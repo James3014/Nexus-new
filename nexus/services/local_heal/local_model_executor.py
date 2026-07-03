@@ -1299,6 +1299,9 @@ class LocalModelExecutor:
             delegated_retry_parser_error_kind = ""
             delegated_retry_status = ""
             delegated_retry_output_excerpt = ""
+            # C15-3T: stage telemetry to distinguish first_patch_empty vs semantic_retry_empty vs provider_not_called
+            delegated_retry_stage = "not_invoked"
+            delegated_retry_provider_called = False
             target_file_hash_before_apply = ""
             target_file_hash_after_restore = ""
             target_file_hash_at_apply = ""
@@ -1649,6 +1652,7 @@ class LocalModelExecutor:
                     from pathlib import Path as _Path
 
                     def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
+                        nonlocal delegated_retry_provider_called
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                         if user_prompt is not None:
                             prompt = (
@@ -1666,6 +1670,7 @@ class LocalModelExecutor:
                             model_name=model_name,
                             timeout_sec=provider_timeout_sec,
                         )
+                        delegated_retry_provider_called = True  # C15-3T: mark provider was called
                         prov_resp = provider.generate(prov_req)
                         return prov_resp.output_text or ""
 
@@ -1725,6 +1730,22 @@ class LocalModelExecutor:
                         delegated_retry_status = str(last_retry.get("status", "") or "")
                         delegated_retry_output_excerpt = str(last_retry.get("output_excerpt", "") or "")[:500]
                     pipeline_retry_delegated = True
+                    # C15-3T: compute delegated_retry_stage to distinguish failure layers
+                    _dr_final_patch = getattr(result_ctx, "final_patch", "") or ""
+                    if _dr_final_patch.strip():
+                        delegated_retry_stage = "success"
+                    elif delegated_retry_status in ("EMPTY_RESPONSE", "MODEL_EMPTY_RESPONSE") or not delegated_retry_status:
+                        # first patch synthesis returned empty (semantic retry in delegated pipeline
+                        # is not triggered because evaluation_report is absent on attempt=1 heal_ctx)
+                        if delegated_retry_provider_called:
+                            delegated_retry_stage = "first_patch_empty_response"
+                        else:
+                            delegated_retry_stage = "provider_not_called"
+                    elif delegated_retry_status in ("REPLACEMENT_MARKDOWN_FENCE", "REPLACEMENT_PROSE_CONTAMINATION",
+                                                    "NO_BLOCKS_FOUND", "SEARCH_MISMATCH"):
+                        delegated_retry_stage = "first_patch_parser_rejected"
+                    else:
+                        delegated_retry_stage = "first_patch_failed"
 
                     orch_passed = bool(getattr(result_ctx, "_orchestrator_verifier_evidence_passed", False))
                     orch_fields = str(getattr(result_ctx, "_orchestrator_verifier_evidence_fields", "") or "")
@@ -1787,6 +1808,9 @@ class LocalModelExecutor:
             raw_meta["delegated_retry_parser_error_kind"] = delegated_retry_parser_error_kind
             raw_meta["delegated_retry_status"] = delegated_retry_status
             raw_meta["delegated_retry_output_excerpt"] = delegated_retry_output_excerpt
+            # C15-3T: stage and provider-call telemetry
+            raw_meta["delegated_retry_stage"] = delegated_retry_stage
+            raw_meta["delegated_retry_provider_called"] = delegated_retry_provider_called
 
             return LocalModelExecutorResponse(
                 invoked=True,

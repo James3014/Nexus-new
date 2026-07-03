@@ -519,6 +519,10 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "delegated_retry_parser_error_kind": adapter_meta.get("delegated_retry_parser_error_kind"),
                 "delegated_retry_status": adapter_meta.get("delegated_retry_status"),
                 "delegated_retry_output_excerpt": adapter_meta.get("delegated_retry_output_excerpt"),
+                # C15-3T: stage and provider-call telemetry (distinguish first_patch_empty vs provider_not_called vs success)
+                "delegated_retry_stage": adapter_meta.get("delegated_retry_stage", "not_invoked"),
+                "delegated_retry_provider_called": adapter_meta.get("delegated_retry_provider_called", False),
+
                 # C15-3Q: Semantic retry diagnostic fields
                 "semantic_retry_client_reused": adapter_meta.get("semantic_retry_client_reused", False),
                 "semantic_retry_client_class": adapter_meta.get("semantic_retry_client_class", ""),
