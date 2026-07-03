@@ -1157,6 +1157,151 @@ def test_local_model_executor_committee_delegated_retry_records_failed_second_at
     assert meta.get("delegated_retry_output_excerpt").startswith("Here is the fix:")
 
 
+def test_pipeline_legacy_context_promotes_semantic_retry_seed_to_v2():
+    from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
+
+    legacy = LegacyHealContext(
+        instance_id="seed-promo",
+        repo_dir=Path("/tmp"),
+        problem_statement="fix bug",
+        route_context={
+            "semantic_retry_seed": {
+                "verifier_failure_evidence_available": True,
+                "semantic_retry_evidence_ready": True,
+                "failure_class": "verification_failed",
+                "verifier_failure_kind": "nonzero_exit",
+                "verifier_exit_code": 1,
+            }
+        },
+    )
+
+    v2 = legacy.to_v2()
+
+    assert getattr(v2.op, "verifier_failure_evidence_available", False) is True
+    assert getattr(v2.op, "semantic_retry_evidence_ready", False) is True
+    assert getattr(v2.op, "failure_class", "") == "verification_failed"
+    assert getattr(v2.op, "verifier_failure_kind", "") == "nonzero_exit"
+    assert getattr(v2.op, "verifier_exit_code", "") == 1
+
+
+def test_localheal_pipeline_verifier_fail_delegates_existing_retry_with_seeded_evidence():
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+
+    req = make_test_request(
+        "c15-pipeline-verifier-retry",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "raise SystemExit(1)"],
+            "python_executable": "/tmp/task-venv/bin/python",
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+
+    with patch(
+        "nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute"
+    ) as mock_exec, \
+        patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+        patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify, \
+        patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+        patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop",
+            selected=True,
+            invoked=True,
+            gate_passed=True,
+            outcome_contributed=True,
+            evidence_present=True,
+            failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text,
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "NO_BLOCKS_FOUND:NO_BLOCKS_FOUND",
+                "patch_synthesis_output_len": len(diff_text),
+                "patch_synthesis_model_name": "qwen2.5-coder:7b",
+                "patch_synthesis_model_called": True,
+                "provider_invoked": True,
+                "model_called": True,
+            },
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="c15-pipeline-verifier-retry",
+            workspace_path="/tmp/ws",
+            target_file="toy/math_util.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=diff_hash,
+            applied_patch_hash=diff_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="c15-pipeline-verifier-retry",
+            verifier_status="fail",
+            exit_code=1,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        def _capture_retry_ctx(heal_ctx):
+            seed = heal_ctx.route_context.get("semantic_retry_seed", {})
+            assert seed.get("verifier_failure_evidence_available") is True
+            assert seed.get("semantic_retry_evidence_ready") is True
+            assert seed.get("failure_class") == "verification_failed"
+            assert seed.get("verifier_exit_code") == 1
+            result = MagicMock()
+            result.final_patch = ""
+            result.failure_reason = "VERIFIER_FAIL"
+            result.model_decisions = [
+                {
+                    "phase": "patch",
+                    "output_class": "VALID_SEARCH_REPLACE",
+                    "parser_error_kind": "none",
+                    "status": "SUCCESS",
+                    "output_excerpt": "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE",
+                }
+            ]
+            result._orchestrator_verifier_evidence_passed = True
+            result._orchestrator_verifier_evidence_fields = "nonzero_exit,1,abc123"
+            result._orchestrator_retry_prompt_evidence_hash = "abc123def4567890"
+            result._semantic_retry_telemetry = {
+                "semantic_retry_count": 1,
+                "same_span_retry": True,
+            }
+            return result
+
+        mock_pipeline_run.side_effect = _capture_retry_ctx
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("retry_available") is True
+    assert meta.get("pipeline_retry_delegated") is True
+    assert meta.get("failure_class") == "verification_failed"
+    assert meta.get("verifier_failure_evidence_available") is True
+    assert meta.get("semantic_retry_evidence_ready") is True
+    assert meta.get("orchestrator_verifier_evidence_passed_to_retry") is True
+    assert meta.get("semantic_retry_verifier_evidence_injected") is True
+    assert meta.get("semantic_retry_invoked") is True
+    assert meta.get("semantic_retry_count") == 1
+    assert meta.get("same_span_retry") is True
+
+
 def test_local_model_executor_committee_delegated_retry_uses_reproduction_contract(monkeypatch):
     from nexus.services.local_heal.candidate_decision_adapter import (
         CandidateDecisionAdapter,

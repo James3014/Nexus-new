@@ -1037,6 +1037,15 @@ class LocalModelExecutor:
             isolated_verifier_exit_code = None
             hybrid_route = None
             candidate_hash_empty = (candidate_hash == empty_hash)
+            retry_available = False
+            retry_not_invoked_reason = ""
+            pipeline_retry_delegated = False
+            delegated_retry_failure_reason = ""
+            delegated_retry_final_patch_len = 0
+            delegated_retry_output_class = ""
+            delegated_retry_parser_error_kind = ""
+            delegated_retry_status = ""
+            delegated_retry_output_excerpt = ""
 
             if pipeline_final_patch and pipeline_final_patch.strip():
                 candidate_patch, patch_meta = _project_pipeline_patch_to_target_file(
@@ -1241,6 +1250,133 @@ class LocalModelExecutor:
             raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
             raw_meta["verifier_error_present"] = bool(isolated_verifier_error)
             raw_meta["verifier_receipt_exit_code_present"] = isolated_verifier_exit_code is not None
+
+            if (
+                provider is not None
+                and raw_meta["semantic_retry_evidence_ready"]
+                and raw_meta["failure_class"] in ("verification_failed", "semantic_wrong_patch")
+                and candidate_isolated
+                and hash_match
+            ):
+                retry_available = True
+                try:
+                    from nexus.services.local_heal.pipeline import HealPipeline, HealContext as LegacyHealContext
+                    from nexus.services.local_heal.corrector import SelfCorrector
+                    from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+                    from pathlib import Path as _Path
+
+                    def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
+                        from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+                        if user_prompt is not None:
+                            prompt = (
+                                f"[SYSTEM]\n{system_prompt_or_req}\n\n"
+                                f"[USER]\n{user_prompt}"
+                            )
+                            model_name = kwargs.get("model", "")
+                        else:
+                            prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
+                            model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "")
+                        prov_req = LocalModelProviderRequest(
+                            task_id=request.task_id,
+                            prompt=prompt,
+                            evidence_refs=request.evidence_refs,
+                            model_name=model_name,
+                            timeout_sec=provider_timeout_sec,
+                        )
+                        prov_resp = provider.generate(prov_req)
+                        return prov_resp.output_text or ""
+
+                    pipeline = HealPipeline(ollama_generate_fn=_provider_generate)
+                    route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
+                    route_ctx = dict(route_ctx)
+                    route_ctx.setdefault("target_file", request.target_file)
+                    route_ctx.setdefault("target_symbol", target_symbol)
+                    route_ctx["semantic_retry_seed"] = {
+                        "verifier_failure_evidence_available": raw_meta["verifier_failure_evidence_available"],
+                        "semantic_retry_evidence_ready": raw_meta["semantic_retry_evidence_ready"],
+                        "failure_class": raw_meta["failure_class"],
+                        "verifier_failure_kind": raw_meta["verifier_failure_kind"],
+                        "verifier_stdout_excerpt": raw_meta["verifier_stdout_excerpt"],
+                        "verifier_stderr_excerpt": raw_meta["verifier_stderr_excerpt"],
+                        "verifier_exit_code": raw_meta["verifier_exit_code"],
+                        "verifier_command_hash": raw_meta["verifier_command_hash"],
+                    }
+                    repro_script = str(route_ctx.get("repro_script", "") or "")
+                    python_executable = str(route_ctx.get("python_executable", "") or "")
+                    retry_prompt = SelfCorrector().build_retry_prompt(
+                        original_user_prompt=request.problem_statement,
+                        error=PatchError(
+                            kind=PatchErrorKind.LOGIC_REGRESSION,
+                            message=f"Verifier failed with exit code {raw_meta['verifier_exit_code']}",
+                        ),
+                        targeted_files=request.target_file,
+                    )
+                    heal_ctx = LegacyHealContext(
+                        instance_id=request.task_id,
+                        repo_dir=_Path(request.repo_root),
+                        problem_statement=request.problem_statement,
+                        user_prompt=retry_prompt,
+                        attempt=1,
+                        repro_script=repro_script,
+                        skip_reproduction=not bool(repro_script),
+                        failure_reason=raw_meta["failure_class"],
+                        route_context=route_ctx,
+                        python_executable=python_executable,
+                        max_tries=1,
+                    )
+                    result_ctx = pipeline.run(heal_ctx)
+                    delegated_retry_failure_reason = str(getattr(result_ctx, "failure_reason", "") or "")
+                    delegated_retry_final_patch_len = len(getattr(result_ctx, "final_patch", "") or "")
+                    retry_model_decisions = list(getattr(result_ctx, "model_decisions", []) or [])
+                    patch_retry_decisions = [
+                        d for d in retry_model_decisions
+                        if isinstance(d, dict) and d.get("phase") == "patch"
+                    ]
+                    if patch_retry_decisions:
+                        last_retry = patch_retry_decisions[-1]
+                        delegated_retry_output_class = str(last_retry.get("output_class", "") or "")
+                        delegated_retry_parser_error_kind = str(last_retry.get("parser_error_kind", "") or "")
+                        delegated_retry_status = str(last_retry.get("status", "") or "")
+                        delegated_retry_output_excerpt = str(last_retry.get("output_excerpt", "") or "")[:500]
+                    pipeline_retry_delegated = True
+
+                    orch_passed = bool(getattr(result_ctx, "_orchestrator_verifier_evidence_passed", False))
+                    orch_fields = str(getattr(result_ctx, "_orchestrator_verifier_evidence_fields", "") or "")
+                    orch_hash = str(getattr(result_ctx, "_orchestrator_retry_prompt_evidence_hash", "") or "")
+                    raw_meta["orchestrator_verifier_evidence_passed_to_retry"] = orch_passed
+                    raw_meta["orchestrator_verifier_evidence_fields"] = orch_fields
+                    raw_meta["orchestrator_retry_prompt_evidence_hash"] = orch_hash
+                    raw_meta["semantic_retry_verifier_evidence_injected"] = orch_passed
+                    raw_meta["semantic_retry_verifier_evidence_fields"] = orch_fields
+                    raw_meta["semantic_retry_prompt_evidence_hash"] = orch_hash
+
+                    semantic_retry_telemetry = dict(getattr(result_ctx, "_semantic_retry_telemetry", {}) or {})
+                    if semantic_retry_telemetry:
+                        raw_meta["semantic_retry_count"] = int(semantic_retry_telemetry.get("semantic_retry_count", 0) or 0)
+                        raw_meta["same_span_retry"] = bool(semantic_retry_telemetry.get("same_span_retry", False))
+                        raw_meta["semantic_retry_invoked"] = (
+                            raw_meta["semantic_retry_count"] > 0 or raw_meta["same_span_retry"]
+                        )
+                except Exception:
+                    pipeline_retry_delegated = False
+            elif provider is None:
+                retry_not_invoked_reason = "provider_missing"
+            elif not raw_meta["semantic_retry_evidence_ready"]:
+                retry_not_invoked_reason = "semantic_retry_evidence_not_ready"
+            elif raw_meta["failure_class"] not in ("verification_failed", "semantic_wrong_patch"):
+                retry_not_invoked_reason = "failure_class_not_retryable"
+            elif not candidate_isolated or not hash_match:
+                retry_not_invoked_reason = "candidate_isolation_not_proven"
+
+            raw_meta["retry_available"] = retry_available
+            raw_meta["retry_not_invoked_reason"] = retry_not_invoked_reason
+            raw_meta["pipeline_retry_delegated"] = pipeline_retry_delegated
+            raw_meta["delegated_retry_failure_reason"] = delegated_retry_failure_reason
+            raw_meta["delegated_retry_final_patch_len"] = delegated_retry_final_patch_len
+            raw_meta["delegated_retry_output_class"] = delegated_retry_output_class
+            raw_meta["delegated_retry_parser_error_kind"] = delegated_retry_parser_error_kind
+            raw_meta["delegated_retry_status"] = delegated_retry_status
+            raw_meta["delegated_retry_output_excerpt"] = delegated_retry_output_excerpt
 
             return LocalModelExecutorResponse(
                 invoked=True,

@@ -118,6 +118,11 @@ class HealContext:
             run_group=self.run_group,
             route_context=self.route_context,
         )
+        retry_seed = {}
+        if isinstance(self.route_context, dict):
+            retry_seed = dict(self.route_context.get("semantic_retry_seed", {}) or {})
+        for attr, value in retry_seed.items():
+            setattr(op, attr, value)
         gov = GovernanceContext(
             expected_stop_layer=self.expected_stop_layer,
             expected_reason_family=self.expected_reason_family,
