@@ -522,6 +522,16 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 # C15-3T: stage and provider-call telemetry (distinguish first_patch_empty vs provider_not_called vs success)
                 "delegated_retry_stage": adapter_meta.get("delegated_retry_stage", "not_invoked"),
                 "delegated_retry_provider_called": adapter_meta.get("delegated_retry_provider_called", False),
+                # C15-3U: observability fields for delegated retry provider calls
+                "delegated_retry_provider_prompt_len": adapter_meta.get("delegated_retry_provider_prompt_len", 0),
+                "delegated_retry_provider_prompt_hash": adapter_meta.get("delegated_retry_provider_prompt_hash", ""),
+                "delegated_retry_provider_model_name": adapter_meta.get("delegated_retry_provider_model_name", ""),
+                "delegated_retry_provider_response_is_none": adapter_meta.get("delegated_retry_provider_response_is_none", False),
+                "delegated_retry_provider_response_empty": adapter_meta.get("delegated_retry_provider_response_empty", False),
+                "delegated_retry_provider_response_len": adapter_meta.get("delegated_retry_provider_response_len", 0),
+                "delegated_retry_provider_response_type": adapter_meta.get("delegated_retry_provider_response_type", ""),
+                "delegated_retry_provider_call_error": adapter_meta.get("delegated_retry_provider_call_error", ""),
+
 
                 # C15-3Q: Semantic retry diagnostic fields
                 "semantic_retry_client_reused": adapter_meta.get("semantic_retry_client_reused", False),

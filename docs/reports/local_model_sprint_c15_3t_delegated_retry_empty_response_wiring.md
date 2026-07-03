@@ -1,6 +1,6 @@
 # C15-3T: Delegated Retry Empty Response Wiring Diagnosis — Closure Report
 
-**Commit**: `PENDING`
+**Commit**: `164add5a1`
 **Date**: 2026-07-03
 **Status**: CLOSED — Diagnostics added; next gate: Gate B (Provider True Empty) → C15-3U
 

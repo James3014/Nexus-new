@@ -962,17 +962,17 @@ class LocalModelExecutor:
                             from nexus.services.local_heal.errors import PatchError, PatchErrorKind
                             from pathlib import Path as _Path
 
-                            def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
+                            def _provider_generate(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                                 from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                                 if user_prompt is not None:
                                     prompt = (
                                         f"[SYSTEM]\n{system_prompt_or_req}\n\n"
                                         f"[USER]\n{user_prompt}"
                                     )
-                                    model_name = kwargs.get("model", "")
+                                    model_name = model or kwargs.get("model", "")
                                 else:
                                     prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
-                                    model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "")
+                                    model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
                                 prov_req = LocalModelProviderRequest(
                                     task_id=request.task_id,
                                     prompt=prompt,
@@ -1302,6 +1302,15 @@ class LocalModelExecutor:
             # C15-3T: stage telemetry to distinguish first_patch_empty vs semantic_retry_empty vs provider_not_called
             delegated_retry_stage = "not_invoked"
             delegated_retry_provider_called = False
+            # C15-3U: observability fields for delegated retry provider calls
+            delegated_retry_provider_prompt_len = 0
+            delegated_retry_provider_prompt_hash = ""
+            delegated_retry_provider_model_name = ""
+            delegated_retry_provider_response_is_none = False
+            delegated_retry_provider_response_empty = False
+            delegated_retry_provider_response_len = 0
+            delegated_retry_provider_response_type = ""
+            delegated_retry_provider_call_error = ""
             target_file_hash_before_apply = ""
             target_file_hash_after_restore = ""
             target_file_hash_at_apply = ""
@@ -1651,28 +1660,57 @@ class LocalModelExecutor:
                     from nexus.services.local_heal.errors import PatchError, PatchErrorKind
                     from pathlib import Path as _Path
 
-                    def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
+                    def _provider_generate(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                         nonlocal delegated_retry_provider_called
+                        nonlocal delegated_retry_provider_prompt_len, delegated_retry_provider_prompt_hash
+                        nonlocal delegated_retry_provider_model_name
+                        nonlocal delegated_retry_provider_response_is_none, delegated_retry_provider_response_empty
+                        nonlocal delegated_retry_provider_response_len, delegated_retry_provider_response_type
+                        nonlocal delegated_retry_provider_call_error
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                         if user_prompt is not None:
                             prompt = (
                                 f"[SYSTEM]\n{system_prompt_or_req}\n\n"
                                 f"[USER]\n{user_prompt}"
                             )
-                            model_name = kwargs.get("model", "")
+                            model_name = model or kwargs.get("model", "")
                         else:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
-                            model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "")
-                        prov_req = LocalModelProviderRequest(
-                            task_id=request.task_id,
-                            prompt=prompt,
-                            evidence_refs=request.evidence_refs,
-                            model_name=model_name,
-                            timeout_sec=provider_timeout_sec,
-                        )
-                        delegated_retry_provider_called = True  # C15-3T: mark provider was called
-                        prov_resp = provider.generate(prov_req)
-                        return prov_resp.output_text or ""
+                            model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
+                        
+                        delegated_retry_provider_called = True
+                        delegated_retry_provider_prompt_len = len(prompt) if prompt else 0
+                        delegated_retry_provider_prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16] if prompt else ""
+                        delegated_retry_provider_model_name = model_name or ""
+                        
+                        try:
+                            prov_req = LocalModelProviderRequest(
+                                task_id=request.task_id,
+                                prompt=prompt,
+                                evidence_refs=request.evidence_refs,
+                                model_name=model_name,
+                                timeout_sec=provider_timeout_sec,
+                            )
+                            prov_resp = provider.generate(prov_req)
+                            delegated_retry_provider_response_is_none = prov_resp is None
+                            if prov_resp is not None:
+                                output_text = prov_resp.output_text or ""
+                                delegated_retry_provider_response_empty = not output_text
+                                delegated_retry_provider_response_len = len(output_text)
+                                delegated_retry_provider_response_type = type(prov_resp).__name__
+                            else:
+                                output_text = ""
+                                delegated_retry_provider_response_empty = True
+                                delegated_retry_provider_response_len = 0
+                                delegated_retry_provider_response_type = "NoneType"
+                            return output_text
+                        except Exception as e:
+                            delegated_retry_provider_call_error = f"{type(e).__name__}: {str(e)}"
+                            delegated_retry_provider_response_is_none = True
+                            delegated_retry_provider_response_empty = True
+                            delegated_retry_provider_response_len = 0
+                            delegated_retry_provider_response_type = "Exception"
+                            raise e
 
                     pipeline = HealPipeline(ollama_generate_fn=_provider_generate)
                     route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
@@ -1811,6 +1849,15 @@ class LocalModelExecutor:
             # C15-3T: stage and provider-call telemetry
             raw_meta["delegated_retry_stage"] = delegated_retry_stage
             raw_meta["delegated_retry_provider_called"] = delegated_retry_provider_called
+            # C15-3U: observability fields for delegated retry provider calls
+            raw_meta["delegated_retry_provider_prompt_len"] = delegated_retry_provider_prompt_len
+            raw_meta["delegated_retry_provider_prompt_hash"] = delegated_retry_provider_prompt_hash
+            raw_meta["delegated_retry_provider_model_name"] = delegated_retry_provider_model_name
+            raw_meta["delegated_retry_provider_response_is_none"] = delegated_retry_provider_response_is_none
+            raw_meta["delegated_retry_provider_response_empty"] = delegated_retry_provider_response_empty
+            raw_meta["delegated_retry_provider_response_len"] = delegated_retry_provider_response_len
+            raw_meta["delegated_retry_provider_response_type"] = delegated_retry_provider_response_type
+            raw_meta["delegated_retry_provider_call_error"] = delegated_retry_provider_call_error
 
             return LocalModelExecutorResponse(
                 invoked=True,

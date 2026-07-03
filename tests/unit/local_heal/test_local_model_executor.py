@@ -5043,6 +5043,15 @@ def test_c15_3t_delegated_retry_stage_first_patch_empty(tmp_path) -> None:
     # (not a wiring failure, but a telemetry projection gap)
     assert meta.get("semantic_retry_prompt_len") == 0  # expected default when SR not invoked
     assert meta.get("delegated_retry_status") in ("EMPTY_RESPONSE", "MODEL_EMPTY_RESPONSE", "")
+    # C15-3U observability assertions
+    assert meta.get("delegated_retry_provider_prompt_len", 0) > 0
+    assert meta.get("delegated_retry_provider_prompt_hash", "") != ""
+    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b"
+    assert meta.get("delegated_retry_provider_response_is_none") is False
+    assert meta.get("delegated_retry_provider_response_empty") is True
+    assert meta.get("delegated_retry_provider_response_len") == 0
+    assert meta.get("delegated_retry_provider_call_error") == ""
+
 
 
 def test_c15_3t_delegated_retry_first_patch_empty_not_mislabeled_semantic_retry(tmp_path) -> None:
