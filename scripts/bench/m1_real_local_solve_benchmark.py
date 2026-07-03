@@ -519,6 +519,22 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "delegated_retry_parser_error_kind": adapter_meta.get("delegated_retry_parser_error_kind"),
                 "delegated_retry_status": adapter_meta.get("delegated_retry_status"),
                 "delegated_retry_output_excerpt": adapter_meta.get("delegated_retry_output_excerpt"),
+                # C15-3Q: Semantic retry diagnostic fields
+                "semantic_retry_client_reused": adapter_meta.get("semantic_retry_client_reused", False),
+                "semantic_retry_client_class": adapter_meta.get("semantic_retry_client_class", ""),
+                "semantic_retry_prompt_len": adapter_meta.get("semantic_retry_prompt_len", 0),
+                "semantic_retry_prompt_hash": adapter_meta.get("semantic_retry_prompt_hash", ""),
+                "semantic_retry_prompt_has_verifier_evidence": adapter_meta.get("semantic_retry_prompt_has_verifier_evidence", False),
+                "semantic_retry_raw_response_len": adapter_meta.get("semantic_retry_raw_response_len", 0),
+                "semantic_retry_raw_response_excerpt": adapter_meta.get("semantic_retry_raw_response_excerpt", ""),
+                "semantic_retry_response_is_none": adapter_meta.get("semantic_retry_response_is_none", False),
+                "semantic_retry_response_empty": adapter_meta.get("semantic_retry_response_empty", False),
+                "semantic_retry_response_type": adapter_meta.get("semantic_retry_response_type", ""),
+                "semantic_retry_output_class": adapter_meta.get("semantic_retry_output_class", ""),
+                "semantic_retry_parser_error_kind": adapter_meta.get("semantic_retry_parser_error_kind", ""),
+                "semantic_retry_status": adapter_meta.get("semantic_retry_status", ""),
+                "semantic_retry_failure_reason": adapter_meta.get("semantic_retry_failure_reason", ""),
+                "semantic_retry_invocation_source": adapter_meta.get("semantic_retry_invocation_source", ""),
             }
 
             print(f"Outcome: {'SOLVED' if is_solved else 'FAILED'}")

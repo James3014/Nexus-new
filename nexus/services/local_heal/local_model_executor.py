@@ -633,6 +633,32 @@ def compute_verifier_failure_evidence(
 class LocalModelExecutor:
     @staticmethod
     def run(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
+        resp = LocalModelExecutor._run_impl(request, provider=provider)
+        if resp and hasattr(resp, "raw_model_metadata") and isinstance(resp.raw_model_metadata, dict):
+            defaults = {
+                "semantic_retry_client_reused": False,
+                "semantic_retry_client_class": "",
+                "semantic_retry_prompt_len": 0,
+                "semantic_retry_prompt_hash": "",
+                "semantic_retry_prompt_has_verifier_evidence": False,
+                "semantic_retry_raw_response_len": 0,
+                "semantic_retry_raw_response_excerpt": "",
+                "semantic_retry_response_is_none": True,
+                "semantic_retry_response_empty": True,
+                "semantic_retry_response_type": "NoneType",
+                "semantic_retry_output_class": "",
+                "semantic_retry_parser_error_kind": "",
+                "semantic_retry_status": "",
+                "semantic_retry_failure_reason": "",
+                "semantic_retry_invocation_source": "none",
+            }
+            for k, v in defaults.items():
+                if k not in resp.raw_model_metadata:
+                    resp.raw_model_metadata[k] = v
+        return resp
+
+    @staticmethod
+    def _run_impl(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
         empty_hash = hashlib.sha256(b"").hexdigest()
         
         try:
@@ -1671,9 +1697,12 @@ class LocalModelExecutor:
                     delegated_retry_failure_reason = str(getattr(result_ctx, "failure_reason", "") or "")
                     delegated_retry_final_patch_len = len(getattr(result_ctx, "final_patch", "") or "")
                     retry_model_decisions = list(getattr(result_ctx, "model_decisions", []) or [])
+                    # C15-3Q: fix phase key match bug — delegated pipeline uses 'patch' for primary
+                    # and 'semantic_retry_patch' for its own orchestrator-level semantic retry.
+                    # We want the *latest patch-class decision* (either phase) for status attribution.
                     patch_retry_decisions = [
                         d for d in retry_model_decisions
-                        if isinstance(d, dict) and d.get("phase") == "patch"
+                        if isinstance(d, dict) and d.get("phase") in ("patch", "semantic_retry_patch")
                     ]
                     if patch_retry_decisions:
                         last_retry = patch_retry_decisions[-1]
@@ -1693,6 +1722,7 @@ class LocalModelExecutor:
                     raw_meta["semantic_retry_verifier_evidence_fields"] = orch_fields
                     raw_meta["semantic_retry_prompt_evidence_hash"] = orch_hash
 
+                    # C15-3Q: unpack semantic retry diagnostics from delegated run
                     semantic_retry_telemetry = dict(getattr(result_ctx, "_semantic_retry_telemetry", {}) or {})
                     if semantic_retry_telemetry:
                         raw_meta["semantic_retry_count"] = int(semantic_retry_telemetry.get("semantic_retry_count", 0) or 0)
@@ -1700,6 +1730,37 @@ class LocalModelExecutor:
                         raw_meta["semantic_retry_invoked"] = (
                             raw_meta["semantic_retry_count"] > 0 or raw_meta["same_span_retry"]
                         )
+                    # C15-3Q: always project 15 diagnostic fields (use defaults if no telemetry)
+                    raw_meta["semantic_retry_client_reused"] = bool(
+                        semantic_retry_telemetry.get("semantic_retry_client_reused", False))
+                    raw_meta["semantic_retry_client_class"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_client_class", "") or "")
+                    raw_meta["semantic_retry_prompt_len"] = int(
+                        semantic_retry_telemetry.get("semantic_retry_prompt_len", 0) or 0)
+                    raw_meta["semantic_retry_prompt_hash"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_prompt_hash", "") or "")
+                    raw_meta["semantic_retry_prompt_has_verifier_evidence"] = bool(
+                        semantic_retry_telemetry.get("semantic_retry_prompt_has_verifier_evidence", False))
+                    raw_meta["semantic_retry_raw_response_len"] = int(
+                        semantic_retry_telemetry.get("semantic_retry_raw_response_len", 0) or 0)
+                    raw_meta["semantic_retry_raw_response_excerpt"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_raw_response_excerpt", "") or "")[:500]
+                    raw_meta["semantic_retry_response_is_none"] = bool(
+                        semantic_retry_telemetry.get("semantic_retry_response_is_none", False))
+                    raw_meta["semantic_retry_response_empty"] = bool(
+                        semantic_retry_telemetry.get("semantic_retry_response_empty", False))
+                    raw_meta["semantic_retry_response_type"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_response_type", "") or "")
+                    raw_meta["semantic_retry_output_class"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_output_class", "") or "")
+                    raw_meta["semantic_retry_parser_error_kind"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_parser_error_kind", "") or "")
+                    raw_meta["semantic_retry_status"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_status", "") or "")
+                    raw_meta["semantic_retry_failure_reason"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_failure_reason", "") or "")
+                    raw_meta["semantic_retry_invocation_source"] = str(
+                        semantic_retry_telemetry.get("semantic_retry_invocation_source", "pipeline_delegated_retry") or "pipeline_delegated_retry")
                 except Exception:
                     pipeline_retry_delegated = False
 

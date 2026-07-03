@@ -389,8 +389,62 @@ class HealOrchestrator:
         )
         ctx.op.model_decisions.append({"phase": "semantic_retry_patch", **patch_decision})
 
-        # 6. Call LLM
+        # 6. Call LLM — C15-3Q: diagnostic metadata
         llm_client = self._resolve_semantic_retry_llm_client()
+        # C15-3Q: record client identity for diagnostics
+        patch_phase_client = getattr(self.patch_phase, "llm_client", None)
+        client_reused = (llm_client is patch_phase_client and patch_phase_client is not None)
+        client_class = type(llm_client).__name__ if llm_client is not None else ""
+        semantic_prompt_len = len(semantic_prompt) if semantic_prompt else 0
+        semantic_prompt_hash = hashlib.sha256(semantic_prompt.encode()).hexdigest()[:16] if semantic_prompt else ""
+        semantic_prompt_has_verifier_evidence = evidence_injected
+        invocation_source = "pipeline_delegated_retry" if getattr(ctx.op, "_is_delegated_retry", False) else "orchestrator_semantic_retry"
+
+        # C15-3Q: write partial telemetry now so early exits capture diagnostics
+        def _write_sr_telemetry(status: str, failure_reason: str, raw_resp_len: int = 0,
+                                raw_resp_excerpt: str = "", resp_is_none: bool = False,
+                                resp_empty: bool = False, resp_type: str = "",
+                                output_class: str = "", parser_error_kind: str = "") -> None:
+            ctx.op._semantic_retry_telemetry = {
+                "semantic_retry_count": 1,
+                "same_span_retry": True,
+                "original_verification_failure": verifier_failure[:500],
+                "observed_behavior": verifier_failure[:300],
+                "behavior_delta_verified": False,
+                "verifier_result_after_retry": f"FAIL: {status}",
+                "search_locked": True,
+                "replace_rewritten": True,
+                "canonical_search_hash": hashlib.sha256(canonical_search.encode()).hexdigest()[:16],
+                "target_file": target_file,
+                "semantic_retry_mode": "llm_replace_rewrite",
+                "llm_replace_success": False,
+                "deterministic_fallback_used": False,
+                "fallback_rule_id": "",
+                "fallback_rule_scope": "",
+                "fallback_rule_reason": "",
+                "model_patch_reward": 0.0,
+                "deterministic_fallback_reward": 0.0,
+                "orchestrator_verifier_evidence_passed_to_retry": getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False),
+                "orchestrator_verifier_evidence_fields": getattr(ctx.op, "_orchestrator_verifier_evidence_fields", ""),
+                "orchestrator_retry_prompt_evidence_hash": getattr(ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""),
+                # C15-3Q new diagnostics
+                "semantic_retry_client_reused": client_reused,
+                "semantic_retry_client_class": client_class,
+                "semantic_retry_prompt_len": semantic_prompt_len,
+                "semantic_retry_prompt_hash": semantic_prompt_hash,
+                "semantic_retry_prompt_has_verifier_evidence": semantic_prompt_has_verifier_evidence,
+                "semantic_retry_raw_response_len": raw_resp_len,
+                "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500] if raw_resp_excerpt else "",
+                "semantic_retry_response_is_none": resp_is_none,
+                "semantic_retry_response_empty": resp_empty,
+                "semantic_retry_response_type": resp_type,
+                "semantic_retry_output_class": output_class,
+                "semantic_retry_parser_error_kind": parser_error_kind,
+                "semantic_retry_status": status,
+                "semantic_retry_failure_reason": failure_reason,
+                "semantic_retry_invocation_source": invocation_source,
+            }
+
         try:
             response = llm_client.generate(
                 system_prompt=PromptBuilder.build_patch_system_prompt(patch_decision["model"]),
@@ -402,17 +456,52 @@ class HealOrchestrator:
         except Exception as e:
             reason = classify_model_exception(e)
             ctx.op.model_decisions[-1]["status"] = reason
+            _write_sr_telemetry(
+                status=reason,
+                failure_reason=f"provider_exception:{reason}",
+                resp_is_none=True,
+                resp_empty=True,
+                resp_type="exception",
+            )
             return False
+
+        # C15-3Q: record raw response diagnostics
+        resp_is_none = response is None
+        resp_empty = not response if not resp_is_none else True
+        resp_type = type(response).__name__ if response is not None else "NoneType"
+        raw_resp_len = len(response) if response else 0
+        raw_resp_excerpt = (response or "")[:500]
 
         if not response:
             ctx.op.model_decisions[-1]["status"] = "MODEL_EMPTY_RESPONSE"
+            _write_sr_telemetry(
+                status="MODEL_EMPTY_RESPONSE",
+                failure_reason="provider_returned_empty_string_or_none",
+                raw_resp_len=raw_resp_len,
+                raw_resp_excerpt=raw_resp_excerpt,
+                resp_is_none=resp_is_none,
+                resp_empty=True,
+                resp_type=resp_type,
+            )
             return False
 
         # 7. Parse SEARCH/REPLACE from response
         parser = SolidSearchReplaceProtocol()
         intents_or_error = parser.parse(response)
         if hasattr(intents_or_error, "kind"):
-            ctx.op.model_decisions[-1]["status"] = intents_or_error.kind.name
+            parse_kind_name = intents_or_error.kind.name
+            ctx.op.model_decisions[-1]["status"] = parse_kind_name
+            _write_sr_telemetry(
+                status=parse_kind_name,
+                failure_reason=f"parser_rejected:{parse_kind_name}",
+                raw_resp_len=raw_resp_len,
+                raw_resp_excerpt=raw_resp_excerpt,
+                resp_is_none=resp_is_none,
+                resp_empty=resp_empty,
+                resp_type=resp_type,
+                output_class="PARSE_ERROR",
+                parser_error_kind=parse_kind_name,
+            )
             return False
 
         # 8. Lock canonical SEARCH span — replace any SEARCH from LLM
@@ -437,6 +526,16 @@ class HealOrchestrator:
 
         if not apply_res.success:
             ctx.op.model_decisions[-1]["status"] = apply_res.error_reason
+            _write_sr_telemetry(
+                status=apply_res.error_reason,
+                failure_reason=f"apply_failed:{apply_res.error_reason}",
+                raw_resp_len=raw_resp_len,
+                raw_resp_excerpt=raw_resp_excerpt,
+                resp_is_none=resp_is_none,
+                resp_empty=resp_empty,
+                resp_type=resp_type,
+                output_class="APPLY_FAILED",
+            )
             return False
 
         ctx.op.model_decisions[-1]["status"] = "SUCCESS"
@@ -447,7 +546,7 @@ class HealOrchestrator:
             self.verify_phase, f"verify_semantic_retry", ctx, ctx.op._latency_ledger
         )
 
-        # 11. Write semantic retry telemetry
+        # 11. Write semantic retry telemetry (success path — overwrite the partial telemetry)
         ctx.op._semantic_retry_telemetry = {
             "semantic_retry_count": 1,
             "same_span_retry": True,
@@ -472,6 +571,22 @@ class HealOrchestrator:
             "orchestrator_verifier_evidence_passed_to_retry": getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False),
             "orchestrator_verifier_evidence_fields": getattr(ctx.op, "_orchestrator_verifier_evidence_fields", ""),
             "orchestrator_retry_prompt_evidence_hash": getattr(ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""),
+            # C15-3Q new diagnostics
+            "semantic_retry_client_reused": client_reused,
+            "semantic_retry_client_class": client_class,
+            "semantic_retry_prompt_len": semantic_prompt_len,
+            "semantic_retry_prompt_hash": semantic_prompt_hash,
+            "semantic_retry_prompt_has_verifier_evidence": semantic_prompt_has_verifier_evidence,
+            "semantic_retry_raw_response_len": raw_resp_len,
+            "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500] if raw_resp_excerpt else "",
+            "semantic_retry_response_is_none": resp_is_none,
+            "semantic_retry_response_empty": False,
+            "semantic_retry_response_type": resp_type,
+            "semantic_retry_output_class": "VALID_PATCH",
+            "semantic_retry_parser_error_kind": "",
+            "semantic_retry_status": "SUCCESS" if v_res.success else "VERIFIER_FAILED",
+            "semantic_retry_failure_reason": "" if v_res.success else "verifier_fail_after_retry",
+            "semantic_retry_invocation_source": invocation_source,
         }
 
         if v_res.success:
