@@ -208,7 +208,7 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
     os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
 
     # 1. Clear previous outputs
-    if JSONL_PATH.exists():
+    if JSONL_PATH.exists() and os.environ.get("NEXUS_BENCHMARK_APPEND") != "1":
         JSONL_PATH.unlink()
 
     # 2. Define benchmark tasks
@@ -367,6 +367,14 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
             if local_model_called:
                 execution_path_modules.append("IsolatedLocalSolveLoop")
 
+            attempt_index = 1
+            if JSONL_PATH.exists():
+                try:
+                    with open(JSONL_PATH, "r", encoding="utf-8") as f:
+                        attempt_index = len(f.readlines()) + 1
+                except Exception:
+                    pass
+
             row_data = {
                 "task_id": task_id,
                 "repo": spec["repo"],
@@ -502,6 +510,15 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),
                 "bare_python_rejected": adapter_meta.get("bare_python_rejected", False),
+                "attempt_index": attempt_index,
+                "protocol_normalization": protocol_normalization,
+                "pipeline_retry_delegated": adapter_meta.get("pipeline_retry_delegated"),
+                "delegated_retry_failure_reason": adapter_meta.get("delegated_retry_failure_reason"),
+                "delegated_retry_final_patch_len": adapter_meta.get("delegated_retry_final_patch_len"),
+                "delegated_retry_output_class": adapter_meta.get("delegated_retry_output_class"),
+                "delegated_retry_parser_error_kind": adapter_meta.get("delegated_retry_parser_error_kind"),
+                "delegated_retry_status": adapter_meta.get("delegated_retry_status"),
+                "delegated_retry_output_excerpt": adapter_meta.get("delegated_retry_output_excerpt"),
             }
 
             print(f"Outcome: {'SOLVED' if is_solved else 'FAILED'}")
