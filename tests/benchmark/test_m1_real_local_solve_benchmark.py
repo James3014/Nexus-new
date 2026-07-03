@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.bench.m1_real_local_solve_benchmark import build_task_specs, select_task_specs
+from scripts.bench.m1_real_local_solve_benchmark import (
+    build_task_specs,
+    resolve_receipt_path,
+    select_task_specs,
+)
 
 
 M1_TELEMETRY_FIELDS = [
@@ -192,3 +196,24 @@ def test_select_task_specs_rejects_unknown_task_id():
     specs = build_task_specs()
     with pytest.raises(ValueError, match="Unknown task_id"):
         select_task_specs(specs, ["not-a-real-task"])
+
+
+def test_resolve_receipt_path_prefers_final_receipt_path():
+    finalized = {}
+    receipt = {"final_receipt_path": "/tmp/local_heal/toy/receipt.json"}
+    adapter = {"metadata": {}}
+
+    assert (
+        resolve_receipt_path(finalized, receipt, adapter, "toy-math-solve")
+        == "/tmp/local_heal/toy/receipt.json"
+    )
+
+
+def test_resolve_receipt_path_falls_back_to_local_heal_report_path():
+    finalized = {}
+    receipt = {}
+    adapter = {"metadata": {}}
+
+    assert resolve_receipt_path(finalized, receipt, adapter, "toy-math-solve").endswith(
+        ".nexus/reports/local_heal/toy-math-solve/receipt.json"
+    )

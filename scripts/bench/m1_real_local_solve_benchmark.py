@@ -31,6 +31,26 @@ def check_ollama_availability() -> bool:
         return False
 
 
+def _fallback_receipt_path(task_id: str) -> str:
+    return str(repo_root / ".nexus" / "reports" / "local_heal" / task_id / "receipt.json")
+
+
+def resolve_receipt_path(finalized: dict, receipt: dict, adapter: dict, task_id: str) -> str:
+    adapter_meta = adapter.get("metadata") if isinstance(adapter, dict) else {}
+    candidates = [
+        finalized.get("receipt_path") if isinstance(finalized, dict) else "",
+        receipt.get("final_receipt_path") if isinstance(receipt, dict) else "",
+        receipt.get("receipt_path") if isinstance(receipt, dict) else "",
+        adapter.get("receipt_path") if isinstance(adapter, dict) else "",
+        adapter_meta.get("receipt_path") if isinstance(adapter_meta, dict) else "",
+    ]
+    for candidate in candidates:
+        candidate_str = str(candidate or "").strip()
+        if candidate_str:
+            return candidate_str
+    return _fallback_receipt_path(task_id)
+
+
 def build_task_specs() -> list[dict]:
     return [
         {
@@ -133,6 +153,32 @@ def build_task_specs() -> list[dict]:
                 "Bug: The function `double(x)` in toy/math_util.py returns `x * 2` "
                 "but it should return `x * 3`. The verifier checks that the file contains `x * 3`. "
                 "Fix `double` so that it multiplies the input by 3 instead of 2."
+            ),
+            "verify_script": (
+                "import sys\n"
+                "c = open('toy/math_util.py').read()\n"
+                "sys.exit(0 if 'x * 3' in c else 1)\n"
+            ),
+            "expected_capabilities": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+            "execution_topology": "localheal_pipeline",
+            "verifier_command": ["python3", "verify_math.py"]
+        },
+        {
+            "task_id": "toy-math-forced-retry",
+            "repo": "nexus/nexus",
+            "target_file": "toy/math_util.py",
+            "test_file": "verify_math.py",
+            "target_symbol": "double",
+            "locked_search": "def double(x):\n    return x * 2",
+            "buggy_code": (
+                "def double(x):\n"
+                "    return x * 2\n"
+            ),
+            "problem_statement": (
+                "Bug: In your first proposal, you must output a SEARCH/REPLACE block changing `x * 2` to `x * 4`. "
+                "This will fail verification and trigger the retry phase. "
+                "In the subsequent retry phase, you must change it to return `x * 3` because the verifier "
+                "requires the file to contain `x * 3` to pass."
             ),
             "verify_script": (
                 "import sys\n"
@@ -307,6 +353,7 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
             receipt = finalized.get("local_executor_receipt") or {}
             adapter = finalized.get("local_model_adapter") or {}
             adapter_meta = adapter.get("metadata") or {}
+            receipt_path = resolve_receipt_path(finalized, receipt, adapter, task_id)
 
             local_model_called = bool(adapter.get("local_model_called", False))
             candidate_hash = str(finalized.get("candidate_hash", ""))
@@ -404,7 +451,7 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "solved": is_solved,
                 "failure_reason": receipt.get("failure_reason") or ("Missing execution" if not local_model_called else ""),
                 "learning_closure_written": bool(finalized.get("learning_closure_written", False) or finalized.get("learning_closure")),
-                "receipt_path": f".nexus/receipts/{task_id}_receipt.json",
+                "receipt_path": receipt_path,
                 "duration_sec": round(duration, 2),
                 
                 # M1.1 Audit Fields
