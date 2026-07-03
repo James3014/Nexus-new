@@ -1,6 +1,6 @@
 # C15-3U: Provider Empty Response Mitigation — Closure Report
 
-**Commit**: `84fbaa90e`
+**Commit**: `3827b9f09`
 **Date**: 2026-07-03
 **Status**: CLOSED — Observability completed, root cause isolated, and model mapped successfully; next gate: Gate C (Parser / Apply Failure) → C15-3V
 

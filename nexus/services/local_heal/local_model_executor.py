@@ -1746,6 +1746,14 @@ class LocalModelExecutor:
                         ),
                         targeted_files=request.target_file,
                     )
+                    # C15-3V: Pre-populate localized_files with locked_search canonical span.
+                    # This bypasses LocalizationPhase (which reads disk + adds line-number annotations)
+                    # and ensures PatchSynthesisPhase uses verbatim locked_search as source truth.
+                    # LocalizationPhase.execute() short-circuits when ctx.op.localized_files is non-empty.
+                    _locked_search_for_dr = str(route_ctx.get("locked_search") or "")
+                    _dr_localized_files: list = []
+                    if _locked_search_for_dr.strip() and request.target_file:
+                        _dr_localized_files = [(request.target_file, _locked_search_for_dr)]
                     heal_ctx = LegacyHealContext(
                         instance_id=request.task_id,
                         repo_dir=_Path(request.repo_root),
@@ -1758,6 +1766,7 @@ class LocalModelExecutor:
                         route_context=route_ctx,
                         python_executable=python_executable,
                         max_tries=1,
+                        localized_files=_dr_localized_files,
                     )
                     result_ctx = pipeline.run(heal_ctx)
                     delegated_retry_failure_reason = str(getattr(result_ctx, "failure_reason", "") or "")
