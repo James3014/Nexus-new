@@ -307,3 +307,127 @@ def test_c15_4c_1_task_has_required_capabilities():
     assert "local_model_executor" in task["expected_capabilities"]
     assert task["execution_topology"] == "localheal_pipeline"
     assert task["verifier_command"] == ["python3", "verify_math_evidence.py"]
+
+
+# ── C15-5A: Model override wiring tests ──────────────────────────────
+
+from pathlib import Path
+from scripts.bench.m1_real_local_solve_benchmark import (
+    build_c15_benchmark_row,
+    DEFAULT_EXECUTOR_MODEL,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_PRIMARY_PROPOSER,
+    DEFAULT_SECONDARY_PROPOSER,
+    DEFAULT_PROVIDER_TIMEOUT,
+)
+
+
+def _make_spec() -> dict:
+    return {
+        "task_id": "toy-math-verifier-evidence-gap",
+        "target_file": "toy/math_util.py",
+        "test_file": "verify_math_evidence.py",
+        "target_symbol": "normalize_score",
+        "locked_search": "def normalize_score(score, min_val, max_val):\n    return (score - min_val) / (max_val - min_val)",
+        "execution_topology": "localheal_pipeline",
+        "expected_capabilities": ["local_model_executor"],
+    }
+
+
+def test_c15_benchmark_default_executor_model_is_qwen7b():
+    """Default executor_model must remain qwen2.5-coder:7b-instruct."""
+    assert DEFAULT_EXECUTOR_MODEL == "qwen2.5-coder:7b-instruct"
+
+
+def test_c15_benchmark_cli_executor_model_override(monkeypatch):
+    """CLI --executor-model overrides signal_snapshot executor_model."""
+    monkeypatch.delenv("NEXUS_C15_EXECUTOR_MODEL", raising=False)
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+        executor_model="deepseek-coder:6.7b-instruct",
+    )
+    assert row["signal_snapshot"]["executor_model"] == "deepseek-coder:6.7b-instruct"
+
+
+def test_c15_benchmark_env_executor_model_override(monkeypatch):
+    """Env NEXUS_C15_EXECUTOR_MODEL overrides default."""
+    monkeypatch.setenv("NEXUS_C15_EXECUTOR_MODEL", "qwen2.5-coder:14b-instruct-q3_K_M")
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+    )
+    assert row["signal_snapshot"]["executor_model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
+
+
+def test_c15_benchmark_cli_override_precedence_over_env(monkeypatch):
+    """CLI flag takes precedence over env var."""
+    monkeypatch.setenv("NEXUS_C15_EXECUTOR_MODEL", "qwen2.5-coder:14b-instruct-q3_K_M")
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+        executor_model="deepseek-coder:6.7b-instruct",
+    )
+    assert row["signal_snapshot"]["executor_model"] == "deepseek-coder:6.7b-instruct"
+
+
+def test_c15_benchmark_proposer_specs_override_is_benchmark_only(monkeypatch):
+    """Proposer specs can be overridden via CLI/env."""
+    monkeypatch.delenv("NEXUS_C15_PRIMARY_PROPOSER_MODEL", raising=False)
+    monkeypatch.delenv("NEXUS_C15_SECONDARY_PROPOSER_MODEL", raising=False)
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+        primary_proposer_model="gemma4-coder-12b-q4km:latest",
+        secondary_proposer_model="qwen2.5-coder:14b-instruct-q3_K_M",
+    )
+    proposers = row["signal_snapshot"]["proposer_specs"]
+    assert proposers[0]["model"] == "gemma4-coder-12b-q4km:latest"
+    assert proposers[1]["model"] == "qwen2.5-coder:14b-instruct-q3_K_M"
+    assert proposers[0]["role"] == "primary"
+    assert proposers[1]["role"] == "secondary"
+
+
+def test_c15_benchmark_override_does_not_add_route_authority(monkeypatch):
+    """Override must not add RouteMode, Router, Planner, or topology fields."""
+    monkeypatch.delenv("NEXUS_C15_EXECUTOR_MODEL", raising=False)
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+        executor_model="deepseek-coder:6.7b-instruct",
+    )
+    import json
+    row_str = json.dumps(row)
+    for token in ["RouteMode", "CapabilityPlanner", "HybridRouteDecision", "execution_topology_override"]:
+        assert token not in row_str, f"Forbidden token '{token}' found in override row"
+
+
+def test_c15_benchmark_row_preserves_required_fields(monkeypatch):
+    """Generated row must include locked_search, target_symbol, verifier_command, signal_snapshot."""
+    monkeypatch.delenv("NEXUS_C15_EXECUTOR_MODEL", raising=False)
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+    )
+    assert "locked_search" in row
+    assert "target_symbol" in row
+    assert "verifier_command" in row
+    assert "signal_snapshot" in row
+    ss = row["signal_snapshot"]
+    assert ss["executor_provider"] == "ollama"
+    assert ss["executor_model"] == DEFAULT_EXECUTOR_MODEL
+    assert "proposer_specs" in ss
+    assert len(ss["proposer_specs"]) == 2
+
+
+def test_c15_benchmark_provider_timeout_override(monkeypatch):
+    """CLI --provider-timeout-sec overrides default."""
+    monkeypatch.delenv("NEXUS_C15_PROVIDER_TIMEOUT_SEC", raising=False)
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+        provider_timeout_sec=300,
+    )
+    assert row["signal_snapshot"]["provider_timeout_sec"] == 300
+
+
+def test_c15_benchmark_env_provider_timeout_override(monkeypatch):
+    """Env NEXUS_C15_PROVIDER_TIMEOUT_SEC overrides default."""
+    monkeypatch.setenv("NEXUS_C15_PROVIDER_TIMEOUT_SEC", "240")
+    row = build_c15_benchmark_row(
+        _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
+    )
+    assert row["signal_snapshot"]["provider_timeout_sec"] == 240

@@ -342,7 +342,14 @@ def select_task_specs(task_specs: list[dict], selected_task_ids: list[str] | Non
     return filtered
 
 
-def run_benchmark(selected_task_ids: list[str] | None = None):
+def run_benchmark(
+    selected_task_ids: list[str] | None = None,
+    executor_model: str | None = None,
+    provider_timeout_sec: int | None = None,
+    judge_model: str | None = None,
+    primary_proposer_model: str | None = None,
+    secondary_proposer_model: str | None = None,
+):
     print("=== M1 Real Local Solve Benchmark Runner ===")
     if not check_ollama_availability():
         print("Error: Ollama is not running. Please start Ollama before running this benchmark.")
@@ -400,33 +407,16 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 test_file=spec["test_file"],
             )
 
-            row = {
-                "capability_plan_selected": spec["expected_capabilities"],
-                "evidence_refs": [f"{task_id}-evidence"],
-                "verifier_command": ["python3", str(verify_path)],
-                "target_symbol": spec["target_symbol"],
-                "locked_search": spec["locked_search"],
-                "signal_snapshot": {
-                    "execution_topology": spec["execution_topology"],
-                    "protocol_mode": "anchored_edit",
-                    "model_call_allowed": True,
-                    "executor_provider": "ollama",
-                    "executor_model": "qwen2.5-coder:7b-instruct",
-                    "provider_timeout_sec": 120,
-                    "mutation_allowed": True,
-                    "verifier_allowed": True,
-                    "judge_model": "qwen2.5-s2t-advisor:3b",
-                    "proposer_specs": [
-                        {"model": "qwen2.5-coder:7b-instruct", "role": "primary"},
-                        {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
-                    ]
-                },
-                "python_executable": sys.executable,
-            }
-            if spec.get("disable_primary_semantic_retry"):
-                row["disable_primary_semantic_retry"] = True
-            if spec.get("repair_specification"):
-                row["repair_specification"] = spec["repair_specification"]
+            row = build_c15_benchmark_row(
+                spec,
+                verify_path=verify_path,
+                sys_executable=sys.executable,
+                executor_model=executor_model,
+                provider_timeout_sec=provider_timeout_sec,
+                judge_model=judge_model,
+                primary_proposer_model=primary_proposer_model,
+                secondary_proposer_model=secondary_proposer_model,
+            )
 
             # 4. Invoke under Downstream Enforcement
             t0 = time.time()
@@ -801,6 +791,77 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
     print(f"Summary markdown written to: {SUMMARY_PATH}")
 
 
+DEFAULT_EXECUTOR_MODEL = "qwen2.5-coder:7b-instruct"
+DEFAULT_JUDGE_MODEL = "qwen2.5-s2t-advisor:3b"
+DEFAULT_PRIMARY_PROPOSER = "qwen2.5-coder:7b-instruct"
+DEFAULT_SECONDARY_PROPOSER = "deepseek-coder:6.7b-instruct"
+DEFAULT_PROVIDER_TIMEOUT = 120
+
+
+def build_c15_benchmark_row(
+    spec: dict,
+    verify_path: Path,
+    sys_executable: str,
+    *,
+    executor_model: str | None = None,
+    provider_timeout_sec: int | None = None,
+    judge_model: str | None = None,
+    primary_proposer_model: str | None = None,
+    secondary_proposer_model: str | None = None,
+) -> dict:
+    """Build a benchmark row with optional C15 model override support.
+
+    Precedence: explicit argument > env var > spec/default.
+    """
+    env = os.environ
+
+    def _resolve(explicit: str | None, env_key: str, default: str) -> str:
+        if explicit is not None:
+            return explicit
+        env_val = env.get(env_key, "").strip()
+        return env_val if env_val else default
+
+    em = _resolve(executor_model, "NEXUS_C15_EXECUTOR_MODEL", DEFAULT_EXECUTOR_MODEL)
+    jm = _resolve(judge_model, "NEXUS_C15_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
+    pp = _resolve(primary_proposer_model, "NEXUS_C15_PRIMARY_PROPOSER_MODEL", DEFAULT_PRIMARY_PROPOSER)
+    sp = _resolve(secondary_proposer_model, "NEXUS_C15_SECONDARY_PROPOSER_MODEL", DEFAULT_SECONDARY_PROPOSER)
+
+    if provider_timeout_sec is not None:
+        pts = provider_timeout_sec
+    else:
+        env_pts = env.get("NEXUS_C15_PROVIDER_TIMEOUT_SEC", "").strip()
+        pts = int(env_pts) if env_pts.isdigit() else DEFAULT_PROVIDER_TIMEOUT
+
+    row = {
+        "capability_plan_selected": spec["expected_capabilities"],
+        "evidence_refs": [f"{spec['task_id']}-evidence"],
+        "verifier_command": ["python3", str(verify_path)],
+        "target_symbol": spec["target_symbol"],
+        "locked_search": spec["locked_search"],
+        "signal_snapshot": {
+            "execution_topology": spec["execution_topology"],
+            "protocol_mode": "anchored_edit",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": em,
+            "provider_timeout_sec": pts,
+            "mutation_allowed": True,
+            "verifier_allowed": True,
+            "judge_model": jm,
+            "proposer_specs": [
+                {"model": pp, "role": "primary"},
+                {"model": sp, "role": "secondary"},
+            ],
+        },
+        "python_executable": sys_executable,
+    }
+    if spec.get("disable_primary_semantic_retry"):
+        row["disable_primary_semantic_retry"] = True
+    if spec.get("repair_specification"):
+        row["repair_specification"] = spec["repair_specification"]
+    return row
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the M1 real local solve benchmark.")
     parser.add_argument(
@@ -809,9 +870,47 @@ def parse_args() -> argparse.Namespace:
         dest="task_ids",
         help="Run only the specified task_id. Repeat to select multiple tasks.",
     )
+    parser.add_argument(
+        "--executor-model",
+        dest="executor_model",
+        default=None,
+        help=f"Override executor model (default: {DEFAULT_EXECUTOR_MODEL}).",
+    )
+    parser.add_argument(
+        "--provider-timeout-sec",
+        dest="provider_timeout_sec",
+        type=int,
+        default=None,
+        help=f"Override provider timeout in seconds (default: {DEFAULT_PROVIDER_TIMEOUT}).",
+    )
+    parser.add_argument(
+        "--judge-model",
+        dest="judge_model",
+        default=None,
+        help=f"Override judge model (default: {DEFAULT_JUDGE_MODEL}).",
+    )
+    parser.add_argument(
+        "--primary-proposer-model",
+        dest="primary_proposer_model",
+        default=None,
+        help=f"Override primary proposer model (default: {DEFAULT_PRIMARY_PROPOSER}).",
+    )
+    parser.add_argument(
+        "--secondary-proposer-model",
+        dest="secondary_proposer_model",
+        default=None,
+        help=f"Override secondary proposer model (default: {DEFAULT_SECONDARY_PROPOSER}).",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run_benchmark(selected_task_ids=args.task_ids)
+    run_benchmark(
+        selected_task_ids=args.task_ids,
+        executor_model=args.executor_model,
+        provider_timeout_sec=args.provider_timeout_sec,
+        judge_model=args.judge_model,
+        primary_proposer_model=args.primary_proposer_model,
+        secondary_proposer_model=args.secondary_proposer_model,
+    )
