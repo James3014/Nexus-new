@@ -542,3 +542,30 @@ def test_semantic_retry_verifier_evidence_injected_flag(tmp_path: Path):
             failure_class="verification_failed",
         )
         assert ctx2.op._semantic_retry_telemetry["semantic_retry_prompt_has_verifier_evidence"] is False
+
+
+def test_handle_verification_failure_skips_primary_semantic_retry_when_disabled(tmp_path: Path):
+    orchestrator = HealOrchestrator(phases=[], governance_gate=MagicMock())
+    orchestrator._attempt_semantic_retry = MagicMock(return_value=True)
+    orchestrator._handle_retry = MagicMock()
+
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="test_disable_primary_sr",
+            repo_dir=tmp_path,
+            problem_statement="fix",
+            route_context={"disable_primary_semantic_retry": True},
+        ),
+        gov=GovernanceContext(),
+    )
+    ctx.op.attempt = 1
+    ctx.op.final_patch = "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new"
+    ctx.op.evaluation_report = "BUG PRESENT"
+
+    res = PhaseResult(success=False, failure_reason="VERIFICATION_FAILED")
+
+    orchestrator._handle_verification_failure(ctx, res)
+
+    orchestrator._attempt_semantic_retry.assert_not_called()
+    orchestrator._handle_retry.assert_called_once()
+    assert ctx.op.failure_reason.startswith("LOGIC_REGRESSION:")

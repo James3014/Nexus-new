@@ -4,6 +4,7 @@ import pytest
 
 from scripts.bench.m1_real_local_solve_benchmark import (
     build_task_specs,
+    classify_solve_mechanism,
     resolve_receipt_path,
     select_task_specs,
 )
@@ -75,6 +76,7 @@ def _make_base_row(**overrides) -> dict:
         "same_span_retry": False,
         "structured_retry_packet_available": False,
         "failure_feedback_builder_invoked": False,
+        "solve_mechanism": "first_pass",
         "execution_path_modules": [
             "CapabilityPlanner",
             "LocalModelExecutor",
@@ -196,6 +198,41 @@ def test_select_task_specs_rejects_unknown_task_id():
     specs = build_task_specs()
     with pytest.raises(ValueError, match="Unknown task_id"):
         select_task_specs(specs, ["not-a-real-task"])
+
+
+def test_build_task_specs_includes_forced_delegated_retry_probe():
+    specs = build_task_specs()
+    forced = next(spec for spec in specs if spec["task_id"] == "toy-math-forced-delegated-retry")
+    assert forced["disable_primary_semantic_retry"] is True
+    assert forced["execution_topology"] == "localheal_pipeline"
+    assert "replace `return x * 2` with `return x * 4`" in forced["repair_specification"]
+
+
+def test_classify_solve_mechanism_distinguishes_first_pass():
+    assert classify_solve_mechanism(
+        solved=True,
+        semantic_retry_invoked=False,
+        pipeline_retry_delegated=False,
+        delegated_retry_stage="not_invoked",
+    ) == "first_pass"
+
+
+def test_classify_solve_mechanism_distinguishes_pipeline_semantic_retry():
+    assert classify_solve_mechanism(
+        solved=True,
+        semantic_retry_invoked=True,
+        pipeline_retry_delegated=False,
+        delegated_retry_stage="not_invoked",
+    ) == "pipeline_semantic_retry"
+
+
+def test_classify_solve_mechanism_distinguishes_delegated_retry():
+    assert classify_solve_mechanism(
+        solved=True,
+        semantic_retry_invoked=True,
+        pipeline_retry_delegated=True,
+        delegated_retry_stage="success",
+    ) == "delegated_retry"
 
 
 def test_resolve_receipt_path_prefers_final_receipt_path():

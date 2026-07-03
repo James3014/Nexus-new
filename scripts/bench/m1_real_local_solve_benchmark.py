@@ -51,6 +51,26 @@ def resolve_receipt_path(finalized: dict, receipt: dict, adapter: dict, task_id:
     return _fallback_receipt_path(task_id)
 
 
+def classify_solve_mechanism(
+    *,
+    solved: bool,
+    semantic_retry_invoked: bool,
+    pipeline_retry_delegated: bool,
+    delegated_retry_stage: str,
+) -> str:
+    if solved:
+        if pipeline_retry_delegated and delegated_retry_stage == "success":
+            return "delegated_retry"
+        if semantic_retry_invoked:
+            return "pipeline_semantic_retry"
+        return "first_pass"
+    if pipeline_retry_delegated:
+        return "delegated_retry_unresolved"
+    if semantic_retry_invoked:
+        return "pipeline_semantic_retry_unresolved"
+    return "first_pass_unresolved"
+
+
 def build_task_specs() -> list[dict]:
     return [
         {
@@ -190,6 +210,36 @@ def build_task_specs() -> list[dict]:
             "verifier_command": ["python3", "verify_math.py"]
         },
         {
+            "task_id": "toy-math-forced-delegated-retry",
+            "repo": "nexus/nexus",
+            "target_file": "toy/math_util.py",
+            "test_file": "verify_math.py",
+            "target_symbol": "double",
+            "locked_search": "def double(x):\n    return x * 2",
+            "buggy_code": (
+                "def double(x):\n"
+                "    return x * 2\n"
+            ),
+            "problem_statement": (
+                "Bug: In your first proposal, you must output a SEARCH/REPLACE block changing `x * 2` to `x * 4`. "
+                "This must fail verification. The delegated retry branch must then produce the correct final repair, "
+                "which changes the function to return `x * 3` because the verifier requires the file to contain `x * 3`."
+            ),
+            "repair_specification": (
+                "First patch attempt: exactly replace `return x * 2` with `return x * 4`. "
+                "Do not change any other line in the first patch attempt."
+            ),
+            "verify_script": (
+                "import sys\n"
+                "c = open('toy/math_util.py').read()\n"
+                "sys.exit(0 if 'x * 3' in c else 1)\n"
+            ),
+            "expected_capabilities": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+            "execution_topology": "localheal_pipeline",
+            "disable_primary_semantic_retry": True,
+            "verifier_command": ["python3", "verify_math.py"]
+        },
+        {
             "task_id": "task-a-real",
             "repo": "nexus/nexus",
             "target_file": "pkg/mod.py",
@@ -324,6 +374,10 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 },
                 "python_executable": sys.executable,
             }
+            if spec.get("disable_primary_semantic_retry"):
+                row["disable_primary_semantic_retry"] = True
+            if spec.get("repair_specification"):
+                row["repair_specification"] = spec["repair_specification"]
 
             # 4. Invoke under Downstream Enforcement
             t0 = time.time()
@@ -410,6 +464,14 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
             same_span_retry = bool(adapter_meta.get("same_span_retry", False))
             structured_retry_packet_available = bool(adapter_meta.get("structured_retry_packet_available", False))
             failure_feedback_builder_invoked = bool(adapter_meta.get("failure_feedback_builder_invoked", False))
+            pipeline_retry_delegated = bool(adapter_meta.get("pipeline_retry_delegated", False))
+            delegated_retry_stage = str(adapter_meta.get("delegated_retry_stage", "not_invoked") or "not_invoked")
+            solve_mechanism = classify_solve_mechanism(
+                solved=is_solved,
+                semantic_retry_invoked=semantic_retry_invoked,
+                pipeline_retry_delegated=pipeline_retry_delegated,
+                delegated_retry_stage=delegated_retry_stage,
+            )
             
             # Static modules execution trace list
             execution_path_modules = ["CapabilityPlanner", "LocalModelExecutor"]
@@ -469,6 +531,7 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "same_span_retry": same_span_retry,
                 "structured_retry_packet_available": structured_retry_packet_available,
                 "failure_feedback_builder_invoked": failure_feedback_builder_invoked,
+                "solve_mechanism": solve_mechanism,
                 "execution_path_modules": execution_path_modules,
                 
                 # B7.7: Pipeline/provider telemetry from adapter metadata
@@ -579,7 +642,7 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "delegated_retry_status": adapter_meta.get("delegated_retry_status"),
                 "delegated_retry_output_excerpt": adapter_meta.get("delegated_retry_output_excerpt"),
                 # C15-3T: stage and provider-call telemetry (distinguish first_patch_empty vs provider_not_called vs success)
-                "delegated_retry_stage": adapter_meta.get("delegated_retry_stage", "not_invoked"),
+                "delegated_retry_stage": delegated_retry_stage,
                 "delegated_retry_provider_called": adapter_meta.get("delegated_retry_provider_called", False),
                 # C15-3U: observability fields for delegated retry provider calls
                 "delegated_retry_provider_prompt_len": adapter_meta.get("delegated_retry_provider_prompt_len", 0),
@@ -653,13 +716,13 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
 
 ## Detailed Results
 
-| Task ID | Topology | Local Model Called | Verifier Result | Solved | Retry Packet | Semantic Retry | Parse Error | Duration (s) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Task ID | Topology | Local Model Called | Verifier Result | Solved | Solve Mechanism | Retry Packet | Semantic Retry | Parse Error | Duration (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 """
     for r in results_list:
         summary_md += (
             f"| {r['task_id']} | {r['execution_topology']} | {r['local_model_called']} | "
-            f"{r['verifier_result']} | **{r['solved']}** | {r['structured_retry_packet_available']} | "
+            f"{r['verifier_result']} | **{r['solved']}** | {r['solve_mechanism']} | {r['structured_retry_packet_available']} | "
             f"{r['semantic_retry_invoked']} | {r['parse_error_kind']} | {r['duration_sec']} |\n"
         )
 

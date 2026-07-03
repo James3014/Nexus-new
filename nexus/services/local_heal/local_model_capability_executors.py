@@ -461,6 +461,7 @@ class LocalHealPipelineCapabilityExecutor:
                     instance_id=ctx.task_id,
                     repo_dir=_Path(ctx.source_root),
                     problem_statement=ctx.problem_statement,
+                    repair_specification=str(route_ctx.get("repair_specification", "") or ""),
                     route_context=route_ctx,
                     python_executable=python_executable,
                     max_tries=3,
@@ -593,6 +594,7 @@ class LocalHealPipelineCapabilityExecutor:
         semantic_retry_count = 0
         same_span_retry = False
         structured_retry_packet_available = False
+        semantic_retry_telemetry = {}
 
         if pipeline_result_ctx is not None:
             # Extract C7 classification

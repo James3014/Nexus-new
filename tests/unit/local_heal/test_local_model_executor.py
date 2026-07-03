@@ -1184,6 +1184,23 @@ def test_pipeline_legacy_context_promotes_semantic_retry_seed_to_v2():
     assert getattr(v2.op, "verifier_exit_code", "") == 1
 
 
+def test_pipeline_legacy_context_promotes_repair_specification_to_v2():
+    from nexus.services.local_heal.pipeline import HealContext as LegacyHealContext
+
+    legacy = LegacyHealContext(
+        instance_id="repair-spec-promo",
+        repo_dir=Path("/tmp"),
+        problem_statement="fix bug",
+        repair_specification="Replace x * 2 with x * 4 on the first patch attempt.",
+    )
+
+    v2 = legacy.to_v2()
+
+    assert getattr(v2.op, "repair_specification", "") == (
+        "Replace x * 2 with x * 4 on the first patch attempt."
+    )
+
+
 def test_localheal_pipeline_verifier_fail_delegates_existing_retry_with_seeded_evidence():
     from unittest.mock import patch, MagicMock
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult

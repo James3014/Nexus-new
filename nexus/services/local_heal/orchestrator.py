@@ -243,9 +243,14 @@ class HealOrchestrator:
         """Handle verification failure with T1.6 semantic retry on first failure."""
         evaluation_report = getattr(ctx.op, "evaluation_report", "")
         failure_class = self._classify_verification_failure(ctx, res.failure_reason)
+        route_ctx = getattr(ctx.op, "route_context", {}) if hasattr(ctx, "op") else {}
+        route_ctx = route_ctx if isinstance(route_ctx, dict) else {}
+        disable_primary_semantic_retry = bool(route_ctx.get("disable_primary_semantic_retry", False))
 
         # T1.6: Semantic retry eligible on first verification failure
         semantic_retry_eligible = (
+            not disable_primary_semantic_retry
+            and
             ctx.op.attempt == 1
             and failure_class in ("semantic_wrong", "LOGIC_REGRESSION", "VERIFICATION_FAILED")
             and evaluation_report

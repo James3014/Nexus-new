@@ -44,6 +44,7 @@ class HealContext:
     attempt: int = 1
     max_tries: int = 3
     final_patch: str = ""
+    repair_specification: str = ""
     errors: List[Any] = field(default_factory=list)
 
     # --- 證據產物 ---
@@ -91,6 +92,7 @@ class HealContext:
             attempt=self.attempt,
             max_tries=self.max_tries,
             final_patch=self.final_patch,
+            repair_specification=self.repair_specification,
             repro_script=self.repro_script,
             repro_evidence=self.repro_evidence,
             reproduced=self.reproduced,
