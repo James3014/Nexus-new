@@ -151,6 +151,7 @@ def _build_unified_diff_from_search_and_replacement(
     target_file: str,
     search_text: str,
     replacement_text: str,
+    original_source_text: Optional[str] = None,
 ) -> str:
     import difflib
     import re as _re
@@ -159,9 +160,13 @@ def _build_unified_diff_from_search_and_replacement(
     _anchor_line = 1
     if search_text and str(search_text).strip():
         try:
-            _fp = _Path(request.repo_root) / target_file if request.repo_root else _Path(target_file)
-            if _fp.exists():
-                _lines = _fp.read_text(encoding="utf-8").splitlines()
+            if original_source_text is not None:
+                _lines = original_source_text.splitlines()
+            else:
+                _fp = _Path(request.repo_root) / target_file if request.repo_root else _Path(target_file)
+                _lines = _fp.read_text(encoding="utf-8").splitlines() if _fp.exists() else []
+
+            if _lines:
                 _search_first = str(search_text).strip().splitlines()[0].strip()
                 for _i, _l in enumerate(_lines, 1):
                     if _search_first in _l:
@@ -204,6 +209,7 @@ def _reanchor_pipeline_patch_to_locked_search(
     request: LocalModelExecutorRequest,
     locked_search: str,
     projected_patch: str,
+    original_source_text: Optional[str] = None,
 ) -> tuple[str, dict[str, Any]]:
     if not projected_patch.strip() or not locked_search.strip():
         return projected_patch, {"pipeline_locked_search_reanchored": False}
@@ -215,9 +221,14 @@ def _reanchor_pipeline_patch_to_locked_search(
     if old_text.strip() == locked_search.strip():
         return projected_patch, {"pipeline_locked_search_reanchored": False}
 
-    current_exists, current_text = _read_text_snapshot(
-        os.path.join(request.repo_root, request.target_file) if request.repo_root and request.target_file else ""
-    )
+    if original_source_text is not None:
+        current_exists = True
+        current_text = original_source_text
+    else:
+        current_exists, current_text = _read_text_snapshot(
+            os.path.join(request.repo_root, request.target_file) if request.repo_root and request.target_file else ""
+        )
+
     if not current_exists or locked_search.strip() not in current_text:
         return projected_patch, {"pipeline_locked_search_reanchored": False}
 
@@ -226,6 +237,7 @@ def _reanchor_pipeline_patch_to_locked_search(
         request.target_file,
         locked_search,
         new_text,
+        original_source_text=original_source_text,
     ).strip()
     if not rebuilt:
         return projected_patch, {"pipeline_locked_search_reanchored": False}
@@ -236,6 +248,7 @@ def _reanchor_pipeline_patch_to_locked_search(
         "pipeline_locked_search_reanchored": True,
         "pipeline_locked_search_reanchor_reason": "preimage_mismatch_current_source",
     }
+
 
 
 def _unwrap_outer_markdown_fence(candidate_patch: str) -> tuple[str, dict[str, Any]]:
@@ -1300,6 +1313,7 @@ class LocalModelExecutor:
                     request,
                     locked_search,
                     candidate_patch,
+                    original_source_text=original_target_content,
                 )
                 patch_meta = {
                     **patch_meta,
