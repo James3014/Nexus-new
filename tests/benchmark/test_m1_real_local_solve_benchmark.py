@@ -254,3 +254,56 @@ def test_resolve_receipt_path_falls_back_to_local_heal_report_path():
     assert resolve_receipt_path(finalized, receipt, adapter, "toy-math-solve").endswith(
         ".nexus/reports/local_heal/toy-math-solve/receipt.json"
     )
+
+
+# ------------------------------------------------------------------
+# C15-4C-1: Verifier Evidence Gap Task Spec Tests
+# ------------------------------------------------------------------
+
+def test_c15_4c_1_verifier_evidence_gap_task_exists():
+    """The toy-math-verifier-evidence-gap task spec must exist."""
+    specs = build_task_specs()
+    task_ids = [spec["task_id"] for spec in specs]
+    assert "toy-math-verifier-evidence-gap" in task_ids
+
+
+def test_c15_4c_1_problem_statement_hides_exact_formula():
+    """Problem statement must NOT contain the exact expected formula."""
+    specs = build_task_specs()
+    task = next(spec for spec in specs if spec["task_id"] == "toy-math-verifier-evidence-gap")
+    ps = task["problem_statement"]
+    # The problem statement should not reveal the exact fix
+    assert "clamp" not in ps.lower()
+    assert "max(0" not in ps
+    assert "min(1" not in ps
+    assert "max_val == min_val" not in ps
+
+
+def test_c15_4c_1_verifier_emits_actionable_evidence():
+    """Verifier script must emit actionable evidence on failure."""
+    specs = build_task_specs()
+    task = next(spec for spec in specs if spec["task_id"] == "toy-math-verifier-evidence-gap")
+    vs = task["verify_script"]
+    # Verifier must print evidence about what's missing
+    assert "EVIDENCE:" in vs
+    assert "EXPECTED:" in vs
+    # Verifier must check for clamp behavior
+    assert "clamp" in vs.lower() or "max(0" in vs or "min(1" in vs
+    # Verifier must check for divide-by-zero handling
+    assert "max_val == min_val" in vs or "ZeroDivisionError" in vs
+
+
+def test_c15_4c_1_locked_search_matches_buggy_code():
+    """locked_search must match the buggy_code exactly."""
+    specs = build_task_specs()
+    task = next(spec for spec in specs if spec["task_id"] == "toy-math-verifier-evidence-gap")
+    assert task["locked_search"] in task["buggy_code"]
+
+
+def test_c15_4c_1_task_has_required_capabilities():
+    """Task must have expected_capabilities including local_model_executor."""
+    specs = build_task_specs()
+    task = next(spec for spec in specs if spec["task_id"] == "toy-math-verifier-evidence-gap")
+    assert "local_model_executor" in task["expected_capabilities"]
+    assert task["execution_topology"] == "localheal_pipeline"
+    assert task["verifier_command"] == ["python3", "verify_math_evidence.py"]

@@ -239,6 +239,55 @@ def build_task_specs() -> list[dict]:
             "disable_primary_semantic_retry": True,
             "verifier_command": ["python3", "verify_math.py"]
         },
+        # C15-4C-1: Verifier evidence gap task — first-pass should be unlikely to solve
+        {
+            "task_id": "toy-math-verifier-evidence-gap",
+            "repo": "nexus/nexus",
+            "target_file": "toy/math_util.py",
+            "test_file": "verify_math_evidence.py",
+            "target_symbol": "normalize_score",
+            "locked_search": "def normalize_score(score, min_val, max_val):\n    return (score - min_val) / (max_val - min_val)",
+            "buggy_code": (
+                "def normalize_score(score, min_val, max_val):\n"
+                "    return (score - min_val) / (max_val - min_val)\n"
+            ),
+            # C15-4C-1: Problem statement is intentionally underspecified
+            # It does NOT reveal the exact expected behavior
+            "problem_statement": (
+                "Bug: The function `normalize_score` in toy/math_util.py has a correctness issue. "
+                "Fix it so that the verifier tests pass. The verifier script tests multiple edge cases."
+            ),
+            # C15-4C-1: Verifier script reveals actionable evidence on failure
+            # It checks multiple cases and prints expected vs actual values
+            "verify_script": (
+                "import sys\n"
+                "c = open('toy/math_util.py').read()\n"
+                "lines = c.split('\\n')\n"
+                "func_lines = [l for l in lines if 'def normalize_score' in l]\n"
+                "if not func_lines:\n"
+                "    print('FAIL: normalize_score function not found')\n"
+                "    sys.exit(1)\n"
+                "func_body = '\\n'.join(lines[lines.index(func_lines[0]):])\n"
+                "has_clamp = 'max(0' in func_body or 'min(1' in func_body or 'clamp' in func_body.lower()\n"
+                "has_divide_check = 'max_val == min_val' in func_body or 'max_val != min_val' in func_body\n"
+                "has_zero_division = 'ZeroDivisionError' in func_body or '/ 0' in func_body\n"
+                "evidence = []\n"
+                "if not has_clamp:\n"
+                "    evidence.append('EVIDENCE: normalize_score does not clamp output to [0, 1] range')\n"
+                "if not has_divide_check:\n"
+                "    evidence.append('EVIDENCE: normalize_score does not handle max_val == min_val case')\n"
+                "if not has_zero_division:\n"
+                "    evidence.append('EVIDENCE: normalize_score may raise ZeroDivisionError when max_val == min_val')\n"
+                "if evidence:\n"
+                "    print('\\n'.join(evidence))\n"
+                "    print('EXPECTED: normalize_score should clamp to [0, 1] and handle equal min/max')\n"
+                "    sys.exit(1)\n"
+                "sys.exit(0)\n"
+            ),
+            "expected_capabilities": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+            "execution_topology": "localheal_pipeline",
+            "verifier_command": ["python3", "verify_math_evidence.py"]
+        },
         {
             "task_id": "task-a-real",
             "repo": "nexus/nexus",
