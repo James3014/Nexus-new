@@ -225,6 +225,49 @@ def build_local_model_provider_from_signal_snapshot(
 
 
 
+def compute_patch_lifecycle_state(
+    pipeline_final_patch_len: int,
+    pipeline_result_projected: bool,
+    candidate_isolation_attempted: bool,
+    isolated_apply_status: str,
+    hash_match: bool,
+    applied_patch_hash: str,
+    selected_candidate_hash: str,
+    verifier_result: str,
+    solved: bool,
+) -> str:
+    """Derive mutually exclusive patch lifecycle state from existing execution results.
+    
+    Must not trigger execution, invoke provider, invoke verifier, or invoke isolated apply.
+    Fails closed on missing data.
+    """
+    if pipeline_final_patch_len == 0:
+        return "patch_absent"
+
+    if not pipeline_result_projected:
+        return "patch_present_not_projected"
+
+    if not candidate_isolation_attempted:
+        return "patch_projected_not_isolated"
+
+    if isolated_apply_status != "applied":
+        return "isolation_attempted_apply_failed"
+
+    if not hash_match:
+        return "isolation_applied_hash_mismatch"
+
+    if verifier_result != "pass" or not solved:
+        return "isolation_applied_hash_match_verifier_failed"
+
+    if not applied_patch_hash or not selected_candidate_hash:
+        return "isolation_applied_hash_mismatch"
+
+    if applied_patch_hash != selected_candidate_hash:
+        return "isolation_applied_hash_mismatch"
+
+    return "verifier_passed"
+
+
 class LocalModelExecutor:
     @staticmethod
     def run(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
@@ -726,6 +769,17 @@ class LocalModelExecutor:
                 hybrid_route is not None
                 and hybrid_route.route_mode.value == "local_only_executed"
             )
+            raw_meta["patch_lifecycle_state"] = compute_patch_lifecycle_state(
+                pipeline_final_patch_len=len(selected_patch) if selected_patch.strip() else 0,
+                pipeline_result_projected=bool(selected_patch.strip()),
+                candidate_isolation_attempted=candidate_isolation_attempted,
+                isolated_apply_status=isolated_apply_status,
+                hash_match=hash_match,
+                applied_patch_hash=applied_patch_hash,
+                selected_candidate_hash=selected_hash if selected_hash != empty_hash else "",
+                verifier_result=isolated_verifier_status,
+                solved=raw_meta["solved"],
+            )
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
@@ -957,6 +1011,18 @@ class LocalModelExecutor:
                     no_reason = "protocol_adherence_failure"
             raw_meta["no_model_call_reason"] = no_reason
             raw_meta["no_patch_reason"] = no_reason
+
+            raw_meta["patch_lifecycle_state"] = compute_patch_lifecycle_state(
+                pipeline_final_patch_len=pipeline_final_patch_len,
+                pipeline_result_projected=pipeline_result_projected,
+                candidate_isolation_attempted=candidate_isolation_attempted,
+                isolated_apply_status=isolated_apply_status,
+                hash_match=hash_match,
+                applied_patch_hash=applied_patch_hash,
+                selected_candidate_hash=selected_candidate_hash,
+                verifier_result=isolated_verifier_status,
+                solved=raw_meta["solved"],
+            )
 
             return LocalModelExecutorResponse(
                 invoked=True,

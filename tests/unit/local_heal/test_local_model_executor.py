@@ -9,6 +9,7 @@ from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutorRequest,
     LocalModelExecutorResponse,
     _resolve_execution_topology,
+    compute_patch_lifecycle_state,
 )
 from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
@@ -1852,6 +1853,8 @@ def test_fence_output_classification_does_not_strip_fences() -> None:
         assert resp.candidate_patch == ""  # C9: no fallback, empty stays empty
 
 
+
+
 # ---------------------------------------------------------------------------
 # C8: Recovery quarantine tests
 # ---------------------------------------------------------------------------
@@ -2434,3 +2437,162 @@ def test_pipeline_projection_drops_non_target_file_diffs_before_isolated_apply()
     assert meta.get("protocol_normalization", {}).get("normalized") is True
     assert meta.get("protocol_normalization", {}).get("dropped_files") == ["verify_math.py"]
     assert meta.get("candidate_isolated") is True
+
+
+# ---------------------------------------------------------------------------
+# C15-1: Patch Lifecycle Receipt Contract Tests
+# ---------------------------------------------------------------------------
+
+def test_patch_lifecycle_patch_absent():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=0,
+        pipeline_result_projected=False,
+        candidate_isolation_attempted=False,
+        isolated_apply_status="",
+        hash_match=False,
+        applied_patch_hash="",
+        selected_candidate_hash="",
+        verifier_result="not_run",
+        solved=False,
+    )
+    assert state == "patch_absent"
+
+
+def test_patch_lifecycle_patch_present_not_projected():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=False,
+        candidate_isolation_attempted=False,
+        isolated_apply_status="",
+        hash_match=False,
+        applied_patch_hash="",
+        selected_candidate_hash="",
+        verifier_result="not_run",
+        solved=False,
+    )
+    assert state == "patch_present_not_projected"
+
+
+def test_patch_lifecycle_projected_not_isolated():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=True,
+        candidate_isolation_attempted=False,
+        isolated_apply_status="",
+        hash_match=False,
+        applied_patch_hash="",
+        selected_candidate_hash="",
+        verifier_result="not_run",
+        solved=False,
+    )
+    assert state == "patch_projected_not_isolated"
+
+
+def test_patch_lifecycle_isolation_attempted_apply_failed():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=True,
+        candidate_isolation_attempted=True,
+        isolated_apply_status="failed",
+        hash_match=False,
+        applied_patch_hash="",
+        selected_candidate_hash="abc123",
+        verifier_result="not_run",
+        solved=False,
+    )
+    assert state == "isolation_attempted_apply_failed"
+
+
+def test_patch_lifecycle_hash_mismatch():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=True,
+        candidate_isolation_attempted=True,
+        isolated_apply_status="applied",
+        hash_match=False,
+        applied_patch_hash="hash_a",
+        selected_candidate_hash="hash_b",
+        verifier_result="pass",
+        solved=False,
+    )
+    assert state == "isolation_applied_hash_mismatch"
+
+
+def test_patch_lifecycle_hash_match_verifier_failed():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=True,
+        candidate_isolation_attempted=True,
+        isolated_apply_status="applied",
+        hash_match=True,
+        applied_patch_hash="hash_a",
+        selected_candidate_hash="hash_a",
+        verifier_result="fail",
+        solved=False,
+    )
+    assert state == "isolation_applied_hash_match_verifier_failed"
+
+
+def test_patch_lifecycle_verifier_passed_requires_hash_match_and_solved():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=True,
+        candidate_isolation_attempted=True,
+        isolated_apply_status="applied",
+        hash_match=True,
+        applied_patch_hash="hash_a",
+        selected_candidate_hash="hash_a",
+        verifier_result="pass",
+        solved=True,
+    )
+    assert state == "verifier_passed"
+
+
+def test_patch_lifecycle_verifier_pass_without_hash_match_does_not_pass():
+    state = compute_patch_lifecycle_state(
+        pipeline_final_patch_len=100,
+        pipeline_result_projected=True,
+        candidate_isolation_attempted=True,
+        isolated_apply_status="applied",
+        hash_match=True,
+        applied_patch_hash="",
+        selected_candidate_hash="",
+        verifier_result="pass",
+        solved=True,
+    )
+    assert state != "verifier_passed"
+    assert state == "isolation_applied_hash_mismatch"
+
+
+def test_m1_row_includes_patch_lifecycle_state():
+    req = make_test_request(
+        "c15-1-lifecycle",
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="NO_PATCH",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "NO_PATCH",
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+    meta = resp.raw_model_metadata
+    assert "patch_lifecycle_state" in meta
+    assert meta["patch_lifecycle_state"] == "patch_absent"
