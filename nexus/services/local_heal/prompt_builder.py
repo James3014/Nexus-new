@@ -297,4 +297,10 @@ class PromptBuilder:
             f">>>>>>> REPLACE\n"
         )
 
-        return original_user_prompt + header + verifier_section + evidence_section + search_lock + instruction
+        reminder = (
+            "\n\nREMINDER: Output one SEARCH/REPLACE block. "
+            "Keep the SEARCH block exactly as shown above. "
+            "Fix only the REPLACE block.\n"
+        )
+
+        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + reminder
