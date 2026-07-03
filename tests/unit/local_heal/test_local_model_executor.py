@@ -10,6 +10,7 @@ from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutorResponse,
     _resolve_execution_topology,
     compute_patch_lifecycle_state,
+    compute_failure_class,
 )
 from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
@@ -2596,3 +2597,234 @@ def test_m1_row_includes_patch_lifecycle_state():
     meta = resp.raw_model_metadata
     assert "patch_lifecycle_state" in meta
     assert meta["patch_lifecycle_state"] == "patch_absent"
+
+
+# ---------------------------------------------------------------------------
+# C15-2: Failure Classifier Hardening Tests
+# ---------------------------------------------------------------------------
+
+def test_failure_class_empty_response():
+    fc, ur = compute_failure_class(
+        output_len=0,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "empty_response"
+    assert ur == ""
+
+
+def test_failure_class_provider_error():
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="ollama_timeout",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "provider_error"
+    assert ur == ""
+
+
+def test_failure_class_no_blocks_found():
+    fc, ur = compute_failure_class(
+        output_len=50,
+        provider_error="",
+        failure_reason="NO_BLOCKS_FOUND",
+        parse_error_kind="",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="NO_BLOCKS_FOUND",
+    )
+    assert fc == "no_blocks_found"
+    assert ur == ""
+
+
+def test_failure_class_search_mismatch():
+    fc, ur = compute_failure_class(
+        output_len=50,
+        provider_error="",
+        failure_reason="SEARCH_MISMATCH",
+        parse_error_kind="",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="SEARCH_MISMATCH",
+    )
+    assert fc == "search_mismatch"
+    assert ur == ""
+
+
+def test_failure_class_replace_syntax_error():
+    fc, ur = compute_failure_class(
+        output_len=50,
+        provider_error="",
+        failure_reason="REPLACE_SYNTAX_ERROR",
+        parse_error_kind="",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="REPLACE_SYNTAX_ERROR",
+    )
+    assert fc == "replace_syntax_error"
+    assert ur == ""
+
+
+def test_failure_class_fenced_output():
+    fc, ur = compute_failure_class(
+        output_len=50,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="REPLACEMENT_MARKDOWN_FENCE",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=True,
+        pipeline_failure_reason="",
+    )
+    assert fc == "fenced_output"
+    assert ur == ""
+
+
+def test_failure_class_refusal():
+    fc, ur = compute_failure_class(
+        output_len=50,
+        provider_error="",
+        failure_reason="REFUSAL",
+        parse_error_kind="",
+        patch_lifecycle_state="patch_absent",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="REFUSAL",
+    )
+    assert fc == "refusal"
+    assert ur == ""
+
+
+def test_failure_class_patch_apply_failed_from_lifecycle():
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="isolation_attempted_apply_failed",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "patch_apply_failed"
+    assert ur == ""
+
+
+def test_failure_class_hash_mismatch_from_lifecycle():
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="isolation_applied_hash_mismatch",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "hash_mismatch"
+    assert ur == ""
+
+
+def test_failure_class_verification_failed_from_lifecycle():
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+        verifier_result="fail",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "verification_failed"
+    assert ur == ""
+
+
+def test_failure_class_verifier_passed():
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="verifier_passed",
+        verifier_result="pass",
+        solved=True,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "verifier_passed"
+    assert ur == ""
+
+
+def test_failure_class_unknown_requires_reason():
+    fc, ur = compute_failure_class(
+        output_len=50,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="",
+        patch_lifecycle_state="",
+        verifier_result="not_run",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "unknown_with_reason"
+    assert ur != ""
+
+
+def test_m1_row_includes_failure_class_and_unknown_reason():
+    req = make_test_request(
+        "c15-2-classifier",
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="NO_PATCH",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "NO_PATCH",
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+    meta = resp.raw_model_metadata
+    assert "failure_class" in meta
+    assert "unknown_reason" in meta
+    assert meta["failure_class"] != ""

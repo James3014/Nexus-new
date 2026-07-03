@@ -452,6 +452,9 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "second_output_class": adapter_meta.get("second_output_class", ""),
                 # C15-1: Patch lifecycle receipt contract
                 "patch_lifecycle_state": adapter_meta.get("patch_lifecycle_state", ""),
+                # C15-2: Failure classifier hardening
+                "failure_class": adapter_meta.get("failure_class", ""),
+                "unknown_reason": adapter_meta.get("unknown_reason", ""),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),

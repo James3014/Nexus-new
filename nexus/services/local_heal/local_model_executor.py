@@ -268,6 +268,78 @@ def compute_patch_lifecycle_state(
     return "verifier_passed"
 
 
+def compute_failure_class(
+    output_len: int,
+    provider_error: str,
+    failure_reason: str,
+    parse_error_kind: str,
+    patch_lifecycle_state: str,
+    verifier_result: str,
+    solved: bool,
+    contains_markdown_fence: bool,
+    pipeline_failure_reason: str,
+) -> tuple[str, str]:
+    """Deterministic failure classifier from existing execution metadata.
+    
+    Returns (failure_class, unknown_reason).
+    Classification only — must not parse/transform model output or change execution.
+    """
+    _reason = failure_reason or pipeline_failure_reason or ""
+
+    # Priority 1: provider error
+    if provider_error and provider_error.strip():
+        return "provider_error", ""
+
+    # Priority 2: empty response
+    if output_len == 0:
+        return "empty_response", ""
+
+    # Priority 3: pipeline failure reasons (deterministic from existing telemetry)
+    upper_reason = _reason.upper()
+    upper_parse = (parse_error_kind or "").upper()
+
+    if "NO_BLOCKS_FOUND" in upper_reason:
+        return "no_blocks_found", ""
+    if "SEARCH_MISMATCH" in upper_reason:
+        return "search_mismatch", ""
+    if "REPLACE_SYNTAX_ERROR" in upper_reason or "SYNTAX_ERROR" in upper_reason:
+        return "replace_syntax_error", ""
+
+    # Priority 4: fenced output
+    if "REPLACEMENT_MARKDOWN_FENCE" in upper_parse or contains_markdown_fence:
+        return "fenced_output", ""
+
+    # Priority 5: refusal
+    if "REFUSAL" in upper_parse or "REFUSAL" in upper_reason:
+        return "refusal", ""
+
+    # Priority 6: patch lifecycle states
+    if patch_lifecycle_state == "isolation_attempted_apply_failed":
+        return "patch_apply_failed", ""
+    if patch_lifecycle_state == "isolation_applied_hash_mismatch":
+        return "hash_mismatch", ""
+    if patch_lifecycle_state == "isolation_applied_hash_match_verifier_failed":
+        return "verification_failed", ""
+
+    # Priority 7: verifier passed
+    if verifier_result == "pass" and solved:
+        return "verifier_passed", ""
+
+    # Priority 8: verifier failed with patch present (semantic wrong patch)
+    if verifier_result == "fail" and patch_lifecycle_state not in ("patch_absent", ""):
+        return "semantic_wrong_patch", ""
+
+    # Fallback: unknown with reason
+    unknown_reason = ""
+    if output_len > 0:
+        unknown_reason = f"output_len={output_len}"
+        if _reason:
+            unknown_reason += f" pipeline_failure_reason={_reason}"
+        if upper_parse:
+            unknown_reason += f" parse_error_kind={parse_error_kind}"
+    return "unknown_with_reason", unknown_reason
+
+
 class LocalModelExecutor:
     @staticmethod
     def run(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
@@ -780,6 +852,19 @@ class LocalModelExecutor:
                 verifier_result=isolated_verifier_status,
                 solved=raw_meta["solved"],
             )
+            fc, ur = compute_failure_class(
+                output_len=len(selected_patch) if selected_patch else 0,
+                provider_error="",
+                failure_reason="",
+                parse_error_kind=error_kind,
+                patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
+                verifier_result=isolated_verifier_status,
+                solved=raw_meta["solved"],
+                contains_markdown_fence=bool(patch_meta.get("outer_markdown_fence_unwrapped")),
+                pipeline_failure_reason="",
+            )
+            raw_meta["failure_class"] = fc
+            raw_meta["unknown_reason"] = ur
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
@@ -1023,6 +1108,19 @@ class LocalModelExecutor:
                 verifier_result=isolated_verifier_status,
                 solved=raw_meta["solved"],
             )
+            fc, ur = compute_failure_class(
+                output_len=raw_meta.get("actual_model_output_len", 0),
+                provider_error=repair_exec.telemetries.get("patch_synthesis_provider_error", ""),
+                failure_reason=pipeline_failure_reason,
+                parse_error_kind=repair_exec.telemetries.get("output_class", ""),
+                patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
+                verifier_result=isolated_verifier_status,
+                solved=raw_meta["solved"],
+                contains_markdown_fence=bool(repair_exec.telemetries.get("contains_markdown_fence", False)),
+                pipeline_failure_reason=pipeline_failure_reason,
+            )
+            raw_meta["failure_class"] = fc
+            raw_meta["unknown_reason"] = ur
 
             return LocalModelExecutorResponse(
                 invoked=True,
