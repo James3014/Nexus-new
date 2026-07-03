@@ -1221,6 +1221,39 @@ class LocalModelExecutor:
                 verifier_result=isolated_verifier_status,
                 solved=raw_meta["solved"],
             )
+
+            # C15-3K: Apply failure diagnostics
+            apply_failure_stage = "none"
+            apply_failure_reason = ""
+            apply_failure_error_excerpt = ""
+            apply_failure_patch_len = 0
+            apply_failure_patch_hash = ""
+            apply_failure_projected = pipeline_result_projected
+            apply_failure_selected_candidate_hash = selected_candidate_hash
+            apply_failure_target_file = target_file
+
+            if raw_meta["patch_lifecycle_state"] == "isolation_attempted_apply_failed":
+                apply_failure_stage = "isolated_apply"
+                apply_failure_reason = isolated_apply_error or "patch_apply_failed"
+                apply_failure_error_excerpt = (isolated_apply_error or "")[:500]
+                apply_failure_patch_len = pipeline_final_patch_len
+                apply_failure_patch_hash = selected_candidate_hash if selected_candidate_hash else ""
+            elif raw_meta["patch_lifecycle_state"] == "patch_present_not_projected":
+                apply_failure_stage = "projection"
+                apply_failure_reason = "patch_present_not_projected"
+            elif raw_meta["patch_lifecycle_state"] == "patch_projected_not_isolated":
+                apply_failure_stage = "isolated_apply"
+                apply_failure_reason = "candidate_isolation_not_attempted"
+
+            raw_meta["apply_failure_stage"] = apply_failure_stage
+            raw_meta["apply_failure_reason"] = apply_failure_reason
+            raw_meta["apply_failure_error_excerpt"] = apply_failure_error_excerpt
+            raw_meta["apply_failure_patch_len"] = apply_failure_patch_len
+            raw_meta["apply_failure_patch_hash"] = apply_failure_patch_hash
+            raw_meta["apply_failure_projected"] = apply_failure_projected
+            raw_meta["apply_failure_selected_candidate_hash"] = apply_failure_selected_candidate_hash
+            raw_meta["apply_failure_target_file"] = apply_failure_target_file
+
             fc, ur = compute_failure_class(
                 output_len=raw_meta.get("actual_model_output_len", 0),
                 provider_error=repair_exec.telemetries.get("patch_synthesis_provider_error", ""),
@@ -1250,6 +1283,40 @@ class LocalModelExecutor:
             raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
             raw_meta["verifier_error_present"] = bool(isolated_verifier_error)
             raw_meta["verifier_receipt_exit_code_present"] = isolated_verifier_exit_code is not None
+
+            # C15-3K: Retry eligibility diagnostics (after evidence computation)
+            retry_eligibility_checked = True
+            retry_eligible = False
+            retry_not_invoked_reason = "none"
+
+            if raw_meta["solved"]:
+                retry_eligible = False
+                retry_not_invoked_reason = "already_solved"
+            elif provider is None:
+                retry_eligible = False
+                retry_not_invoked_reason = "delegated_consumer_unavailable"
+            elif raw_meta["patch_lifecycle_state"] in ("isolation_attempted_apply_failed",):
+                retry_eligible = False
+                retry_not_invoked_reason = "patch_apply_failed"
+            elif raw_meta["patch_lifecycle_state"] == "isolation_applied_hash_mismatch":
+                retry_eligible = False
+                retry_not_invoked_reason = "hash_mismatch"
+            elif not raw_meta["semantic_retry_evidence_ready"]:
+                retry_eligible = False
+                retry_not_invoked_reason = "semantic_retry_evidence_not_ready"
+            elif raw_meta["failure_class"] not in ("verification_failed", "semantic_wrong_patch"):
+                retry_eligible = False
+                retry_not_invoked_reason = "failure_class_not_retryable"
+            elif not candidate_isolated:
+                retry_eligible = False
+                retry_not_invoked_reason = "candidate_not_isolated"
+            else:
+                retry_eligible = True
+                retry_not_invoked_reason = "none"
+
+            raw_meta["retry_eligibility_checked"] = retry_eligibility_checked
+            raw_meta["retry_eligible"] = retry_eligible
+            raw_meta["retry_not_invoked_reason"] = retry_not_invoked_reason
 
             if (
                 provider is not None
@@ -1359,14 +1426,6 @@ class LocalModelExecutor:
                         )
                 except Exception:
                     pipeline_retry_delegated = False
-            elif provider is None:
-                retry_not_invoked_reason = "provider_missing"
-            elif not raw_meta["semantic_retry_evidence_ready"]:
-                retry_not_invoked_reason = "semantic_retry_evidence_not_ready"
-            elif raw_meta["failure_class"] not in ("verification_failed", "semantic_wrong_patch"):
-                retry_not_invoked_reason = "failure_class_not_retryable"
-            elif not candidate_isolated or not hash_match:
-                retry_not_invoked_reason = "candidate_isolation_not_proven"
 
             raw_meta["retry_available"] = retry_available
             raw_meta["retry_not_invoked_reason"] = retry_not_invoked_reason

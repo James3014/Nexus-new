@@ -476,6 +476,19 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "verifier_stderr_tail_present": adapter_meta.get("verifier_stderr_tail_present", False),
                 "verifier_error_present": adapter_meta.get("verifier_error_present", False),
                 "verifier_receipt_exit_code_present": adapter_meta.get("verifier_receipt_exit_code_present", False),
+                # C15-3K: Apply failure diagnostics
+                "apply_failure_stage": adapter_meta.get("apply_failure_stage", "none"),
+                "apply_failure_reason": adapter_meta.get("apply_failure_reason", ""),
+                "apply_failure_error_excerpt": adapter_meta.get("apply_failure_error_excerpt", ""),
+                "apply_failure_patch_len": adapter_meta.get("apply_failure_patch_len", 0),
+                "apply_failure_patch_hash": adapter_meta.get("apply_failure_patch_hash", ""),
+                "apply_failure_projected": adapter_meta.get("apply_failure_projected", False),
+                "apply_failure_selected_candidate_hash": adapter_meta.get("apply_failure_selected_candidate_hash", ""),
+                "apply_failure_target_file": adapter_meta.get("apply_failure_target_file", ""),
+                # C15-3K: Retry eligibility diagnostics
+                "retry_eligibility_checked": adapter_meta.get("retry_eligibility_checked", False),
+                "retry_eligible": adapter_meta.get("retry_eligible", False),
+                "retry_not_invoked_reason": adapter_meta.get("retry_not_invoked_reason", ""),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),
