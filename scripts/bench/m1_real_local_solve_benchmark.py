@@ -128,6 +128,12 @@ def build_task_specs() -> list[dict]:
                 "def double(x):\n"
                 "    return x * 2\n"
             ),
+            # C15-3W: descriptive problem_statement so the model gets actionable fix direction
+            "problem_statement": (
+                "Bug: The function `double(x)` in toy/math_util.py returns `x * 2` "
+                "but it should return `x * 3`. The verifier checks that the file contains `x * 3`. "
+                "Fix `double` so that it multiplies the input by 3 instead of 2."
+            ),
             "verify_script": (
                 "import sys\n"
                 "c = open('toy/math_util.py').read()\n"
@@ -239,7 +245,7 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
 
             task = CapabilityTask(
                 id=task_id,
-                task_desc=f"Fix target file buggy code for {task_id}",
+                task_desc=spec.get("problem_statement") or f"Fix target file buggy code for {task_id}",
                 task_type="bug",
                 success_criteria="verify passes",
                 difficulty="medium",
@@ -312,7 +318,13 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
             candidate_isolated = bool(adapter_meta.get("candidate_output_isolated", False))
             
             # Verifier outcome
-            vr_val = finalized.get("verifier_status") or receipt.get("verifier_result") or "fail"
+            vr_val = (
+                finalized.get("verifier_status")
+                or receipt.get("verifier_result")
+                or adapter.get("verifier_result")
+                or receipt.get("telemetries", {}).get("verifier_status")
+                or "fail"
+            )
             verifier_result = "pass" if vr_val == "pass" or vr_val == VerifierResult.PASS else "fail"
             
             # Solved check (REAL_SOLVE_PASS definition)
