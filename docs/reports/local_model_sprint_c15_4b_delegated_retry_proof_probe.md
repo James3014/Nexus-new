@@ -1,7 +1,7 @@
 # Local Model Sprint C15-4B: Delegated Retry Proof Probe
 
 **Date**: 2026-07-04  
-**Status**: PARTIAL - benchmark-only controls landed; live delegated-retry solve still unproven.
+**Status**: `C15_4B_PARTIAL_PROBE_CONSOLIDATED` — benchmark-only controls committed; live delegated-retry solve still NOT_PROVEN.
 
 ## 1. Objective
 
@@ -228,3 +228,34 @@ Forbidden directions:
 - altering candidate isolation rules
 - changing route authority away from CapabilityPlanner
 ```
+
+---
+
+## 8. C15-4B-INTEGRITY-CHECK Consolidation Summary (2026-07-04)
+
+**Status**: `C15_4B_PARTIAL_PROBE_CONSOLIDATED`
+
+**Commit**: `d17b030ec` test(localheal): consolidate C15-4B delegated retry proof probe controls
+
+**Files committed**:
+- `nexus/services/local_heal/local_model_capability_executors.py`
+- `nexus/services/local_heal/orchestrator.py`
+- `nexus/services/local_heal/pipeline.py`
+- `scripts/bench/m1_real_local_solve_benchmark.py`
+- `tests/benchmark/test_m1_real_local_solve_benchmark.py`
+- `tests/unit/local_heal/test_local_model_executor.py`
+- `tests/unit/local_heal/test_retry_metadata.py`
+- `docs/reports/local_model_sprint_c15_4b_delegated_retry_proof_probe.md`
+
+**Commands run**:
+- `python3 -m py_compile` — 7 files, no errors
+- `uv run pytest` — 160 passed, 30 focused passed
+
+**Current claim boundary**:
+- delegated_retry solved = NOT_PROVEN
+- solve_mechanism=first_pass is not delegated_retry
+- benchmark-only controls are proof harness, not Nexus full capability
+- production_ready=false
+- public_claim_allowed=false
+
+**Next recommended task**: C15-4C-1 Controlled Verifier Failure Task Spec
