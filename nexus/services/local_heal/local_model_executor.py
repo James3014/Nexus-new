@@ -340,6 +340,72 @@ def compute_failure_class(
     return "unknown_with_reason", unknown_reason
 
 
+def compute_verifier_failure_evidence(
+    verifier_result: str,
+    verifier_error: str,
+    exit_code: int | None,
+    stdout_tail: str,
+    stderr_tail: str,
+    verifier_command: tuple[str, ...],
+    failure_class: str,
+    patch_lifecycle_state: str,
+) -> dict[str, str | bool]:
+    """Capture bounded verifier failure evidence for downstream semantic retry.
+    
+    Must not change verifier behavior, trigger retry, alter patch content,
+    or alter candidate isolation. Evidence capture only.
+    """
+    evidence_available = False
+    failure_kind = ""
+    stdout_excerpt = ""
+    stderr_excerpt = ""
+    cmd_hash = ""
+    retry_ready = False
+
+    if verifier_result == "fail":
+        stdout_excerpt = (stdout_tail or "")[:1000]
+        stderr_excerpt = (stderr_tail or "")[:1000]
+        cmd_hash = hashlib.sha256(
+            " ".join(verifier_command).encode("utf-8")
+        ).hexdigest()[:16] if verifier_command else ""
+
+        if verifier_error and "timeout" in verifier_error.lower():
+            failure_kind = "timeout"
+        elif exit_code is not None and exit_code != 0:
+            combined = (stdout_excerpt + stderr_excerpt).lower()
+            if "assert" in combined or "assertionerror" in combined or "assertion error" in combined:
+                failure_kind = "assertion_failure"
+            elif "traceback" in combined or "exception" in combined or "error" in combined:
+                failure_kind = "exception"
+            else:
+                failure_kind = "nonzero_exit"
+        elif not verifier_command:
+            failure_kind = "missing_verifier_command"
+        else:
+            failure_kind = "unknown_verifier_failure"
+
+        evidence_available = bool(stdout_excerpt or stderr_excerpt or verifier_error)
+
+    retry_ready = (
+        failure_class in ("verification_failed", "semantic_wrong_patch")
+        and patch_lifecycle_state in (
+            "isolation_applied_hash_match_verifier_failed",
+            "isolation_applied_hash_mismatch",
+        )
+        and evidence_available
+    )
+
+    return {
+        "verifier_failure_evidence_available": evidence_available,
+        "verifier_failure_kind": failure_kind,
+        "verifier_stdout_excerpt": stdout_excerpt,
+        "verifier_stderr_excerpt": stderr_excerpt,
+        "verifier_exit_code": exit_code if exit_code is not None else "",
+        "verifier_command_hash": cmd_hash,
+        "semantic_retry_evidence_ready": retry_ready,
+    }
+
+
 class LocalModelExecutor:
     @staticmethod
     def run(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
@@ -865,6 +931,17 @@ class LocalModelExecutor:
             )
             raw_meta["failure_class"] = fc
             raw_meta["unknown_reason"] = ur
+            vfe = compute_verifier_failure_evidence(
+                verifier_result=isolated_verifier_status,
+                verifier_error=isolated_verifier_error,
+                exit_code=None,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_command=verifier_command,
+                failure_class=fc,
+                patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
+            )
+            raw_meta.update(vfe)
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
@@ -1121,6 +1198,17 @@ class LocalModelExecutor:
             )
             raw_meta["failure_class"] = fc
             raw_meta["unknown_reason"] = ur
+            vfe = compute_verifier_failure_evidence(
+                verifier_result=isolated_verifier_status,
+                verifier_error=isolated_verifier_error,
+                exit_code=None,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_command=verifier_command,
+                failure_class=fc,
+                patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
+            )
+            raw_meta.update(vfe)
 
             return LocalModelExecutorResponse(
                 invoked=True,

@@ -455,6 +455,14 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 # C15-2: Failure classifier hardening
                 "failure_class": adapter_meta.get("failure_class", ""),
                 "unknown_reason": adapter_meta.get("unknown_reason", ""),
+                # C15-3A: Verifier failure evidence capture
+                "verifier_failure_evidence_available": adapter_meta.get("verifier_failure_evidence_available", False),
+                "verifier_failure_kind": adapter_meta.get("verifier_failure_kind", ""),
+                "verifier_stdout_excerpt": adapter_meta.get("verifier_stdout_excerpt", ""),
+                "verifier_stderr_excerpt": adapter_meta.get("verifier_stderr_excerpt", ""),
+                "verifier_exit_code": adapter_meta.get("verifier_exit_code", ""),
+                "verifier_command_hash": adapter_meta.get("verifier_command_hash", ""),
+                "semantic_retry_evidence_ready": adapter_meta.get("semantic_retry_evidence_ready", False),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),

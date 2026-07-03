@@ -11,6 +11,7 @@ from nexus.services.local_heal.local_model_executor import (
     _resolve_execution_topology,
     compute_patch_lifecycle_state,
     compute_failure_class,
+    compute_verifier_failure_evidence,
 )
 from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
@@ -2828,3 +2829,209 @@ def test_m1_row_includes_failure_class_and_unknown_reason():
     assert "failure_class" in meta
     assert "unknown_reason" in meta
     assert meta["failure_class"] != ""
+
+
+# ---------------------------------------------------------------------------
+# C15-3A: Verifier Failure Evidence Capture Tests
+# ---------------------------------------------------------------------------
+
+def test_verifier_failure_evidence_available_when_stdout_present():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError: expected 42, got 0",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_stdout_excerpt"] != ""
+
+
+def test_verifier_failure_evidence_available_when_stderr_present():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="Traceback (most recent call last):\n  File \"test.py\", line 5\n    raise ValueError('bad')",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_stderr_excerpt"] != ""
+
+
+def test_verifier_failure_evidence_false_without_evidence():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is False
+
+
+def test_verifier_stdout_excerpt_is_bounded():
+    long_stdout = "A" * 2000
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail=long_stdout,
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert len(evidence["verifier_stdout_excerpt"]) <= 1000
+
+
+def test_verifier_stderr_excerpt_is_bounded():
+    long_stderr = "B" * 2000
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail=long_stderr,
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert len(evidence["verifier_stderr_excerpt"]) <= 1000
+
+
+def test_verifier_command_hash_does_not_store_raw_command():
+    cmd = ("python3", "run_tests.sh", "--verbose")
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="fail",
+        stderr_tail="",
+        verifier_command=cmd,
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_command_hash"] != ""
+    assert len(evidence["verifier_command_hash"]) == 16
+    assert "python3" not in evidence["verifier_command_hash"]
+
+
+def test_verifier_failure_kind_assertion_failure():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError: assert 1 == 2",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_kind"] == "assertion_failure"
+
+
+def test_verifier_failure_kind_exception():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="Traceback (most recent call last):\n  File \"test.py\", line 10\n    raise RuntimeError('oops')",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_kind"] == "exception"
+
+
+def test_semantic_retry_evidence_ready_for_verification_failed_lifecycle():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["semantic_retry_evidence_ready"] is True
+
+
+def test_semantic_retry_evidence_not_ready_without_verifier_evidence():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["semantic_retry_evidence_ready"] is False
+
+
+def test_semantic_retry_evidence_capture_does_not_mark_solved():
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    # This function only captures evidence, it must not change solved
+    # solved is determined by the caller, not by this function
+
+
+def test_m1_row_includes_verifier_failure_evidence_fields():
+    req = make_test_request(
+        "c15-3a-verifier-evidence",
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="NO_PATCH",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "NO_PATCH",
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+    meta = resp.raw_model_metadata
+    assert "verifier_failure_evidence_available" in meta
+    assert "verifier_failure_kind" in meta
+    assert "verifier_stdout_excerpt" in meta
+    assert "verifier_stderr_excerpt" in meta
+    assert "verifier_exit_code" in meta
+    assert "verifier_command_hash" in meta
+    assert "semantic_retry_evidence_ready" in meta
