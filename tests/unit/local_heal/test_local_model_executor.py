@@ -2586,6 +2586,108 @@ def test_pipeline_projection_drops_non_target_file_diffs_before_isolated_apply()
     assert meta.get("candidate_isolated") is True
 
 
+def test_pipeline_projection_reanchors_to_locked_search_when_preimage_mismatches_current_source(tmp_path) -> None:
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    req = make_test_request(
+        "c15-3n-reanchor",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        evidence_refs=("ref1",),
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    mismatched_diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def double(x):\n"
+        "-    return x * 2 if x is not None else None\n"
+        "+    return x * 2 if x is not None and isinstance(x, (int, float)) else None\n"
+    )
+    expected_reanchored_diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def double(x):\n"
+        "-    return x * 2\n"
+        "+    return x * 2 if x is not None and isinstance(x, (int, float)) else None\n"
+    )
+    expected_hash = hashlib.sha256(expected_reanchored_diff.rstrip("\n").encode("utf-8")).hexdigest()
+
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop",
+            selected=True,
+            invoked=True,
+            gate_passed=True,
+            outcome_contributed=True,
+            evidence_present=True,
+            failure_reason="",
+            telemetries={
+                "pipeline_final_patch": mismatched_diff,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            },
+        )
+
+        def _check_apply(apply_req):
+            assert apply_req.unified_diff == expected_reanchored_diff.rstrip("\n")
+            assert apply_req.selected_candidate_hash == expected_hash
+            return IsolatedApplyReceipt(
+                task_id="c15-3n-reanchor",
+                workspace_path="/tmp/ws",
+                target_file=target_rel,
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash=expected_hash,
+                applied_patch_hash=expected_hash,
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+
+        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=_check_apply), \
+             patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+            mock_verify.return_value = IsolatedVerifierReceipt(
+                task_id="c15-3n-reanchor",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("protocol_normalization", {}).get("pipeline_locked_search_reanchored") is True
+    assert meta.get("protocol_normalization", {}).get("protocol_used") == "pipeline_result_locked_search_reanchored"
+    assert meta.get("candidate_isolated") is True
+    assert meta.get("hash_match") is True
+
+
 # ---------------------------------------------------------------------------
 # C15-1: Patch Lifecycle Receipt Contract Tests
 # ---------------------------------------------------------------------------

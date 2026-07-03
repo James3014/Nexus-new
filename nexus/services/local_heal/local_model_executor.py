@@ -129,6 +129,115 @@ def _project_pipeline_patch_to_target_file(unified_diff: str, target_file: str) 
     }
 
 
+def _extract_old_new_text_from_unified_diff(unified_diff: str) -> tuple[str, str]:
+    old_lines: list[str] = []
+    new_lines: list[str] = []
+    for line in unified_diff.splitlines(keepends=True):
+        if line.startswith(("--- ", "+++ ", "@@")):
+            continue
+        if line.startswith("-"):
+            old_lines.append(line[1:] if line[1:].endswith("\n") else line[1:] + "\n")
+        elif line.startswith("+"):
+            new_lines.append(line[1:] if line[1:].endswith("\n") else line[1:] + "\n")
+        elif line.startswith(" "):
+            shared = line[1:] if line[1:].endswith("\n") else line[1:] + "\n"
+            old_lines.append(shared)
+            new_lines.append(shared)
+    return "".join(old_lines), "".join(new_lines)
+
+
+def _build_unified_diff_from_search_and_replacement(
+    request: LocalModelExecutorRequest,
+    target_file: str,
+    search_text: str,
+    replacement_text: str,
+) -> str:
+    import difflib
+    import re as _re
+    from pathlib import Path as _Path
+
+    _anchor_line = 1
+    if search_text and str(search_text).strip():
+        try:
+            _fp = _Path(request.repo_root) / target_file if request.repo_root else _Path(target_file)
+            if _fp.exists():
+                _lines = _fp.read_text(encoding="utf-8").splitlines()
+                _search_first = str(search_text).strip().splitlines()[0].strip()
+                for _i, _l in enumerate(_lines, 1):
+                    if _search_first in _l:
+                        _anchor_line = _i
+                        break
+        except Exception:
+            pass
+
+    search_lines = str(search_text).splitlines(keepends=True)
+    replace_lines = str(replacement_text).splitlines(keepends=True)
+    search_lines = [l if l.endswith("\n") else l + "\n" for l in search_lines]
+    replace_lines = [l if l.endswith("\n") else l + "\n" for l in replace_lines]
+
+    diff_gen = difflib.unified_diff(
+        search_lines,
+        replace_lines,
+        fromfile=f"a/{target_file}",
+        tofile=f"b/{target_file}",
+        lineterm="\n",
+    )
+
+    adjusted_lines: list[str] = []
+    for line in diff_gen:
+        if line.startswith("@@"):
+            m = _re.match(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@(.*)", line)
+            if m:
+                old_start = int(m.group(1))
+                old_len = int(m.group(2))
+                new_start = int(m.group(3))
+                new_len = int(m.group(4))
+                extra = m.group(5)
+                adj_old = _anchor_line + old_start - 1
+                adj_new = _anchor_line + new_start - 1
+                line = f"@@ -{adj_old},{old_len} +{adj_new},{new_len} @@{extra}\n"
+        adjusted_lines.append(line)
+    return "".join(adjusted_lines)
+
+
+def _reanchor_pipeline_patch_to_locked_search(
+    request: LocalModelExecutorRequest,
+    locked_search: str,
+    projected_patch: str,
+) -> tuple[str, dict[str, Any]]:
+    if not projected_patch.strip() or not locked_search.strip():
+        return projected_patch, {"pipeline_locked_search_reanchored": False}
+
+    old_text, new_text = _extract_old_new_text_from_unified_diff(projected_patch)
+    if not old_text.strip() or not new_text.strip():
+        return projected_patch, {"pipeline_locked_search_reanchored": False}
+
+    if old_text.strip() == locked_search.strip():
+        return projected_patch, {"pipeline_locked_search_reanchored": False}
+
+    current_exists, current_text = _read_text_snapshot(
+        os.path.join(request.repo_root, request.target_file) if request.repo_root and request.target_file else ""
+    )
+    if not current_exists or locked_search.strip() not in current_text:
+        return projected_patch, {"pipeline_locked_search_reanchored": False}
+
+    rebuilt = _build_unified_diff_from_search_and_replacement(
+        request,
+        request.target_file,
+        locked_search,
+        new_text,
+    ).strip()
+    if not rebuilt:
+        return projected_patch, {"pipeline_locked_search_reanchored": False}
+
+    return rebuilt, {
+        "protocol_used": "pipeline_result_locked_search_reanchored",
+        "normalized": True,
+        "pipeline_locked_search_reanchored": True,
+        "pipeline_locked_search_reanchor_reason": "preimage_mismatch_current_source",
+    }
+
+
 def _unwrap_outer_markdown_fence(candidate_patch: str) -> tuple[str, dict[str, Any]]:
     stripped = candidate_patch.strip()
     if not stripped.startswith("```"):
@@ -1161,6 +1270,19 @@ class LocalModelExecutor:
                     pipeline_final_patch,
                     target_file,
                 )
+                candidate_patch, reanchor_meta = _reanchor_pipeline_patch_to_locked_search(
+                    request,
+                    locked_search,
+                    candidate_patch,
+                )
+                patch_meta = {
+                    **patch_meta,
+                    **reanchor_meta,
+                    "normalized": bool(
+                        patch_meta.get("normalized", False)
+                        or reanchor_meta.get("normalized", False)
+                    ),
+                }
                 pipeline_result_projected = True
                 if candidate_patch.strip():
                     candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
@@ -1800,54 +1922,12 @@ def _normalize_candidate_patch(
         return "", {"protocol_parse_failed": True, "error": "empty_replacement", **unwrap_meta}
     
     # 5. Generate unified diff from locked_search → replacement
-    import difflib
-    import re as _re
-    
-    _anchor_line = 1
-    if locked_search and str(locked_search).strip():
-        try:
-            from pathlib import Path as _Path
-            _fp = _Path(request.repo_root) / request.target_file if request.repo_root else _Path(request.target_file)
-            if _fp.exists():
-                _lines = _fp.read_text(encoding="utf-8").splitlines()
-                _search_first = str(locked_search).strip().splitlines()[0].strip()
-                for _i, _l in enumerate(_lines, 1):
-                    if _search_first in _l:
-                        _anchor_line = _i
-                        break
-        except Exception:
-            pass
-    
-    locked_lines = str(locked_search).splitlines(keepends=True)
-    replace_lines = str(replacement).splitlines(keepends=True)
-    
-    locked_lines = [l if l.endswith("\n") else l + "\n" for l in locked_lines]
-    replace_lines = [l if l.endswith("\n") else l + "\n" for l in replace_lines]
-    
-    diff_gen = difflib.unified_diff(
-        locked_lines,
-        replace_lines,
-        fromfile=f"a/{request.target_file}",
-        tofile=f"b/{request.target_file}",
-        lineterm="\n"
+    normalized = _build_unified_diff_from_search_and_replacement(
+        request,
+        request.target_file,
+        locked_search,
+        replacement,
     )
-    
-    adjusted_lines = []
-    for line in diff_gen:
-        if line.startswith("@@"):
-            m = _re.match(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@(.*)", line)
-            if m:
-                old_start = int(m.group(1))
-                old_len = int(m.group(2))
-                new_start = int(m.group(3))
-                new_len = int(m.group(4))
-                extra = m.group(5)
-                adj_old = _anchor_line + old_start - 1
-                adj_new = _anchor_line + new_start - 1
-                line = f"@@ -{adj_old},{old_len} +{adj_new},{new_len} @@{extra}\n"
-        adjusted_lines.append(line)
-    
-    normalized = "".join(adjusted_lines)
     return normalized, {
         "protocol_used": "solid_search_replace",
         "normalized": True,
