@@ -186,6 +186,111 @@ def _unwrap_markdown_fence_inside_replace_block(candidate_patch: str) -> tuple[s
     }
 
 
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _read_text_snapshot(path: str) -> tuple[bool, str]:
+    if not path or not os.path.exists(path):
+        return False, ""
+    with open(path, "r", encoding="utf-8") as f:
+        return True, f.read()
+
+
+def _truncate_excerpt(text: str, limit: int = 400) -> str:
+    return (text or "")[:limit]
+
+
+def _extract_projected_patch_header(unified_diff: str) -> str:
+    header_lines: list[str] = []
+    for line in unified_diff.splitlines():
+        if line.startswith("--- ") or line.startswith("+++ "):
+            header_lines.append(line)
+            if len(header_lines) == 2:
+                break
+    return "\n".join(header_lines)
+
+
+def _extract_projected_patch_paths(unified_diff: str) -> tuple[str, str]:
+    old_path = ""
+    new_path = ""
+    for line in unified_diff.splitlines():
+        if not old_path and line.startswith("--- a/"):
+            old_path = os.path.normpath(line[len("--- a/"):].strip())
+        elif not new_path and line.startswith("+++ b/"):
+            new_path = os.path.normpath(line[len("+++ b/"):].strip())
+        if old_path and new_path:
+            break
+    return old_path, new_path
+
+
+def _extract_search_excerpt_from_projected_patch(unified_diff: str) -> str:
+    search_lines: list[str] = []
+    inside_hunk = False
+    for line in unified_diff.splitlines():
+        if line.startswith("@@"):
+            inside_hunk = True
+            continue
+        if not inside_hunk:
+            continue
+        if line.startswith(("--- ", "+++ ")):
+            continue
+        if line.startswith((" ", "-")):
+            search_lines.append(line[1:])
+    return "\n".join(search_lines).strip()
+
+
+def _classify_apply_failure_root_cause(
+    *,
+    target_file: str,
+    projected_patch: str,
+    apply_error: str,
+    current_source_text: str,
+    target_file_hash_before_apply: str,
+    target_file_hash_after_restore: str,
+    target_file_hash_at_apply: str,
+) -> str:
+    if not projected_patch.strip():
+        return "unknown_apply_failure"
+
+    projected_header = _extract_projected_patch_header(projected_patch)
+    old_path, new_path = _extract_projected_patch_paths(projected_patch)
+    target_norm = os.path.normpath(target_file)
+    has_hunk_header = any(line.startswith("@@") for line in projected_patch.splitlines())
+
+    if not projected_header or not has_hunk_header:
+        return "patch_format_invalid"
+
+    if old_path != target_norm or new_path != target_norm:
+        return "projected_patch_header_mismatch"
+
+    if (
+        target_file_hash_after_restore
+        and target_file_hash_at_apply
+        and target_file_hash_after_restore != target_file_hash_at_apply
+    ):
+        return "target_file_state_drift"
+
+    search_excerpt = _extract_search_excerpt_from_projected_patch(projected_patch)
+    if search_excerpt and current_source_text and search_excerpt not in current_source_text:
+        return "search_block_mismatch_current_source"
+
+    if (
+        target_file_hash_before_apply
+        and target_file_hash_after_restore
+        and target_file_hash_before_apply != target_file_hash_after_restore
+    ):
+        return "workspace_pollution_before_apply"
+
+    error_lower = (apply_error or "").lower()
+    if "patch does not apply" in error_lower:
+        return "search_block_mismatch_current_source" if search_excerpt else "workspace_pollution_before_apply"
+    if "corrupt patch" in error_lower or "malformed patch" in error_lower:
+        return "patch_format_invalid"
+
+    return "projected_patch_body_mismatch"
+
+
 def build_local_model_provider_from_signal_snapshot(
     route_context: Mapping[str, Any],
     injected_fn_key: str,
@@ -1046,6 +1151,10 @@ class LocalModelExecutor:
             delegated_retry_parser_error_kind = ""
             delegated_retry_status = ""
             delegated_retry_output_excerpt = ""
+            target_file_hash_before_apply = ""
+            target_file_hash_after_restore = ""
+            target_file_hash_at_apply = ""
+            apply_source_text_at_apply = ""
 
             if pipeline_final_patch and pipeline_final_patch.strip():
                 candidate_patch, patch_meta = _project_pipeline_patch_to_target_file(
@@ -1058,12 +1167,22 @@ class LocalModelExecutor:
                     candidate_isolation_attempted = True
 
                 if candidate_isolation_attempted and original_target_path:
+                    before_exists, before_text = _read_text_snapshot(original_target_path)
+                    if before_exists or os.path.exists(original_target_path):
+                        target_file_hash_before_apply = _sha256_text(before_text)
                     if original_target_exists:
                         os.makedirs(os.path.dirname(original_target_path), exist_ok=True)
                         with open(original_target_path, "w", encoding="utf-8") as f:
                             f.write(original_target_content or "")
                     elif os.path.exists(original_target_path):
                         os.remove(original_target_path)
+                    after_exists, after_text = _read_text_snapshot(original_target_path)
+                    if after_exists or not original_target_exists:
+                        target_file_hash_after_restore = _sha256_text(after_text)
+                    at_apply_exists, at_apply_text = _read_text_snapshot(original_target_path)
+                    apply_source_text_at_apply = at_apply_text
+                    if at_apply_exists or not original_target_exists:
+                        target_file_hash_at_apply = _sha256_text(at_apply_text)
 
                 if candidate_isolation_attempted:
                     apply_receipt = run_isolated_workspace_apply(
@@ -1231,6 +1350,12 @@ class LocalModelExecutor:
             apply_failure_projected = pipeline_result_projected
             apply_failure_selected_candidate_hash = selected_candidate_hash
             apply_failure_target_file = target_file
+            apply_failure_search_excerpt = ""
+            apply_failure_current_source_excerpt = ""
+            apply_failure_projected_patch_excerpt = ""
+            apply_failure_projection_header = ""
+            apply_failure_original_header = ""
+            apply_failure_root_cause = ""
 
             if raw_meta["patch_lifecycle_state"] == "isolation_attempted_apply_failed":
                 apply_failure_stage = "isolated_apply"
@@ -1238,6 +1363,26 @@ class LocalModelExecutor:
                 apply_failure_error_excerpt = (isolated_apply_error or "")[:500]
                 apply_failure_patch_len = pipeline_final_patch_len
                 apply_failure_patch_hash = selected_candidate_hash if selected_candidate_hash else ""
+                apply_failure_search_excerpt = _truncate_excerpt(
+                    _extract_search_excerpt_from_projected_patch(candidate_patch)
+                )
+                apply_failure_current_source_excerpt = _truncate_excerpt(apply_source_text_at_apply)
+                apply_failure_projected_patch_excerpt = _truncate_excerpt(candidate_patch)
+                apply_failure_projection_header = _extract_projected_patch_header(candidate_patch)
+                apply_failure_original_header = (
+                    f"--- a/{os.path.normpath(target_file)}\n+++ b/{os.path.normpath(target_file)}"
+                    if target_file
+                    else ""
+                )
+                apply_failure_root_cause = _classify_apply_failure_root_cause(
+                    target_file=target_file,
+                    projected_patch=candidate_patch,
+                    apply_error=isolated_apply_error,
+                    current_source_text=apply_source_text_at_apply,
+                    target_file_hash_before_apply=target_file_hash_before_apply,
+                    target_file_hash_after_restore=target_file_hash_after_restore,
+                    target_file_hash_at_apply=target_file_hash_at_apply,
+                )
             elif raw_meta["patch_lifecycle_state"] == "patch_present_not_projected":
                 apply_failure_stage = "projection"
                 apply_failure_reason = "patch_present_not_projected"
@@ -1253,6 +1398,15 @@ class LocalModelExecutor:
             raw_meta["apply_failure_projected"] = apply_failure_projected
             raw_meta["apply_failure_selected_candidate_hash"] = apply_failure_selected_candidate_hash
             raw_meta["apply_failure_target_file"] = apply_failure_target_file
+            raw_meta["apply_failure_search_excerpt"] = apply_failure_search_excerpt
+            raw_meta["apply_failure_current_source_excerpt"] = apply_failure_current_source_excerpt
+            raw_meta["apply_failure_projected_patch_excerpt"] = apply_failure_projected_patch_excerpt
+            raw_meta["apply_failure_target_file_hash_before_apply"] = target_file_hash_before_apply
+            raw_meta["apply_failure_target_file_hash_after_restore"] = target_file_hash_after_restore
+            raw_meta["apply_failure_target_file_hash_at_apply"] = target_file_hash_at_apply
+            raw_meta["apply_failure_projection_header"] = apply_failure_projection_header
+            raw_meta["apply_failure_original_header"] = apply_failure_original_header
+            raw_meta["apply_failure_root_cause"] = apply_failure_root_cause
 
             fc, ur = compute_failure_class(
                 output_len=raw_meta.get("actual_model_output_len", 0),

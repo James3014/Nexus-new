@@ -3908,9 +3908,11 @@ def test_m1_row_includes_pipeline_delegated_retry_contract_fields():
 # C15-3K: Patch Apply Stability and Eligible Branch Consumer Audit Tests
 # ---------------------------------------------------------------------------
 
-def test_localheal_pipeline_apply_failure_records_stage_reason_and_hash():
-    req = make_test_request(
-        "c15-3k-apply-failure",
+def _make_c15_localheal_pipeline_request(*, repo_root: str = "/workspace", target_file: str = "file.py"):
+    return make_test_request(
+        "c15-localheal-apply",
+        repo_root=repo_root,
+        target_file=target_file,
         execution_topology="localheal_pipeline",
         route_context={
             "verifier_command": ["python3", "-c", "print(1)"],
@@ -3926,13 +3928,15 @@ def test_localheal_pipeline_apply_failure_records_stage_reason_and_hash():
             },
         },
     )
-    diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
-    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
 
+
+def _run_c15_apply_failure(req, diff_text: str, *, apply_error: str = "patch does not apply"):
     from unittest.mock import patch
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+
+    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
-        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
-        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
         mock_exec.return_value = CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=False, outcome_contributed=False,
@@ -3946,11 +3950,11 @@ def test_localheal_pipeline_apply_failure_records_stage_reason_and_hash():
         )
         with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
             mock_apply.return_value = IsolatedApplyReceipt(
-                task_id="c15-3k-apply-failure",
+                task_id=req.task_id,
                 workspace_path="/tmp/ws",
-                target_file="file.py",
+                target_file=req.target_file,
                 patch_apply_status="failed",
-                patch_apply_error="patch does not apply",
+                patch_apply_error=apply_error,
                 selected_candidate_hash=diff_hash,
                 applied_patch_hash="",
                 selected_candidate_hash_matches_applied=False,
@@ -3958,7 +3962,12 @@ def test_localheal_pipeline_apply_failure_records_stage_reason_and_hash():
                 mutation_allowed=True,
                 applied_patch_hash_source="",
             )
-            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+            return LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+def test_localheal_pipeline_apply_failure_records_stage_reason_and_hash():
+    req = _make_c15_localheal_pipeline_request()
+    diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    resp = _run_c15_apply_failure(req, diff_text)
     meta = resp.raw_model_metadata
     assert meta.get("apply_failure_stage") != "none"
     assert meta.get("apply_failure_reason") != ""
@@ -3967,30 +3976,114 @@ def test_localheal_pipeline_apply_failure_records_stage_reason_and_hash():
 
 
 def test_localheal_pipeline_apply_failure_sets_retry_not_invoked_reason():
-    req = make_test_request(
-        "c15-3k-apply-reason",
-        execution_topology="localheal_pipeline",
-        route_context={
-            "verifier_command": ["python3", "-c", "print(1)"],
-            "signal_snapshot": {
-                "execution_topology": "localheal_pipeline",
-                "executor_model": "qwen2.5-coder:7b",
-                "executor_provider": "ollama",
-                "model_call_allowed": True,
-                "selected_executor": "local_model",
-                "protocol_mode": "anchored_edit",
-                "mutation_allowed": True,
-                "verifier_allowed": True,
-            },
-        },
-    )
+    req = _make_c15_localheal_pipeline_request()
     diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
-    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+    resp = _run_c15_apply_failure(req, diff_text)
+    meta = resp.raw_model_metadata
+    assert meta.get("retry_eligibility_checked") is True
+    assert meta.get("retry_eligible") is False
+    assert meta.get("retry_not_invoked_reason") == "patch_apply_failed"
+    assert meta.get("pipeline_retry_delegated") is False
+
+
+def test_apply_failure_root_cause_search_block_mismatch_current_source(tmp_path):
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+    diff_text = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def triple(x):\n"
+        "-    return x * 3\n"
+        "+def double(x):\n"
+        "+    return x * 4\n"
+    )
+
+    resp = _run_c15_apply_failure(
+        _make_c15_localheal_pipeline_request(repo_root=str(tmp_path), target_file=target_rel),
+        diff_text,
+        apply_error="error: toy/math_util.py: patch does not apply",
+    )
+    assert resp.raw_model_metadata.get("apply_failure_root_cause") == "search_block_mismatch_current_source"
+
+
+def test_apply_failure_root_cause_projected_patch_header_mismatch():
+    req = _make_c15_localheal_pipeline_request(target_file="toy/math_util.py")
+    projected_diff = (
+        "--- a/other.py\n"
+        "+++ b/other.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
 
     from unittest.mock import patch
-    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
-        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
-        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor._project_pipeline_patch_to_target_file", return_value=(projected_diff, {"protocol_used": "pipeline_result"})), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": "placeholder",
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            }
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id=req.task_id,
+            workspace_path="/tmp/ws",
+            target_file=req.target_file,
+            patch_apply_status="failed",
+            patch_apply_error="error: toy/math_util.py: patch does not apply",
+            selected_candidate_hash=hashlib.sha256(projected_diff.encode("utf-8")).hexdigest(),
+            applied_patch_hash="",
+            selected_candidate_hash_matches_applied=False,
+            candidate_output_isolated=False,
+            mutation_allowed=True,
+            applied_patch_hash_source="",
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: projected_diff))
+
+    assert resp.raw_model_metadata.get("apply_failure_root_cause") == "projected_patch_header_mismatch"
+
+
+def test_apply_failure_root_cause_target_file_state_drift(tmp_path):
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+    req = _make_c15_localheal_pipeline_request(repo_root=str(tmp_path), target_file=target_rel)
+    diff_text = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def double(x):\n"
+        "-    return x * 2\n"
+        "+def double(x):\n"
+        "+    return x * 3\n"
+    )
+
+    from unittest.mock import patch
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+
+    snapshots = [
+        (True, "def drifted(x):\n    return x\n"),
+        (True, "def double(x):\n    return x * 2\n"),
+        (True, "def modified_again(x):\n    return x * 5\n"),
+    ]
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor._read_text_snapshot", side_effect=snapshots), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
         mock_exec.return_value = CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=False, outcome_contributed=False,
@@ -4002,26 +4095,153 @@ def test_localheal_pipeline_apply_failure_sets_retry_not_invoked_reason():
                 "model_called": True,
             }
         )
-        with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
-            mock_apply.return_value = IsolatedApplyReceipt(
-                task_id="c15-3k-apply-reason",
-                workspace_path="/tmp/ws",
-                target_file="file.py",
-                patch_apply_status="failed",
-                patch_apply_error="patch does not apply",
-                selected_candidate_hash=diff_hash,
-                applied_patch_hash="",
-                selected_candidate_hash_matches_applied=False,
-                candidate_output_isolated=False,
-                mutation_allowed=True,
-                applied_patch_hash_source="",
-            )
-            resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id=req.task_id,
+            workspace_path="/tmp/ws",
+            target_file=req.target_file,
+            patch_apply_status="failed",
+            patch_apply_error="error: toy/math_util.py: patch does not apply",
+            selected_candidate_hash=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+            applied_patch_hash="",
+            selected_candidate_hash_matches_applied=False,
+            candidate_output_isolated=False,
+            mutation_allowed=True,
+            applied_patch_hash_source="",
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    assert resp.raw_model_metadata.get("apply_failure_root_cause") == "target_file_state_drift"
+
+
+def test_apply_failure_records_search_and_source_excerpts(tmp_path):
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+    diff_text = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def triple(x):\n"
+        "-    return x * 3\n"
+        "+def double(x):\n"
+        "+    return x * 4\n"
+    )
+
+    resp = _run_c15_apply_failure(
+        _make_c15_localheal_pipeline_request(repo_root=str(tmp_path), target_file=target_rel),
+        diff_text,
+        apply_error="error: toy/math_util.py: patch does not apply",
+    )
     meta = resp.raw_model_metadata
-    assert meta.get("retry_eligibility_checked") is True
-    assert meta.get("retry_eligible") is False
-    assert meta.get("retry_not_invoked_reason") == "patch_apply_failed"
-    assert meta.get("pipeline_retry_delegated") is False
+    assert meta.get("apply_failure_search_excerpt") != ""
+    assert meta.get("apply_failure_current_source_excerpt") != ""
+    assert meta.get("apply_failure_projected_patch_excerpt") != ""
+
+
+def test_apply_failure_records_target_file_hashes(tmp_path):
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+    diff_text = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def triple(x):\n"
+        "-    return x * 3\n"
+        "+def double(x):\n"
+        "+    return x * 4\n"
+    )
+
+    resp = _run_c15_apply_failure(
+        _make_c15_localheal_pipeline_request(repo_root=str(tmp_path), target_file=target_rel),
+        diff_text,
+        apply_error="error: toy/math_util.py: patch does not apply",
+    )
+    meta = resp.raw_model_metadata
+    assert meta.get("apply_failure_target_file_hash_before_apply") != ""
+    assert meta.get("apply_failure_target_file_hash_at_apply") != ""
+
+
+def test_apply_failure_restore_hash_consistency_when_restore_available(tmp_path):
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    original_text = "def double(x):\n    return x * 2\n"
+    target_path.write_text(original_text, encoding="utf-8")
+    diff_text = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def double(x):\n"
+        "-    return x * 2\n"
+        "+def double(x):\n"
+        "+    return x * 3\n"
+    )
+    req = _make_c15_localheal_pipeline_request(repo_root=str(tmp_path), target_file=target_rel)
+
+    from unittest.mock import patch
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply:
+        def _mutating_execute(_ctx):
+            target_path.write_text("def mutated():\n    return 999\n", encoding="utf-8")
+            return CapabilityExecutionResult(
+                name="repair_loop", selected=True, invoked=True,
+                gate_passed=False, outcome_contributed=False,
+                evidence_present=True, failure_reason="",
+                telemetries={
+                    "pipeline_final_patch": diff_text,
+                    "pipeline_solve_eligible": True,
+                    "pipeline_failure_reason": "",
+                    "model_called": True,
+                }
+            )
+
+        mock_exec.side_effect = _mutating_execute
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id=req.task_id,
+            workspace_path="/tmp/ws",
+            target_file=req.target_file,
+            patch_apply_status="failed",
+            patch_apply_error="error: toy/math_util.py: patch does not apply",
+            selected_candidate_hash=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+            applied_patch_hash="",
+            selected_candidate_hash_matches_applied=False,
+            candidate_output_isolated=False,
+            mutation_allowed=True,
+            applied_patch_hash_source="",
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("apply_failure_target_file_hash_after_restore") == meta.get("apply_failure_target_file_hash_at_apply")
+
+
+def test_apply_failure_root_cause_not_unknown_when_patch_does_not_apply_with_evidence(tmp_path):
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+    diff_text = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-def triple(x):\n"
+        "-    return x * 3\n"
+        "+def double(x):\n"
+        "+    return x * 4\n"
+    )
+
+    resp = _run_c15_apply_failure(
+        _make_c15_localheal_pipeline_request(repo_root=str(tmp_path), target_file=target_rel),
+        diff_text,
+        apply_error="error: toy/math_util.py: patch does not apply",
+    )
+    assert resp.raw_model_metadata.get("apply_failure_root_cause") != "unknown_apply_failure"
 
 
 def test_localheal_pipeline_hash_mismatch_sets_retry_not_invoked_reason():

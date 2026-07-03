@@ -23,6 +23,18 @@ M1_TELEMETRY_FIELDS = [
     "execution_path_modules",
 ]
 
+M1_APPLY_FAILURE_FIELDS = [
+    "apply_failure_search_excerpt",
+    "apply_failure_current_source_excerpt",
+    "apply_failure_projected_patch_excerpt",
+    "apply_failure_target_file_hash_before_apply",
+    "apply_failure_target_file_hash_after_restore",
+    "apply_failure_target_file_hash_at_apply",
+    "apply_failure_projection_header",
+    "apply_failure_original_header",
+    "apply_failure_root_cause",
+]
+
 
 def _make_base_row(**overrides) -> dict:
     """Build a minimal valid M1 row with sensible defaults."""
@@ -65,6 +77,15 @@ def _make_base_row(**overrides) -> dict:
             "SolidSearchReplaceProtocol",
             "IsolatedLocalSolveLoop",
         ],
+        "apply_failure_search_excerpt": "",
+        "apply_failure_current_source_excerpt": "",
+        "apply_failure_projected_patch_excerpt": "",
+        "apply_failure_target_file_hash_before_apply": "",
+        "apply_failure_target_file_hash_after_restore": "",
+        "apply_failure_target_file_hash_at_apply": "",
+        "apply_failure_projection_header": "",
+        "apply_failure_original_header": "",
+        "apply_failure_root_cause": "",
     }
     row.update(overrides)
     return row
@@ -89,6 +110,12 @@ def test_m1_rows_include_wiring_telemetry():
     row = _make_base_row()
     for field in M1_TELEMETRY_FIELDS:
         assert field in row, f"Missing telemetry field: {field}"
+
+
+def test_m1_rows_include_apply_failure_root_cause_telemetry():
+    row = _make_base_row()
+    for field in M1_APPLY_FAILURE_FIELDS:
+        assert field in row, f"Missing apply-failure telemetry field: {field}"
 
 
 def test_m1_shared_retry_truth_fields_are_observational():
