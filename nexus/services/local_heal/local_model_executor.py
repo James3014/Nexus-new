@@ -660,6 +660,9 @@ class LocalModelExecutor:
             applied_patch_hash_source = ""
             isolated_verifier_status = "not_run"
             isolated_verifier_error = ""
+            isolated_verifier_stdout_tail = ""
+            isolated_verifier_stderr_tail = ""
+            isolated_verifier_exit_code = None
             hybrid_route = None
             if selected_patch.strip():
                 selected_patch, patch_meta = _normalize_candidate_patch(request, locked_search, selected_patch)
@@ -801,6 +804,9 @@ class LocalModelExecutor:
                 )
                 isolated_verifier_status = verifier_receipt.verifier_status
                 isolated_verifier_error = verifier_receipt.verifier_error
+                isolated_verifier_stdout_tail = verifier_receipt.stdout_tail
+                isolated_verifier_stderr_tail = verifier_receipt.stderr_tail
+                isolated_verifier_exit_code = verifier_receipt.exit_code
 
                 isolation_receipt = CandidateIsolationReceipt(
                     candidate_id=decision.selected_candidate_id or f"{request.task_id}#committee-candidate",
@@ -938,14 +944,19 @@ class LocalModelExecutor:
             vfe = compute_verifier_failure_evidence(
                 verifier_result=isolated_verifier_status,
                 verifier_error=isolated_verifier_error,
-                exit_code=None,
-                stdout_tail="",
-                stderr_tail="",
+                exit_code=isolated_verifier_exit_code,
+                stdout_tail=isolated_verifier_stdout_tail,
+                stderr_tail=isolated_verifier_stderr_tail,
                 verifier_command=verifier_command,
                 failure_class=fc,
                 patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
             )
             raw_meta.update(vfe)
+            # C15-3E: Verifier receipt presence fields
+            raw_meta["verifier_stdout_tail_present"] = bool(isolated_verifier_stdout_tail)
+            raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
+            raw_meta["verifier_error_present"] = bool(isolated_verifier_error)
+            raw_meta["verifier_receipt_exit_code_present"] = isolated_verifier_exit_code is not None
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
@@ -1015,6 +1026,9 @@ class LocalModelExecutor:
             applied_patch_hash_source = ""
             isolated_verifier_status = "not_run"
             isolated_verifier_error = ""
+            isolated_verifier_stdout_tail = ""
+            isolated_verifier_stderr_tail = ""
+            isolated_verifier_exit_code = None
             hybrid_route = None
             candidate_hash_empty = (candidate_hash == empty_hash)
 
@@ -1065,6 +1079,9 @@ class LocalModelExecutor:
                     )
                     isolated_verifier_status = verifier_receipt.verifier_status
                     isolated_verifier_error = verifier_receipt.verifier_error
+                    isolated_verifier_stdout_tail = verifier_receipt.stdout_tail
+                    isolated_verifier_stderr_tail = verifier_receipt.stderr_tail
+                    isolated_verifier_exit_code = verifier_receipt.exit_code
 
                     isolation_receipt = CandidateIsolationReceipt(
                         candidate_id=f"{request.task_id}#pipeline-candidate",
@@ -1205,14 +1222,19 @@ class LocalModelExecutor:
             vfe = compute_verifier_failure_evidence(
                 verifier_result=isolated_verifier_status,
                 verifier_error=isolated_verifier_error,
-                exit_code=None,
-                stdout_tail="",
-                stderr_tail="",
+                exit_code=isolated_verifier_exit_code,
+                stdout_tail=isolated_verifier_stdout_tail,
+                stderr_tail=isolated_verifier_stderr_tail,
                 verifier_command=verifier_command,
                 failure_class=fc,
                 patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
             )
             raw_meta.update(vfe)
+            # C15-3E: Verifier receipt presence fields
+            raw_meta["verifier_stdout_tail_present"] = bool(isolated_verifier_stdout_tail)
+            raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
+            raw_meta["verifier_error_present"] = bool(isolated_verifier_error)
+            raw_meta["verifier_receipt_exit_code_present"] = isolated_verifier_exit_code is not None
 
             return LocalModelExecutorResponse(
                 invoked=True,

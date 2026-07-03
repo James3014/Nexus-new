@@ -3264,3 +3264,174 @@ def test_m1_row_includes_orchestrator_verifier_evidence_pass_through_fields():
     assert hasattr(ctx.op, "_orchestrator_verifier_evidence_passed")
     assert hasattr(ctx.op, "_orchestrator_verifier_evidence_fields")
     assert hasattr(ctx.op, "_orchestrator_retry_prompt_evidence_hash")
+
+
+# ---------------------------------------------------------------------------
+# C15-3E: Verifier Receipt Stdout/Stderr Capture Fix Tests
+# ---------------------------------------------------------------------------
+
+def test_verifier_receipt_stdout_tail_reaches_failure_evidence():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError: expected 3",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_stdout_excerpt"] != ""
+    assert "AssertionError" in evidence["verifier_stdout_excerpt"]
+
+
+def test_verifier_receipt_stderr_tail_reaches_failure_evidence():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="Traceback (most recent call last):\n  File \"test.py\", line 5\n    raise RuntimeError('bad')",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_stderr_excerpt"] != ""
+    assert evidence["verifier_failure_kind"] == "exception"
+
+
+def test_verifier_receipt_exit_code_reaches_metadata():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="fail",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_exit_code"] == 1
+
+
+def test_empty_verifier_output_preserves_false_evidence_available():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is False
+
+
+def test_verifier_receipt_error_reaches_failure_evidence():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="verifier_timeout: execution exceeded 30 seconds",
+        exit_code=None,
+        stdout_tail="",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    assert evidence["verifier_failure_kind"] == "timeout"
+
+
+def test_no_synthetic_verifier_output_created():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_stdout_excerpt"] == ""
+    assert evidence["verifier_stderr_excerpt"] == ""
+
+
+def test_verifier_receipt_capture_does_not_change_solved():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    assert evidence["verifier_failure_evidence_available"] is True
+    # This function only captures evidence, it must not change solved
+
+
+def test_verifier_receipt_capture_does_not_change_candidate_isolation():
+    from nexus.services.local_heal.local_model_executor import compute_verifier_failure_evidence
+    evidence = compute_verifier_failure_evidence(
+        verifier_result="fail",
+        verifier_error="",
+        exit_code=1,
+        stdout_tail="AssertionError",
+        stderr_tail="",
+        verifier_command=("python3", "test.py"),
+        failure_class="verification_failed",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+    )
+    # Evidence capture must not affect candidate isolation
+    assert "candidate_isolation" not in str(evidence)
+
+
+def test_m1_row_includes_verifier_receipt_presence_fields():
+    req = make_test_request(
+        "c15-3e-presence",
+        execution_topology="localheal_pipeline",
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "executor_provider": "ollama",
+                "model_call_allowed": True,
+                "selected_executor": "local_model",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+    from unittest.mock import patch
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=False, outcome_contributed=False,
+            evidence_present=True, failure_reason="NO_PATCH",
+            telemetries={
+                "pipeline_final_patch": "",
+                "pipeline_solve_eligible": False,
+                "pipeline_failure_reason": "NO_PATCH",
+            }
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+    meta = resp.raw_model_metadata
+    assert "verifier_stdout_tail_present" in meta
+    assert "verifier_stderr_tail_present" in meta
+    assert "verifier_error_present" in meta
+    assert "verifier_receipt_exit_code_present" in meta

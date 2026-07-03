@@ -471,6 +471,11 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "orchestrator_verifier_evidence_passed_to_retry": adapter_meta.get("orchestrator_verifier_evidence_passed_to_retry", False),
                 "orchestrator_verifier_evidence_fields": adapter_meta.get("orchestrator_verifier_evidence_fields", ""),
                 "orchestrator_retry_prompt_evidence_hash": adapter_meta.get("orchestrator_retry_prompt_evidence_hash", ""),
+                # C15-3E: Verifier receipt presence fields
+                "verifier_stdout_tail_present": adapter_meta.get("verifier_stdout_tail_present", False),
+                "verifier_stderr_tail_present": adapter_meta.get("verifier_stderr_tail_present", False),
+                "verifier_error_present": adapter_meta.get("verifier_error_present", False),
+                "verifier_receipt_exit_code_present": adapter_meta.get("verifier_receipt_exit_code_present", False),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),
