@@ -403,6 +403,10 @@ def compute_verifier_failure_evidence(
         "verifier_exit_code": exit_code if exit_code is not None else "",
         "verifier_command_hash": cmd_hash,
         "semantic_retry_evidence_ready": retry_ready,
+        # C15-3B: Metadata for prompt evidence injection tracking
+        "semantic_retry_verifier_evidence_injected": False,
+        "semantic_retry_verifier_evidence_fields": "",
+        "semantic_retry_prompt_evidence_hash": "",
     }
 
 

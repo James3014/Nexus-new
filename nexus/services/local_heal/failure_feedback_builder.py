@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 
 def build_failure_feedback(
@@ -93,3 +94,56 @@ def _prune_log_tail(log: str, max_lines: int = 15) -> str:
     if len(lines) > max_lines:
         lines = lines[-max_lines:]
     return "\n".join(lines).strip()
+
+
+def build_verifier_evidence_section(
+    verifier_failure_kind: str,
+    verifier_stdout_excerpt: str,
+    verifier_stderr_excerpt: str,
+    verifier_exit_code: int | str,
+    verifier_command_hash: str,
+) -> str:
+    """Build bounded verifier evidence section for semantic retry prompt.
+    
+    Must not include raw verifier command, unbounded stdout/stderr,
+    any route decision, any instruction to bypass verifier,
+    or any instruction to mark solved.
+    """
+    if not verifier_failure_kind:
+        return ""
+
+    section = "\n### VERIFIER FAILURE EVIDENCE (bounded, for root-cause analysis only)\n"
+    section += f"- Failure kind: {verifier_failure_kind}\n"
+    if verifier_exit_code != "" and verifier_exit_code is not None:
+        section += f"- Exit code: {verifier_exit_code}\n"
+    if verifier_command_hash:
+        section += f"- Command hash: {verifier_command_hash}\n"
+    if verifier_stdout_excerpt:
+        section += f"- Stdout excerpt (bounded):\n```\n{verifier_stdout_excerpt[:1000]}\n```\n"
+    if verifier_stderr_excerpt:
+        section += f"- Stderr excerpt (bounded):\n```\n{verifier_stderr_excerpt[:1000]}\n```\n"
+    section += (
+        "\nANALYZE the failure evidence above to understand what went wrong.\n"
+        "The verifier remains final authority — your new patch must still pass verification.\n"
+        "Output must remain SEARCH/REPLACE protocol. No prose, no markdown fences.\n"
+    )
+    return section
+
+
+def compute_verifier_evidence_hash(
+    verifier_failure_kind: str,
+    verifier_stdout_excerpt: str,
+    verifier_stderr_excerpt: str,
+    verifier_exit_code: int | str,
+    verifier_command_hash: str,
+) -> str:
+    """Compute a deterministic hash of the verifier evidence for receipt tracking."""
+    parts = [
+        verifier_failure_kind,
+        str(verifier_exit_code),
+        verifier_command_hash,
+        verifier_stdout_excerpt[:200],
+        verifier_stderr_excerpt[:200],
+    ]
+    combined = "|".join(parts)
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]

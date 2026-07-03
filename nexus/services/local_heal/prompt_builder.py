@@ -2,6 +2,7 @@ from typing import List, Tuple, Dict, Any
 from pathlib import Path
 from nexus.services.local_heal.knowledge_injector import ParserHardeningKnowledgeInjector
 from nexus.services.local_heal.failure_memory import build_failure_context
+from nexus.services.local_heal.failure_feedback_builder import build_verifier_evidence_section
 from nexus.services.local_heal.interface import LocalizedFile
 
 class PromptBuilder:
@@ -243,6 +244,11 @@ class PromptBuilder:
         canonical_search_span: str,
         target_file: str,
         retry_count: int = 1,
+        verifier_failure_kind: str = "",
+        verifier_stdout_excerpt: str = "",
+        verifier_stderr_excerpt: str = "",
+        verifier_exit_code: int | str = "",
+        verifier_command_hash: str = "",
     ) -> str:
         """T1.5: Build a verification-guided retry prompt.
 
@@ -259,6 +265,15 @@ class PromptBuilder:
             f"```\n{verification_report}\n```\n\n"
             f"The patch compiled and was applied, but the test still FAILS.\n"
             f"This means the REPLACE block does not address the root cause.\n\n"
+        )
+
+        # C15-3B: Inject bounded verifier evidence when available
+        evidence_section = build_verifier_evidence_section(
+            verifier_failure_kind=verifier_failure_kind,
+            verifier_stdout_excerpt=verifier_stdout_excerpt,
+            verifier_stderr_excerpt=verifier_stderr_excerpt,
+            verifier_exit_code=verifier_exit_code,
+            verifier_command_hash=verifier_command_hash,
         )
 
         search_lock = (
@@ -282,4 +297,4 @@ class PromptBuilder:
             f">>>>>>> REPLACE\n"
         )
 
-        return original_user_prompt + header + verifier_section + search_lock + instruction
+        return original_user_prompt + header + verifier_section + evidence_section + search_lock + instruction

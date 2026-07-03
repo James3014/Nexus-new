@@ -463,6 +463,10 @@ def run_benchmark(selected_task_ids: list[str] | None = None):
                 "verifier_exit_code": adapter_meta.get("verifier_exit_code", ""),
                 "verifier_command_hash": adapter_meta.get("verifier_command_hash", ""),
                 "semantic_retry_evidence_ready": adapter_meta.get("semantic_retry_evidence_ready", False),
+                # C15-3B: Semantic retry verifier evidence prompt injection
+                "semantic_retry_verifier_evidence_injected": adapter_meta.get("semantic_retry_verifier_evidence_injected", False),
+                "semantic_retry_verifier_evidence_fields": adapter_meta.get("semantic_retry_verifier_evidence_fields", ""),
+                "semantic_retry_prompt_evidence_hash": adapter_meta.get("semantic_retry_prompt_evidence_hash", ""),
                 # C8: Micro Verifier Context
                 "micro_verify_context_present": adapter_meta.get("micro_verify_context_present", False),
                 "verifier_command_present": adapter_meta.get("verifier_command_present", False),
