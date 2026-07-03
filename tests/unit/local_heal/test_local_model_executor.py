@@ -3462,6 +3462,105 @@ def test_orchestrator_verifier_evidence_pass_through_records_metadata():
     assert len(ctx.op._orchestrator_retry_prompt_evidence_hash) == 16
 
 
+def test_orchestrator_semantic_retry_reuses_patch_phase_llm_client():
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
+    from unittest.mock import MagicMock
+
+    shared_client = MagicMock()
+    patch_phase = MagicMock()
+    patch_phase.llm_client = shared_client
+
+    orch = HealOrchestrator(
+        phases=[MagicMock(), MagicMock(), MagicMock(), patch_phase, MagicMock()],
+        governance_gate=MagicMock(),
+    )
+
+    assert orch._resolve_semantic_retry_llm_client() is shared_client
+
+
+def test_orchestrator_semantic_retry_uses_shared_patch_phase_client(tmp_path, monkeypatch):
+    from nexus.services.local_heal.context import HealContext, GovernanceContext, OperationalContext
+    from nexus.services.local_heal.interface import LocalizedFile, PhaseResult
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
+    from nexus.services.local_heal.protocol import PatchIntent
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    shared_client = MagicMock()
+    shared_client.generate.return_value = "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE"
+    patch_phase = MagicMock()
+    patch_phase.llm_client = shared_client
+    verify_phase = MagicMock()
+
+    orch = HealOrchestrator(
+        phases=[MagicMock(), MagicMock(), MagicMock(), patch_phase, verify_phase],
+        governance_gate=MagicMock(),
+    )
+
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id="test-semantic-retry-shared-client",
+            problem_statement="fix toy math",
+            repo_dir=tmp_path,
+            user_prompt="fix toy math",
+            final_patch="--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1,2 +1,2 @@\n def double(x):\n-    return x * 2\n+    return x * 3\n",
+            localized_files=[LocalizedFile(path=target_rel, content=target_path.read_text(encoding="utf-8"))],
+            evaluation_report="AssertionError: expected 3",
+            attempt=1,
+            model_decisions=[],
+        ),
+        gov=GovernanceContext(),
+    )
+    ctx.op.verifier_failure_evidence_available = True
+    ctx.op.semantic_retry_evidence_ready = True
+    ctx.op.failure_class = "verification_failed"
+    ctx.op.verifier_failure_kind = "nonzero_exit"
+    ctx.op.verifier_stdout_excerpt = "AssertionError: expected 3"
+    ctx.op.verifier_stderr_excerpt = ""
+    ctx.op.verifier_exit_code = 1
+    ctx.op.verifier_command_hash = "abc123"
+    ctx.op.plan = SimpleNamespace(search_symbols=["double"])
+    ctx.op._latency_ledger = MagicMock()
+
+    monkeypatch.setattr(
+        "nexus.services.local_heal.canonical_span.get_canonical_search_span",
+        lambda **kwargs: SimpleNamespace(span="def double(x):\n    return x * 2", source="source_file"),
+    )
+    monkeypatch.setattr(
+        "nexus.engine.local_model_policy.LocalModelPolicy.select_model",
+        lambda *args, **kwargs: {
+            "model": "qwen2.5-coder:7b-instruct",
+            "timeout_seconds": 30,
+            "ollama_options": None,
+        },
+    )
+
+    class _ApplyResult:
+        success = True
+        applied_diffs = ["--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1,2 +1,2 @@\n def double(x):\n-    return x * 2\n+    return x * 3\n"]
+
+    monkeypatch.setattr(
+        "nexus.services.local_heal.protocol.SolidSearchReplaceProtocol.parse",
+        lambda self, response: [PatchIntent(file_path=target_rel, search="old", replace="new")],
+    )
+    monkeypatch.setattr(
+        "nexus.services.local_heal.patch_applier.PatchApplier.apply_and_validate",
+        lambda self, intents, repo_dir, localized_files: _ApplyResult(),
+    )
+    orch.phase_runner.run_phase = MagicMock(return_value=PhaseResult(success=False, failure_reason="VERIFICATION_FAILED"))
+
+    result = orch._attempt_semantic_retry(ctx, "AssertionError: expected 3", "VERIFICATION_FAILED")
+
+    assert result is False
+    assert shared_client.generate.call_count == 1
+    assert ctx.op._orchestrator_verifier_evidence_passed is True
+
+
 def test_orchestrator_verifier_evidence_pass_through_does_not_add_retry_loop():
     from nexus.services.local_heal.context import HealContext, OperationalContext
     from pathlib import Path

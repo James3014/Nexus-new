@@ -121,6 +121,14 @@ class HealOrchestrator:
             self._record_role_receipt(ctx, name)
         return True
 
+    def _resolve_semantic_retry_llm_client(self):
+        """Prefer the same LLM client/provider path used by patch synthesis."""
+        patch_phase_client = getattr(self.patch_phase, "llm_client", None)
+        if patch_phase_client is not None and hasattr(patch_phase_client, "generate"):
+            return patch_phase_client
+        from nexus.services.local_heal.llm_client import OllamaLLMClient
+        return OllamaLLMClient(None)
+
     def _run_repair_loop(self, ctx: HealContext, ledger: LatencyLedger) -> None:
         """執行 Patch 合成與驗證的迭代迴圈。"""
         import os
@@ -382,8 +390,7 @@ class HealOrchestrator:
         ctx.op.model_decisions.append({"phase": "semantic_retry_patch", **patch_decision})
 
         # 6. Call LLM
-        from nexus.services.local_heal.llm_client import OllamaLLMClient
-        llm_client = OllamaLLMClient(None)
+        llm_client = self._resolve_semantic_retry_llm_client()
         try:
             response = llm_client.generate(
                 system_prompt=PromptBuilder.build_patch_system_prompt(patch_decision["model"]),
