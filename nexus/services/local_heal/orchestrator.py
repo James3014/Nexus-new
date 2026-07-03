@@ -1,5 +1,6 @@
 from typing import Any, Callable, List
 from pathlib import Path
+import hashlib
 import subprocess
 from nexus.services.local_heal.interface import IPhase, PhaseResult, RepairPlan
 from nexus.services.local_heal.context import HealContext
@@ -320,13 +321,52 @@ class HealOrchestrator:
 
         # 4. Build semantic retry prompt
         original_prompt = getattr(ctx.op, "user_prompt", "")
+        
+        # C15-3C: Pass verifier evidence when available and ready
+        evidence_injected = False
+        evidence_fields = ""
+        evidence_hash = ""
+        vfk = ""
+        vse = ""
+        vserr = ""
+        vec = ""
+        vch = ""
+        
+        vfe_available = getattr(ctx.op, "verifier_failure_evidence_available", False)
+        sr_ready = getattr(ctx.op, "semantic_retry_evidence_ready", False)
+        failure_class = getattr(ctx.op, "failure_class", "")
+        
+        if sr_ready and vfe_available and failure_class in ("verification_failed", "semantic_wrong_patch"):
+            vfk = getattr(ctx.op, "verifier_failure_kind", "")
+            vse = getattr(ctx.op, "verifier_stdout_excerpt", "")
+            vserr = getattr(ctx.op, "verifier_stderr_excerpt", "")
+            vec = getattr(ctx.op, "verifier_exit_code", "")
+            vch = getattr(ctx.op, "verifier_command_hash", "")
+            evidence_injected = True
+            evidence_fields = ",".join(
+                f for f in [vfk, vse[:50], vserr[:50], str(vec), vch] if f
+            )
+            evidence_hash = hashlib.sha256(
+                f"{vfk}|{vse[:200]}|{vserr[:200]}|{vec}|{vch}".encode()
+            ).hexdigest()[:16]
+        
         semantic_prompt = PromptBuilder.build_verification_guided_retry_prompt(
             original_user_prompt=original_prompt,
             verification_report=verifier_failure,
             canonical_search_span=canonical_search,
             target_file=target_file,
             retry_count=1,
+            verifier_failure_kind=vfk,
+            verifier_stdout_excerpt=vse,
+            verifier_stderr_excerpt=vserr,
+            verifier_exit_code=vec,
+            verifier_command_hash=vch,
         )
+        
+        # C15-3C: Record pass-through metadata
+        ctx.op._orchestrator_verifier_evidence_passed = evidence_injected
+        ctx.op._orchestrator_verifier_evidence_fields = evidence_fields
+        ctx.op._orchestrator_retry_prompt_evidence_hash = evidence_hash
 
         # 5. Select model for patch (Qwen14B only)
         patch_decision = LocalModelPolicy.select_model(
@@ -421,6 +461,10 @@ class HealOrchestrator:
             "fallback_rule_reason": "",
             "model_patch_reward": 1.0 if v_res.success else 0.0,
             "deterministic_fallback_reward": 0.0,
+            # C15-3C: Orchestrator verifier evidence pass-through
+            "orchestrator_verifier_evidence_passed_to_retry": getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False),
+            "orchestrator_verifier_evidence_fields": getattr(ctx.op, "_orchestrator_verifier_evidence_fields", ""),
+            "orchestrator_retry_prompt_evidence_hash": getattr(ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""),
         }
 
         if v_res.success:
