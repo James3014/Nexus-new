@@ -1888,6 +1888,8 @@ def test_committee_trial_flows(monkeypatch) -> None:
     diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
     diff_hash = hashlib.sha256(diff_text.encode()).hexdigest()
 
+
+
     applied_applies = []
     applied_verifies = []
 
@@ -1952,13 +1954,19 @@ def test_committee_trial_flows(monkeypatch) -> None:
             outcome_contributed=True, evidence_present=True, failure_reason="",
             telemetries={
                 "pipeline_final_patch": diff_text,
-                "pipeline_solve_eligible": False,
-                # Empty failure_reason so compute_failure_class falls through to lifecycle-state-based logic
+                "pipeline_solve_eligible": True,
                 "pipeline_failure_reason": "",
                 "patch_synthesis_output_len": len(diff_text),
                 "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
                 "patch_synthesis_model_called": True,
                 "provider_invoked": True, "model_called": True,
+                # Pipeline run flags — required for isolation path to be entered
+                "localheal_pipeline_run_called": True,
+                "localheal_pipeline_run_success": True,
+                "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True,
+                "orchestrator_run_reachable": True,
+                "path_a_actual_execution": True,
             },
         )
 
@@ -1974,6 +1982,7 @@ def test_committee_trial_flows(monkeypatch) -> None:
             r._orchestrator_retry_prompt_evidence_hash = ""
             r._semantic_retry_telemetry = {}
             return r
+
 
         mock_pipeline_run.side_effect = make_pipeline_run_result
 

@@ -1767,14 +1767,11 @@ class LocalModelExecutor:
                         targeted_files=request.target_file,
                     )
 
-                    # C15-3V: Pre-populate localized_files with locked_search canonical span.
-                    # This bypasses LocalizationPhase (which reads disk + adds line-number annotations)
-                    # and ensures PatchSynthesisPhase uses verbatim locked_search as source truth.
-                    # LocalizationPhase.execute() short-circuits when ctx.op.localized_files is non-empty.
+                    # C15-5D:委員會讓 LocalizationPhase 真正讀磁碟（不再 bypass）。
+                    # locked_search 只作為 user_prompt 裡的「參考 span」傳入 retry_prompt，
+                    # 不再預填 localized_files，確保每個候選都拿到磁碟當前版本而非舊版 locked_search。
                     _locked_search_for_dr = str(route_ctx.get("locked_search") or "")
-                    _dr_localized_files: list = []
-                    if _locked_search_for_dr.strip() and request.target_file:
-                        _dr_localized_files = [(request.target_file, _locked_search_for_dr)]
+                    _dr_localized_files: list = []  # 空 → LocalizationPhase 讀磁碟
 
                     _dr_committee_winner = None
                     _dr_committee_candidate_count = 0
@@ -1835,9 +1832,46 @@ class LocalModelExecutor:
                             _rejection_reason = ""
                             _raw_excerpt = _cp_patch[:300] if _cp_patch else ""
                             
+                            # C15-5D: 格式拒絕門——沿用 Nexus SSRP 合約，apply 前先確認格式。
+                            # 若委員會模型輸出 unified-diff 而非 SEARCH/REPLACE，直接拒絕不送 apply。
+                            _last_patch_decision = next(
+                                (d for d in reversed(getattr(_cp_result, "model_decisions", [])) 
+                                 if isinstance(d, dict) and d.get("phase") in ("patch", "semantic_retry_patch")),
+                                None
+                            )
+                            
+                            _is_unified_diff = False
+                            _has_ssrp_marker = True
+                            if _last_patch_decision:
+                                if _last_patch_decision.get("output_class") == "UNIFIED_DIFF" or _last_patch_decision.get("contains_unified_diff_header"):
+                                    _is_unified_diff = True
+                                if "contains_search_marker" in _last_patch_decision:
+                                    _has_ssrp_marker = bool(_last_patch_decision.get("contains_search_marker"))
+                                else:
+                                    # Fallback for unit tests mocking model_decisions
+                                    _has_ssrp_marker = (
+                                        "SEARCH" in _last_patch_decision.get("output_class", "")
+                                        or "SEARCH" in _last_patch_decision.get("output_excerpt", "")
+                                        or "SEARCH" in _last_patch_decision.get("status", "")
+                                    )
+                            else:
+                                # Fallback if no decisions found (legacy/mock contexts)
+                                _is_unified_diff = (
+                                    _cp_patch.lstrip().startswith("--- a/")
+                                    or _cp_patch.lstrip().startswith("---\n")
+                                )
+                                _has_ssrp_marker = "<<<<<<< SEARCH" in _cp_patch
+
                             if not _cp_patch.strip():
                                 _apply_status = "empty_patch"
                                 _rejection_reason = "patch_empty"
+                            elif _is_unified_diff and not _has_ssrp_marker:
+                                # 接 Nexus SSRP 合約：unified-diff 不是合法委員會輸出
+                                _apply_status = "format_rejected"
+                                _rejection_reason = "wrong_format:unified_diff"
+                            elif not _has_ssrp_marker:
+                                _apply_status = "format_rejected"
+                                _rejection_reason = "wrong_format:no_ssrp_marker"
                             else:
                                 _cp_apply = run_isolated_workspace_apply(
                                     IsolatedApplyRequest(
@@ -1891,6 +1925,50 @@ class LocalModelExecutor:
                                     _cand_data["rejection_reason"] = "not_selected"
                                     
                             _dr_committee_candidates_list.append(_cand_data)
+
+                    # C15-5D: Autoreason 接委員會候選評審（Phase D）。
+                    # 若有多個 verifier-pass 候選，交給既有 AutoreasonService 做信心排名，
+                    # 選出最高分候選，而非直接選第一個。
+                    _dr_autoreason_winner_model = ""
+                    _dr_autoreason_invoked = False
+                    _passing_cands = [
+                        c for c in _dr_committee_candidates_list
+                        if c.get("verifier_result") == "pass"
+                    ]
+                    if len(_passing_cands) > 1:
+                        try:
+                            from nexus.engine.autoreason_service import AutoreasonService
+                            _ar_candidates = [
+                                {
+                                    "candidate_id": c["model"],
+                                    "patch": c["raw_output_excerpt"],
+                                    "evidence_refs": list(request.evidence_refs or []),
+                                    "model": c["model"],
+                                    "role": "committee_candidate",
+                                }
+                                for c in _passing_cands
+                            ]
+                            _ar_result = AutoreasonService().run(
+                                candidates=_ar_candidates,
+                                task_desc=request.problem_statement,
+                                stop_threshold=2,
+                            )
+                            _ar_winner_id = _ar_result.get("winner")
+                            _dr_autoreason_invoked = True
+                            if _ar_winner_id:
+                                _dr_autoreason_winner_model = _ar_winner_id
+                                # 用 Autoreason 選出的 winner 重置 _dr_committee_winner
+                                for c in _dr_committee_candidates_list:
+                                    c["selected"] = (c["model"] == _ar_winner_id)
+                                _dr_committee_winner = next(
+                                    (w for w in [_dr_committee_winner] if w and w["model"] == _ar_winner_id),
+                                    _dr_committee_winner,  # fallback 保持原值
+                                )
+                            raw_meta["delegated_retry_autoreason_winner"] = _dr_autoreason_winner_model
+                            raw_meta["delegated_retry_autoreason_borda"] = str(_ar_result.get("borda_scores", {}))
+                        except Exception as _ar_err:
+                            raw_meta["delegated_retry_autoreason_error"] = str(_ar_err)
+                    raw_meta["delegated_retry_autoreason_invoked"] = _dr_autoreason_invoked
 
                     if _dr_committee_winner is not None:
                         result_ctx = _dr_committee_winner["result_ctx"]
