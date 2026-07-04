@@ -122,9 +122,16 @@ class PatchSynthesisPhase(IPhase):
                     timeout=spec_decision["timeout_seconds"],
                     options=spec_decision.get("ollama_options")
                 )
-                model_decisions.append({"phase": "repair_spec", **spec_decision, "status": "SUCCESS"})
+                # C15-5H: Record spec_gen telemetry inline in the patch decision dict to avoid
+                # shifting model_decisions[-1] index. Appending a separate decision here would
+                # cause all subsequent model_decisions[-1] references (L198, L216-247, etc.)
+                # to target the repair_spec decision instead of the patch decision, resulting
+                # in conversion_status remaining "none" and rejection_reason "unified_diff_malformed".
+                model_decisions[-1]["repair_spec_model"] = spec_decision.get("model", "")
+                model_decisions[-1]["repair_spec_status"] = "SUCCESS"
             except Exception:
                 repair_spec = "Apply surgical fix as planned."
+
 
         # 4. 準備治理化 Prompt — use interleaved mode if planning was LLM-based
         plan = input_data.plan

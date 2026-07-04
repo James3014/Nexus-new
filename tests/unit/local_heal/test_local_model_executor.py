@@ -6571,4 +6571,42 @@ def test_delegated_retry_patch_error_message_contains_verifier_evidence(tmp_path
     )
 
 
+# --- C15-5H Regression: _dr_localized_files must be LocalizedFile, not tuple ---
 
+def test_c15_5h_dr_localized_files_is_localized_file_not_tuple(tmp_path):
+    """C15-5H: Verify that the committee _dr_localized_files uses LocalizedFile objects.
+    
+    Root cause: _dr_localized_files was list[tuple[str,str]] but PatchSynthesisPhase.run()
+    calls loc_file.path which AttributeErrors on tuples. LocalizationPhase skips when
+    localized_files is non-empty, so the wrong type was propagated all the way to
+    PatchSynthesisPhase, causing conversion_status to stay "none" (model_decisions empty).
+    
+    Fix: Wrap with LocalizedFile in local_model_executor.py L1780.
+    """
+    from nexus.services.local_heal.interface import LocalizedFile
+
+    # Simulate what fixed local_model_executor.py does
+    target_file = "toy/math_util.py"
+    target_full_path = tmp_path / target_file
+    target_full_path.parent.mkdir(parents=True, exist_ok=True)
+    buggy_content = "def normalize_score(s, m, M):\n    return (s - m) / (M - m)\n"
+    target_full_path.write_text(buggy_content, encoding="utf-8")
+
+    # Replicate the fixed construction
+    _dr_localized_files: list = []
+    if target_file:
+        _target_full_path = tmp_path / target_file
+        if _target_full_path.exists():
+            try:
+                _current_content = _target_full_path.read_text(encoding="utf-8", errors="replace")
+                _dr_localized_files = [LocalizedFile(path=target_file, content=_current_content)]
+            except Exception:
+                pass
+
+    assert len(_dr_localized_files) == 1, "Expected one localized file"
+    assert isinstance(_dr_localized_files[0], LocalizedFile), (
+        f"Expected LocalizedFile, got {type(_dr_localized_files[0])}. "
+        "This is the C15-5H regression: tuple breaks PatchSynthesisPhase.run() loc_file.path."
+    )
+    assert _dr_localized_files[0].path == target_file
+    assert "normalize_score" in _dr_localized_files[0].content

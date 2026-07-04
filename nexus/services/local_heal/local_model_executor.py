@@ -1770,14 +1770,17 @@ class LocalModelExecutor:
                     # C15-5D: 讀取磁碟上的當前檔案內容以預填 _dr_localized_files。
                     # 這可以繞過委員會小模型的 LocalizationPhase，避免其定位失敗，
                     # 同時確保 PatchSynthesisPhase 的 Prompt Context 拿到的是磁碟最新狀態，而非舊版 locked_search。
+                    # C15-5H fix: 必須使用 LocalizedFile 而非 raw tuple，否則 PatchSynthesisPhase.run()
+                    # 在 loc_file.path 時會丟 AttributeError（LocalizationPhase skip 後不做轉換）。
                     _locked_search_for_dr = str(route_ctx.get("locked_search") or "")
                     _dr_localized_files: list = []
                     if request.target_file:
                         _target_full_path = _Path(request.repo_root) / request.target_file
                         if _target_full_path.exists():
                             try:
+                                from nexus.services.local_heal.interface import LocalizedFile as _LocalizedFile
                                 _current_content = _target_full_path.read_text(encoding="utf-8", errors="replace")
-                                _dr_localized_files = [(request.target_file, _current_content)]
+                                _dr_localized_files = [_LocalizedFile(path=request.target_file, content=_current_content)]
                             except Exception:
                                 pass
 
