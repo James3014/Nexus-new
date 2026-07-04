@@ -89,29 +89,37 @@ class CandidateDecisionAdapter:
             else:
                 ranking_trace.append(f"Autoreason not invoked: {autoreason_result.failure_reason}")
 
-        # 3. Decision Logic — deterministic role priority
+        # 3. Decision Logic — deterministic priority (fallback if no Borda scores)
         selected_candidate = None
         selected_by = "deterministic_fallback"
 
         if active_candidates:
-            def role_priority(c):
-                if c.role == "external_primary":
-                    return 0
-                elif c.role == "primary_proposer":
-                    return 1
-                elif c.role == "secondary_proposer":
-                    return 2
-                return 3
-            active_candidates = sorted(active_candidates, key=role_priority)
+            has_borda = (autoreason_result is not None and 
+                         autoreason_result.invoked and 
+                         autoreason_result.telemetries.get("winner") and 
+                         autoreason_result.telemetries.get("borda_scores"))
+            
+            if not has_borda:
+                def role_priority(c):
+                    if c.role == "external_primary":
+                        return 0
+                    elif c.role == "primary_proposer":
+                        return 1
+                    elif c.role == "secondary_proposer":
+                        return 2
+                    return 3
+                active_candidates = sorted(active_candidates, key=role_priority)
+                if active_candidates[0].role == "external_primary":
+                    selected_by = "external_primary_policy"
+                elif active_candidates[0].role == "primary_proposer":
+                    selected_by = "candidate_policy"
+                elif active_candidates[0].role == "secondary_proposer":
+                    selected_by = "candidate_policy_fallback"
+            else:
+                selected_by = "committee_borda_policy"
 
             selected_candidate = active_candidates[0]
-            if selected_candidate.role == "external_primary":
-                selected_by = "external_primary_policy"
-            elif selected_candidate.role == "primary_proposer":
-                selected_by = "candidate_policy"
-            elif selected_candidate.role == "secondary_proposer":
-                selected_by = "candidate_policy_fallback"
-            ranking_trace.append(f"Selected {selected_candidate.role}: {selected_candidate.candidate_id}")
+            ranking_trace.append(f"Selected {selected_candidate.role}: {selected_candidate.candidate_id} via {selected_by}")
         else:
             ranking_trace.append("No active candidates available")
 

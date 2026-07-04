@@ -11,6 +11,7 @@ This report records the complete execution and gate validation of Google DeepMin
 - **Telemetry Observability**: Correctly wired `local_model_called=true`, `selected_candidate_hash_matches_applied=true`, `isolated_apply_status=applied`, and `isolated_verifier_status=pass`.
 
 ### 未證明 (Not Proven):
+- **Committee Actual Solve**: The committee routing was configured but did not undergo real debate or candidate voting because the single model completed the fix in attempt 1.
 - **Full Product-Level Target**: We cannot claim that Local Model Nexus Armor is fully product-ready or can generalize to production SWE tasks.
 - **Real Codebase Benchmark Solves**: Tasks with static verifier evidence gaps (such as `toy-math-verifier-evidence-gap`) or real repository tasks (`astropy`, `sympy`) have not been proven solved.
 - **Model Equality**: Local 7B models have not been proven to approach GPT/Gemini-level bare model stability on multi-file complex codebase edits.
@@ -87,9 +88,9 @@ This report records the complete execution and gate validation of Google DeepMin
   ```
 - **Is the next level allowed**: YES.
 
-### 🟢 LV6 — End-to-End Committee Real Solve and Claimable Receipt
-- **What changed**: Ran full committee topology on `toy-math-solve`.
-- **What was verified**: Real solve successfully verified.
+### 🟢 LV6 — Single-Model End-to-End Real Solve
+- **What changed**: Ran single-proposer setup on `toy-math-solve`.
+- **What was verified**: Pipeline-connected single model solved task successfully.
 - **Evidence**:
   ```json
   "solved": true,
@@ -100,7 +101,7 @@ This report records the complete execution and gate validation of Google DeepMin
 
 ---
 
-## 🔬 Real Solve Telemetry Receipt (`toy-math-solve`)
+## 🔬 Single-Model Real Solve Telemetry Receipt (`toy-math-solve`)
 ```json
 {
   "task_id": "toy-math-solve",
@@ -122,4 +123,4 @@ This report records the complete execution and gate validation of Google DeepMin
 
 ## 🎯 Final Milestone Claim Status
 
-`C15_6G_TOY_REAL_SOLVE_PROVEN_PIPELINE_NOT_PRODUCT_CLAIMABLE`
+`C15_6G_TOY_SINGLE_MODEL_REAL_SOLVE_PROVEN_PIPELINE_CONNECTED`

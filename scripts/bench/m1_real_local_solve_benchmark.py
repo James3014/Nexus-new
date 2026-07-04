@@ -181,6 +181,30 @@ def build_task_specs() -> list[dict]:
             ),
             "expected_capabilities": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
             "execution_topology": "localheal_pipeline",
+        },
+        {
+            "task_id": "toy-math-committee-required-solve",
+            "repo": "nexus/nexus",
+            "target_file": "toy/math_util.py",
+            "test_file": "verify_math.py",
+            "target_symbol": "double",
+            "locked_search": "def double(x):\n    return x * 2",
+            "buggy_code": (
+                "def double(x):\n"
+                "    return x * 2\n"
+            ),
+            "problem_statement": (
+                "Bug: The function `double(x)` in toy/math_util.py returns `x * 2` "
+                "but it should return `x * 3`. The verifier checks that the file contains `x * 3`. "
+                "Fix `double` so that it multiplies the input by 3 instead of 2."
+            ),
+            "verify_script": (
+                "import sys\n"
+                "c = open('toy/math_util.py').read()\n"
+                "sys.exit(0 if 'x * 3' in c else 1)\n"
+            ),
+            "expected_capabilities": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
+            "execution_topology": "local_committee_only",
             "verifier_command": ["python3", "verify_math.py"]
         },
         {
@@ -444,9 +468,12 @@ def run_benchmark(
             print(f"  local_model_called (finalized): {finalized.get('local_model_called') if finalized else None}")
             print(f"  local_executor_receipt: {finalized.get('local_executor_receipt') if finalized else None}")
             print(f"  local_model_adapter: {finalized.get('local_model_adapter') if finalized else None}")
-            print(f"  local_executor_error: {finalized.get('local_executor_error') if finalized else None}")
-            if finalized and finalized.get('local_executor_traceback'):
-                print(f"  local_executor_traceback:\n{finalized.get('local_executor_traceback')}")
+            if finalized and finalized.get('local_model_adapter') and finalized['local_model_adapter'].get('metadata'):
+                meta = finalized['local_model_adapter']['metadata']
+                if 'committee_candidates' in meta:
+                    print("  DEBUG committee_candidates:")
+                    for c_info in meta['committee_candidates']:
+                        print(f"    - ID: {c_info['candidate_id']}, Role: {c_info['role']}, Expected: {c_info['expected_model']}, Invoked: {c_info['invoked_model']}, ProviderCalled: {c_info['provider_called']}, Hash: {c_info['candidate_hash'][:16]}..., AppliedHash: {c_info['applied_patch_hash'][:16]}..., Match: {c_info['selected_candidate_hash_matches_applied']}, Apply: {c_info['apply_status']}, Verifier: {c_info['isolated_verifier_result']}, Selected: {c_info['selected']}, Winner: {c_info['winner']}")
 
             # 5. Extract results
             # Executor path: local_executor_receipt + finalized keys

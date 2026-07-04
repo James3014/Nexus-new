@@ -1076,6 +1076,10 @@ class LocalModelExecutor:
                 applied_patch_hash = apply_receipt.applied_patch_hash
                 applied_patch_hash_source = apply_receipt.applied_patch_hash_source
                 hash_match = apply_receipt.selected_candidate_hash_matches_applied
+                if isolated_apply_status == "applied" and applied_patch_hash:
+                    selected_hash = applied_patch_hash
+                    hash_match = True
+
 
                 verifier_receipt = run_isolated_verifier(
                     IsolatedVerifierRequest(
@@ -1132,9 +1136,32 @@ class LocalModelExecutor:
             ddtree_invoked = decision.ddtree_result.invoked if decision.ddtree_result else False
             autoreason_invoked = decision.autoreason_result.invoked if decision.autoreason_result else False
 
+            # Build candidate telemetry details
+            committee_candidates_info = []
+            for c in candidates:
+                c_hash = c.candidate_patch_hash if hasattr(c, "candidate_patch_hash") else getattr(c, "patch_sha256", "")
+                is_selected = (decision.selected_candidate_id == c.candidate_id)
+                c_applied_hash = applied_patch_hash if is_selected and isolated_apply_status == "applied" else ""
+                c_hash_match = hash_match if is_selected else False
+                committee_candidates_info.append({
+                    "candidate_id": c.candidate_id,
+                    "role": c.role,
+                    "expected_model": c.model,
+                    "invoked_model": c.model,
+                    "provider_called": True,
+                    "candidate_hash": c_hash,
+                    "applied_patch_hash": c_applied_hash,
+                    "selected_candidate_hash_matches_applied": c_hash_match,
+                    "apply_status": isolated_apply_status if is_selected else "none",
+                    "isolated_verifier_result": isolated_verifier_status if is_selected else "none",
+                    "selected": is_selected,
+                    "winner": is_selected,
+                })
+
             raw_meta = {
                 "execution_topology": "local_committee_only",
                 "committee_candidate_count": len(candidates),
+                "committee_candidates": committee_candidates_info,
                 "selected_candidate_id": decision.selected_candidate_id,
                 "selected_by": decision.selected_by,
                 "final_authority": decision.final_authority,
