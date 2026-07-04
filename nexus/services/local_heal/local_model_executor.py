@@ -2170,6 +2170,8 @@ class LocalModelExecutor:
                         isolated_apply_status = "applied"
                         isolated_verifier_status = "pass"
                         isolated_verifier_exit_code = 0
+                        raw_meta["isolated_apply_status"] = "applied"
+                        raw_meta["isolated_verifier_status"] = "pass"
                         raw_meta["solved"] = True
                         raw_meta["verifier_result"] = "pass"
                         raw_meta["patch_lifecycle_state"] = "verifier_passed"
@@ -2190,7 +2192,9 @@ class LocalModelExecutor:
                             _dr_committee_candidates_list,
                             _dr_committee_winner,
                         )
-                except Exception:
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
                     pipeline_retry_delegated = False
 
             raw_meta["retry_available"] = retry_available

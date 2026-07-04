@@ -6699,3 +6699,201 @@ def test_c15_5h_dr_localized_files_is_localized_file_not_tuple(tmp_path):
     )
     assert _dr_localized_files[0].path == target_file
     assert "normalize_score" in _dr_localized_files[0].content
+
+
+# --- C15-6E Controlled Committee Success Integration Test ---
+
+def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
+    """C15-6E: Test-only controlled success lane proving the committee winner path
+    can produce solved=True under strict gates, marked as C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN.
+    """
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutor
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.local_model_provider import LocalModelProviderResponse
+
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    # Build request targeting a committee-enabled delegated retry
+    req = make_test_request(
+        "c15-6e-controlled-success",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "exit(0)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "local_committee_enabled": True,
+                "delegated_retry_candidate_models": ["ornith:9b", "qwythos:9b"],
+            },
+        },
+    )
+
+    # Provider mock that simulates committee candidate completions
+    mock_provider = MagicMock()
+    mock_resp = LocalModelProviderResponse(
+        provider_invoked=True,
+        model_called=True,
+        model_name="ornith:9b",
+        output_text="FILE: toy/math_util.py\n<<<<<<< SEARCH\ndef double(x):\n    return x * 2\n=======\ndef double(x):\n    return x * 4\n>>>>>>> REPLACE",
+        requested_timeout_sec=120,
+        elapsed_sec=0.1,
+        effective_timeout_sec=120,
+    )
+    mock_provider.generate.return_value = mock_resp
+
+    # Stub the main capability execution to FAIL first (triggering delegated retry)
+    main_pipeline_result = CapabilityExecutionResult(
+        name="repair_loop", selected=True, invoked=True,
+        gate_passed=True, outcome_contributed=True,
+        evidence_present=True, failure_reason="VERIFIER_FAILED",
+        telemetries={
+            "pipeline_final_patch": "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1,2 +1,2 @@\n def double(x):\n-    return x * 2\n+    return x * 3\n",
+            "pipeline_solve_eligible": False,
+            "pipeline_failure_reason": "VERIFIER_FAILED",
+            "model_called": True,
+            "patch_synthesis_model_called": True,
+            "patch_synthesis_output_len": 80,
+        }
+    )
+
+    # Stub HealPipeline.run result for candidate evaluations
+    class MockHealResult:
+        def __init__(self, model_name):
+            self.pre_verification_final_patch = "FILE: toy/math_util.py\n<<<<<<< SEARCH\ndef double(x):\n    return x * 2\n=======\ndef double(x):\n    return x * 4\n>>>>>>> REPLACE"
+            self.final_patch = self.pre_verification_final_patch
+            self.model_decisions = [
+                {
+                    "phase": "patch",
+                    "model": model_name,
+                    "raw_label": "r:0,d:0,p:3,c:0",
+                    "output_class": "VALID_SEARCH_REPLACE",
+                    "parser_error_kind": "",
+                    "conversion_status": "none",
+                    "status": "SUCCESS",
+                }
+            ]
+
+    def mock_pipeline_run(self, ctx):
+        return MockHealResult(ctx.committee_proposer_model)
+
+    # Mock isolated apply: succeeds for both candidates
+    # Mock isolated verifier: passes for ornith:9b (the winning candidate)
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute", return_value=main_pipeline_result), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run", mock_pipeline_run), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+
+        # Mock apply output for multiple steps (primary patch and then candidate patch)
+        mock_apply.side_effect = [
+            IsolatedApplyReceipt(
+                task_id="c15-6e-controlled-success",
+                workspace_path="/tmp/ws",
+                target_file=target_rel,
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash="bbbb2222",
+                applied_patch_hash="bbbb2222",
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            ),
+            IsolatedApplyReceipt(
+                task_id="c15-6e-controlled-success#committee-ornith:9b",
+                workspace_path="/tmp/ws-candidate",
+                target_file=target_rel,
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash="cccc3333",
+                applied_patch_hash="cccc3333",
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            ),
+            IsolatedApplyReceipt(
+                task_id="c15-6e-controlled-success#committee-qwythos:9b",
+                workspace_path="/tmp/ws-candidate2",
+                target_file=target_rel,
+                patch_apply_status="applied",
+                patch_apply_error="",
+                selected_candidate_hash="dddd4444",
+                applied_patch_hash="dddd4444",
+                selected_candidate_hash_matches_applied=True,
+                candidate_output_isolated=True,
+                mutation_allowed=True,
+                applied_patch_hash_source="git_diff",
+            )
+        ]
+
+        # Mock verifier output: 1st call fails (triggers retry), 2nd call passes (controlled success winner)
+        mock_verify.side_effect = [
+            IsolatedVerifierReceipt(
+                task_id="c15-6e-controlled-success",
+                verifier_status="fail",
+                exit_code=1,
+                stdout_tail="EVIDENCE: normalize_score may raise ZeroDivisionError when max_val == min_val",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            ),
+            IsolatedVerifierReceipt(
+                task_id="c15-6e-controlled-success#committee-ornith:9b",
+                verifier_status="pass",
+                exit_code=0,
+                stdout_tail="VERIFIER SUCCESSFUL",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            ),
+            IsolatedVerifierReceipt(
+                task_id="c15-6e-controlled-success#committee-qwythos:9b",
+                verifier_status="fail",
+                exit_code=1,
+                stdout_tail="VERIFIER FAILED",
+                stderr_tail="",
+                verifier_error="",
+                verifier_allowed=True,
+            )
+        ]
+
+        res = LocalModelExecutor.run(req, provider=mock_provider)
+
+    # Telemetry Assertions to prove C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN
+    meta = res.raw_model_metadata
+    print("DEBUG META KEYS AND VALUES:")
+    for k, v in sorted(meta.items()):
+        print(f"  {k}: {v}")
+    assert meta.get("solved") is True, "E2E solved gate must pass for controlled success"
+    assert meta.get("verifier_result") == "pass"
+
+    assert meta.get("delegated_retry_committee_path_used") is True
+    assert meta.get("delegated_retry_heterogeneous_candidate_count") == 2
+    assert meta.get("delegated_retry_heterogeneous_winner_model") == "ornith:9b", "Winner model must be populated"
+    assert meta.get("selected_candidate_hash_matches_applied") is True
+    assert meta.get("isolated_apply_status") == "applied"
+    assert meta.get("isolated_verifier_status") == "pass"
+
+    # Verify that candidate JSON details are recorded correctly
+    candidates_json = meta.get("delegated_retry_committee_candidates_json", "[]")
+    import json
+    candidates = json.loads(candidates_json)
+    assert len(candidates) == 2
+
+    # Check for expected label markers
+    assert any(c.get("candidate_model") == "ornith:9b" and c.get("selected") is True for c in candidates)
+    
+    # Expose label for the report
+    res.raw_model_metadata["C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN"] = True
