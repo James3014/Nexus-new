@@ -2120,6 +2120,462 @@ def test_committee_triple_and_limits(monkeypatch) -> None:
     assert "14b" not in [c["model"].lower() for c in candidates]
 
 
+def test_committee_candidate_records_conversion_status(monkeypatch) -> None:
+    """C15-5F: Verify that candidate metadata records detailed conversion status and telemetry fields."""
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch, MagicMock
+    import hashlib, json
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+    def mock_apply(req):
+        return IsolatedApplyReceipt(
+            task_id=req.task_id, patch_apply_status="applied", patch_apply_error="",
+            target_file=req.target_file, selected_candidate_hash=req.selected_candidate_hash,
+            applied_patch_hash=req.selected_candidate_hash, selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, workspace_path="/tmp/ws", mutation_allowed=True, applied_patch_hash_source="git_diff"
+        )
+
+    def mock_verify(req):
+        return IsolatedVerifierReceipt(
+            task_id=req.task_id, verifier_status="fail", exit_code=1, stdout_tail="AssertionError", stderr_tail="", verifier_error="", verifier_allowed=True
+        )
+
+    req = make_test_request(
+        "comm-tele-task",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "pass"],
+            "python_executable": "python3",
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=mock_apply), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier", side_effect=mock_verify), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True, gate_passed=True, outcome_contributed=True, evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text, "pipeline_solve_eligible": True, "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(diff_text), "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
+                "patch_synthesis_model_called": True, "provider_invoked": True, "model_called": True,
+                "localheal_pipeline_run_called": True, "localheal_pipeline_run_success": True, "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True, "orchestrator_run_reachable": True, "path_a_actual_execution": True,
+            }
+        )
+
+        def make_pipeline_run_result(heal_ctx):
+            model_name = getattr(heal_ctx, "committee_proposer_model", "")
+            r = MagicMock()
+            r.final_patch = diff_text
+            r.pre_verification_final_patch = ""
+            r.failure_reason = ""
+            r._orchestrator_verifier_evidence_passed = False
+            r._orchestrator_verifier_evidence_fields = ""
+            r._orchestrator_retry_prompt_evidence_hash = ""
+            r._semantic_retry_telemetry = {}
+            if "qwen" in model_name:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "UNIFIED_DIFF", "parser_error_kind": "none", "status": "SUCCESS",
+                    "output_excerpt": diff_text, "conversion_status": "unified_diff_to_ssrp_converted",
+                    "conversion_source_hash_before": "src_hash_123", "conversion_candidate_hash": "cand_hash_123",
+                    "target_file_correct": True, "preimage_match_status": "exact_match"
+                }]
+            else:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "MALFORMED_SEARCH_REPLACE", "parser_error_kind": "none", "status": "FAIL"
+                }]
+            return r
+
+        mock_pipeline_run.side_effect = make_pipeline_run_result
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    meta = resp.raw_model_metadata
+    candidates = json.loads(meta.get("delegated_retry_committee_candidates_json", "[]"))
+    assert len(candidates) == 2
+    qwen_cand = [c for c in candidates if "qwen" in c["model"]][0]
+    assert qwen_cand["candidate_model"] == "qwen2.5-coder:7b-instruct"
+    assert qwen_cand["format_class"] == "UNIFIED_DIFF"
+    assert qwen_cand["conversion_status"] == "unified_diff_to_ssrp_converted"
+    assert qwen_cand["conversion_source_hash_before"] == "src_hash_123"
+    assert qwen_cand["conversion_candidate_hash"] == "cand_hash_123"
+    assert qwen_cand["target_file_correct"] is True
+    assert qwen_cand["preimage_match_status"] == "exact_match"
+
+
+def test_committee_candidate_records_raw_and_applied_hashes(monkeypatch) -> None:
+    """C15-5F: Verify that candidate records distinct hashes for applied vs raw candidates."""
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch, MagicMock
+    import hashlib, json
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+    def mock_apply(req):
+        return IsolatedApplyReceipt(
+            task_id=req.task_id, patch_apply_status="applied", patch_apply_error="",
+            target_file=req.target_file, selected_candidate_hash=req.selected_candidate_hash,
+            applied_patch_hash=req.selected_candidate_hash, selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, workspace_path="/tmp/ws", mutation_allowed=True, applied_patch_hash_source="git_diff"
+        )
+
+    def mock_verify(req):
+        return IsolatedVerifierReceipt(
+            task_id=req.task_id, verifier_status="fail", exit_code=1, stdout_tail="AssertionError", stderr_tail="", verifier_error="", verifier_allowed=True
+        )
+
+    req = make_test_request(
+        "comm-hash-task",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "pass"],
+            "python_executable": "python3",
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=mock_apply), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier", side_effect=mock_verify), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True, gate_passed=True, outcome_contributed=True, evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text, "pipeline_solve_eligible": True, "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(diff_text), "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
+                "patch_synthesis_model_called": True, "provider_invoked": True, "model_called": True,
+                "localheal_pipeline_run_called": True, "localheal_pipeline_run_success": True, "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True, "orchestrator_run_reachable": True, "path_a_actual_execution": True,
+            }
+        )
+
+        def make_pipeline_run_result(heal_ctx):
+            model_name = getattr(heal_ctx, "committee_proposer_model", "")
+            r = MagicMock()
+            r.final_patch = diff_text
+            r.pre_verification_final_patch = ""
+            r.failure_reason = ""
+            r._orchestrator_verifier_evidence_passed = False
+            r._orchestrator_verifier_evidence_fields = ""
+            r._orchestrator_retry_prompt_evidence_hash = ""
+            r._semantic_retry_telemetry = {}
+            if "qwen" in model_name:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "UNIFIED_DIFF", "parser_error_kind": "none", "status": "SUCCESS",
+                    "output_excerpt": diff_text, "conversion_status": "unified_diff_to_ssrp_converted",
+                    "conversion_source_hash_before": "src_hash_abc", "conversion_candidate_hash": "cand_hash_xyz",
+                    "target_file_correct": True, "preimage_match_status": "exact_match"
+                }]
+            else:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "MALFORMED_SEARCH_REPLACE", "parser_error_kind": "none", "status": "FAIL"
+                }]
+            return r
+
+        mock_pipeline_run.side_effect = make_pipeline_run_result
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    meta = resp.raw_model_metadata
+    candidates = json.loads(meta.get("delegated_retry_committee_candidates_json", "[]"))
+    qwen_cand = [c for c in candidates if "qwen" in c["model"]][0]
+    expected_applied_hash = hashlib.sha256(diff_text.rstrip("\n").encode()).hexdigest()
+    assert qwen_cand["candidate_hash"] == expected_applied_hash
+    assert qwen_cand["conversion_candidate_hash"] == "cand_hash_xyz"
+
+
+def test_committee_unified_diff_conversion_success_allows_isolated_apply(monkeypatch) -> None:
+    """C15-5F: Verify that successful unified diff conversion allows isolated apply to run."""
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch, MagicMock
+    import json
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+    apply_called = []
+
+    def mock_apply(req):
+        apply_called.append(req.task_id)
+        return IsolatedApplyReceipt(
+            task_id=req.task_id, patch_apply_status="applied", patch_apply_error="",
+            target_file=req.target_file, selected_candidate_hash=req.selected_candidate_hash,
+            applied_patch_hash=req.selected_candidate_hash, selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, workspace_path="/tmp/ws", mutation_allowed=True, applied_patch_hash_source="git_diff"
+        )
+
+    def mock_verify(req):
+        # We need the first round to fail
+        return IsolatedVerifierReceipt(
+            task_id=req.task_id, verifier_status="fail", exit_code=1, stdout_tail="AssertionError", stderr_tail="", verifier_error="", verifier_allowed=True
+        )
+
+    req = make_test_request(
+        "comm-apply-task",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "pass"],
+            "python_executable": "python3",
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=mock_apply), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier", side_effect=mock_verify), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True, gate_passed=True, outcome_contributed=True, evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text, "pipeline_solve_eligible": True, "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(diff_text), "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
+                "patch_synthesis_model_called": True, "provider_invoked": True, "model_called": True,
+                "localheal_pipeline_run_called": True, "localheal_pipeline_run_success": True, "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True, "orchestrator_run_reachable": True, "path_a_actual_execution": True,
+            }
+        )
+
+        def make_pipeline_run_result(heal_ctx):
+            model_name = getattr(heal_ctx, "committee_proposer_model", "")
+            r = MagicMock()
+            r.final_patch = diff_text
+            r.pre_verification_final_patch = ""
+            r.failure_reason = ""
+            r._orchestrator_verifier_evidence_passed = False
+            r._orchestrator_verifier_evidence_fields = ""
+            r._orchestrator_retry_prompt_evidence_hash = ""
+            r._semantic_retry_telemetry = {}
+            if "qwen" in model_name:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "UNIFIED_DIFF", "parser_error_kind": "none", "status": "SUCCESS",
+                    "output_excerpt": diff_text, "conversion_status": "unified_diff_to_ssrp_converted"
+                }]
+            else:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "MALFORMED_SEARCH_REPLACE", "parser_error_kind": "none", "status": "FAIL"
+                }]
+            return r
+
+        mock_pipeline_run.side_effect = make_pipeline_run_result
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    assert len(apply_called) == 2
+    assert "comm-apply-task#committee-qwen2.5-coder:7b-instruct" in apply_called
+
+
+def test_committee_unified_diff_conversion_failure_records_specific_reason(monkeypatch) -> None:
+    """C15-5F: Verify that unified diff conversion failure records specific rejection reason and blocks apply."""
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch, MagicMock
+    import json
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+    apply_called = []
+
+    def mock_apply(req):
+        apply_called.append(req.task_id)
+        return IsolatedApplyReceipt(
+            task_id=req.task_id, patch_apply_status="applied", patch_apply_error="",
+            target_file=req.target_file, selected_candidate_hash=req.selected_candidate_hash,
+            applied_patch_hash=req.selected_candidate_hash, selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, workspace_path="/tmp/ws", mutation_allowed=True, applied_patch_hash_source="git_diff"
+        )
+
+    def mock_verify(req):
+        return IsolatedVerifierReceipt(
+            task_id=req.task_id, verifier_status="fail", exit_code=1, stdout_tail="AssertionError", stderr_tail="", verifier_error="", verifier_allowed=True
+        )
+
+    req = make_test_request(
+        "comm-fail-task",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "pass"],
+            "python_executable": "python3",
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=mock_apply), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier", side_effect=mock_verify), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True, gate_passed=True, outcome_contributed=True, evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text, "pipeline_solve_eligible": True, "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(diff_text), "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
+                "patch_synthesis_model_called": True, "provider_invoked": True, "model_called": True,
+                "localheal_pipeline_run_called": True, "localheal_pipeline_run_success": True, "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True, "orchestrator_run_reachable": True, "path_a_actual_execution": True,
+            }
+        )
+
+        def make_pipeline_run_result(heal_ctx):
+            model_name = getattr(heal_ctx, "committee_proposer_model", "")
+            r = MagicMock()
+            r.final_patch = ""
+            r.pre_verification_final_patch = ""
+            r.failure_reason = "PATCH_FORMAT_INVALID"
+            r._orchestrator_verifier_evidence_passed = False
+            r._orchestrator_verifier_evidence_fields = ""
+            r._orchestrator_retry_prompt_evidence_hash = ""
+            r._semantic_retry_telemetry = {}
+            if "qwen" in model_name:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "UNIFIED_DIFF", "parser_error_kind": "PATCH_FORMAT_INVALID", "status": "FAIL",
+                    "output_excerpt": diff_text, "conversion_status": "unified_diff_target_mismatch"
+                }]
+            else:
+                r.model_decisions = [{
+                    "phase": "patch", "output_class": "MALFORMED_SEARCH_REPLACE", "parser_error_kind": "none", "status": "FAIL"
+                }]
+            return r
+
+        mock_pipeline_run.side_effect = make_pipeline_run_result
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    assert len(apply_called) == 1
+    meta = resp.raw_model_metadata
+    candidates = json.loads(meta.get("delegated_retry_committee_candidates_json", "[]"))
+    qwen_cand = [c for c in candidates if "qwen" in c["model"]][0]
+    assert qwen_cand["apply_status"] == "format_rejected"
+    assert qwen_cand["rejection_reason"] == "unified_diff_target_mismatch"
+
+
+def test_committee_no_selected_winner_without_verifier_pass(monkeypatch) -> None:
+    """C15-5F: Verify that if no candidate passes the verifier, no winner is selected and solved is False."""
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from unittest.mock import patch, MagicMock
+    import json
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+    def mock_apply(req):
+        return IsolatedApplyReceipt(
+            task_id=req.task_id, patch_apply_status="applied", patch_apply_error="",
+            target_file=req.target_file, selected_candidate_hash=req.selected_candidate_hash,
+            applied_patch_hash=req.selected_candidate_hash, selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True, workspace_path="/tmp/ws", mutation_allowed=True, applied_patch_hash_source="git_diff"
+        )
+
+    def mock_verify(req):
+        return IsolatedVerifierReceipt(
+            task_id=req.task_id, verifier_status="fail", exit_code=1, stdout_tail="AssertionError", stderr_tail="", verifier_error="", verifier_allowed=True
+        )
+
+    req = make_test_request(
+        "comm-no-winner-task",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "raise SystemExit(1)"],
+            "python_executable": "python3",
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", side_effect=mock_apply), \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier", side_effect=mock_verify), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+         patch("nexus.services.local_heal.pipeline.HealPipeline.run") as mock_pipeline_run:
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True, gate_passed=True, outcome_contributed=True, evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text, "pipeline_solve_eligible": True, "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(diff_text), "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
+                "patch_synthesis_model_called": True, "provider_invoked": True, "model_called": True,
+                "localheal_pipeline_run_called": True, "localheal_pipeline_run_success": True, "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True, "orchestrator_run_reachable": True, "path_a_actual_execution": True,
+            }
+        )
+
+        def make_pipeline_run_result(heal_ctx):
+            r = MagicMock()
+            r.final_patch = diff_text
+            r.pre_verification_final_patch = ""
+            r.failure_reason = ""
+            r.model_decisions = [{
+                "phase": "patch", "output_class": "VALID_SEARCH_REPLACE", "parser_error_kind": "none", "status": "SUCCESS",
+                "output_excerpt": diff_text, "conversion_status": "none"
+            }]
+            r._orchestrator_verifier_evidence_passed = False
+            r._orchestrator_verifier_evidence_fields = ""
+            r._orchestrator_retry_prompt_evidence_hash = ""
+            r._semantic_retry_telemetry = {}
+            return r
+
+        mock_pipeline_run.side_effect = make_pipeline_run_result
+
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: diff_text))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("delegated_retry_heterogeneous_winner_model") == ""
+    assert meta.get("solved") is not True
+
+
 # ---------------------------------------------------------------------------
 # C7: Output Classification Tests
 # ---------------------------------------------------------------------------

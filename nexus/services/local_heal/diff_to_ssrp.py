@@ -22,6 +22,8 @@ class DiffToSSRPConverter:
             "source_hash_before": hashlib.sha256(source_text.encode("utf-8")).hexdigest() if source_text else "",
             "candidate_hash": hashlib.sha256(raw_diff.encode("utf-8")).hexdigest() if raw_diff else "",
             "target_file": expected_target_file,
+            "target_file_correct": True,
+            "preimage_match_status": "none",
         }
         
         if not raw_diff or not raw_diff.strip():
@@ -44,6 +46,7 @@ class DiffToSSRPConverter:
             unique_files.add(f_clean)
             
         if len(unique_files) > 1:
+            telemetry["target_file_correct"] = False
             return "", "unified_diff_multi_file_rejected", telemetry
             
         if unique_files:
@@ -53,6 +56,7 @@ class DiffToSSRPConverter:
             if (target_path_norm != expected_target_norm 
                 and not expected_target_norm.endswith(target_path_norm) 
                 and not target_path_norm.endswith(expected_target_norm)):
+                telemetry["target_file_correct"] = False
                 return "", "unified_diff_target_mismatch", telemetry
                 
         # 2. Split hunks and convert
@@ -89,18 +93,23 @@ class DiffToSSRPConverter:
             replace_block = "\n".join(replace_lines)
             
             if not search_block:
+                telemetry["preimage_match_status"] = "missing"
                 return "", "unified_diff_missing_preimage", telemetry
                 
             if search_block not in source_text:
+                telemetry["preimage_match_status"] = "missing"
                 return "", "unified_diff_missing_preimage", telemetry
                 
             if source_text.count(search_block) > 1:
+                telemetry["preimage_match_status"] = "ambiguous"
                 return "", "unified_diff_ambiguous_preimage", telemetry
                 
             ssrp_blocks.append((search_block, replace_block))
             
         if not ssrp_blocks:
             return "", "unified_diff_malformed", telemetry
+            
+        telemetry["preimage_match_status"] = "exact_match"
             
         # Construct SSRP text
         ssrp_lines = [f"FILE: {expected_target_file}"]

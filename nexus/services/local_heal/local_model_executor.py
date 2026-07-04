@@ -1877,22 +1877,37 @@ class LocalModelExecutor:
                             _is_unified_diff = (_format_class == "UNIFIED_DIFF")
                             _has_ssrp_marker = (_format_class in ("VALID_SEARCH_REPLACE", "FENCED_SEARCH_REPLACE"))
 
-                            _conversion_status = _last_patch_decision.get("conversion_status", "none") if _last_patch_decision else "none"
+                            _conversion_status = "none"
+                            _conversion_source_hash_before = ""
+                            _conversion_candidate_hash = ""
+                            _target_file_correct = True
+                            _preimage_match_status = "not_applicable"
+                            if _last_patch_decision:
+                                _conversion_status = _last_patch_decision.get("conversion_status", "none")
+                                _conversion_source_hash_before = _last_patch_decision.get("conversion_source_hash_before", "")
+                                _conversion_candidate_hash = _last_patch_decision.get("conversion_candidate_hash", "")
+                                _target_file_correct = _last_patch_decision.get("target_file_correct", True)
+                                _preimage_match_status = _last_patch_decision.get("preimage_match_status", "not_applicable")
 
-                            if not _cp_patch.strip():
+
+                            _should_apply = False
+                            if _is_unified_diff and _conversion_status != "unified_diff_to_ssrp_converted":
+                                _apply_status = "format_rejected"
+                                # If conversion failed, map to specific reject reason from converter
+                                _rejection_reason = _conversion_status if _conversion_status != "none" else "unified_diff_malformed"
+                            elif not _cp_patch.strip():
                                 _apply_status = "empty_patch"
                                 _rejection_reason = "patch_empty"
                             elif _is_unified_diff and _conversion_status == "unified_diff_to_ssrp_converted":
                                 # Converted successfully: allow it to pass to isolated apply!
-                                pass
-                            elif _is_unified_diff:
-                                _apply_status = "format_rejected"
-                                # If conversion failed, map to specific reject reason from converter
-                                _rejection_reason = _conversion_status if _conversion_status != "none" else "unified_diff_malformed"
+                                _should_apply = True
                             elif not _has_ssrp_marker:
                                 _apply_status = "format_rejected"
                                 _rejection_reason = "wrong_format:no_ssrp_marker"
                             else:
+                                _should_apply = True
+
+                            if _should_apply:
                                 _cp_apply = run_isolated_workspace_apply(
                                     IsolatedApplyRequest(
                                         task_id=f"{request.task_id}#committee-{_dr_cand_resolved}",
@@ -1921,10 +1936,18 @@ class LocalModelExecutor:
                                         
                             _cand_data = {
                                 "model": _dr_cand_resolved,
+                                "candidate_model": _dr_cand_resolved,
                                 "raw_output_excerpt": _raw_excerpt,
+                                "format_class": _format_class,
+                                "conversion_status": _conversion_status,
+                                "conversion_source_hash_before": _conversion_source_hash_before,
+                                "conversion_candidate_hash": _conversion_candidate_hash,
+                                "target_file_correct": _target_file_correct,
+                                "preimage_match_status": _preimage_match_status,
                                 "apply_status": _apply_status,
                                 "candidate_hash": _cp_patch_hash,
                                 "verifier_result": _verifier_result,
+                                "isolated_verifier_result": _verifier_result,
                                 "selected": False,
                                 "rejection_reason": _rejection_reason,
                             }
@@ -2002,21 +2025,32 @@ class LocalModelExecutor:
                             raw_meta["delegated_retry_heterogeneous_candidate_count"] = _dr_committee_candidate_count
                             raw_meta["delegated_retry_committee_path_used"] = True
                             raw_meta["delegated_retry_committee_candidates_json"] = _json.dumps(_dr_committee_candidates_list)
-                        heal_ctx = LegacyHealContext(
-                            instance_id=request.task_id,
-                            repo_dir=_Path(request.repo_root),
-                            problem_statement=request.problem_statement,
-                            user_prompt=retry_prompt,
-                            attempt=1,
-                            repro_script=repro_script,
-                            skip_reproduction=not bool(repro_script),
-                            failure_reason=raw_meta["failure_class"],
-                            route_context=route_ctx,
-                            python_executable=python_executable,
-                            max_tries=1,
-                            localized_files=_dr_localized_files,
-                        )
-                        result_ctx = pipeline.run(heal_ctx)
+                            
+                            class DummyResultCtx:
+                                final_patch = ""
+                                failure_reason = "committee_no_winner"
+                                model_decisions = []
+                                _orchestrator_verifier_evidence_passed = False
+                                _orchestrator_verifier_evidence_fields = ""
+                                _orchestrator_retry_prompt_evidence_hash = ""
+                                _semantic_retry_telemetry = {}
+                            result_ctx = DummyResultCtx()
+                        else:
+                            heal_ctx = LegacyHealContext(
+                                instance_id=request.task_id,
+                                repo_dir=_Path(request.repo_root),
+                                problem_statement=request.problem_statement,
+                                user_prompt=retry_prompt,
+                                attempt=1,
+                                repro_script=repro_script,
+                                skip_reproduction=not bool(repro_script),
+                                failure_reason=raw_meta["failure_class"],
+                                route_context=route_ctx,
+                                python_executable=python_executable,
+                                max_tries=1,
+                                localized_files=_dr_localized_files,
+                            )
+                            result_ctx = pipeline.run(heal_ctx)
                     delegated_retry_failure_reason = str(getattr(result_ctx, "failure_reason", "") or "")
                     delegated_retry_final_patch_len = len(getattr(result_ctx, "final_patch", "") or "")
                     retry_model_decisions = list(getattr(result_ctx, "model_decisions", []) or [])

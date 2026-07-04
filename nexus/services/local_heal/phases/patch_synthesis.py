@@ -212,6 +212,13 @@ class PatchSynthesisPhase(IPhase):
         # Determine output_class using robust static classifier
         output_class = self.parser.classify_format(response)
 
+        # C15-5F: Initialize conversion telemetry default values
+        model_decisions[-1]["conversion_status"] = "none"
+        model_decisions[-1]["conversion_source_hash_before"] = ""
+        model_decisions[-1]["conversion_candidate_hash"] = ""
+        model_decisions[-1]["target_file_correct"] = True
+        model_decisions[-1]["preimage_match_status"] = "not_applicable"
+
         # C15-5E Path B: Unified-Diff-to-SSRP Converter
         conv_status = "none"
         if output_class == "UNIFIED_DIFF" and response and input_data.localized_files:
@@ -234,6 +241,11 @@ class PatchSynthesisPhase(IPhase):
                 source_text=source_text
             )
             model_decisions[-1]["conversion_status"] = conv_status
+            model_decisions[-1]["conversion_source_hash_before"] = conv_tele.get("source_hash_before", "")
+            model_decisions[-1]["conversion_candidate_hash"] = conv_tele.get("candidate_hash", "")
+            model_decisions[-1]["target_file_correct"] = conv_tele.get("target_file_correct", True)
+            model_decisions[-1]["preimage_match_status"] = conv_tele.get("preimage_match_status", "none")
+            
             if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
                 response = converted_ssrp
             else:
