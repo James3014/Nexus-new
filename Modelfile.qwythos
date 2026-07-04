@@ -1,0 +1,19 @@
+FROM /Users/jameschen/llama.cpp/models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf
+TEMPLATE """{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{- end }}
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{- else if eq .Role "assistant" }}<|im_start|>assistant
+{{- if .Content }}
+{{ .Content }}<|im_end|>
+{{- else }}
+<|im_start|>thought
+{{- end }}
+{{- end }}
+{{- end }}"""
+SYSTEM """You are Antigravity, a helpful assistant."""
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER temperature 0.0

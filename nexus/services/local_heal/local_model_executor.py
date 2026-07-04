@@ -1815,7 +1815,7 @@ class LocalModelExecutor:
                                 max_tries=1, localized_files=_dr_localized_files,
                             )
                             _cp_result = _cp_pipeline.run(_cp_heal_ctx)
-                            _cp_patch = str(getattr(_cp_result, "final_patch", "") or "")
+                            _cp_patch = str(getattr(_cp_result, "pre_verification_final_patch", "") or getattr(_cp_result, "final_patch", "") or "")
                             
                             import hashlib as _hashlib
                             _cp_patch_hash = _hashlib.sha256(_cp_patch.rstrip("\n").encode()).hexdigest() if _cp_patch.strip() else ""
