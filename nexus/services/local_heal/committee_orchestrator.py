@@ -7,6 +7,7 @@ import time
 from nexus.services.local_heal.interface import IPhase, PhaseResult
 from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.orchestrator import HealOrchestrator
+from nexus.services.local_heal.output_understanding import build_output_understanding_result
 from nexus.committee.controller import CommitteeControllerV263
 
 COMMITTEE_ROUTE_SCHEMA = "nexus.local_heal.committee_trace.v1"
@@ -116,15 +117,34 @@ class CommitteeOrchestrator(HealOrchestrator):
                     break
                 patch_hash = _compute_patch_hash(patch_text)
                 candidate_id = f"{ctx.op.instance_id}#candidate-{i + 1}"
+                understanding = build_output_understanding_result(
+                    candidate_id=candidate_id,
+                    expected_model=spec["model"],
+                    invoked_model=invoked_model,
+                    target_file=str(getattr(ctx.op, "target_file", "") or ""),
+                    target_symbol=str(getattr(ctx.op, "target_symbol", "") or ""),
+                    patch_text=patch_text,
+                    patch_hash=patch_hash,
+                    model_decision=model_decision,
+                )
                 candidate_snapshot = {
                     "candidate_id": candidate_id,
                     "candidate_key": f"{ctx.op.instance_id}#proposer-{i + 1}",
                     "model": spec["model"],
+                    "expected_model": spec["model"],
+                    "invoked_model": invoked_model,
                     "role": spec["role"],
                     "attempt": i + 1,
                     "raw_label": str(model_decision.get("raw_label", "r:0,d:0,p:3,c:0") or "r:0,d:0,p:3,c:0"),
                     "patch_sha256": patch_hash,
                     "patch_length": len(patch_text),
+                    "output_class": str(model_decision.get("output_class", "") or ""),
+                    "parser_error_kind": str(model_decision.get("parser_error_kind", "") or ""),
+                    "conversion_status": str(model_decision.get("conversion_status", "") or "none"),
+                    "source_format": understanding.source_format,
+                    "normalization_steps": list(understanding.normalization_steps),
+                    "anchor_status": understanding.anchor_status,
+                    "output_understanding": understanding.to_dict(),
                     "selected": False,
                     "applied": False,
                     "isolation_status": "stored",

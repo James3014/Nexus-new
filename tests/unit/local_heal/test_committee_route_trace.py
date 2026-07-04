@@ -35,6 +35,41 @@ class _PatchPhase:
                 "phase": "patch",
                 "model": model,
                 "raw_label": "r:0,d:0,p:3,c:0",
+                "output_class": "VALID_SEARCH_REPLACE",
+                "parser_error_kind": "",
+                "conversion_status": "none",
+                "status": "SUCCESS",
+            }
+        )
+        return PhaseResult(success=True)
+
+
+class _FormatAwarePatchPhase:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, ctx):
+        self.calls += 1
+        if self.calls == 1:
+            model = "qwen2.5-coder:7b-instruct"
+            output_class = "UNIFIED_DIFF"
+            conversion_status = "unified_diff_to_ssrp_converted"
+            parser_error_kind = ""
+        else:
+            model = "deepseek-coder:6.7b-instruct"
+            output_class = "EMPTY"
+            conversion_status = "none"
+            parser_error_kind = "MODEL_EMPTY_RESPONSE"
+        assert ctx.op.committee_proposer_model == model
+        ctx.op.final_patch = f"patch-{self.calls}"
+        ctx.op.model_decisions.append(
+            {
+                "phase": "patch",
+                "model": model,
+                "raw_label": "r:0,d:0,p:3,c:0",
+                "output_class": output_class,
+                "parser_error_kind": parser_error_kind,
+                "conversion_status": conversion_status,
                 "status": "SUCCESS",
             }
         )
@@ -144,6 +179,21 @@ def test_committee_orchestrator_records_two_candidate_trace(monkeypatch):
         "qwen2.5-coder:7b-instruct",
         "deepseek-coder:6.7b-instruct",
     ]
+    assert [c["expected_model"] for c in candidates] == [
+        "qwen2.5-coder:7b-instruct",
+        "deepseek-coder:6.7b-instruct",
+    ]
+    assert [c["invoked_model"] for c in candidates] == [
+        "qwen2.5-coder:7b-instruct",
+        "deepseek-coder:6.7b-instruct",
+    ]
+    assert [c["source_format"] for c in candidates] == [
+        "search_replace",
+        "search_replace",
+    ]
+    assert candidates[0]["normalization_steps"] == []
+    assert candidates[0]["anchor_status"] == "unknown"
+    assert candidates[0]["output_understanding"]["source_format"] == "search_replace"
     # U3-1: selected/applied flags present
     for c in candidates:
         assert "selected" in c
@@ -170,6 +220,43 @@ def test_committee_orchestrator_records_two_candidate_trace(monkeypatch):
         "deepseek-coder:6.7b-instruct",
     ]
     assert not hasattr(ctx.op, "committee_proposer_model")
+
+
+def test_committee_trace_records_candidate_execution_truth_fields(monkeypatch):
+    ctx = _make_ctx()
+    orch = CommitteeOrchestrator.__new__(CommitteeOrchestrator)
+    orch.k = 2
+    orch.repro_phase = _FixedPhase()
+    orch.plan_phase = _FixedPhase()
+    orch.loc_phase = _FixedPhase()
+    orch.patch_phase = _FormatAwarePatchPhase()
+    orch.verify_phase = _FixedPhase(success=True)
+    monkeypatch.setenv("NEXUS_USE_COMMITTEE", "1")
+    monkeypatch.setattr(
+        "nexus.services.local_heal.committee_orchestrator.CommitteeControllerV263",
+        _CommitteeControllerStub,
+    )
+
+    orch.run(ctx)
+
+    candidates = ctx.op._committee_trace["proposer_candidates"]
+    assert candidates[0]["expected_model"] == "qwen2.5-coder:7b-instruct"
+    assert candidates[0]["invoked_model"] == "qwen2.5-coder:7b-instruct"
+    assert candidates[0]["output_class"] == "UNIFIED_DIFF"
+    assert candidates[0]["conversion_status"] == "unified_diff_to_ssrp_converted"
+    assert candidates[0]["parser_error_kind"] == ""
+    assert candidates[0]["source_format"] == "unified_diff_converted"
+    assert candidates[0]["normalization_steps"] == ["unified_diff_to_ssrp_converted"]
+    assert candidates[0]["output_understanding"]["candidate"]["source_format"] == "unified_diff_converted"
+
+    assert candidates[1]["expected_model"] == "deepseek-coder:6.7b-instruct"
+    assert candidates[1]["invoked_model"] == "deepseek-coder:6.7b-instruct"
+    assert candidates[1]["output_class"] == "EMPTY"
+    assert candidates[1]["conversion_status"] == "none"
+    assert candidates[1]["parser_error_kind"] == "MODEL_EMPTY_RESPONSE"
+    assert candidates[1]["source_format"] == "empty"
+    assert candidates[1]["normalization_steps"] == []
+    assert candidates[1]["output_understanding"]["rejection_reason"] == "MODEL_EMPTY_RESPONSE"
 
 
 def test_committee_orchestrator_rejects_single_proposer_spec(monkeypatch):
@@ -216,6 +303,10 @@ def test_committee_trace_is_persisted_into_repair_receipt(monkeypatch):
     assert len(committee["proposer_candidates"]) == 2
     assert committee["proposer_candidates"][0]["candidate_id"] == "C_12481#candidate-1"
     assert committee["proposer_candidates"][1]["candidate_id"] == "C_12481#candidate-2"
+    assert committee["proposer_candidates"][0]["expected_model"] == "qwen2.5-coder:7b-instruct"
+    assert committee["proposer_candidates"][0]["invoked_model"] == "qwen2.5-coder:7b-instruct"
+    assert committee["proposer_candidates"][0]["source_format"] == "search_replace"
+    assert committee["proposer_candidates"][0]["output_understanding"]["source_format"] == "search_replace"
     assert committee["judge_selection"]["winner_id"]
     assert committee["judge_selection"]["selected_candidate_id"] == "C_12481#candidate-2"
     assert committee["judge_selection"]["candidate_id_mapping_mode"] == "legacy_winner_id_prefix"

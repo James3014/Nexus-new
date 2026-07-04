@@ -495,6 +495,27 @@ def compute_patch_lifecycle_state(
     return "verifier_passed"
 
 
+def _summarize_committee_retry_truth(
+    candidates: list[dict[str, Any]],
+    winner: dict[str, Any] | None,
+) -> tuple[bool, str]:
+    if not candidates:
+        return False, "provider_not_called"
+    if winner is not None:
+        return True, "success"
+
+    apply_statuses = {str(c.get("apply_status", "") or "") for c in candidates}
+    rejection_reasons = {str(c.get("rejection_reason", "") or "") for c in candidates}
+
+    if "format_rejected" in apply_statuses:
+        return True, "committee_candidates_format_rejected"
+    if "empty_patch" in apply_statuses:
+        return True, "committee_candidates_empty_patch"
+    if any(r == "winner_already_selected" for r in rejection_reasons):
+        return True, "committee_winner_selected"
+    return True, "committee_no_winner"
+
+
 def compute_failure_class(
     output_len: int,
     provider_error: str,
@@ -2163,6 +2184,12 @@ class LocalModelExecutor:
                         isolated_verifier_status = "fail"
                         raw_meta["patch_lifecycle_state"] = "isolation_applied_hash_match_verifier_failed"
                         raw_meta["failure_class"] = "verification_failed"
+
+                    if _dr_committee_candidate_count > 0:
+                        delegated_retry_provider_called, delegated_retry_stage = _summarize_committee_retry_truth(
+                            _dr_committee_candidates_list,
+                            _dr_committee_winner,
+                        )
                 except Exception:
                     pipeline_retry_delegated = False
 
