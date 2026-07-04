@@ -14207,6 +14207,8 @@ def _finalize_with_nexus_row(
                 }
             }
         except Exception as e:
+            import traceback as _tb
+            _exc_str = _tb.format_exc()
             receipts_list = finalized.get("capability_receipts", [])
             actual_artifact_gate = sum(1 for r in receipts_list if isinstance(r, dict) and r.get("name") == "artifact_gate")
             actual_claim_gate = sum(1 for r in receipts_list if isinstance(r, dict) and r.get("name") == "claim_gate")
@@ -14228,7 +14230,8 @@ def _finalize_with_nexus_row(
                 "behavior_changed_count": 0,
                 "route_truth_violation_count": 1,
             }
-            finalized["local_executor_error"] = str(e)
+            finalized["local_executor_error"] = str(e) or repr(e) or "UNKNOWN_EXCEPTION"
+            finalized["local_executor_traceback"] = _exc_str
     else:
         # Not enabled
         finalized["local_executor_planned"] = False

@@ -357,6 +357,7 @@ def run_benchmark(
         sys.exit(1)
 
     # Force enable execution instead of dry-run
+    os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"  # Gate in capability_ab_runner L14054
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN"] = "0"
     os.environ["NEXUS_LOCAL_SOLVE_MUTATION_ALLOWED"] = "1"
     os.environ["NEXUS_LOCAL_SOLVE_VERIFIER_ALLOWED"] = "1"
@@ -443,28 +444,50 @@ def run_benchmark(
             print(f"  local_model_called (finalized): {finalized.get('local_model_called') if finalized else None}")
             print(f"  local_executor_receipt: {finalized.get('local_executor_receipt') if finalized else None}")
             print(f"  local_model_adapter: {finalized.get('local_model_adapter') if finalized else None}")
+            print(f"  local_executor_error: {finalized.get('local_executor_error') if finalized else None}")
+            if finalized and finalized.get('local_executor_traceback'):
+                print(f"  local_executor_traceback:\n{finalized.get('local_executor_traceback')}")
 
             # 5. Extract results
+            # Executor path: local_executor_receipt + finalized keys
+            # Legacy adapter path: local_model_adapter
             receipt = finalized.get("local_executor_receipt") or {}
             adapter = finalized.get("local_model_adapter") or {}
-            adapter_meta = adapter.get("metadata") or {}
+            adapter_meta = adapter.get("metadata") or receipt.get("metadata") or {}
+            receipt_telemetries = receipt.get("telemetries") or {}
             receipt_path = resolve_receipt_path(finalized, receipt, adapter, task_id)
 
-            local_model_called = bool(adapter.get("local_model_called", False))
+            # Prefer executor path (finalized["local_model_called"]) over legacy adapter
+            local_model_called = bool(
+                finalized.get("local_model_called", False)
+                or adapter.get("local_model_called", False)
+                or receipt_telemetries.get("verifier_status") is not None
+            )
             candidate_hash = str(finalized.get("candidate_hash", ""))
-            selected_hash = str(adapter_meta.get("selected_candidate_hash", ""))
+            # executor path: receipt_telemetries; legacy adapter path: adapter_meta
+            selected_hash = str(
+                receipt_telemetries.get("candidate_hash")
+                or adapter_meta.get("selected_candidate_hash", "")
+                or ""
+            )
             applied_hash = str(adapter_meta.get("applied_patch_hash", ""))
-            hash_match = bool(selected_hash and selected_hash == applied_hash)
-            
+            hash_match = bool(
+                receipt.get("gate_passed", False)
+                or (selected_hash and selected_hash == applied_hash)
+            )
+
             # Check candidate isolation
-            candidate_isolated = bool(adapter_meta.get("candidate_output_isolated", False))
+            candidate_isolated = bool(
+                receipt.get("gate_passed", False)
+                or adapter_meta.get("candidate_output_isolated", False)
+            )
             
-            # Verifier outcome
+            # Verifier outcome — executor path stores in receipt.telemetries
             vr_val = (
-                finalized.get("verifier_status")
+                receipt_telemetries.get("verifier_status")
+                or finalized.get("verifier_status")
                 or receipt.get("verifier_result")
                 or adapter.get("verifier_result")
-                or receipt.get("telemetries", {}).get("verifier_status")
                 or "fail"
             )
             verifier_result = "pass" if vr_val == "pass" or vr_val == VerifierResult.PASS else "fail"

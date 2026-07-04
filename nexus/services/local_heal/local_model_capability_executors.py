@@ -343,6 +343,7 @@ class LocalHealPipelineCapabilityExecutor:
         pipeline_run_success = False
         pipeline_result_ctx = None
         orchestrator_run_reachable = False
+        _last_provider_diag: dict = {}  # Initialized here so always defined even if heal_pipeline unavailable
 
         if modules.get("heal_pipeline"):
             try:
