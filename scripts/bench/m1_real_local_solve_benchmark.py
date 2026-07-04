@@ -349,6 +349,7 @@ def run_benchmark(
     judge_model: str | None = None,
     primary_proposer_model: str | None = None,
     secondary_proposer_model: str | None = None,
+    delegated_retry_candidate_models: str | None = None,
 ):
     print("=== M1 Real Local Solve Benchmark Runner ===")
     if not check_ollama_availability():
@@ -416,6 +417,7 @@ def run_benchmark(
                 judge_model=judge_model,
                 primary_proposer_model=primary_proposer_model,
                 secondary_proposer_model=secondary_proposer_model,
+                delegated_retry_candidate_models=delegated_retry_candidate_models,
             )
 
             # 4. Invoke under Downstream Enforcement
@@ -693,6 +695,11 @@ def run_benchmark(
                 "delegated_retry_provider_response_type": adapter_meta.get("delegated_retry_provider_response_type", ""),
                 "delegated_retry_provider_call_error": adapter_meta.get("delegated_retry_provider_call_error", ""),
 
+                # C15-5C: committee telemetry fields
+                "delegated_retry_committee_candidates_json": adapter_meta.get("delegated_retry_committee_candidates_json", "[]"),
+                "delegated_retry_committee_winner_model": adapter_meta.get("delegated_retry_heterogeneous_winner_model", ""),
+                "delegated_retry_committee_candidate_count": int(adapter_meta.get("delegated_retry_heterogeneous_candidate_count", 0)),
+                "delegated_retry_committee_path_used": bool(adapter_meta.get("delegated_retry_committee_path_used", False)),
 
                 # C15-3Q: Semantic retry diagnostic fields
                 "semantic_retry_client_reused": adapter_meta.get("semantic_retry_client_reused", False),
@@ -808,6 +815,7 @@ def build_c15_benchmark_row(
     judge_model: str | None = None,
     primary_proposer_model: str | None = None,
     secondary_proposer_model: str | None = None,
+    delegated_retry_candidate_models: str | None = None,
 ) -> dict:
     """Build a benchmark row with optional C15 model override support.
 
@@ -825,6 +833,7 @@ def build_c15_benchmark_row(
     jm = _resolve(judge_model, "NEXUS_C15_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
     pp = _resolve(primary_proposer_model, "NEXUS_C15_PRIMARY_PROPOSER_MODEL", DEFAULT_PRIMARY_PROPOSER)
     sp = _resolve(secondary_proposer_model, "NEXUS_C15_SECONDARY_PROPOSER_MODEL", DEFAULT_SECONDARY_PROPOSER)
+    dr_candidates_raw = _resolve(delegated_retry_candidate_models, "NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS", "")
 
     if provider_timeout_sec is not None:
         pts = provider_timeout_sec
@@ -852,6 +861,7 @@ def build_c15_benchmark_row(
                 {"model": pp, "role": "primary"},
                 {"model": sp, "role": "secondary"},
             ],
+            "delegated_retry_candidate_models": [m.strip() for m in dr_candidates_raw.split(",") if m.strip()] if dr_candidates_raw else [],
         },
         "python_executable": sys_executable,
     }
@@ -901,6 +911,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=f"Override secondary proposer model (default: {DEFAULT_SECONDARY_PROPOSER}).",
     )
+    parser.add_argument(
+        "--delegated-retry-candidate-models",
+        dest="delegated_retry_candidate_models",
+        default=None,
+        help="Comma-separated list of models for heterogeneous delegated retry candidates.",
+    )
     return parser.parse_args()
 
 
@@ -913,4 +929,5 @@ if __name__ == "__main__":
         judge_model=args.judge_model,
         primary_proposer_model=args.primary_proposer_model,
         secondary_proposer_model=args.secondary_proposer_model,
+        delegated_retry_candidate_models=args.delegated_retry_candidate_models,
     )

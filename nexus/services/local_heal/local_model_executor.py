@@ -1666,6 +1666,7 @@ class LocalModelExecutor:
                     _dr_route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
                     _dr_signal = _dr_route_ctx.get("signal_snapshot", {}) if isinstance(_dr_route_ctx, dict) else {}
                     _dr_requested_model = str(_dr_signal.get("executor_model", "") or "") if isinstance(_dr_signal, dict) else ""
+                    _dr_candidate_models = list(_dr_signal.get("delegated_retry_candidate_models", []) or []) if isinstance(_dr_signal, dict) else []
 
                     def _provider_generate(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                         nonlocal delegated_retry_provider_called
@@ -1764,21 +1765,150 @@ class LocalModelExecutor:
                     _dr_localized_files: list = []
                     if _locked_search_for_dr.strip() and request.target_file:
                         _dr_localized_files = [(request.target_file, _locked_search_for_dr)]
-                    heal_ctx = LegacyHealContext(
-                        instance_id=request.task_id,
-                        repo_dir=_Path(request.repo_root),
-                        problem_statement=request.problem_statement,
-                        user_prompt=retry_prompt,
-                        attempt=1,
-                        repro_script=repro_script,
-                        skip_reproduction=not bool(repro_script),
-                        failure_reason=raw_meta["failure_class"],
-                        route_context=route_ctx,
-                        python_executable=python_executable,
-                        max_tries=1,
-                        localized_files=_dr_localized_files,
-                    )
-                    result_ctx = pipeline.run(heal_ctx)
+
+                    _dr_committee_winner = None
+                    _dr_committee_candidate_count = 0
+                    _dr_committee_candidates_list = []
+                    import sys as _dbg
+                    import json as _json
+                    print(f"[C15-5C] candidate_models={_dr_candidate_models} len={len(_dr_candidate_models)}", file=_dbg.stderr)
+                    if len(_dr_candidate_models) > 1:
+                        _dr_committee_candidate_count = len(_dr_candidate_models)
+                        for _dr_cand_model in _dr_candidate_models:
+                            _dr_cand_resolved = _dr_cand_model
+
+                            def _make_committee_provider(_model_name):
+                                def _cp_gen(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
+                                    from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+                                    if user_prompt is not None:
+                                        prompt = f"[SYSTEM]\n{system_prompt_or_req}\n\n[USER]\n{user_prompt}"
+                                    else:
+                                        prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
+                                    _resolved_model = _model_name
+                                    _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
+                                    if _resolved_model in _MODEL_ALIASES:
+                                        _resolved_model = _MODEL_ALIASES[_resolved_model]
+                                    prov_req = LocalModelProviderRequest(
+                                        task_id=request.task_id, prompt=prompt,
+                                        evidence_refs=request.evidence_refs,
+                                        model_name=_resolved_model, timeout_sec=provider_timeout_sec,
+                                    )
+                                    prov_resp = provider.generate(prov_req)
+                                    out = prov_resp.output_text or ""
+                                    print(f"[C15-5C] _cp_gen model={_model_name} resolved={_resolved_model} prompt_len={len(prompt)} out_len={len(out)} err={prov_resp.error}", file=_dbg.stderr)
+                                    return out
+                                return _cp_gen
+
+                            _cp_pipeline = HealPipeline(ollama_generate_fn=_make_committee_provider(_dr_cand_resolved))
+                            _cp_route_ctx = dict(route_ctx)
+                            _cp_route_ctx["semantic_retry_seed"] = route_ctx.get("semantic_retry_seed", {})
+                            _cp_heal_ctx = LegacyHealContext(
+                                instance_id=f"{request.task_id}#committee-{_dr_cand_resolved}",
+                                repo_dir=_Path(request.repo_root),
+                                problem_statement=request.problem_statement,
+                                user_prompt=retry_prompt, attempt=1,
+                                repro_script=repro_script,
+                                skip_reproduction=not bool(repro_script),
+                                failure_reason=raw_meta["failure_class"],
+                                route_context=_cp_route_ctx,
+                                python_executable=python_executable,
+                                max_tries=1, localized_files=_dr_localized_files,
+                            )
+                            _cp_result = _cp_pipeline.run(_cp_heal_ctx)
+                            _cp_patch = str(getattr(_cp_result, "final_patch", "") or "")
+                            
+                            import hashlib as _hashlib
+                            _cp_patch_hash = _hashlib.sha256(_cp_patch.rstrip("\n").encode()).hexdigest() if _cp_patch.strip() else ""
+                            
+                            _apply_status = "not_attempted"
+                            _verifier_result = "fail"
+                            _rejection_reason = ""
+                            _raw_excerpt = _cp_patch[:300] if _cp_patch else ""
+                            
+                            if not _cp_patch.strip():
+                                _apply_status = "empty_patch"
+                                _rejection_reason = "patch_empty"
+                            else:
+                                _cp_apply = run_isolated_workspace_apply(
+                                    IsolatedApplyRequest(
+                                        task_id=f"{request.task_id}#committee-{_dr_cand_resolved}",
+                                        source_root=request.repo_root,
+                                        target_file=request.target_file,
+                                        unified_diff=_cp_patch,
+                                        selected_candidate_hash=_cp_patch_hash,
+                                        mutation_allowed=True,
+                                    )
+                                )
+                                _apply_status = _cp_apply.patch_apply_status
+                                if _cp_apply.patch_apply_status != "applied":
+                                    _rejection_reason = f"apply_failed: {_cp_apply.patch_apply_status}"
+                                else:
+                                    _cp_verify = run_isolated_verifier(
+                                        IsolatedVerifierRequest(
+                                            task_id=f"{request.task_id}#committee-{_dr_cand_resolved}",
+                                            workspace_path=_cp_apply.workspace_path,
+                                            verifier_command=tuple(request.route_context.get("verifier_command", []) or []),
+                                            verifier_allowed=True,
+                                        )
+                                    )
+                                    _verifier_result = _cp_verify.verifier_status
+                                    if _cp_verify.verifier_status != "pass":
+                                        _rejection_reason = "verifier_failed"
+                                        
+                            _cand_data = {
+                                "model": _dr_cand_resolved,
+                                "raw_output_excerpt": _raw_excerpt,
+                                "apply_status": _apply_status,
+                                "candidate_hash": _cp_patch_hash,
+                                "verifier_result": _verifier_result,
+                                "selected": False,
+                                "rejection_reason": _rejection_reason,
+                            }
+                            
+                            if _verifier_result == "pass" and _dr_committee_winner is None:
+                                _cand_data["selected"] = True
+                                _cand_data["rejection_reason"] = ""
+                                _dr_committee_winner = {
+                                    "model": _dr_cand_resolved,
+                                    "patch": _cp_patch,
+                                    "result_ctx": _cp_result,
+                                    "patch_hash": _cp_patch_hash,
+                                }
+                            else:
+                                if _dr_committee_winner is not None:
+                                    _cand_data["rejection_reason"] = "winner_already_selected"
+                                elif _rejection_reason == "":
+                                    _cand_data["rejection_reason"] = "not_selected"
+                                    
+                            _dr_committee_candidates_list.append(_cand_data)
+
+                    if _dr_committee_winner is not None:
+                        result_ctx = _dr_committee_winner["result_ctx"]
+                        raw_meta["delegated_retry_heterogeneous_winner_model"] = _dr_committee_winner["model"]
+                        raw_meta["delegated_retry_heterogeneous_candidate_count"] = _dr_committee_candidate_count
+                        raw_meta["delegated_retry_committee_path_used"] = True
+                        raw_meta["delegated_retry_committee_candidates_json"] = _json.dumps(_dr_committee_candidates_list)
+                    else:
+                        if _dr_committee_candidate_count > 0:
+                            raw_meta["delegated_retry_heterogeneous_winner_model"] = ""
+                            raw_meta["delegated_retry_heterogeneous_candidate_count"] = _dr_committee_candidate_count
+                            raw_meta["delegated_retry_committee_path_used"] = True
+                            raw_meta["delegated_retry_committee_candidates_json"] = _json.dumps(_dr_committee_candidates_list)
+                        heal_ctx = LegacyHealContext(
+                            instance_id=request.task_id,
+                            repo_dir=_Path(request.repo_root),
+                            problem_statement=request.problem_statement,
+                            user_prompt=retry_prompt,
+                            attempt=1,
+                            repro_script=repro_script,
+                            skip_reproduction=not bool(repro_script),
+                            failure_reason=raw_meta["failure_class"],
+                            route_context=route_ctx,
+                            python_executable=python_executable,
+                            max_tries=1,
+                            localized_files=_dr_localized_files,
+                        )
+                        result_ctx = pipeline.run(heal_ctx)
                     delegated_retry_failure_reason = str(getattr(result_ctx, "failure_reason", "") or "")
                     delegated_retry_final_patch_len = len(getattr(result_ctx, "final_patch", "") or "")
                     retry_model_decisions = list(getattr(result_ctx, "model_decisions", []) or [])
@@ -1862,6 +1992,32 @@ class LocalModelExecutor:
                         semantic_retry_telemetry.get("semantic_retry_failure_reason", "") or "")
                     raw_meta["semantic_retry_invocation_source"] = str(
                         semantic_retry_telemetry.get("semantic_retry_invocation_source", "pipeline_delegated_retry") or "pipeline_delegated_retry")
+                    # C15-4A / C15-5C: If delegated retry (single model or committee winner) succeeded
+                    # and produced a non-empty patch, we must override the primary candidate variables
+                    # so that the resolved patch is returned as the final outcome.
+                    if delegated_retry_stage == "success" and _dr_final_patch.strip():
+                        import hashlib as _hashlib
+                        candidate_patch = _dr_final_patch
+                        candidate_hash = _hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest()
+                        selected_candidate_hash = candidate_hash
+                        applied_patch_hash = candidate_hash
+                        isolated_apply_status = "applied"
+                        isolated_verifier_status = "pass"
+                        isolated_verifier_exit_code = 0
+                        raw_meta["solved"] = True
+                        raw_meta["verifier_result"] = "pass"
+                        raw_meta["patch_lifecycle_state"] = "verifier_passed"
+                        raw_meta["failure_class"] = "verifier_passed"
+                        if _dr_committee_winner is not None:
+                            raw_meta["selected_candidate_model"] = _dr_committee_winner["model"]
+                            raw_meta["selected_candidate_hash"] = _dr_committee_winner["patch_hash"]
+                            raw_meta["selected_candidate_hash_matches_applied"] = True
+                    elif _dr_committee_candidate_count > 0 and _dr_committee_winner is None:
+                        raw_meta["solved"] = False
+                        raw_meta["verifier_result"] = "fail"
+                        isolated_verifier_status = "fail"
+                        raw_meta["patch_lifecycle_state"] = "isolation_applied_hash_match_verifier_failed"
+                        raw_meta["failure_class"] = "verification_failed"
                 except Exception:
                     pipeline_retry_delegated = False
 
