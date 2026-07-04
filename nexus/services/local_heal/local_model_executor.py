@@ -1767,11 +1767,20 @@ class LocalModelExecutor:
                         targeted_files=request.target_file,
                     )
 
-                    # C15-5D:委員會讓 LocalizationPhase 真正讀磁碟（不再 bypass）。
-                    # locked_search 只作為 user_prompt 裡的「參考 span」傳入 retry_prompt，
-                    # 不再預填 localized_files，確保每個候選都拿到磁碟當前版本而非舊版 locked_search。
+                    # C15-5D: 讀取磁碟上的當前檔案內容以預填 _dr_localized_files。
+                    # 這可以繞過委員會小模型的 LocalizationPhase，避免其定位失敗，
+                    # 同時確保 PatchSynthesisPhase 的 Prompt Context 拿到的是磁碟最新狀態，而非舊版 locked_search。
                     _locked_search_for_dr = str(route_ctx.get("locked_search") or "")
-                    _dr_localized_files: list = []  # 空 → LocalizationPhase 讀磁碟
+                    _dr_localized_files: list = []
+                    if request.target_file:
+                        _target_full_path = _Path(request.repo_root) / request.target_file
+                        if _target_full_path.exists():
+                            try:
+                                _current_content = _target_full_path.read_text(encoding="utf-8", errors="replace")
+                                _dr_localized_files = [(request.target_file, _current_content)]
+                            except Exception:
+                                pass
+
 
                     _dr_committee_winner = None
                     _dr_committee_candidate_count = 0
@@ -1822,6 +1831,15 @@ class LocalModelExecutor:
                                 max_tries=1, localized_files=_dr_localized_files,
                             )
                             _cp_result = _cp_pipeline.run(_cp_heal_ctx)
+                             
+                            # C15-5D: 還原根目錄中的目標檔案內容，防止多個候選模型執行時互相污染 / 產生競態條件。
+                            if request.target_file and original_target_path and os.path.exists(original_target_path):
+                                try:
+                                    with open(original_target_path, "w", encoding="utf-8") as f:
+                                        f.write(original_target_content or "")
+                                except Exception:
+                                    pass
+                            
                             _cp_patch = str(getattr(_cp_result, "pre_verification_final_patch", "") or getattr(_cp_result, "final_patch", "") or "")
                             
                             import hashlib as _hashlib
