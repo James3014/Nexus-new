@@ -5948,3 +5948,12 @@ def test_delegated_retry_records_actual_provider_model_name(tmp_path) -> None:
     assert meta.get("delegated_retry_provider_called") is True
     assert "RouteMode" not in meta
     assert "execution_topology_override" not in meta
+
+
+def test_prompt_builder_enforces_contract_for_heterogeneous_small_models() -> None:
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+    prompt_6_7b = PromptBuilder.build_patch_system_prompt("deepseek-coder:6.7b-instruct")
+    prompt_9b = PromptBuilder.build_patch_system_prompt("qwythos:9b")
+    assert "HARD OUTPUT CONTRACT" in prompt_6_7b
+    assert "HARD OUTPUT CONTRACT" in prompt_9b
+

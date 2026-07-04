@@ -17,7 +17,10 @@ class PromptBuilder:
             "    return os.path.join(a, b) if a and b else ''\n>>>>>>> REPLACE\n"
         )
 
-        is_7b = model_name and "7b" in model_name.lower()
+        is_small_local = model_name and any(
+            term in model_name.lower()
+            for term in ["7b", "6.7b", "9b", "10b", "13b", "14b", "3b", "1.5b"]
+        )
         
         # Interleaved mode: add reasoning section for planning + patch in one call
         reasoning_section = ""
@@ -30,7 +33,8 @@ class PromptBuilder:
                 "Then produce the SEARCH/REPLACE patch.\n"
             )
 
-        if is_7b:
+        if is_small_local:
+
             return (
                 "HARD OUTPUT CONTRACT: Your response MUST be exactly one SEARCH/REPLACE block.\n"
                 "Any prose, explanation, markdown, or text outside the block will be REJECTED.\n\n"
