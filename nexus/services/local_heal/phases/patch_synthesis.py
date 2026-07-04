@@ -209,23 +209,36 @@ class PatchSynthesisPhase(IPhase):
         contains_fence = "```" in (response or "")
         contains_diff = ("--- a/" in (response or "") and "+++ b/" in (response or ""))
 
-        # Determine output_class
-        output_class = "UNKNOWN"
-        if not response or not response.strip():
-            output_class = "EMPTY"
-        elif "LLM refused fix" in response or "cannot fulfill" in response.lower() or "sorry" in response.lower():
-            output_class = "REFUSAL"
-        elif contains_search and contains_replace:
-            if contains_fence:
-                output_class = "FENCED_SEARCH_REPLACE"
+        # Determine output_class using robust static classifier
+        output_class = self.parser.classify_format(response)
+
+        # C15-5E Path B: Unified-Diff-to-SSRP Converter
+        conv_status = "none"
+        if output_class == "UNIFIED_DIFF" and response and input_data.localized_files:
+            from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
+            loc_file = input_data.localized_files[0]
+            expected_target = loc_file.path
+            target_path = input_data.repo_dir / expected_target
+            source_text = ""
+            if target_path.exists():
+                try:
+                    source_text = target_path.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+            if not source_text:
+                source_text = loc_file.content
+            
+            converted_ssrp, conv_status, conv_tele = DiffToSSRPConverter.convert(
+                raw_diff=response,
+                expected_target_file=expected_target,
+                source_text=source_text
+            )
+            model_decisions[-1]["conversion_status"] = conv_status
+            if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
+                response = converted_ssrp
             else:
-                output_class = "VALID_SEARCH_REPLACE"
-        elif contains_diff:
-            output_class = "UNIFIED_DIFF"
-        elif contains_search or contains_replace:
-            output_class = "MALFORMED_SEARCH_REPLACE"
-        elif not contains_search and not contains_replace and not contains_diff:
-            output_class = "NATURAL_LANGUAGE"
+                # If conversion failed, overwrite response so parser fails
+                response = ""
 
         # Parser check (run parser to get potential errors)
         parser_error_kind = "none"
@@ -235,6 +248,10 @@ class PatchSynthesisPhase(IPhase):
             if isinstance(intents_or_error, PatchError):
                 parser_error_kind = intents_or_error.kind.name if hasattr(intents_or_error.kind, "name") else str(intents_or_error.kind)
                 parser_error_message = intents_or_error.message
+        elif conv_status != "none":
+            parser_error_kind = "PATCH_FORMAT_INVALID"
+            parser_error_message = f"Unified diff conversion failed: {conv_status}"
+
 
         # Record these in the current model decision
         model_decisions[-1]["output_hash"] = output_hash

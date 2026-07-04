@@ -19,7 +19,7 @@ class PromptBuilder:
 
         is_small_local = model_name and any(
             term in model_name.lower()
-            for term in ["7b", "6.7b", "9b", "10b", "13b", "14b", "3b", "1.5b"]
+            for term in ["7b", "6.7b", "9b", "10b", "13b", "3b", "1.5b"]
         )
         
         # Interleaved mode: add reasoning section for planning + patch in one call

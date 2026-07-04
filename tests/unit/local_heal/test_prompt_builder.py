@@ -117,3 +117,18 @@ def test_no_route_authority_fields_change():
             f"Forbidden route/topology token '{token}' found in "
             f"build_verification_guided_retry_prompt"
         )
+
+
+def test_small_model_prompt_does_not_leak_unified_diff():
+    """Ensure retry prompt instructions for small local models do not contain positive unified diff wording."""
+    prompt = PromptBuilder.build_patch_system_prompt("qwen-7b")
+    # Positive matching check: should not instruct model to output unified diff
+    # The occurrences of unified diff indicators must be only inside forbidden sections
+    assert "FORBIDDEN" in prompt
+    forbidden_idx = prompt.find("FORBIDDEN")
+    unified_diff_idx = prompt.lower().find("unified diff")
+    assert unified_diff_idx > forbidden_idx, "unified diff mentioned outside FORBIDDEN section"
+    assert "--- a/" in prompt
+    minus_a_idx = prompt.find("--- a/")
+    assert minus_a_idx > forbidden_idx, "--- a/ mentioned outside FORBIDDEN section"
+

@@ -1830,6 +1830,7 @@ class LocalModelExecutor:
                                 python_executable=python_executable,
                                 max_tries=1, localized_files=_dr_localized_files,
                             )
+                            _cp_heal_ctx.committee_proposer_model = _dr_cand_resolved
                             _cp_result = _cp_pipeline.run(_cp_heal_ctx)
                              
                             # C15-5D: 還原根目錄中的目標檔案內容，防止多個候選模型執行時互相污染 / 產生競態條件。
@@ -1858,35 +1859,36 @@ class LocalModelExecutor:
                                 None
                             )
                             
-                            _is_unified_diff = False
-                            _has_ssrp_marker = True
+                            from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+
+                            _format_class = "UNKNOWN"
                             if _last_patch_decision:
-                                if _last_patch_decision.get("output_class") == "UNIFIED_DIFF" or _last_patch_decision.get("contains_unified_diff_header"):
-                                    _is_unified_diff = True
-                                if "contains_search_marker" in _last_patch_decision:
-                                    _has_ssrp_marker = bool(_last_patch_decision.get("contains_search_marker"))
-                                else:
-                                    # Fallback for unit tests mocking model_decisions
-                                    _has_ssrp_marker = (
-                                        "SEARCH" in _last_patch_decision.get("output_class", "")
-                                        or "SEARCH" in _last_patch_decision.get("output_excerpt", "")
-                                        or "SEARCH" in _last_patch_decision.get("status", "")
-                                    )
-                            else:
-                                # Fallback if no decisions found (legacy/mock contexts)
-                                _is_unified_diff = (
-                                    _cp_patch.lstrip().startswith("--- a/")
-                                    or _cp_patch.lstrip().startswith("---\n")
-                                )
-                                _has_ssrp_marker = "<<<<<<< SEARCH" in _cp_patch
+                                _format_class = _last_patch_decision.get("output_class", "UNKNOWN")
+                            
+                            # Fallback if unknown or no decision
+                            if _format_class == "UNKNOWN":
+                                _raw_output = ""
+                                if _last_patch_decision:
+                                    _raw_output = _last_patch_decision.get("output_excerpt", "")
+                                if not _raw_output and _cp_patch:
+                                    _raw_output = _cp_patch
+                                _format_class = SolidSearchReplaceProtocol.classify_format(_raw_output)
+
+                            _is_unified_diff = (_format_class == "UNIFIED_DIFF")
+                            _has_ssrp_marker = (_format_class in ("VALID_SEARCH_REPLACE", "FENCED_SEARCH_REPLACE"))
+
+                            _conversion_status = _last_patch_decision.get("conversion_status", "none") if _last_patch_decision else "none"
 
                             if not _cp_patch.strip():
                                 _apply_status = "empty_patch"
                                 _rejection_reason = "patch_empty"
-                            elif _is_unified_diff and not _has_ssrp_marker:
-                                # 接 Nexus SSRP 合約：unified-diff 不是合法委員會輸出
+                            elif _is_unified_diff and _conversion_status == "unified_diff_to_ssrp_converted":
+                                # Converted successfully: allow it to pass to isolated apply!
+                                pass
+                            elif _is_unified_diff:
                                 _apply_status = "format_rejected"
-                                _rejection_reason = "wrong_format:unified_diff"
+                                # If conversion failed, map to specific reject reason from converter
+                                _rejection_reason = _conversion_status if _conversion_status != "none" else "unified_diff_malformed"
                             elif not _has_ssrp_marker:
                                 _apply_status = "format_rejected"
                                 _rejection_reason = "wrong_format:no_ssrp_marker"

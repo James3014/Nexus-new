@@ -38,6 +38,45 @@ class SolidSearchReplaceProtocol:
         lower_output = raw_output.lower()
         return any(kw in lower_output for kw in refusal_keywords) and "<<<<<<< SEARCH" not in raw_output
 
+    @staticmethod
+    def classify_format(raw: str) -> str:
+        if not raw or not raw.strip():
+            return "EMPTY"
+            
+        # Refusal check
+        refusal_keywords = ["i apologize", "i cannot", "i'm sorry", "sorry", "as an ai", "unfortunately", "llm refused fix", "cannot fulfill"]
+        lower_raw = raw.lower()
+        if any(kw in lower_raw for kw in refusal_keywords) and "<<<<<<< SEARCH" not in raw:
+            return "REFUSAL"
+        
+        # Check for unified diff headers or hunks
+        has_diff_headers = ("--- a/" in raw and "+++ b/" in raw) or ("--- " in raw and "+++ " in raw)
+        has_hunk = "@@ " in raw
+        if has_diff_headers or (has_hunk and ("---" in raw or "+++" in raw)):
+            return "UNIFIED_DIFF"
+            
+        # Check for SSRP
+        has_search = "<<<<<<< SEARCH" in raw
+        has_replace = ">>>>>>> REPLACE" in raw
+        if has_search and has_replace:
+            if "```" in raw:
+                return "FENCED_SEARCH_REPLACE"
+            return "VALID_SEARCH_REPLACE"
+            
+        if has_search or has_replace:
+            return "MALFORMED_SEARCH_REPLACE"
+            
+        if "```" in raw:
+            return "MARKDOWN_FENCED"
+            
+        # Code indicators for plain_text vs natural_language
+        code_keywords = ["def ", "import ", "class ", "return ", "const ", "let ", "function ", "var ", "sys.", "os.", "print("]
+        if any(kw in raw for kw in code_keywords) or ("=" in raw and len(raw.splitlines()) > 1):
+            return "PLAIN_TEXT"
+            
+        return "NATURAL_LANGUAGE"
+
+
     def parse(self, raw_output: str, anchor_text: str = None, protocol_mode: str | None = None) -> List[PatchIntent] | PatchError:
         if not raw_output or not raw_output.strip():
             return PatchError(kind=PatchErrorKind.EMPTY_RESPONSE, message="LLM output is empty.")
