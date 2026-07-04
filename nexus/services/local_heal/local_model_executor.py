@@ -1749,14 +1749,24 @@ class LocalModelExecutor:
                     }
                     repro_script = str(route_ctx.get("repro_script", "") or "")
                     python_executable = str(route_ctx.get("python_executable", "") or "")
+                    # C15-5C: inject verifier stdout/stderr into PatchError.message
+                    # so committee models receive concrete failure evidence, not just exit code.
+                    _dr_verifier_stdout = str(raw_meta.get("verifier_stdout_excerpt", "") or "")
+                    _dr_verifier_stderr = str(raw_meta.get("verifier_stderr_excerpt", "") or "")
+                    _dr_patch_error_msg = f"Verifier failed with exit code {raw_meta['verifier_exit_code']}"
+                    if _dr_verifier_stdout:
+                        _dr_patch_error_msg += f"\n### VERIFIER STDOUT\n{_dr_verifier_stdout}"
+                    if _dr_verifier_stderr:
+                        _dr_patch_error_msg += f"\n### VERIFIER STDERR\n{_dr_verifier_stderr}"
                     retry_prompt = SelfCorrector().build_retry_prompt(
                         original_user_prompt=request.problem_statement,
                         error=PatchError(
                             kind=PatchErrorKind.LOGIC_REGRESSION,
-                            message=f"Verifier failed with exit code {raw_meta['verifier_exit_code']}",
+                            message=_dr_patch_error_msg,
                         ),
                         targeted_files=request.target_file,
                     )
+
                     # C15-3V: Pre-populate localized_files with locked_search canonical span.
                     # This bypasses LocalizationPhase (which reads disk + adds line-number annotations)
                     # and ensures PatchSynthesisPhase uses verbatim locked_search as source truth.

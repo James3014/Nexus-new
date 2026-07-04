@@ -5957,3 +5957,153 @@ def test_prompt_builder_enforces_contract_for_heterogeneous_small_models() -> No
     assert "HARD OUTPUT CONTRACT" in prompt_6_7b
     assert "HARD OUTPUT CONTRACT" in prompt_9b
 
+
+def test_delegated_retry_prompt_contains_verifier_evidence_details() -> None:
+    """C15-5C: RED test.
+    SelfCorrector.build_retry_prompt with LOGIC_REGRESSION must propagate
+    verifier stdout/stderr into the prompt when they are embedded in error.message.
+    This validates the fix: local_model_executor.py must concatenate
+    verifier_stdout_excerpt and verifier_stderr_excerpt into PatchError.message
+    so that committee models see the evidence.
+    """
+    from nexus.services.local_heal.corrector import SelfCorrector
+    from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+
+    verifier_stdout = "EVIDENCE: normalize_score may raise ZeroDivisionError when max_val == min_val"
+    verifier_stderr = "Traceback: division by zero"
+
+    # Simulate what local_model_executor.py SHOULD build after the fix:
+    # message includes verifier stdout and stderr details
+    error = PatchError(
+        kind=PatchErrorKind.LOGIC_REGRESSION,
+        message=(
+            f"Verifier failed with exit code 1.\n"
+            f"### VERIFIER STDOUT\n{verifier_stdout}\n"
+            f"### VERIFIER STDERR\n{verifier_stderr}"
+        ),
+    )
+
+    prompt = SelfCorrector().build_retry_prompt(
+        original_user_prompt="Fix normalize_score to handle equal min/max",
+        error=error,
+        targeted_files="toy/math_util.py",
+    )
+
+    # The prompt must contain the verifier evidence so committee models can reason about it
+    assert verifier_stdout in prompt, (
+        f"Expected verifier stdout in retry prompt.\n"
+        f"stdout='{verifier_stdout}'\nprompt (first 500)='{prompt[:500]}'"
+    )
+    assert verifier_stderr in prompt, (
+        f"Expected verifier stderr in retry prompt.\n"
+        f"stderr='{verifier_stderr}'\nprompt (first 500)='{prompt[:500]}'"
+    )
+
+
+def test_delegated_retry_patch_error_message_contains_verifier_evidence(tmp_path) -> None:
+    """C15-5C: RED test (executor integration).
+    After the fix, the PatchError built by local_model_executor.py for delegated
+    retry must include verifier_stdout_excerpt and verifier_stderr_excerpt.
+    We verify this by inspecting what SelfCorrector.build_retry_prompt is called with.
+    """
+    from unittest.mock import patch, MagicMock, call
+    from nexus.services.local_heal.corrector import SelfCorrector
+
+    captured_errors = []
+    original_build = SelfCorrector.build_retry_prompt
+
+    def capturing_build(self, original_user_prompt, error, targeted_files="", structured_packet=None):
+        captured_errors.append(error)
+        return original_build(self, original_user_prompt, error, targeted_files, structured_packet)
+
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    req = make_test_request(
+        "c15-5c-patch-error-wiring",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "exit(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": ["ornith:9b", "qwythos:9b"],
+            },
+        },
+    )
+
+    mock_provider = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.output_text = ""
+    mock_resp.error = ""
+    mock_provider.generate.return_value = mock_resp
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify, \
+         patch.object(SelfCorrector, "build_retry_prompt", capturing_build):
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1,2 +1,2 @@\n def double(x):\n-    return x * 2\n+    return x * 3\n",
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+                "patch_synthesis_model_called": True,
+                "patch_synthesis_output_len": 80,
+            }
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="c15-5c-patch-error-wiring",
+            workspace_path="/tmp/ws",
+            target_file=target_rel,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash="aaaa1111",
+            applied_patch_hash="aaaa1111",
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="c15-5c-patch-error-wiring",
+            verifier_status="fail",
+            exit_code=1,
+            stdout_tail="EVIDENCE: normalize_score may raise ZeroDivisionError when max_val == min_val",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+        LocalModelExecutor.run(req, provider=mock_provider)
+
+    # After the fix, build_retry_prompt must have been called with an error
+    # whose message contains the verifier stdout excerpt
+    assert len(captured_errors) > 0, (
+        "Expected SelfCorrector.build_retry_prompt to be called during delegated retry, "
+        "but it was never called. Check that retry_eligible conditions are met."
+    )
+    verifier_evidence = "EVIDENCE: normalize_score may raise ZeroDivisionError when max_val == min_val"
+    found = any(verifier_evidence in str(e.message) for e in captured_errors)
+    assert found, (
+        f"Expected verifier stdout in PatchError.message for committee retry.\n"
+        f"Captured error messages: {[str(e.message) for e in captured_errors]}"
+    )
+
+
+
