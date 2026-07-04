@@ -492,6 +492,31 @@ class HealOrchestrator:
 
         # 7. Parse SEARCH/REPLACE from response
         parser = SolidSearchReplaceProtocol()
+        
+        # C15-5E Path B: Unified-Diff-to-SSRP Converter for Semantic Retry
+        output_class = parser.classify_format(response)
+        if output_class == "UNIFIED_DIFF":
+            from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
+            expected_target = target_file
+            source_text = ""
+            target_path = ctx.op.repo_dir / expected_target
+            if target_path.exists():
+                try:
+                    source_text = target_path.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+            if not source_text and ctx.op.localized_files:
+                source_text = ctx.op.localized_files[0].content
+            
+            if expected_target and source_text:
+                converted_ssrp, conv_status, conv_tele = DiffToSSRPConverter.convert(
+                    raw_diff=response,
+                    expected_target_file=expected_target,
+                    source_text=source_text
+                )
+                if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
+                    response = converted_ssrp
+
         intents_or_error = parser.parse(response)
         if hasattr(intents_or_error, "kind"):
             parse_kind_name = intents_or_error.kind.name

@@ -228,35 +228,56 @@ class PatchSynthesisPhase(IPhase):
 
         # C15-5E Path B: Unified-Diff-to-SSRP Converter
         conv_status = "none"
-        if output_class == "UNIFIED_DIFF" and response and input_data.localized_files:
-            from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
-            loc_file = input_data.localized_files[0]
-            expected_target = loc_file.path
-            target_path = input_data.repo_dir / expected_target
+        if output_class == "UNIFIED_DIFF" and response:
+            expected_target = ""
             source_text = ""
-            if target_path.exists():
-                try:
-                    source_text = target_path.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    pass
-            if not source_text:
-                source_text = loc_file.content
-            
-            converted_ssrp, conv_status, conv_tele = DiffToSSRPConverter.convert(
-                raw_diff=response,
-                expected_target_file=expected_target,
-                source_text=source_text
-            )
-            model_decisions[-1]["conversion_status"] = conv_status
-            model_decisions[-1]["conversion_source_hash_before"] = conv_tele.get("source_hash_before", "")
-            model_decisions[-1]["conversion_candidate_hash"] = conv_tele.get("candidate_hash", "")
-            model_decisions[-1]["target_file_correct"] = conv_tele.get("target_file_correct", True)
-            model_decisions[-1]["preimage_match_status"] = conv_tele.get("preimage_match_status", "none")
-            
-            if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
-                response = converted_ssrp
+            if input_data.localized_files:
+                loc_file = input_data.localized_files[0]
+                expected_target = loc_file.path
+                target_path = input_data.repo_dir / expected_target
+                if target_path.exists():
+                    try:
+                        source_text = target_path.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        pass
+                if not source_text:
+                    source_text = loc_file.content
             else:
-                # If conversion failed, overwrite response so parser fails
+                import re
+                plus_headers = re.findall(r'^\+\+\+ (?:a/|b/)?([^\n]+)', response, re.MULTILINE)
+                if plus_headers:
+                    parsed_target = plus_headers[0].split('\t')[0].strip()
+                    if parsed_target.startswith("a/") or parsed_target.startswith("b/"):
+                        parsed_target = parsed_target[2:]
+                    expected_target = parsed_target
+                    target_path = input_data.repo_dir / expected_target
+                    if target_path.exists():
+                        try:
+                            source_text = target_path.read_text(encoding="utf-8", errors="replace")
+                        except Exception:
+                            pass
+                            
+            if expected_target and source_text:
+                from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
+                converted_ssrp, conv_status, conv_tele = DiffToSSRPConverter.convert(
+                    raw_diff=response,
+                    expected_target_file=expected_target,
+                    source_text=source_text
+                )
+                model_decisions[-1]["conversion_status"] = conv_status
+                model_decisions[-1]["conversion_source_hash_before"] = conv_tele.get("source_hash_before", "")
+                model_decisions[-1]["conversion_candidate_hash"] = conv_tele.get("candidate_hash", "")
+                model_decisions[-1]["target_file_correct"] = conv_tele.get("target_file_correct", True)
+                model_decisions[-1]["preimage_match_status"] = conv_tele.get("preimage_match_status", "none")
+                
+                if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
+                    response = converted_ssrp
+                else:
+                    # If conversion failed, overwrite response so parser fails
+                    response = ""
+            else:
+                # If cannot resolve target or source text, fail conversion
+                conv_status = "unified_diff_target_mismatch"
                 response = ""
 
         # Parser check (run parser to get potential errors)

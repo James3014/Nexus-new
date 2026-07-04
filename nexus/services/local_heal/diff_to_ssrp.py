@@ -96,20 +96,35 @@ class DiffToSSRPConverter:
                 telemetry["preimage_match_status"] = "missing"
                 return "", "unified_diff_missing_preimage", telemetry
                 
-            if search_block not in source_text:
-                telemetry["preimage_match_status"] = "missing"
-                return "", "unified_diff_missing_preimage", telemetry
+            # 1. Exact match check
+            if search_block in source_text:
+                if source_text.count(search_block) > 1:
+                    telemetry["preimage_match_status"] = "ambiguous"
+                    return "", "unified_diff_ambiguous_preimage", telemetry
+                matched_search_block = search_block
+                overall_match_status = "exact_match"
+            else:
+                # 2. Recovery sequence
+                recovered_block, status = _recover_preimage_unique(search_block, source_text)
+                if status == "ambiguous":
+                    telemetry["preimage_match_status"] = "ambiguous"
+                    return "", "unified_diff_ambiguous_preimage", telemetry
+                elif status == "too_short":
+                    telemetry["preimage_match_status"] = "too_short"
+                    return "", "unified_diff_preimage_too_short", telemetry
+                elif status in ("whitespace_unique_match", "indentation_unique_match"):
+                    matched_search_block = recovered_block
+                    overall_match_status = status
+                else:
+                    telemetry["preimage_match_status"] = "missing"
+                    return "", "unified_diff_missing_preimage", telemetry
                 
-            if source_text.count(search_block) > 1:
-                telemetry["preimage_match_status"] = "ambiguous"
-                return "", "unified_diff_ambiguous_preimage", telemetry
-                
-            ssrp_blocks.append((search_block, replace_block))
+            ssrp_blocks.append((matched_search_block, replace_block))
             
         if not ssrp_blocks:
             return "", "unified_diff_malformed", telemetry
             
-        telemetry["preimage_match_status"] = "exact_match"
+        telemetry["preimage_match_status"] = overall_match_status
             
         # Construct SSRP text
         ssrp_lines = [f"FILE: {expected_target_file}"]
@@ -122,3 +137,59 @@ class DiffToSSRPConverter:
             
         ssrp_text = "\n".join(ssrp_lines)
         return ssrp_text, "unified_diff_to_ssrp_converted", telemetry
+
+
+def _recover_preimage_unique(search_block: str, source_text: str) -> tuple[str | None, str]:
+    """🛡️ Bounded preimage recovery based on whitespace/indentation normalization.
+    Returns (recovered_block, status).
+    """
+    if not search_block or not source_text:
+        return None, "missing"
+
+    search_lines = search_block.splitlines()
+    source_lines = source_text.splitlines()
+    n_search = len(search_lines)
+    n_source = len(source_lines)
+
+    # 1. Whitespace-trimmed line match (rstrip only)
+    norm_search_ws = [line.rstrip() for line in search_lines]
+    
+    ws_matches = []
+    for i in range(n_source - n_search + 1):
+        window = [source_lines[i + j].rstrip() for j in range(n_search)]
+        if window == norm_search_ws:
+            matched_text = "\n".join(source_lines[i : i + n_search])
+            ws_matches.append(matched_text)
+
+    # 2. Indentation-normalized match (strip leading and trailing)
+    norm_search_indent = [line.strip() for line in search_lines]
+    indent_matches = []
+    for i in range(n_source - n_search + 1):
+        window = [source_lines[i + j].strip() for j in range(n_search)]
+        if window == norm_search_indent:
+            matched_text = "\n".join(source_lines[i : i + n_search])
+            indent_matches.append(matched_text)
+
+    # Verify if there is any match at all
+    has_match = (len(ws_matches) > 0 or len(indent_matches) > 0)
+    if not has_match:
+        return None, "missing"
+
+    # Enforce minimum line safety limit for recovery
+    non_empty_search_count = sum(1 for line in search_lines if line.strip())
+    if non_empty_search_count < 2:
+        return None, "too_short"
+
+    # Process whitespace-trimmed match first
+    if len(ws_matches) == 1:
+        return ws_matches[0], "whitespace_unique_match"
+    elif len(ws_matches) > 1:
+        return None, "ambiguous"
+
+    # Process indentation-normalized match
+    if len(indent_matches) == 1:
+        return indent_matches[0], "indentation_unique_match"
+    elif len(indent_matches) > 1:
+        return None, "ambiguous"
+
+    return None, "missing"

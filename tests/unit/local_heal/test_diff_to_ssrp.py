@@ -190,3 +190,131 @@ def test_c15_5h_patch_synthesis_phase_conversion_with_localized_file(tmp_path):
         f"Preimage match status: {last_pd.get('preimage_match_status')}. "
         f"Last decision: {last_pd}"
     )
+
+
+# --- C15-6F & C15-6G: Unified Diff Bounded Preimage Recovery ---
+
+def test_c15_6f_unified_diff_exact_preimage_still_converts():
+    """Test A: Ensure existing exact-match behavior stays green."""
+    source = (
+        "def normalize_score(score, min_val, max_val):\n"
+        "    return (score - min_val) / (max_val - min_val)\n"
+    )
+    diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,4 @@\n"
+        " def normalize_score(score, min_val, max_val):\n"
+        "-    return (score - min_val) / (max_val - min_val)\n"
+        "+    if max_val == min_val:\n"
+        "+        return 0.5\n"
+        "+    return (score - min_val) / (max_val - min_val)\n"
+    )
+    ssrp, status, tele = DiffToSSRPConverter.convert(diff, "toy/math_util.py", source)
+    assert status == "unified_diff_to_ssrp_converted"
+    assert tele["preimage_match_status"] == "exact_match"
+
+
+def test_c15_6g_unified_diff_trailing_whitespace_recovered_unique():
+    """Test B: Show whitespace drift is recovered and converted successfully."""
+    source = (
+        "def normalize_score(score, min_val, max_val):\n"
+        "    return (score - min_val) / (max_val - min_val)\n"
+    )
+    diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,4 @@\n"
+        " def normalize_score(score, min_val, max_val):  \n"
+        "-    return (score - min_val) / (max_val - min_val) \n"
+        "+    if max_val == min_val:\n"
+        "+        return 0.5\n"
+        "+    return (score - min_val) / (max_val - min_val)\n"
+    )
+    ssrp, status, tele = DiffToSSRPConverter.convert(diff, "toy/math_util.py", source)
+    assert status == "unified_diff_to_ssrp_converted"
+    assert tele["preimage_match_status"] == "whitespace_unique_match"
+    # Recovered SEARCH block must use source's exact text
+    assert "<<<<<<< SEARCH\ndef normalize_score(score, min_val, max_val):\n    return (score - min_val) / (max_val - min_val)\n=======" in ssrp
+
+
+def test_c15_6g_unified_diff_indentation_drift_recovered_unique():
+    """Test C: Show indentation drift is recovered and converted successfully."""
+    source = (
+        "def normalize_score(score, min_val, max_val):\n"
+        "    return (score - min_val) / (max_val - min_val)\n"
+    )
+    diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,4 @@\n"
+        "   def normalize_score(score, min_val, max_val):\n"
+        "-        return (score - min_val) / (max_val - min_val)\n"
+        "+    if max_val == min_val:\n"
+        "+        return 0.5\n"
+        "+    return (score - min_val) / (max_val - min_val)\n"
+    )
+    ssrp, status, tele = DiffToSSRPConverter.convert(diff, "toy/math_util.py", source)
+    assert status == "unified_diff_to_ssrp_converted"
+    assert tele["preimage_match_status"] == "indentation_unique_match"
+    # Recovered SEARCH block must use source's exact text
+    assert "<<<<<<< SEARCH\ndef normalize_score(score, min_val, max_val):\n    return (score - min_val) / (max_val - min_val)\n=======" in ssrp
+
+
+def test_c15_6g_unified_diff_too_short_preimage_rejected():
+    """Test D: Extremely short preimages (less than 2 non-empty lines) with drift must reject."""
+    source = (
+        "def double(x):\n"
+        "    return x * 2\n"
+    )
+    # Only 1 non-empty line in search block, and it has whitespace drift
+    diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -2,1 +2,1 @@\n"
+        "-    return x * 2  \n"
+        "+    return x * 4\n"
+    )
+    ssrp, status, tele = DiffToSSRPConverter.convert(diff, "toy/math_util.py", source)
+    assert status == "unified_diff_preimage_too_short"
+    assert tele["preimage_match_status"] == "too_short"
+
+
+def test_c15_6g_unified_diff_ambiguous_recovery_rejected():
+    """Test E: Ambiguous recovery matches must remain rejected."""
+    source = (
+        "def helper(x):\n"
+        "    return x + 1\n"
+        "def helper(x):\n"
+        "    return x + 1\n"
+    )
+    diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def helper(x):  \n"
+        "-    return x + 1 \n"
+        "+    return x + 2\n"
+    )
+    ssrp, status, tele = DiffToSSRPConverter.convert(diff, "toy/math_util.py", source)
+    assert status == "unified_diff_ambiguous_preimage"
+    assert tele["preimage_match_status"] == "ambiguous"
+
+
+def test_c15_6g_unified_diff_semantic_wrong_missing_still_rejected():
+    """Test F: Semantically wrong preimages must remain rejected."""
+    source = (
+        "def normalize_score(score, min_val, max_val):\n"
+        "    return (score - min_val) / (max_val - min_val)\n"
+    )
+    diff = (
+        "--- a/toy/math_util.py\n"
+        "+++ b/toy/math_util.py\n"
+        "@@ -3,2 +3,2 @@\n"
+        " def non_existing_function(y):\n"
+        "-    return y * 2\n"
+        "+    return y * 4\n"
+    )
+    ssrp, status, tele = DiffToSSRPConverter.convert(diff, "toy/math_util.py", source)
+    assert status == "unified_diff_missing_preimage"
+    assert tele["preimage_match_status"] == "missing"
