@@ -517,11 +517,18 @@ def _summarize_committee_retry_truth(
     # Committee no-winner: project classification
     try:
         from nexus.services.local_heal.committee_no_winner_classifier import classify_committee_no_winner
-        classification = classify_committee_no_winner(candidates=candidates, winner=winner)
+        classification = classify_committee_no_winner(
+            candidates=candidates,
+            winner=winner,
+            verifier_evidence_passed=False,
+            verifier_evidence_fields="",
+        )
         projection = {
             "committee_no_winner_failure_class": classification.failure_class,
             "committee_no_winner_classification_available": classification.classification_available,
             "committee_no_winner_evidence": classification.evidence,
+            "committee_no_winner_verifier_evidence_passed": classification.verifier_evidence_passed,
+            "committee_no_winner_verifier_evidence_fields": classification.verifier_evidence_fields,
         }
     except Exception:
         projection = {

@@ -25,11 +25,15 @@ class CommitteeClassification:
     candidate_count: int
     has_winner: bool
     classification_available: bool
+    verifier_evidence_passed: bool = False
+    verifier_evidence_fields: str = ""
 
 
 def classify_committee_no_winner(
     candidates: list[dict[str, Any]] | None = None,
     winner: dict[str, Any] | None = None,
+    verifier_evidence_passed: bool = False,
+    verifier_evidence_fields: str = "",
 ) -> CommitteeClassification:
     """Classify committee_no_winner into bounded failure classes.
 
@@ -47,6 +51,8 @@ def classify_committee_no_winner(
             candidate_count=len(candidates or []),
             has_winner=True,
             classification_available=False,
+            verifier_evidence_passed=verifier_evidence_passed,
+            verifier_evidence_fields=verifier_evidence_fields,
         )
 
     if not candidates:
@@ -56,6 +62,8 @@ def classify_committee_no_winner(
             candidate_count=0,
             has_winner=False,
             classification_available=False,
+            verifier_evidence_passed=verifier_evidence_passed,
+            verifier_evidence_fields=verifier_evidence_fields,
         )
 
     candidate_count = len(candidates)
@@ -70,6 +78,8 @@ def classify_committee_no_winner(
             candidate_count=candidate_count,
             has_winner=False,
             classification_available=True,
+            verifier_evidence_passed=verifier_evidence_passed,
+            verifier_evidence_fields=verifier_evidence_fields,
         )
 
     # Check for FORMAT_CONVERSION_GAP: all candidates have format_rejected status
@@ -83,6 +93,8 @@ def classify_committee_no_winner(
             candidate_count=candidate_count,
             has_winner=False,
             classification_available=True,
+            verifier_evidence_passed=verifier_evidence_passed,
+            verifier_evidence_fields=verifier_evidence_fields,
         )
 
     # Check for CANDIDATE_ISOLATION_GAP: isolation check failed
@@ -95,6 +107,8 @@ def classify_committee_no_winner(
             candidate_count=candidate_count,
             has_winner=False,
             classification_available=True,
+            verifier_evidence_passed=verifier_evidence_passed,
+            verifier_evidence_fields=verifier_evidence_fields,
         )
 
     # Check for VERIFIER_EVIDENCE_GAP: verifier evidence missing
@@ -108,6 +122,8 @@ def classify_committee_no_winner(
             candidate_count=candidate_count,
             has_winner=False,
             classification_available=True,
+            verifier_evidence_passed=verifier_evidence_passed,
+            verifier_evidence_fields=verifier_evidence_fields,
         )
 
     # Insufficient telemetry to classify
@@ -117,4 +133,6 @@ def classify_committee_no_winner(
         candidate_count=candidate_count,
         has_winner=False,
         classification_available=False,
+        verifier_evidence_passed=verifier_evidence_passed,
+        verifier_evidence_fields=verifier_evidence_fields,
     )
