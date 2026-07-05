@@ -65,7 +65,12 @@ class LocalCommitteeCandidateProvider:
         envelopes = []
         anchor_hash = hashlib.sha256(locked_search.encode("utf-8")).hexdigest() if locked_search else ""
         
-        for model_name, role, patch_protocol in committee_models:
+        import re
+        for idx, (model_name, role, patch_protocol) in enumerate(committee_models, 1):
+            # Create a safe model slug (lowercase, replace non-alphanumeric chars with hyphens)
+            safe_model_slug = re.sub(r'[^a-zA-Z0-9]', '-', model_name.lower())
+            safe_model_slug = re.sub(r'-+', '-', safe_model_slug).strip('-')
+
             # 2. Check resource policies
             policy = DEFAULT_POLICIES.get(model_name)
             blocked = False
@@ -78,7 +83,7 @@ class LocalCommitteeCandidateProvider:
             
             if blocked:
                 env = CandidateEnvelope(
-                    candidate_id=f"{task_id}-{role}-blocked",
+                    candidate_id=f"{task_id}-{role}-{idx:02d}-{safe_model_slug}-blocked",
                     task_id=task_id,
                     source="local",
                     model=model_name,
@@ -118,16 +123,19 @@ class LocalCommitteeCandidateProvider:
                     f"Provide the replacement code inside a REPLACE block exactly like this:\n"
                     f"<<<<<<< REPLACE\n"
                     f"[replacement code goes here]\n"
-                    f">>>>>>> REPLACE\n\n"
-                    f"Do not include any other text, explanation, markdown formatting, or markdown code fences outside the REPLACE block.\n"
+                    f"=======\n"
+                    f"```\n\n"
+                    f"Keep comments and formatting intact where possible."
                 )
             else:
                 prompt = (
-                    f"You are generating a unified diff to solve a coding task.\n"
+                    f"You are generating a git diff to solve a coding task.\n"
                     f"Problem: {problem_statement}\n"
                     f"Target File: {target_file}\n"
-                    f"Return only a standard unified diff wrapped in fenced ```diff block.\n"
-                    f"Do not include any prose, explanation, or extra commentary.\n"
+                    f"Target Symbol: {target_symbol}\n"
+                    f"Locked Search Span:\n"
+                    f"```\n{locked_search}\n```\n\n"
+                    f"Provide standard unified diff output."
                 )
                 
             prov_req = LocalModelProviderRequest(
@@ -141,7 +149,7 @@ class LocalCommitteeCandidateProvider:
             
             if prov_resp.error:
                 env = CandidateEnvelope(
-                    candidate_id=f"{task_id}-{role}-error",
+                    candidate_id=f"{task_id}-{role}-{idx:02d}-{safe_model_slug}-error",
                     task_id=task_id,
                     source="local",
                     model=model_name,
@@ -160,7 +168,7 @@ class LocalCommitteeCandidateProvider:
                 patch_text = prov_resp.output_text if role != "judge" else ""
                 patch_hash = hashlib.sha256(patch_text.encode("utf-8")).hexdigest() if patch_text else hashlib.sha256(b"").hexdigest()
                 env = CandidateEnvelope(
-                    candidate_id=f"{task_id}-{role}-success",
+                    candidate_id=f"{task_id}-{role}-{idx:02d}-{safe_model_slug}-success",
                     task_id=task_id,
                     source="local",
                     model=model_name,

@@ -161,3 +161,52 @@ def test_generate_committee_candidates_rejects_judge_model_reused_as_proposer() 
             protocol_mode="anchored_edit",
             route_context=route_context,
         )
+
+
+def test_generate_committee_candidates_four_models_uniqueness() -> None:
+    provider = InjectedLocalModelProvider(lambda req: "output")
+    route_context = {
+        "signal_snapshot": {
+            "proposer_specs": [
+                {"model": "qwen2.5-coder:7b-instruct", "role": "primary"},
+                {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+                {"model": "ornith:9b", "role": "primary"},
+                {"model": "qwythos:9b", "role": "secondary"},
+            ],
+            "judge_model": "qwen2.5-s2t-advisor:3b",
+        }
+    }
+
+    envelopes = LocalCommitteeCandidateProvider.generate_committee_candidates(
+        task_id="task-123",
+        problem_statement="fix hello",
+        target_file="app.py",
+        target_symbol="run",
+        locked_search="print('hello')",
+        evidence_refs=("ref-1",),
+        provider=provider,
+        protocol_mode="anchored_edit",
+        route_context=route_context,
+    )
+
+    assert len(envelopes) == 5
+    
+    # Assert unique candidate IDs
+    candidate_ids = [e.candidate_id for e in envelopes]
+    assert len(set(candidate_ids)) == 5
+    
+    # Assert formatting structure for each candidate_id
+    for env in envelopes:
+        # Check index formatting e.g., 01, 02, 03...
+        assert any(f"-{i:02d}-" in env.candidate_id for i in range(1, 6))
+        
+        # Verify model name is traced within the candidate_id
+        if "qwen2.5-coder:7b-instruct" in env.model:
+            assert "qwen2-5-coder-7b-instruct" in env.candidate_id
+        elif "deepseek-coder:6.7b-instruct" in env.model:
+            assert "deepseek-coder-6-7b-instruct" in env.candidate_id
+        elif "ornith:9b" in env.model:
+            assert "ornith-9b" in env.candidate_id
+        elif "qwythos:9b" in env.model:
+            assert "qwythos-9b" in env.candidate_id
+
