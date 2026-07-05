@@ -750,6 +750,9 @@ def run_benchmark(
                 "delegated_retry_committee_winner_model": adapter_meta.get("delegated_retry_heterogeneous_winner_model", ""),
                 "delegated_retry_committee_candidate_count": int(adapter_meta.get("delegated_retry_heterogeneous_candidate_count", 0)),
                 "delegated_retry_committee_path_used": bool(adapter_meta.get("delegated_retry_committee_path_used", False)),
+                "delegated_retry_proposer_count_expected": int(adapter_meta.get("delegated_retry_proposer_count_expected", 0)),
+                "delegated_retry_judge_count_expected": int(adapter_meta.get("delegated_retry_judge_count_expected", 0)),
+                "delegated_retry_candidate_count_actual": int(adapter_meta.get("delegated_retry_candidate_count_actual", 0)),
 
                 # C15-3Q: Semantic retry diagnostic fields
                 "semantic_retry_client_reused": adapter_meta.get("semantic_retry_client_reused", False),
