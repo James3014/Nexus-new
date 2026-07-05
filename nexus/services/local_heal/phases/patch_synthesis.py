@@ -278,6 +278,7 @@ class PatchSynthesisPhase(IPhase):
             else:
                 # If cannot resolve target or source text, fail conversion
                 conv_status = "unified_diff_target_mismatch"
+                model_decisions[-1]["conversion_status"] = conv_status
                 response = ""
 
         # Parser check (run parser to get potential errors)
@@ -296,6 +297,7 @@ class PatchSynthesisPhase(IPhase):
         # Record these in the current model decision
         model_decisions[-1]["output_hash"] = output_hash
         model_decisions[-1]["output_class"] = output_class
+        model_decisions[-1]["output_excerpt"] = output_excerpt
         model_decisions[-1]["parser_error_kind"] = parser_error_kind
         model_decisions[-1]["parser_error_message"] = parser_error_message
         model_decisions[-1]["contains_search_marker"] = contains_search
