@@ -1878,8 +1878,12 @@ class LocalModelExecutor:
                     print(f"[C15-5C] candidate_models={_dr_candidate_models} len={len(_dr_candidate_models)}", file=_dbg.stderr)
                     if len(_dr_candidate_models) > 1:
                         _dr_committee_candidate_count = len(_dr_candidate_models)
-                        for _dr_cand_model in _dr_candidate_models:
+                        for idx, _dr_cand_model in enumerate(_dr_candidate_models, start=1):
                             _dr_cand_resolved = _dr_cand_model
+                            import re as _re
+                            _safe_model_slug = _re.sub(r'[^a-zA-Z0-9]', '-', _dr_cand_model.lower())
+                            _safe_model_slug = _re.sub(r'-+', '-', _safe_model_slug).strip('-')
+                            _cand_id = f"{request.task_id}#delegated-retry-{idx:02d}-{_safe_model_slug}"
 
                             def _make_committee_provider(_model_name):
                                 def _cp_gen(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
@@ -2023,6 +2027,7 @@ class LocalModelExecutor:
                                         _rejection_reason = "verifier_failed"
                                         
                             _cand_data = {
+                                "candidate_id": _cand_id,
                                 "model": _dr_cand_resolved,
                                 "candidate_model": _dr_cand_resolved,
                                 "raw_output_excerpt": _raw_excerpt,
@@ -2044,6 +2049,7 @@ class LocalModelExecutor:
                                 _cand_data["selected"] = True
                                 _cand_data["rejection_reason"] = ""
                                 _dr_committee_winner = {
+                                    "candidate_id": _cand_id,
                                     "model": _dr_cand_resolved,
                                     "patch": _cp_patch,
                                     "result_ctx": _cp_result,
@@ -2071,7 +2077,7 @@ class LocalModelExecutor:
                             from nexus.engine.autoreason_service import AutoreasonService
                             _ar_candidates = [
                                 {
-                                    "candidate_id": c["model"],
+                                    "candidate_id": c["candidate_id"],
                                     "patch": c["raw_output_excerpt"],
                                     "evidence_refs": list(request.evidence_refs or []),
                                     "model": c["model"],
@@ -2087,12 +2093,14 @@ class LocalModelExecutor:
                             _ar_winner_id = _ar_result.get("winner")
                             _dr_autoreason_invoked = True
                             if _ar_winner_id:
-                                _dr_autoreason_winner_model = _ar_winner_id
+                                _winner_cand = next((c for c in _dr_committee_candidates_list if c["candidate_id"] == _ar_winner_id), None)
+                                _winner_model = _winner_cand["model"] if _winner_cand else _ar_winner_id
+                                _dr_autoreason_winner_model = _winner_model
                                 # 用 Autoreason 選出的 winner 重置 _dr_committee_winner
                                 for c in _dr_committee_candidates_list:
-                                    c["selected"] = (c["model"] == _ar_winner_id)
+                                    c["selected"] = (c["candidate_id"] == _ar_winner_id)
                                 _dr_committee_winner = next(
-                                    (w for w in [_dr_committee_winner] if w and w["model"] == _ar_winner_id),
+                                    (w for w in [_dr_committee_winner] if w and w["model"] == _winner_model),
                                     _dr_committee_winner,  # fallback 保持原值
                                 )
                             raw_meta["delegated_retry_autoreason_winner"] = _dr_autoreason_winner_model
@@ -2100,6 +2108,11 @@ class LocalModelExecutor:
                         except Exception as _ar_err:
                             raw_meta["delegated_retry_autoreason_error"] = str(_ar_err)
                     raw_meta["delegated_retry_autoreason_invoked"] = _dr_autoreason_invoked
+
+                    _dr_judge_model = _dr_signal.get("judge_model") or ""
+                    raw_meta["delegated_retry_proposer_count_expected"] = len(_dr_candidate_models)
+                    raw_meta["delegated_retry_judge_count_expected"] = 1 if _dr_judge_model else 0
+                    raw_meta["delegated_retry_candidate_count_actual"] = _dr_committee_candidate_count
 
                     if _dr_committee_winner is not None:
                         result_ctx = _dr_committee_winner["result_ctx"]

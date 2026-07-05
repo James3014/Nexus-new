@@ -7262,3 +7262,115 @@ def test_local_committee_candidate_truth_table_contains_hash_sources(monkeypatch
     assert "rejection_reason" in p1_info
 
 
+def test_delegated_retry_committee_candidates_have_unique_ids(tmp_path) -> None:
+    """Delegated retry committee telemetry must compile unique candidate IDs and separate proposer vs judge counts."""
+    target_rel = "toy/math_util.py"
+    target_path = tmp_path / "toy" / "math_util.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
+
+    req = make_test_request(
+        "c15-6l-delegated-retry-unique",
+        repo_root=str(tmp_path),
+        target_file=target_rel,
+        execution_topology="localheal_pipeline",
+        route_context={
+            "locked_search": "def double(x):\n    return x * 2",
+            "verifier_command": ["python3", "-c", "exit(1)"],
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "delegated_retry_candidate_models": ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+                "judge_model": "qwen2.5-s2t-advisor:3b",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+            },
+        },
+    )
+
+    from unittest.mock import patch, MagicMock
+
+    mock_provider = MagicMock()
+    mock_provider.generate.return_value = MagicMock(output_text="", error="")
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+        from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+        from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": (
+                    "--- a/toy/math_util.py\n"
+                    "+++ b/toy/math_util.py\n"
+                    "@@ -1,2 +1,2 @@\n"
+                    " def double(x):\n"
+                    "-    return x * 2\n"
+                    "+    return x * 3\n"
+                ),
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+                "patch_synthesis_model_called": True,
+                "patch_synthesis_output_len": 10,
+            }
+        )
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="c15-6l-delegated-retry-unique",
+            workspace_path="/tmp/ws",
+            target_file=target_rel,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash="abc",
+            applied_patch_hash="abc",
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="c15-6l-delegated-retry-unique",
+            verifier_status="fail",
+            exit_code=1,
+            stdout_tail="FAIL",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+        resp = LocalModelExecutor.run(req, provider=mock_provider)
+
+    meta = resp.raw_model_metadata
+    assert meta.get("delegated_retry_committee_path_used") is True
+    
+    candidates_json = meta.get("delegated_retry_committee_candidates_json", "[]")
+    import json
+    candidates = json.loads(candidates_json)
+    assert len(candidates) == 2
+
+    # Assert expected counts are separated
+    assert meta.get("delegated_retry_proposer_count_expected") == 2
+    assert meta.get("delegated_retry_judge_count_expected") == 1
+    assert meta.get("delegated_retry_candidate_count_actual") == 2
+
+    # Assert unique candidate IDs are present
+    candidate_ids = [c.get("candidate_id") for c in candidates]
+    assert all(cid for cid in candidate_ids)
+    assert len(candidate_ids) == len(set(candidate_ids))
+
+    # Assert format class / model slug details
+    qwen_cand = next(c for c in candidates if "qwen" in c["model"])
+    assert "qwen" in qwen_cand["candidate_id"]
+    assert "delegated-retry-01" in qwen_cand["candidate_id"]
+
+    ds_cand = next(c for c in candidates if "deepseek" in c["model"])
+    assert "deepseek" in ds_cand["candidate_id"]
+    assert "delegated-retry-02" in ds_cand["candidate_id"]
+
+
+
