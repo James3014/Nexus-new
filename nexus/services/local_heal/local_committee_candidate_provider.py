@@ -123,9 +123,8 @@ class LocalCommitteeCandidateProvider:
                     f"Provide the replacement code inside a REPLACE block exactly like this:\n"
                     f"<<<<<<< REPLACE\n"
                     f"[replacement code goes here]\n"
-                    f"=======\n"
-                    f"```\n\n"
-                    f"Keep comments and formatting intact where possible."
+                    f">>>>>>> REPLACE\n\n"
+                    f"Do not include any other text, explanation, markdown formatting, or markdown code fences outside the REPLACE block."
                 )
             else:
                 prompt = (
