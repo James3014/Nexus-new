@@ -10,7 +10,7 @@ from nexus.services.local_heal.heterogeneous_candidate_provider import (
 
 
 def test_primary_always_runs():
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(primary_model="test-model:7b")
     candidates = provider.generate_candidates(
         task_id="t1", problem_statement="fix", target_file="a.py",
         target_symbol="f", locked_search="def f(): pass",
@@ -18,11 +18,13 @@ def test_primary_always_runs():
     )
     assert len(candidates) == 1
     assert candidates[0].role == "primary_proposer"
-    assert candidates[0].model_name == "qwen2.5-coder:7b"
+    assert candidates[0].model_name == "test-model:7b"
 
 
 def test_secondary_only_on_disagreement():
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(
+        primary_model="test-model:7b", secondary_model="test-secondary:6b",
+    )
     candidates = provider.generate_candidates(
         task_id="t2", problem_statement="fix", target_file="a.py",
         target_symbol="f", locked_search="def f(): pass",
@@ -35,7 +37,9 @@ def test_secondary_only_on_disagreement():
 
 
 def test_secondary_only_on_high_uncertainty():
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(
+        primary_model="test-model:7b", secondary_model="test-secondary:6b",
+    )
     candidates = provider.generate_candidates(
         task_id="t3", problem_statement="fix", target_file="a.py",
         target_symbol="f", locked_search="def f(): pass",
@@ -46,7 +50,7 @@ def test_secondary_only_on_high_uncertainty():
 
 
 def test_no_secondary_without_trigger():
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(primary_model="test-model:7b")
     candidates = provider.generate_candidates(
         task_id="t4", problem_statement="fix", target_file="a.py",
         target_symbol="f", locked_search="def f(): pass",
@@ -56,7 +60,9 @@ def test_no_secondary_without_trigger():
 
 
 def test_bucket_recorded():
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(
+        primary_model="test-model:7b", secondary_model="test-secondary:6b",
+    )
     candidates = provider.generate_candidates(
         task_id="t5", problem_statement="fix", target_file="a.py",
         target_symbol="f", locked_search="def f(): pass",
@@ -64,3 +70,8 @@ def test_bucket_recorded():
     )
     assert candidates[0].bucket == "default"
     assert candidates[1].bucket == "disagreement"
+
+
+def test_primary_model_required_fail_closed():
+    with pytest.raises(ValueError, match="primary_model is required"):
+        HeterogeneousCandidateProvider()

@@ -29,13 +29,15 @@ class HeterogeneousCandidateProvider:
 
     def __init__(
         self,
-        primary_model: str = "qwen2.5-coder:7b",
-        secondary_model: str = "deepseek-coder:6.7b-instruct",
-        judge_model: str = "qwen2.5:3b",
+        primary_model: str | None = None,
+        secondary_model: str | None = None,
+        judge_model: str | None = None,
     ):
+        if not primary_model:
+            raise ValueError("primary_model is required — must be provided by planner/signal_snapshot")
         self.primary_model = primary_model
-        self.secondary_model = secondary_model
-        self.judge_model = judge_model
+        self.secondary_model = secondary_model or ""
+        self.judge_model = judge_model or ""
 
     def generate_candidates(
         self,

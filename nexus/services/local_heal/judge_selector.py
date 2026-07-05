@@ -21,7 +21,9 @@ class JudgeSelectionReceipt:
 class JudgeSelector:
     """3B judge/selector for candidate ranking and selection."""
 
-    def __init__(self, judge_model: str = "qwen2.5:3b"):
+    def __init__(self, judge_model: str | None = None):
+        if not judge_model:
+            raise ValueError("judge_model is required — must be provided by planner/signal_snapshot")
         self.judge_model = judge_model
 
     def select(
