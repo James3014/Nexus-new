@@ -498,22 +498,38 @@ def compute_patch_lifecycle_state(
 def _summarize_committee_retry_truth(
     candidates: list[dict[str, Any]],
     winner: dict[str, Any] | None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, dict[str, Any]]:
     if not candidates:
-        return False, "provider_not_called"
+        return False, "provider_not_called", {}
     if winner is not None:
-        return True, "success"
+        return True, "success", {}
 
     apply_statuses = {str(c.get("apply_status", "") or "") for c in candidates}
     rejection_reasons = {str(c.get("rejection_reason", "") or "") for c in candidates}
 
     if "format_rejected" in apply_statuses:
-        return True, "committee_candidates_format_rejected"
+        return True, "committee_candidates_format_rejected", {}
     if "empty_patch" in apply_statuses:
-        return True, "committee_candidates_empty_patch"
+        return True, "committee_candidates_empty_patch", {}
     if any(r == "winner_already_selected" for r in rejection_reasons):
-        return True, "committee_winner_selected"
-    return True, "committee_no_winner"
+        return True, "committee_winner_selected", {}
+
+    # Committee no-winner: project classification
+    try:
+        from nexus.services.local_heal.committee_no_winner_classifier import classify_committee_no_winner
+        classification = classify_committee_no_winner(candidates=candidates, winner=winner)
+        projection = {
+            "committee_no_winner_failure_class": classification.failure_class,
+            "committee_no_winner_classification_available": classification.classification_available,
+            "committee_no_winner_evidence": classification.evidence,
+        }
+    except Exception:
+        projection = {
+            "committee_no_winner_failure_class": "UNKNOWN_NEEDS_INSTRUMENTATION",
+            "committee_no_winner_classification_available": False,
+            "committee_no_winner_evidence": "classifier error",
+        }
+    return True, "committee_no_winner", projection
 
 
 def compute_failure_class(
@@ -2271,10 +2287,12 @@ class LocalModelExecutor:
                         raw_meta["failure_class"] = "verification_failed"
 
                     if _dr_committee_candidate_count > 0:
-                        delegated_retry_provider_called, delegated_retry_stage = _summarize_committee_retry_truth(
+                        delegated_retry_provider_called, delegated_retry_stage, committee_no_winner_projection = _summarize_committee_retry_truth(
                             _dr_committee_candidates_list,
                             _dr_committee_winner,
                         )
+                        if committee_no_winner_projection:
+                            raw_meta.update(committee_no_winner_projection)
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
