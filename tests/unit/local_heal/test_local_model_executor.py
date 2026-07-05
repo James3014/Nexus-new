@@ -7353,6 +7353,13 @@ def test_delegated_retry_committee_candidates_have_unique_ids(tmp_path) -> None:
     candidates = json.loads(candidates_json)
     assert len(candidates) == 2
 
+    # Assert provider was called with policy options
+    assert mock_provider.generate.call_count == 6
+    for call in mock_provider.generate.call_args_list:
+        req_arg = call[0][0]
+        assert req_arg.options is not None
+        assert "num_ctx" in req_arg.options
+
     # Assert expected counts are separated
     assert meta.get("delegated_retry_proposer_count_expected") == 2
     assert meta.get("delegated_retry_judge_count_expected") == 1

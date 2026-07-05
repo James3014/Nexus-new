@@ -18,6 +18,7 @@ class LocalModelProviderRequest:
     model_name: str = ""
     timeout_sec: float = 120.0
     max_output_chars: int = 4000
+    options: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,8 @@ class OllamaLocalModelProvider(LocalModelProvider):
             "prompt": request.prompt,
             "stream": False
         }
+        if request.options:
+            payload["options"] = request.options
         
         t0 = time.monotonic()
         try:

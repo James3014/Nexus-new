@@ -997,12 +997,14 @@ class LocalModelExecutor:
                                 _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
                                 if model_name in _MODEL_ALIASES:
                                     model_name = _MODEL_ALIASES[model_name]
+                                _opts = options or kwargs.get("options")
                                 prov_req = LocalModelProviderRequest(
                                     task_id=request.task_id,
                                     prompt=prompt,
                                     evidence_refs=request.evidence_refs,
                                     model_name=model_name,
                                     timeout_sec=provider_timeout_sec,
+                                    options=_opts,
                                 )
                                 prov_resp = provider.generate(prov_req)
                                 return prov_resp.output_text or ""
@@ -1787,12 +1789,14 @@ class LocalModelExecutor:
                         delegated_retry_provider_model_name = model_name or ""
                         
                         try:
+                            _opts = options or kwargs.get("options")
                             prov_req = LocalModelProviderRequest(
                                 task_id=request.task_id,
                                 prompt=prompt,
                                 evidence_refs=request.evidence_refs,
                                 model_name=model_name,
                                 timeout_sec=provider_timeout_sec,
+                                options=_opts,
                             )
                             prov_resp = provider.generate(prov_req)
                             delegated_retry_provider_response_is_none = prov_resp is None
@@ -1896,10 +1900,12 @@ class LocalModelExecutor:
                                     _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
                                     if _resolved_model in _MODEL_ALIASES:
                                         _resolved_model = _MODEL_ALIASES[_resolved_model]
+                                    _opts = options or kwargs.get("options")
                                     prov_req = LocalModelProviderRequest(
                                         task_id=request.task_id, prompt=prompt,
                                         evidence_refs=request.evidence_refs,
                                         model_name=_resolved_model, timeout_sec=provider_timeout_sec,
+                                        options=_opts,
                                     )
                                     prov_resp = provider.generate(prov_req)
                                     out = prov_resp.output_text or ""
@@ -2382,12 +2388,16 @@ class LocalModelExecutor:
             )
 
         model_name = signal_snapshot["executor_model"]
+        _opts = signal_snapshot.get("ollama_options")
+        if not _opts:
+            _opts = {"num_ctx": 8192, "num_predict": 512, "temperature": 0.0}
         prov_req = LocalModelProviderRequest(
             task_id=request.task_id,
             prompt=explicit_prompt,
             evidence_refs=request.evidence_refs,
             model_name=model_name,
             timeout_sec=provider_timeout_sec,
+            options=_opts,
         )
         
         prov_resp = provider.generate(prov_req)
