@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _load_dynamic_learning_policy_safe(project_root: Optional[str]) -> dict:
+    """Fail-safe loader for .nexus/memory/dynamic_learning_policy.json.
+    Returns {promoted_capabilities: [...], penalized_capabilities: [...]}
+    or empty dict on any error.
+    """
+    if not project_root:
+        return {}
+    try:
+        path = Path(project_root) / ".nexus" / "memory" / "dynamic_learning_policy.json"
+        if not path.exists():
+            return {}
+        with open(path, encoding="utf-8") as f:
+            policy = json.load(f)
+        if policy.get("schema_version") != "nexus_dynamic_learning_policy.v1":
+            return {}
+        if policy.get("status") != "PASS":
+            return {}
+        return {
+            "promoted_capabilities": [str(c) for c in policy.get("promoted_capabilities", []) or [] if str(c).strip()],
+            "penalized_capabilities": [str(c) for c in policy.get("penalized_capabilities", []) or [] if str(c).strip()],
+        }
+    except Exception as exc:
+        logger.debug("[CapabilitySelector] dynamic_learning_policy load skipped: %s", exc)
+        return {}
 
 from nexus.core.belief_contracts import CapabilityExecutionPlan, SkillSlot
 from nexus.core.capability_registry import CapabilityRegistry
@@ -15,8 +43,9 @@ from nexus.core.capability_constraints import CapabilityConstraints
 class CapabilitySelector:
     """🧠 The single source of truth decision engine that dynamically generates execution plans."""
 
-    def __init__(self, registry: Optional[CapabilityRegistry] = None) -> None:
+    def __init__(self, registry: Optional[CapabilityRegistry] = None, project_root: Optional[str] = None) -> None:
         self.registry = registry or CapabilityRegistry()
+        self.project_root = project_root
 
     def select_capabilities(
         self,
@@ -95,6 +124,20 @@ class CapabilitySelector:
             # C (Closure)
             required_caps.append("learning_closure")
             required_caps.append("metabolism_resume")
+
+        # 2.5: 套用動態學習政策 (RC-1 Learning Closure)
+        learning_policy = _load_dynamic_learning_policy_safe(self.project_root)
+        if learning_policy:
+            penalized = set(learning_policy.get("penalized_capabilities", []))
+            required_caps = [c for c in required_caps if c not in penalized]
+            promoted = learning_policy.get("promoted_capabilities", [])
+            existing = set(required_caps)
+            for cap in promoted:
+                if cap not in existing and self.registry.get_capability(cap):
+                    required_caps.append(cap)
+                    logger.debug("[CapabilitySelector] learning_policy promoted: %s", cap)
+            if penalized:
+                logger.debug("[CapabilitySelector] learning_policy penalized (removed): %s", penalized & existing)
 
         # 3. 過濾與過濾黑名單規則 (Filter Out Blocked capabilities)
         final_caps: List[str] = []

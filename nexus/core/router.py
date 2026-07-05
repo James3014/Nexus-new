@@ -281,7 +281,7 @@ class SkillsRouter:
 
         # 3. 智慧能力動態選擇 (P5 & P7)
         from nexus.core.capability_selector import CapabilitySelector
-        selector = CapabilitySelector()
+        selector = CapabilitySelector(project_root=self.project_root)
         plan = selector.select_capabilities(signal_set, constraints)
 
         # 4. 驅動執行與收據累積 (P9 - P11)
@@ -317,6 +317,16 @@ class SkillsRouter:
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         except Exception as e:
             logger.debug("[OutcomeMemory] learning_closure writeback failed: %s", e)
+
+        # 5.5: RC-2 抗幻覺閉環：對 claim_gate / artifact_gate 執行 is_claimable 警告檢查
+        for _cr in receipts:
+            if _cr.capability_name in ("claim_gate", "artifact_gate"):
+                if _cr.gate_passed and not _cr.is_claimable:
+                    logger.warning(
+                        "\U0001f6a8 [AntiHallucination] %s gate_passed=True but is_claimable=False: %s",
+                        _cr.capability_name,
+                        _cr.verify_telemetry.reason,
+                    )
 
         # 6. 包裝成果並回傳給舊接口 (向下相容)
         candidates = []
