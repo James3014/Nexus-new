@@ -1143,6 +1143,25 @@ class LocalModelExecutor:
                 is_selected = (decision.selected_candidate_id == c.candidate_id)
                 c_applied_hash = applied_patch_hash if is_selected and isolated_apply_status == "applied" else ""
                 c_hash_match = hash_match if is_selected else False
+                
+                # Determine rejection reason
+                c_rejection_reason = ""
+                if is_selected:
+                    if isolated_verifier_status == "pass":
+                        c_rejection_reason = ""
+                    elif isolated_verifier_status == "fail":
+                        c_rejection_reason = "verifier_failed"
+                    elif isolated_apply_status != "applied":
+                        if not selected_patch.strip():
+                            c_rejection_reason = "patch_empty"
+                        else:
+                            c_rejection_reason = f"apply_failed: {isolated_apply_status}"
+                else:
+                    if isolated_verifier_status == "pass":
+                        c_rejection_reason = "winner_already_selected"
+                    else:
+                        c_rejection_reason = "not_selected"
+
                 committee_candidates_info.append({
                     "candidate_id": c.candidate_id,
                     "role": c.role,
@@ -1150,17 +1169,35 @@ class LocalModelExecutor:
                     "invoked_model": c.model,
                     "provider_called": True,
                     "candidate_hash": c_hash,
+                    "raw_candidate_hash": c_hash,
+                    "selected_candidate_hash": selected_hash if is_selected else "",
                     "applied_patch_hash": c_applied_hash,
                     "selected_candidate_hash_matches_applied": c_hash_match,
+                    "selected_hash_source": "applied_git_diff" if is_selected and hash_match else "none",
+                    "applied_patch_hash_source": applied_patch_hash_source if is_selected else "none",
                     "apply_status": isolated_apply_status if is_selected else "none",
                     "isolated_verifier_result": isolated_verifier_status if is_selected else "none",
                     "selected": is_selected,
                     "winner": is_selected,
+                    "rejection_reason": c_rejection_reason,
                 })
+
+            # Calculate counts and retrieve raw hash for provenance tracking
+            proposers = [c for c in candidates if c.role != "judge"]
+            judges = [c for c in candidates if c.role == "judge"]
+            
+            raw_cand_hash = ""
+            selected_cand_obj = next((c for c in candidates if c.candidate_id == decision.selected_candidate_id), None)
+            if selected_cand_obj:
+                raw_cand_hash = selected_cand_obj.candidate_patch_hash if hasattr(selected_cand_obj, "candidate_patch_hash") else getattr(selected_cand_obj, "patch_sha256", "")
 
             raw_meta = {
                 "execution_topology": "local_committee_only",
                 "committee_candidate_count": len(candidates),
+                "proposer_candidate_count": len(proposers),
+                "judge_count": len(judges),
+                "raw_candidate_hash": raw_cand_hash,
+                "selected_hash_source": "applied_git_diff" if hash_match else "unaligned",
                 "committee_candidates": committee_candidates_info,
                 "selected_candidate_id": decision.selected_candidate_id,
                 "selected_by": decision.selected_by,

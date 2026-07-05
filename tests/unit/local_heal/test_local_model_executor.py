@@ -6897,3 +6897,368 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
     
     # Expose label for the report
     res.raw_model_metadata["C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN"] = True
+
+
+def test_local_committee_records_raw_and_applied_hash_provenance(monkeypatch) -> None:
+    from unittest.mock import patch
+    import hashlib
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+
+    diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    raw_hash = "6643a2598c25505c61410535a298cc053e6f9852790cedc3d539f40e9ee0b1ec"
+    applied_hash = "72c5ffe5af17009b62643f779a058c34b4fa264e09614e388502cfda04b59ce7"
+
+    envelope = CandidateEnvelope(
+        candidate_id="c-1",
+        task_id="comm-hash-prov",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="unified_diff",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=raw_hash,
+        evidence_refs=("ref1",),
+        candidate_patch=diff_text,
+    )
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [envelope],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-1",
+            selected_candidate_patch=diff_text,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="comm-hash-prov",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="comm-hash-prov",
+            workspace_path="/tmp/ws",
+            target_file="file.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=raw_hash,
+            applied_patch_hash=applied_hash,
+            selected_candidate_hash_matches_applied=False,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="comm-hash-prov",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("raw_candidate_hash") == raw_hash
+    assert meta.get("selected_candidate_hash") == applied_hash
+    assert meta.get("selected_hash_source") == "applied_git_diff"
+    assert meta.get("applied_patch_hash_source") == "git_diff"
+    assert meta.get("selected_candidate_hash_matches_applied") is True
+
+
+def test_committee_candidate_count_distinguishes_proposer_and_judge(monkeypatch) -> None:
+    from unittest.mock import patch
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+
+    diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+
+    c_judge = CandidateEnvelope(
+        candidate_id="c-judge",
+        task_id="comm-counts",
+        source="local",
+        model="qwen2.5:3b",
+        role="judge",
+        patch_protocol="none",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash="",
+        evidence_refs=("ref1",),
+        candidate_patch="",
+    )
+    c_p1 = CandidateEnvelope(
+        candidate_id="c-p1",
+        task_id="comm-counts",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="unified_diff",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=diff_hash,
+        evidence_refs=("ref1",),
+        candidate_patch=diff_text,
+    )
+    c_p2 = CandidateEnvelope(
+        candidate_id="c-p2",
+        task_id="comm-counts",
+        source="local",
+        model="deepseek-coder:6.7b",
+        role="secondary_proposer",
+        patch_protocol="unified_diff",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=diff_hash,
+        evidence_refs=("ref1",),
+        candidate_patch=diff_text,
+    )
+
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [c_judge, c_p1, c_p2],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-p2",
+            selected_candidate_patch=diff_text,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="comm-counts",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                    {"model": "deepseek-coder:6.7b", "role": "secondary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="comm-counts",
+            workspace_path="/tmp/ws",
+            target_file="file.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=diff_hash,
+            applied_patch_hash=diff_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="comm-counts",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    assert meta.get("committee_candidate_count") == 3
+    assert meta.get("proposer_candidate_count") == 2
+    assert meta.get("judge_count") == 1
+
+
+def test_local_committee_candidate_truth_table_contains_hash_sources(monkeypatch) -> None:
+    from unittest.mock import patch
+    from nexus.services.local_heal.candidate_decision_adapter import (
+        CandidateDecisionAdapter,
+        CandidateDecisionResponse,
+    )
+    from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.local_committee_candidate_provider import (
+        LocalCommitteeCandidateProvider,
+    )
+
+    diff_text = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    diff_hash = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+
+    c_judge = CandidateEnvelope(
+        candidate_id="c-judge",
+        task_id="comm-truth",
+        source="local",
+        model="qwen2.5:3b",
+        role="judge",
+        patch_protocol="none",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash="",
+        evidence_refs=("ref1",),
+        candidate_patch="",
+    )
+    c_p1 = CandidateEnvelope(
+        candidate_id="c-p1",
+        task_id="comm-truth",
+        source="local",
+        model="qwen2.5-coder:7b",
+        role="primary_proposer",
+        patch_protocol="unified_diff",
+        target_file="file.py",
+        target_symbol="func",
+        source_anchor_hash="hash",
+        candidate_patch_hash=diff_hash,
+        evidence_refs=("ref1",),
+        candidate_patch=diff_text,
+    )
+
+    monkeypatch.setattr(
+        LocalCommitteeCandidateProvider,
+        "generate_committee_candidates",
+        lambda *a, **k: [c_judge, c_p1],
+    )
+    monkeypatch.setattr(
+        CandidateDecisionAdapter,
+        "select_candidate",
+        lambda *a, **k: CandidateDecisionResponse(
+            selected_candidate_id="c-p1",
+            selected_candidate_patch=diff_text,
+            ranking_trace=["ranked"],
+            selected_by="candidate_policy",
+            decision_evidence_refs=("ref1",),
+        ),
+    )
+
+    req = make_test_request(
+        task_id="comm-truth",
+        problem_statement="test",
+        evidence_refs=("ref1",),
+        route_context={
+            "verifier_command": ["python3", "-c", "print(1)"],
+            "signal_snapshot": {
+                "execution_topology": "local_committee_only",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "proposer_specs": [
+                    {"model": "qwen2.5-coder:7b", "role": "primary"},
+                ],
+                "judge_model": "qwen2.5:3b",
+            },
+        },
+    )
+
+    with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
+        mock_apply.return_value = IsolatedApplyReceipt(
+            task_id="comm-truth",
+            workspace_path="/tmp/ws",
+            target_file="file.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=diff_hash,
+            applied_patch_hash=diff_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+        mock_verify.return_value = IsolatedVerifierReceipt(
+            task_id="comm-truth",
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+        resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
+
+    meta = resp.raw_model_metadata
+    candidates_info = meta.get("committee_candidates", [])
+    
+    judge_info = next(c for c in candidates_info if c["role"] == "judge")
+    assert judge_info["raw_candidate_hash"] == ""
+    assert judge_info["selected_candidate_hash"] == ""
+    assert judge_info["selected_hash_source"] == "none"
+    assert judge_info["applied_patch_hash_source"] == "none"
+    assert judge_info["apply_status"] == "none"
+    assert judge_info["isolated_verifier_result"] == "none"
+    assert judge_info["selected"] is False
+    assert judge_info["winner"] is False
+
+    p1_info = next(c for c in candidates_info if c["role"] == "primary_proposer")
+    assert p1_info["raw_candidate_hash"] == diff_hash
+    assert p1_info["selected_candidate_hash"] == diff_hash
+    assert p1_info["applied_patch_hash"] == diff_hash
+    assert p1_info["selected_hash_source"] == "applied_git_diff"
+    assert p1_info["applied_patch_hash_source"] == "git_diff"
+    assert p1_info["apply_status"] == "applied"
+    assert p1_info["isolated_verifier_result"] == "pass"
+    assert p1_info["selected"] is True
+    assert p1_info["winner"] is True
+    assert "rejection_reason" in p1_info
+
+
