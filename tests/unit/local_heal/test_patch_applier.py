@@ -1,3 +1,4 @@
+import os
 import pytest
 from pathlib import Path
 from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
@@ -5,6 +6,12 @@ from nexus.services.local_heal.patcher import Patcher
 from nexus.services.local_heal.patch_applier import PatchApplier
 from nexus.services.local_heal.interface import LocalizedFile
 from nexus.services.local_heal.errors import MatchAuthority
+
+
+@pytest.fixture(autouse=True)
+def _reset_protocol_mode(monkeypatch):
+    monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "standard")
+    yield
 
 
 def test_patch_applier_success(tmp_path):

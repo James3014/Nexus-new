@@ -90,7 +90,7 @@ def test_verification_guided_retry_prompt_preserves_verifier_evidence():
 def test_primary_patch_system_prompt_unchanged():
     """Primary patch system prompt must remain intact (7B and non-7B)."""
     prompt_7b = PromptBuilder.build_patch_system_prompt("qwen-7b")
-    assert "HARD OUTPUT CONTRACT" in prompt_7b
+    assert "OUTPUT: exactly one SEARCH/REPLACE block" in prompt_7b
     assert "SEARCH" in prompt_7b
     assert "REPLACE" in prompt_7b
 
@@ -128,7 +128,4 @@ def test_small_model_prompt_does_not_leak_unified_diff():
     forbidden_idx = prompt.find("FORBIDDEN")
     unified_diff_idx = prompt.lower().find("unified diff")
     assert unified_diff_idx > forbidden_idx, "unified diff mentioned outside FORBIDDEN section"
-    assert "--- a/" in prompt
-    minus_a_idx = prompt.find("--- a/")
-    assert minus_a_idx > forbidden_idx, "--- a/ mentioned outside FORBIDDEN section"
 

@@ -4,7 +4,13 @@ import hashlib
 import pytest
 from pathlib import Path
 
-os.environ["NEXUS_PROTOCOL_MODE"] = "anchored_edit"
+
+@pytest.fixture(autouse=True)
+def _reset_protocol_mode(monkeypatch):
+    monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "anchored_edit")
+    yield
+    monkeypatch.delenv("NEXUS_PROTOCOL_MODE", raising=False)
+
 
 from nexus.services.local_heal.constrained_action_applier import (
     ConstrainedActionApplier, ConstrainedAction, ActionResult,

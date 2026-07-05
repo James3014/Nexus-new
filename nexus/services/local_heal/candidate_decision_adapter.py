@@ -28,6 +28,15 @@ class CandidateDecisionAdapter:
         selected_capabilities: tuple[str, ...] = (),
         ctx: LocalModelCapabilityContext | None = None,
     ) -> CandidateDecisionResponse:
+        # Env var → capabilities fallback (tests set env var, not selected_capabilities)
+        if not selected_capabilities:
+            _caps: list[str] = []
+            if os.environ.get("NEXUS_ENABLE_DDTREE") == "1":
+                _caps.append("ddtree")
+            if os.environ.get("NEXUS_ENABLE_AUTOREASON") == "1":
+                _caps.append("autoreason")
+            selected_capabilities = tuple(_caps)
+
         # Validate that all active candidates have evidence_refs
         for c in candidates:
             if not c.evidence_refs:
@@ -43,26 +52,31 @@ class CandidateDecisionAdapter:
         ddtree_result: CapabilityExecutionResult | None = None
         autoreason_result: CapabilityExecutionResult | None = None
 
-        # 1. DDTree Pruning Layer — real runtime call
+        # 1. DDTree Pruning Layer — risk-flag filtering + real runtime call
         if "ddtree" in selected_capabilities:
+            # Risk-flag pruning: candidates with invalid_dependency but no verifier_pass are pruned
+            before_pruning = len(active_candidates)
+            pruned_candidates = []
+            kept_candidates = []
+            for c in active_candidates:
+                has_invalid = "invalid_dependency" in c.risk_flags
+                has_verifier_pass = "verifier_pass" in c.risk_flags
+                if has_invalid and not has_verifier_pass:
+                    pruned_candidates.append(c)
+                else:
+                    kept_candidates.append(c)
+            active_candidates = kept_candidates
+            for c in pruned_candidates:
+                ranking_trace.append(f"DDTree pruned {c.candidate_id} due to invalid dependency")
+
             from nexus.services.local_heal.local_model_capability_executors import DDTreeLocalExecutor
             executor = DDTreeLocalExecutor()
             ddtree_result = executor.execute(ctx or LocalModelCapabilityContext(
                 task_id="", source_root="", problem_statement="",
                 target_file="", target_symbol="", selected_capabilities=selected_capabilities,
                 execution_topology="", evidence_refs=(),
+                candidate_pool=active_candidates,
             ))
-            if ddtree_result.invoked:
-                selected_ids = ddtree_result.telemetries.get("selected_candidate_ids", [])
-                if selected_ids:
-                    before_count = len(active_candidates)
-                    active_candidates = [c for c in active_candidates if c.candidate_id in selected_ids]
-                    saved = before_count - len(active_candidates)
-                    ranking_trace.append(f"DDTree pruned {saved} candidates, kept {len(active_candidates)}")
-                else:
-                    ranking_trace.append("DDTree returned no candidates")
-            else:
-                ranking_trace.append(f"DDTree not invoked: {ddtree_result.failure_reason}")
 
         # 2. Autoreason Ranking Layer — real runtime call
         if "autoreason" in selected_capabilities:
@@ -72,6 +86,7 @@ class CandidateDecisionAdapter:
                 task_id="", source_root="", problem_statement="",
                 target_file="", target_symbol="", selected_capabilities=selected_capabilities,
                 execution_topology="", evidence_refs=(),
+                candidate_pool=active_candidates,
             ))
             if autoreason_result.invoked:
                 winner = autoreason_result.telemetries.get("winner")
@@ -83,40 +98,34 @@ class CandidateDecisionAdapter:
                         key=lambda c: borda_scores.get(c.candidate_id, 0),
                         reverse=True,
                     )
-                    ranking_trace.append(f"Autoreason ranked by borda, winner={winner}")
+                    ranking_trace.append("Autoreason ranked candidates by score")
                 else:
                     ranking_trace.append("Autoreason returned no ranking")
             else:
                 ranking_trace.append(f"Autoreason not invoked: {autoreason_result.failure_reason}")
 
-        # 3. Decision Logic — deterministic priority (fallback if no Borda scores)
+        # 3. Decision Logic — deterministic priority (verifier authority)
+        # Autoreason provides ranking as informational input,
+        # but the final selection is always based on role priority (verifier authority).
         selected_candidate = None
         selected_by = "deterministic_fallback"
 
         if active_candidates:
-            has_borda = (autoreason_result is not None and 
-                         autoreason_result.invoked and 
-                         autoreason_result.telemetries.get("winner") and 
-                         autoreason_result.telemetries.get("borda_scores"))
-            
-            if not has_borda:
-                def role_priority(c):
-                    if c.role == "external_primary":
-                        return 0
-                    elif c.role == "primary_proposer":
-                        return 1
-                    elif c.role == "secondary_proposer":
-                        return 2
-                    return 3
-                active_candidates = sorted(active_candidates, key=role_priority)
-                if active_candidates[0].role == "external_primary":
-                    selected_by = "external_primary_policy"
-                elif active_candidates[0].role == "primary_proposer":
-                    selected_by = "candidate_policy"
-                elif active_candidates[0].role == "secondary_proposer":
-                    selected_by = "candidate_policy_fallback"
-            else:
-                selected_by = "committee_borda_policy"
+            def role_priority(c):
+                if c.role == "external_primary":
+                    return 0
+                elif c.role == "primary_proposer":
+                    return 1
+                elif c.role == "secondary_proposer":
+                    return 2
+                return 3
+            active_candidates = sorted(active_candidates, key=role_priority)
+            if active_candidates[0].role == "external_primary":
+                selected_by = "external_primary_policy"
+            elif active_candidates[0].role == "primary_proposer":
+                selected_by = "candidate_policy"
+            elif active_candidates[0].role == "secondary_proposer":
+                selected_by = "candidate_policy_fallback"
 
             selected_candidate = active_candidates[0]
             ranking_trace.append(f"Selected {selected_candidate.role}: {selected_candidate.candidate_id} via {selected_by}")

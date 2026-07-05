@@ -36,24 +36,16 @@ class PromptBuilder:
         if is_small_local:
 
             return (
-                "HARD OUTPUT CONTRACT: Your response MUST be exactly one SEARCH/REPLACE block.\n"
-                "Any prose, explanation, markdown, or text outside the block will be REJECTED.\n\n"
-                "VALID EXAMPLE (copy this format exactly):\n"
-                "FILE: src/utils.py\n"
-                "<<<<<<< SEARCH\n    return os.path.join(a, b)\n=======\n"
-                "    return os.path.join(a, b) if a and b else ''\n>>>>>>> REPLACE\n\n"
+                "OUTPUT: exactly one SEARCH/REPLACE block. No prose outside the block.\n\n"
+                "FILE: <path>\n<<<<<<< SEARCH\n<verbatim original>\n=======\n<fixed>\n>>>>>>> REPLACE\n\n"
                 "SOURCE ANCHORING (CRITICAL):\n"
-                "- SEARCH must be copied EXACTLY from the CURRENT SOURCE / LOCKED SEARCH below.\n"
+                "- SEARCH must be copied EXACTLY from the CURRENT SOURCE.\n"
                 "- Do NOT paraphrase, reformat, or reconstruct SEARCH from memory.\n"
                 "- Do NOT change whitespace, indentation, or line breaks in SEARCH.\n"
                 "- REPLACE may change logic. SEARCH may NOT change anything.\n\n"
-                "FORBIDDEN (will be rejected):\n"
-                "- Markdown code fences (```) around SEARCH/REPLACE\n"
-                "- Unified diff format (--- a/ or +++ b/)\n"
-                "- Explanations, prose, or text before/after blocks\n"
-                "- Missing SEARCH or REPLACE markers\n"
-                "- SEARCH that differs from the provided source\n\n"
-                "If unsure, still emit one best SEARCH/REPLACE block using current source."
+                "FORBIDDEN:\n"
+                "- Markdown code fences, unified diff format, explanations before/after blocks\n"
+                "- SEARCH that differs from the provided source"
                 + reasoning_section
                 + few_shot
             )
