@@ -517,7 +517,7 @@ class HealOrchestrator:
                 if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
                     response = converted_ssrp
 
-        intents_or_error = parser.parse(response)
+        intents_or_error = parser.parse(response, anchor_text=canonical_search)
         if hasattr(intents_or_error, "kind"):
             parse_kind_name = intents_or_error.kind.name
             ctx.op.model_decisions[-1]["status"] = parse_kind_name
