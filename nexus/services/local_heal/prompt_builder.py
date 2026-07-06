@@ -276,6 +276,8 @@ class PromptBuilder:
             f"### CANONICAL SEARCH SPAN (LOCKED — DO NOT MODIFY)\n"
             f"The following SEARCH block has been verified to match the source file exactly.\n"
             f"You MUST use this EXACT SEARCH block — do NOT change it.\n"
+            f"Do NOT add line numbers, do NOT paraphrase, do NOT reconstruct from memory.\n"
+            f"Copy the EXACT text below into your SEARCH block:\n"
             f"```\n{canonical_search_span}\n```\n\n"
         )
 
