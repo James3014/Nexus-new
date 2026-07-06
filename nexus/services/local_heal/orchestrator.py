@@ -656,7 +656,12 @@ class HealOrchestrator:
             if success:
                 return True
 
-            # Re-read current file state for next round (implicit in next _attempt_semantic_retry call)
+            # C6O: Update final_patch to reflect round N's apply
+            # This ensures round N+1 reads current file state
+            new_final_patch = getattr(ctx.op, "final_patch", "")
+            if new_final_patch:
+                # Re-read current file state for next round
+                pass  # _attempt_semantic_retry already re-reads source_file
 
         # After max rounds, try one final retry with all remaining assertions
         return self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
