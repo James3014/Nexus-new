@@ -284,7 +284,11 @@ class PromptBuilder:
             f"1. Keep the SEARCH block above EXACTLY as-is.\n"
             f"2. Analyze the verification failure to understand what the code actually needs.\n"
             f"3. Write ONLY a new REPLACE block that fixes the root cause.\n"
-            f"4. Output format:\n"
+            f"4. The REPLACE block MUST address ALL failing assertions from the verifier.\n"
+            f"5. Do NOT output a no-op patch (SEARCH and REPLACE must differ).\n"
+            f"6. Do NOT clamp INPUT values — clamp the OUTPUT of the computation.\n"
+            f"7. Handle edge cases like division by zero (max_val == min_val).\n"
+            f"8. Output format:\n"
             f"FILE: {target_file}\n"
             f"<<<<<<< SEARCH\n"
             f"<copy the canonical SEARCH span above exactly>\n"
@@ -296,6 +300,7 @@ class PromptBuilder:
             f"- Unified diff format (--- a/ or +++ b/)\n"
             f"- Explanations, prose, or text before/after blocks\n"
             f"- Missing SEARCH or REPLACE markers\n"
+            f"- No-op patches where SEARCH equals REPLACE\n"
         )
 
         reminder = (
