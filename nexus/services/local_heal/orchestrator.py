@@ -363,13 +363,34 @@ class HealOrchestrator:
                 f"{vfk}|{vse[:200]}|{vserr[:200]}|{vec}|{vch}".encode()
             ).hexdigest()[:16]
         
-        # C6P: Extract memory lessons for active guidance
+        # C6P/C6S: Extract memory lesson CONTENT for active guidance
+        # Fixed: now reads actual lesson summaries, not just IDs
         memory_lessons_text = ""
         memory_trace = getattr(ctx.op, "_memory_influence_trace", None)
         if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
-            memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
-            if hasattr(memory_trace, "memory_evidence_ids") and memory_trace.memory_evidence_ids:
-                memory_lessons_text += f"\nEvidence IDs: {', '.join(memory_trace.memory_evidence_ids[:3])}"
+            # Read lesson content from memory store using IDs
+            try:
+                from nexus.services.local_heal.memory_retrieval_adapter import NexusCompositeLessonStore
+                store = NexusCompositeLessonStore()
+                lessons = store.query(
+                    query_text=" ".join(memory_trace.selected_ids[:3]),
+                    limit=3,
+                )
+                if lessons:
+                    lesson_parts = []
+                    for lesson in lessons:
+                        summary = lesson.get("summary", "")
+                        classification = lesson.get("classification", "")
+                        lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
+                        if summary:
+                            lesson_parts.append(
+                                f"Lesson [{classification}] (id: {lesson_id}):\n  - {summary}"
+                            )
+                    if lesson_parts:
+                        memory_lessons_text = "\n".join(lesson_parts)
+            except Exception:
+                # Fallback: use IDs if content read fails
+                memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
 
         semantic_prompt = PromptBuilder.build_verification_guided_retry_prompt(
             original_user_prompt=original_prompt,
