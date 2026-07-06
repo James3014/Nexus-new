@@ -1,4 +1,4 @@
-"""C6AJ: CapabilityPromptInjector tests."""
+"""C6AJ/C6AL/C6AS: CapabilityPromptInjector tests."""
 from __future__ import annotations
 
 import pytest
@@ -9,6 +9,8 @@ from nexus.services.local_heal.prompt_sections import (
     MemoryLessonsSection,
     CodeIntelSection,
     ResearchPatternsSection,
+    XRaySection,
+    SandboxSection,
 )
 
 
@@ -152,3 +154,62 @@ def test_prompt_builder_accepts_sections():
     )
     assert "VERIFIER EVIDENCE" in result
     assert "test" in result
+
+
+def test_xray_section_render():
+    """XRaySection renders with symbols and risks."""
+    section = XRaySection(
+        symbols=["func_a", "ClassB"],
+        crossings=[{"source": "app.py", "target": "utils.py"}],
+        risks=["app.py: EXTREME COUPLING"],
+    )
+    rendered = section.render()
+    assert "XRAY DEPENDENCY ANALYSIS" in rendered
+    assert "func_a" in rendered
+    assert "ClassB" in rendered
+    assert "EXTREME COUPLING" in rendered
+
+
+def test_xray_section_empty():
+    """XRaySection renders empty when no data."""
+    section = XRaySection()
+    assert section.render() == ""
+
+
+def test_sandbox_section_render_passed():
+    """SandboxSection renders passed status."""
+    section = SandboxSection(sandbox_passed=True, sandbox_output="All tests passed")
+    rendered = section.render()
+    assert "SANDBOX EXECUTION RESULT" in rendered
+    assert "PASSED" in rendered
+    assert "All tests passed" in rendered
+
+
+def test_sandbox_section_render_failed():
+    """SandboxSection renders failed status with error."""
+    section = SandboxSection(sandbox_passed=False, sandbox_error="AssertionError")
+    rendered = section.render()
+    assert "FAILED" in rendered
+    assert "AssertionError" in rendered
+
+
+def test_sandbox_section_empty():
+    """SandboxSection renders empty when no data."""
+    section = SandboxSection()
+    assert section.render() == ""
+
+
+def test_xray_in_injector():
+    """XRaySection works in CapabilityPromptInjector."""
+    injector = CapabilityPromptInjector()
+    injector.add(XRaySection(symbols=["func_a"], risks=["high coupling"]))
+    rendered = injector.render_all()
+    assert "XRAY DEPENDENCY ANALYSIS" in rendered
+
+
+def test_sandbox_in_injector():
+    """SandboxSection works in CapabilityPromptInjector."""
+    injector = CapabilityPromptInjector()
+    injector.add(SandboxSection(sandbox_passed=True, sandbox_output="ok"))
+    rendered = injector.render_all()
+    assert "SANDBOX EXECUTION RESULT" in rendered

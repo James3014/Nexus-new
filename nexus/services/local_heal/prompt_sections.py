@@ -144,3 +144,53 @@ class CapabilityPromptInjector:
     def clear(self) -> None:
         """Clear all sections."""
         self._sections.clear()
+
+
+@dataclass
+class XRaySection:
+    """XRayObserver findings section for dependency awareness."""
+    name: str = "xray"
+    priority: int = 22
+    symbols: list[str] | None = None
+    crossings: list[dict[str, str]] | None = None
+    risks: list[str] | None = None
+
+    def render(self) -> str:
+        if not self.symbols and not self.crossings and not self.risks:
+            return ""
+        parts = ["\n### XRAY DEPENDENCY ANALYSIS"]
+        if self.symbols:
+            parts.append(f"Symbols found: {', '.join(self.symbols[:10])}")
+        if self.crossings:
+            high_coupling = [c for c in self.crossings if c.get("source", "").endswith(".py")]
+            if high_coupling:
+                pairs = [f"{c.get('source', '?')} → {c.get('target', '?')}" for c in high_coupling[:5]]
+                parts.append(f"Key crossings: {'; '.join(pairs)}")
+        if self.risks:
+            parts.append("Risks:")
+            for risk in self.risks[:3]:
+                parts.append(f"  - {risk}")
+        parts.append("Consider these dependencies when writing your REPLACE block.\n")
+        return "\n".join(parts) + "\n"
+
+
+@dataclass
+class SandboxSection:
+    """SandboxRunner isolated execution results section."""
+    name: str = "sandbox"
+    priority: int = 35
+    sandbox_passed: bool = False
+    sandbox_output: str = ""
+    sandbox_error: str = ""
+
+    def render(self) -> str:
+        if not self.sandbox_output and not self.sandbox_error:
+            return ""
+        parts = ["\n### SANDBOX EXECUTION RESULT"]
+        parts.append(f"Status: {'PASSED' if self.sandbox_passed else 'FAILED'}")
+        if self.sandbox_output:
+            parts.append(f"Output:\n```\n{self.sandbox_output[:500]}\n```")
+        if self.sandbox_error:
+            parts.append(f"Error:\n```\n{self.sandbox_error[:500]}\n```")
+        parts.append("Use this feedback to improve your REPLACE block.\n")
+        return "\n".join(parts) + "\n"
