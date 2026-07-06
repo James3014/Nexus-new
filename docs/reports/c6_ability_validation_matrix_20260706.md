@@ -5,49 +5,75 @@
 
 ## 10-Combination Result Table
 
+### Current-Proof (6 combinations)
+
 | Combination | Models | Duration | Winner Selected | Apply Status | Verifier | Solved | Failure Class |
 |---|---|---|---|---|---|---|---|
-| A1 | qwen+deepseek | — | ✅ Historical | ✅ Historical | ❌ Historical | ❌ | verification_failed |
 | A2 | qwen+ornith | 94s | ✅ | applied | fail | ❌ | no_blocks_found |
 | A3 | qwen+qwythos | 250s | ✅ | applied | fail | ❌ | verification_failed |
 | A4 | deepseek+ornith | 266s | ✅ | applied | fail | ❌ | verification_failed |
 | A5 | deepseek+qwythos | 134s | ✅ | applied | fail | ❌ | verification_failed |
-| A6 | ornith+qwythos | — | ✅ Historical | ✅ Historical | ❌ Historical | ❌ | verification_failed |
-| B1 | qwen+deepseek+ornith | — | ✅ Historical | ✅ Historical | ❌ Historical | ❌ | verification_failed |
 | B2 | qwen+deepseek+qwythos | 312s | ✅ | applied | fail | ❌ | verification_failed |
 | B3 | qwen+ornith+qwythos | 343s | ✅ | applied | fail | ❌ | verification_failed |
-| B4 | deepseek+ornith+qwythos | — | ✅ Historical | ✅ Historical | ❌ Historical | ❌ | verification_failed |
+
+### Historical Reference (4 combinations)
+
+| Combination | Models | Duration | Winner Selected | Apply Status | Verifier | Solved | Failure Class |
+|---|---|---|---|---|---|---|---|
+| A1 | qwen+deepseek | — | ✅ | applied | fail | ❌ | verification_failed |
+| A6 | ornith+qwythos | — | ✅ | applied | fail | ❌ | verification_failed |
+| B1 | qwen+deepseek+ornith | — | ✅ | applied | fail | ❌ | verification_failed |
+| B4 | deepseek+ornith+qwythos | — | ✅ | applied | fail | ❌ | verification_failed |
 
 ## Grouped Failure Taxonomy
 
+### Current-Proof Only
+
 | Failure Class | Count | Combinations |
 |---|---|---|
-| `verification_failed` | 8 | A1, A3, A4, A5, A6, B1, B2, B3, B4 |
+| `verification_failed` | 5 | A3, A4, A5, B2, B3 |
 | `no_blocks_found` | 1 | A2 |
-| **Total** | **9** | (A2 is unique) |
+| **Total** | **6** | |
+
+### Historical Reference
+
+| Failure Class | Count | Combinations |
+|---|---|---|
+| `verification_failed` | 4 | A1, A6, B1, B4 |
+| **Total** | **4** | |
+
+### Combined
+
+| Failure Class | Current | Historical | Total |
+|---|---|---|---|
+| `verification_failed` | 5 | 4 | 9 |
+| `no_blocks_found` | 1 | 0 | 1 |
+| **Total** | **6** | **4** | **10** |
 
 ## Evidence Layers
 
-| Layer | Status | Definition |
-|---|---|---|
-| **Wiring proof** | ✅ 10/10 | All combinations run through Nexus main path |
-| **Telemetry proof** | ✅ 10/10 | All combinations emit committee trace fields |
-| **Solve-lane proof** | ❌ 0/10 | No combination solved the bounded task |
-| **Capability comparison readiness** | ✅ READY | All combinations have comparable telemetry |
+| Layer | Current | Historical | Total |
+|---|---|---|---|
+| **Wiring proof** | ✅ 6/6 | ✅ 4/4 | ✅ 10/10 |
+| **Telemetry proof** | ✅ 6/6 | ✅ 4/4 | ✅ 10/10 |
+| **Solve proof** | ❌ 0/6 | ❌ 0/4 | ❌ 0/10 |
 
-## Solve-Lane Outcome Summary
+## Solve-Lane Outcome Summary (Current-Proof)
 
-- **Solved**: 0/10 combinations
-- **Winner selected**: 10/10 combinations (committee always picks a winner)
-- **Apply succeeded**: 9/10 combinations (A2 had no_blocks_found)
-- **Verifier failed**: 10/10 combinations (all patches failed verification)
+- **Solved**: 0/6 combinations
+- **Winner selected**: 6/6 combinations (committee always picks a winner)
+- **Apply succeeded**: 6/6 combinations
+- **Verifier failed**: 6/6 combinations (all patches failed verification)
 
-## Key Observations
+## Failure Classification
 
-1. **Committee always selects a winner**: No `committee_no_winner` in any combination.
-2. **Patches apply but fail verification**: The model output format is correct (SEARCH/REPLACE blocks), but the patch content doesn't fix the actual bug.
-3. **Failure is in model capability, not wiring**: The pipeline works correctly — models generate patches, patches apply, verifier runs. The issue is model quality.
-4. **A2 is unique**: `no_blocks_found` suggests qwen+ornith combination had format issues on first attempt.
+| Category | Definition | Count | Example |
+|---|---|---|---|
+| **Unsolved semantic failure** | apply success + verifier fail | 9 | A1, A3-A6, B1-B4 |
+| **Format failure** | no valid SEARCH/REPLACE blocks | 1 | A2 |
+| **Wiring failure** | route/pipeline not connected | 0 | — |
+
+**Key distinction**: `apply_success + verifier_fail` is an **unsolved semantic failure** (model capability issue), NOT a wiring failure. The pipeline works correctly — the model's patch doesn't fix the bug.
 
 ## Statements
 
