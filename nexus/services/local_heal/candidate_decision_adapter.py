@@ -104,13 +104,26 @@ class CandidateDecisionAdapter:
             else:
                 ranking_trace.append(f"Autoreason not invoked: {autoreason_result.failure_reason}")
 
-        # 3. Decision Logic — deterministic priority (verifier authority)
-        # Autoreason provides ranking as informational input,
-        # but the final selection is always based on role priority (verifier authority).
+        # 3. Decision Logic — C6V: output-quality-aware selection
+        # Prefer candidates with better output class (VALID_SEARCH_REPLACE > FENCED > UNIFIED_DIFF)
+        # Fallback to role priority when output classes are equal
         selected_candidate = None
         selected_by = "deterministic_fallback"
 
         if active_candidates:
+            def output_quality_priority(c):
+                # Higher priority = better output quality
+                oc = getattr(c, "output_class", "")
+                if oc == "VALID_SEARCH_REPLACE":
+                    return 0
+                elif oc == "FENCED_SEARCH_REPLACE":
+                    return 1
+                elif oc == "SEARCH_REPLACE_SEARCH_MISMATCH":
+                    return 2
+                elif oc == "UNIFIED_DIFF":
+                    return 3
+                return 4  # Unknown or empty
+
             def role_priority(c):
                 if c.role == "external_primary":
                     return 0
@@ -119,7 +132,13 @@ class CandidateDecisionAdapter:
                 elif c.role == "secondary_proposer":
                     return 2
                 return 3
-            active_candidates = sorted(active_candidates, key=role_priority)
+
+            # Sort by output quality first, then role priority as tiebreaker
+            active_candidates = sorted(
+                active_candidates,
+                key=lambda c: (output_quality_priority(c), role_priority(c))
+            )
+
             if active_candidates[0].role == "external_primary":
                 selected_by = "external_primary_policy"
             elif active_candidates[0].role == "primary_proposer":

@@ -22,6 +22,7 @@ class CandidateEnvelope:
     allowed_actions: tuple[str, ...] = field(default_factory=tuple)
     forbidden_actions: tuple[str, ...] = field(default_factory=tuple)
     candidate_patch: str = ""
+    output_class: str = ""  # C6V: VALID_SEARCH_REPLACE, FENCED_SEARCH_REPLACE, etc.
     schema: str = "nexus.candidate_envelope.v1"
 
     def __post_init__(self) -> None:
