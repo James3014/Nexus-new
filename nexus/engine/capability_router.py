@@ -43,7 +43,7 @@ class CapabilityRouter:
         route_features: dict[str, Any],
         target_file: str | None = None,
     ) -> CapabilityDecision:
-        from nexus.engine.capability_selector import CapabilitySelector
+        from nexus.engine.capability_planner import CapabilityPlanner
 
         task_lower = f"{task_desc} {task_type}".lower()
         seed_selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
@@ -54,7 +54,7 @@ class CapabilityRouter:
         seed_acceleration = ["ddtree"] if candidate_factory_ready and estimated_candidates >= 3 else []
         if any(str(target_file or "").startswith(prefix) for prefix in self.HIGH_RISK_PREFIXES):
             route_features = {**route_features, "has_hard_signal": True}
-        plan = CapabilitySelector().select(
+        plan = CapabilityPlanner().plan(
             task_desc=task_desc,
             task_type=task_type,
             route={
