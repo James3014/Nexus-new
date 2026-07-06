@@ -50,23 +50,43 @@ def get_canonical_search_span(
     """
     telemetry = {"strategies_tried": []}
 
-    # Strategy a: locked previous canonical SEARCH
-    if locked_search and locked_search.strip():
-        telemetry["strategies_tried"].append({"strategy": "locked_search", "found": True})
-        return CanonicalSpanResult(
-            span=locked_search.strip(),
-            source="locked_search",
-            confidence=1.0,
-            telemetry=telemetry,
-        )
+    # Read current source text for verification
+    current_source_text = ""
+    if source_file and source_file.exists():
+        try:
+            current_source_text = source_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
 
-    # Strategy b: unified diff extraction
+    # Strategy a: locked previous canonical SEARCH (verify against current source)
+    if locked_search and locked_search.strip():
+        locked_span = locked_search.strip()
+        # C6J: Verify locked_search matches current source before using it
+        if current_source_text and locked_span not in current_source_text:
+            telemetry["strategies_tried"].append({"strategy": "locked_search", "found": False, "reason": "stale_locked_search"})
+            # Don't return — fall through to other strategies
+        else:
+            telemetry["strategies_tried"].append({"strategy": "locked_search", "found": True})
+            return CanonicalSpanResult(
+                span=locked_span,
+                source="locked_search",
+                confidence=1.0,
+                telemetry=telemetry,
+            )
+
+    # Strategy b: unified diff extraction (verify against current source)
     diff_result = _extract_from_unified_diff(patch_diff)
     if diff_result:
-        telemetry["strategies_tried"].append({"strategy": "unified_diff", "found": True})
-        diff_result.telemetry = telemetry
-        return diff_result
-    telemetry["strategies_tried"].append({"strategy": "unified_diff", "found": False})
+        # C6J: Verify diff-extracted span matches current source
+        if current_source_text and diff_result.span.strip() not in current_source_text:
+            telemetry["strategies_tried"].append({"strategy": "unified_diff", "found": False, "reason": "span_not_in_current_source"})
+            # Don't return — fall through to AST boundary
+        else:
+            telemetry["strategies_tried"].append({"strategy": "unified_diff", "found": True})
+            diff_result.telemetry = telemetry
+            return diff_result
+    else:
+        telemetry["strategies_tried"].append({"strategy": "unified_diff", "found": False})
 
     # Strategy c: AST symbol boundary fallback
     if source_file and source_file.exists() and target_symbol:
