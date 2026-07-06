@@ -2160,9 +2160,10 @@ class LocalModelExecutor:
                                 final_patch = ""
                                 failure_reason = "committee_no_winner"
                                 model_decisions = []
-                                _orchestrator_verifier_evidence_passed = False
-                                _orchestrator_verifier_evidence_fields = ""
-                                _orchestrator_retry_prompt_evidence_hash = ""
+                                # C6E: Carry over verifier evidence from first pass
+                                _orchestrator_verifier_evidence_passed = bool(raw_meta.get("verifier_failure_evidence_available", False))
+                                _orchestrator_verifier_evidence_fields = str(raw_meta.get("verifier_failure_kind", "")) + "|" + str(raw_meta.get("verifier_stdout_excerpt", ""))[:50]
+                                _orchestrator_retry_prompt_evidence_hash = str(raw_meta.get("verifier_command_hash", ""))
                                 _semantic_retry_telemetry = {}
                             result_ctx = DummyResultCtx()
                         else:
