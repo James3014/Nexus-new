@@ -12,6 +12,7 @@ from nexus.committee.controller import CommitteeControllerV263
 
 COMMITTEE_ROUTE_SCHEMA = "nexus.local_heal.committee_trace.v1"
 COMMITTEE_ROUTE_POLICY = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
+DIAGNOSIS_COMMITTEE_SCHEMA = "nexus.local_heal.committee_diagnosis.v1"
 # DEPRECATED: Legacy test fixture constant. Do not use in runtime decision paths.
 COMMITTEE_PROPOSER_SPECS = (
     {"model": "qwen2.5-coder:7b-instruct", "role": "primary"},
@@ -25,6 +26,22 @@ def _compute_patch_hash(patch_text: str) -> str:
     return hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else ""
 
 
+def _borda_select_diagnosis(diagnoses: list[dict]) -> dict | None:
+    """Borda voting: aggregate confidence-weighted rankings, select best."""
+    if not diagnoses:
+        return None
+    if len(diagnoses) == 1:
+        return diagnoses[0]
+    scored = []
+    for d in diagnoses:
+        conf = float(d.get("confidence", 0.5))
+        rank = int(d.get("rank", len(diagnoses)))
+        borda_score = conf * (len(diagnoses) - rank + 1)
+        scored.append((borda_score, d))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[0][1]
+
+
 class CommitteeOrchestrator(HealOrchestrator):
     """
     🤝 Nexus Committee Orchestrator (v26)
@@ -34,6 +51,87 @@ class CommitteeOrchestrator(HealOrchestrator):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.k = None
+
+    def _invoke_diagnosis_model(self, model: str, ctx: HealContext) -> dict:
+        """Invoke a single model for diagnosis. Returns diagnosis dict."""
+        from nexus.services.local_heal.llm_client import OllamaLLMClient
+        from nexus.engine.local_model_policy import LocalModelPolicy
+
+        decision = LocalModelPolicy.select_model(
+            task_type="swe_repair", phase="diagnosis",
+            context={"reasoning_mode": getattr(ctx.op, "reasoning_mode", "INTUITIVE")},
+        )
+        timeout = decision.get("timeout_seconds", 120)
+        options = decision.get("ollama_options")
+
+        prompt = (
+            f"Analyze this bug and provide:\n"
+            f"1. root_cause: One concise root cause hypothesis\n"
+            f"2. confidence: Your confidence (0.0-1.0)\n"
+            f"3. evidence: Key evidence supporting your diagnosis\n\n"
+            f"Problem: {str(ctx.op.problem_statement)[:2000]}\n"
+            f"Repro: {str(getattr(ctx.op, 'repro_evidence', ''))[:1000]}"
+        )
+        try:
+            client = OllamaLLMClient()
+            response = client.generate(
+                system_prompt="You are a diagnostic assistant. Analyze bugs concisely.",
+                user_prompt=prompt,
+                model=model,
+                timeout=timeout,
+                options=options,
+            )
+            import json, re
+            match = re.search(r"\{.*\}", response or "", re.DOTALL)
+            if match:
+                parsed = json.loads(match.group(0))
+                return {
+                    "root_cause": str(parsed.get("root_cause", ""))[:500],
+                    "confidence": float(parsed.get("confidence", 0.5)),
+                    "evidence": str(parsed.get("evidence", ""))[:500],
+                    "model": model,
+                    "status": "success",
+                }
+            return {"root_cause": (response or "")[:500], "confidence": 0.3, "evidence": "", "model": model, "status": "parsed_failed"}
+        except Exception as e:
+            return {"root_cause": "", "confidence": 0.0, "evidence": "", "model": model, "status": f"error:{type(e).__name__}"}
+
+    def diagnose_with_committee(self, ctx: HealContext) -> dict | None:
+        """C6AD: Multi-model independent diagnosis → Borda selects best."""
+        route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
+        signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        if not signal_snapshot.get("diagnosis_committee_enabled", False):
+            return None
+
+        diagnosis_models = signal_snapshot.get("diagnosis_models", [])
+        if len(diagnosis_models) < 2:
+            logger.warning("diagnosis_committee_enabled but <2 diagnosis_models, skipping")
+            return None
+
+        logger.info(f"--- [DIAGNOSIS COMMITTEE] k={len(diagnosis_models)} ---")
+        diagnoses = []
+        for model in diagnosis_models:
+            result = self._invoke_diagnosis_model(model, ctx)
+            diagnoses.append(result)
+            logger.info(f"  📋 Diagnosis from {model}: status={result.get('status', 'unknown')} conf={result.get('confidence', 0)}")
+
+        selected = _borda_select_diagnosis(diagnoses)
+        if not selected or selected.get("status", "").startswith("error"):
+            logger.warning("  ❌ All diagnosis models failed, falling back to single-model plan")
+            return None
+
+        ctx.op._committee_diagnosis = selected
+        ctx.op._committee_diagnosis_trace = {
+            "schema": DIAGNOSIS_COMMITTEE_SCHEMA,
+            "enabled": True,
+            "candidate_count": len(diagnoses),
+            "diagnoses": diagnoses,
+            "selected_model": selected.get("model", ""),
+            "selected_root_cause": selected.get("root_cause", ""),
+            "selected_confidence": selected.get("confidence", 0.0),
+        }
+        logger.info(f"  🏆 Diagnosis selected: model={selected['model']} conf={selected.get('confidence', 0)}")
+        return selected
 
     def run(self, ctx: HealContext) -> HealContext:
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
@@ -68,6 +166,9 @@ class CommitteeOrchestrator(HealOrchestrator):
             
         self.k = len(proposer_specs)
         logger.info(f"--- [COMMITTEE MODE ACTIVE] k={self.k} ---")
+        
+        # C6AD: D-phase committee diagnosis (before linear phases)
+        self.diagnose_with_committee(ctx)
         
         # Phase 1-3: Linear Execution
         for phase in [self.repro_phase, self.plan_phase, self.loc_phase]:

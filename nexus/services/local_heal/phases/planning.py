@@ -94,6 +94,18 @@ class PlanningPhase(IPhase):
 
         ctx.op.plan = self._apply_route_hints(ctx, output.plan)
 
+        # C6AD: Override repair_strategy with committee-selected diagnosis if available
+        committee_diagnosis = getattr(ctx.op, "_committee_diagnosis", None)
+        if committee_diagnosis and committee_diagnosis.get("root_cause"):
+            existing_plan = ctx.op.plan
+            ctx.op.plan = RepairPlan(
+                search_symbols=existing_plan.search_symbols,
+                repair_strategy=f"COMMITTEE_DIAGNOSIS: {committee_diagnosis['root_cause']}",
+                violated_invariants=existing_plan.violated_invariants,
+            )
+            ctx.op.model_decisions[-1]["committee_diagnosis_model"] = committee_diagnosis.get("model", "")
+            ctx.op.model_decisions[-1]["committee_diagnosis_confidence"] = committee_diagnosis.get("confidence", 0.0)
+
         # 5. Gemma sidecar (shadow lane, no authority)
         ctx._sidecar_enabled = SidecarConfig.SIDECAR_ENABLED
         ctx._sidecar_model = SidecarConfig.SIDECAR_MODEL if SidecarConfig.SIDECAR_ENABLED else ""
