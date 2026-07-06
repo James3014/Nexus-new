@@ -189,6 +189,16 @@ class SelfCorrector:
                 f"Please output a corrected and verified SEARCH/REPLACE block now."
             )
 
+        # C6H: Add FORBIDDEN section to enforce SEARCH/REPLACE format
+        forbidden_section = (
+            "\n\nFORBIDDEN (will be rejected):\n"
+            "- Markdown code fences (```) around SEARCH/REPLACE\n"
+            "- Unified diff format (--- a/ or +++ b/)\n"
+            "- Explanations, prose, or text before/after blocks\n"
+            "- Missing SEARCH or REPLACE markers\n"
+        )
+        retry_instruction += forbidden_section
+
         import os
         protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
         if protocol_mode == "control_plane_search_model_replace":
