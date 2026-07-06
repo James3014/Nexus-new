@@ -223,5 +223,28 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
             "training_export_allowed": False,
             "internal_only": True,
         }
+    
+    # C6AH: Writeback to OutcomeMemoryManager for dynamic_learning_policy.json
+    try:
+        from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
+        task_id = str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown")
+        classification = classify_learning_outcome(ctx)
+        OutcomeMemoryManager.save_episode_and_tune_sync(
+            EpisodeOutcomeRecord.from_task(
+                task_id=task_id,
+                task_type="local_heal",
+                task_desc=str(getattr(op, "problem_statement", "") or "")[:500],
+                solved=bool(getattr(op, "solve_eligible", False) and not getattr(op, "failure_reason", "")),
+                wall_duration_sec=float(getattr(op, "wall_time_sec", 0.0) or 0.0),
+                total_tokens_used=0,
+                trust_mismatch=False,
+                receipts=[],
+            ),
+            project_root=Path(__file__).resolve().parents[3],
+        )
+        result["outcome_memory_writeback"] = "ok"
+    except Exception:
+        result["outcome_memory_writeback"] = "skipped"
+    
     setattr(op, "_learning_closure", result)
     return result
