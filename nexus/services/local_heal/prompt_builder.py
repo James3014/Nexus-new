@@ -245,11 +245,13 @@ class PromptBuilder:
         verifier_stderr_excerpt: str = "",
         verifier_exit_code: int | str = "",
         verifier_command_hash: str = "",
+        memory_lessons: str = "",
     ) -> str:
         """T1.5: Build a verification-guided retry prompt.
 
         Fixes the canonical SEARCH span and asks the LLM to rewrite only REPLACE
         based on verifier failure output.
+        C6P: Accepts optional memory_lessons for active guidance.
         """
         header = (
             "\n\n⚠️ [NEXUS SEMANTIC RETRY — VERIFICATION-GUIDED]\n"
@@ -320,4 +322,13 @@ class PromptBuilder:
             "Fix only the REPLACE block.\n"
         )
 
-        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + assertion_checklist + reminder
+        # C6P: Add memory lessons for active guidance
+        memory_section = ""
+        if memory_lessons:
+            memory_section = (
+                "\n### RELEVANT MEMORY LESSONS (from prior repairs)\n"
+                f"{memory_lessons}\n"
+                "Consider these lessons when fixing the code.\n"
+            )
+
+        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + assertion_checklist + memory_section + reminder

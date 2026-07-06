@@ -363,6 +363,14 @@ class HealOrchestrator:
                 f"{vfk}|{vse[:200]}|{vserr[:200]}|{vec}|{vch}".encode()
             ).hexdigest()[:16]
         
+        # C6P: Extract memory lessons for active guidance
+        memory_lessons_text = ""
+        memory_trace = getattr(ctx.op, "_memory_influence_trace", None)
+        if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
+            memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
+            if hasattr(memory_trace, "memory_evidence_ids") and memory_trace.memory_evidence_ids:
+                memory_lessons_text += f"\nEvidence IDs: {', '.join(memory_trace.memory_evidence_ids[:3])}"
+
         semantic_prompt = PromptBuilder.build_verification_guided_retry_prompt(
             original_user_prompt=original_prompt,
             verification_report=verifier_failure,
@@ -374,6 +382,7 @@ class HealOrchestrator:
             verifier_stderr_excerpt=vserr,
             verifier_exit_code=vec,
             verifier_command_hash=vch,
+            memory_lessons=memory_lessons_text,
         )
         
         # C15-3C: Record pass-through metadata
@@ -780,7 +789,7 @@ class HealOrchestrator:
                 task_id=getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""),
             )
             adapter.last_metadata["evidence_packet_included"] = False
-            adapter.last_metadata["prompt_included"] = False
+            adapter.last_metadata["prompt_included"] = True  # C6P: memory lessons now active in retry
             adapter.last_metadata["verifier_status"] = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
             ctx.op._memory_influence_trace = build_memory_trace_from_adapter(adapter.last_metadata)
         except Exception as exc:
