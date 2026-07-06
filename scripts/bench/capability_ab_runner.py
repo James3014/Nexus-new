@@ -13546,6 +13546,15 @@ def _finalize_with_nexus_row(
     )
     _apply_data_contract_audit(finalized)
 
+    # C6AF: Preserve delegated_retry_candidate_models from original row signal_snapshot
+    _orig_signal = row.get("signal_snapshot", {}) if isinstance(row, dict) else {}
+    _finalized_signal = finalized.get("signal_snapshot", {}) if isinstance(finalized, dict) else {}
+    if isinstance(_orig_signal, dict) and isinstance(_finalized_signal, dict):
+        _dr_models = _orig_signal.get("delegated_retry_candidate_models", [])
+        if _dr_models and "delegated_retry_candidate_models" not in _finalized_signal:
+            _finalized_signal["delegated_retry_candidate_models"] = _dr_models
+            finalized["signal_snapshot"] = _finalized_signal
+
     # Phase H2: Deterministic Local Assist Before Cloud, Trace Mode
     import os
     enable_assist_trace = os.environ.get("NEXUS_HYBRID_LOCAL_ASSIST_TRACE", "").strip().lower() in {"1", "true", "yes"}
