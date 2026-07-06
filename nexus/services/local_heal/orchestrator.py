@@ -258,7 +258,7 @@ class HealOrchestrator:
         )
 
         if semantic_retry_eligible:
-            semantic_ok = self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
+            semantic_ok = self._attempt_multipass_semantic_retry(ctx, evaluation_report, failure_class)
             if semantic_ok:
                 # Semantic retry succeeded — skip normal retry loop
                 return
@@ -625,6 +625,41 @@ class HealOrchestrator:
             return True
 
         return False
+
+    def _attempt_multipass_semantic_retry(
+        self, ctx: HealContext, evaluation_report: str, failure_class: str,
+        max_rounds: int = 2
+    ) -> bool:
+        """C6N: Multipass semantic retry with assertion decomposition.
+
+        Each round focuses on one highest-priority unmet assertion.
+        Each round re-anchors from current file state.
+        Each round preserves replace-only contract.
+        Max rounds bounded to prevent infinite loops.
+        """
+        for round_num in range(max_rounds):
+            # Extract current unmet assertions from verifier output
+            verifier_stdout = getattr(ctx.op, "verifier_stdout_excerpt", "")
+            assertions = [line.strip() for line in verifier_stdout.split("\n")
+                         if line.strip().startswith("EVIDENCE:")]
+
+            if not assertions:
+                # No more assertions to fix — try single retry with full checklist
+                return self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
+
+            # Focus on first (highest priority) unmet assertion
+            focused_assertion = assertions[0]
+            focused_report = f"FOCUS: Fix this specific issue:\n{focused_assertion}\n\nFull verifier output:\n{evaluation_report}"
+
+            # Run single retry with focused assertion
+            success = self._attempt_semantic_retry(ctx, focused_report, failure_class)
+            if success:
+                return True
+
+            # Re-read current file state for next round (implicit in next _attempt_semantic_retry call)
+
+        # After max rounds, try one final retry with all remaining assertions
+        return self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
 
     def _extract_target_symbol(self, ctx: HealContext) -> str:
         """Extract target symbol from plan or localized files."""
