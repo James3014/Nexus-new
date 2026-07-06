@@ -272,6 +272,16 @@ class PromptBuilder:
             verifier_command_hash=verifier_command_hash,
         )
 
+        # C6K: Extract and list each failing assertion as explicit checklist
+        assertion_checklist = ""
+        if verifier_stdout_excerpt:
+            assertions = [line.strip() for line in verifier_stdout_excerpt.split("\n") if line.strip().startswith("EVIDENCE:")]
+            if assertions:
+                assertion_checklist = "\n### FAILING ASSERTIONS (your REPLACE must address ALL of these)\n"
+                for i, assertion in enumerate(assertions, 1):
+                    assertion_checklist += f"{i}. {assertion}\n"
+                assertion_checklist += "\nYour REPLACE block MUST fix ALL listed conditions above.\n"
+
         search_lock = (
             f"### CANONICAL SEARCH SPAN (LOCKED — DO NOT MODIFY)\n"
             f"The following SEARCH block has been verified to match the source file exactly.\n"
@@ -311,4 +321,4 @@ class PromptBuilder:
             "Fix only the REPLACE block.\n"
         )
 
-        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + reminder
+        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + assertion_checklist + reminder
