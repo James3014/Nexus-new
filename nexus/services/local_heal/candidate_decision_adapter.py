@@ -104,39 +104,57 @@ class CandidateDecisionAdapter:
             else:
                 ranking_trace.append(f"Autoreason not invoked: {autoreason_result.failure_reason}")
 
-        # 3. Decision Logic — C6V: output-quality-aware selection
-        # Prefer candidates with better output class (VALID_SEARCH_REPLACE > FENCED > UNIFIED_DIFF)
-        # Fallback to role priority when output classes are equal
+        # 3. Decision Logic — C6Y: truth-aware selection
+        # Priority: verifier_result > semantic_retry > apply+hash > output_class > role
         selected_candidate = None
         selected_by = "deterministic_fallback"
 
+        def role_priority(c):
+            if c.role == "external_primary":
+                return 0
+            elif c.role == "primary_proposer":
+                return 1
+            elif c.role == "secondary_proposer":
+                return 2
+            return 3
+
         if active_candidates:
-            def output_quality_priority(c):
-                # Higher priority = better output quality
+            def truth_priority(c):
+                vr = getattr(c, "verifier_result", "")
+                sro = getattr(c, "semantic_retry_outcome", "")
+                hs = getattr(c, "hash_match", False)
+                ap = getattr(c, "apply_success", False)
                 oc = getattr(c, "output_class", "")
+
+                # Level 1: verifier_result=pass is strongest
+                if vr == "pass":
+                    return (0, 0, 0, 0, 0)
+                # Level 2: semantic_retry success
+                if sro == "success":
+                    return (1, 0, 0, 0, 0)
+                # Level 3: apply_success + hash_match
+                if ap and hs:
+                    return (2, 0, 0, 0, 0)
+                if ap:
+                    return (2, 1, 0, 0, 0)
+                if hs:
+                    return (2, 2, 0, 0, 0)
+                # Level 4: output_class quality
                 if oc == "VALID_SEARCH_REPLACE":
-                    return 0
+                    return (3, 0, 0, 0, 0)
                 elif oc == "FENCED_SEARCH_REPLACE":
-                    return 1
+                    return (3, 1, 0, 0)
                 elif oc == "SEARCH_REPLACE_SEARCH_MISMATCH":
-                    return 2
+                    return (3, 2, 0, 0)
                 elif oc == "UNIFIED_DIFF":
-                    return 3
-                return 4  # Unknown or empty
+                    return (3, 3, 0, 0)
+                # Level 5: role priority fallback
+                return (4, role_priority(c), 0, 0, 0)
 
-            def role_priority(c):
-                if c.role == "external_primary":
-                    return 0
-                elif c.role == "primary_proposer":
-                    return 1
-                elif c.role == "secondary_proposer":
-                    return 2
-                return 3
-
-            # Sort by output quality first, then role priority as tiebreaker
+            # Sort by truth priority (lower = better)
             active_candidates = sorted(
                 active_candidates,
-                key=lambda c: (output_quality_priority(c), role_priority(c))
+                key=truth_priority
             )
 
             if active_candidates[0].role == "external_primary":

@@ -23,6 +23,11 @@ class CandidateEnvelope:
     forbidden_actions: tuple[str, ...] = field(default_factory=tuple)
     candidate_patch: str = ""
     output_class: str = ""  # C6V: VALID_SEARCH_REPLACE, FENCED_SEARCH_REPLACE, etc.
+    # C6Y: Truth signals for selection rerank
+    apply_success: bool = False
+    verifier_result: str = ""  # "pass" | "fail" | ""
+    hash_match: bool = False
+    semantic_retry_outcome: str = ""  # "success" | "fail" | ""
     schema: str = "nexus.candidate_envelope.v1"
 
     def __post_init__(self) -> None:

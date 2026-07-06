@@ -9,7 +9,9 @@ from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.candidate_decision_adapter import CandidateDecisionAdapter
 
 
-def _make_candidate(cid, role, risk_flags=(), candidate_patch="patch"):
+def _make_candidate(cid, role, risk_flags=(), candidate_patch="patch",
+                    output_class="", apply_success=False, verifier_result="",
+                    hash_match=False, semantic_retry_outcome=""):
     return CandidateEnvelope(
         candidate_id=cid, task_id="task-1", source="local",
         model="test-model", role=role, patch_protocol="anchored_edit",
@@ -17,22 +19,27 @@ def _make_candidate(cid, role, risk_flags=(), candidate_patch="patch"):
         source_anchor_hash="hash-1", candidate_patch_hash="hash-2",
         evidence_refs=("ref-1",), risk_flags=risk_flags,
         candidate_patch=candidate_patch,
+        output_class=output_class,
+        apply_success=apply_success,
+        verifier_result=verifier_result,
+        hash_match=hash_match,
+        semantic_retry_outcome=semantic_retry_outcome,
     )
 
 
 def test_selection_not_pure_role_priority_when_stronger_truth_exists():
     """Selection should not be pure role priority when output_class differs."""
     # primary has FENCED_SEARCH_REPLACE (worse format)
-    c_primary = _make_candidate("c1", "primary_proposer")
-    c_primary_output_class = "FENCED_SEARCH_REPLACE"
+    c_primary = _make_candidate("c1", "primary_proposer",
+                                output_class="FENCED_SEARCH_REPLACE")
 
     # secondary has VALID_SEARCH_REPLACE (better format)
-    c_secondary = _make_candidate("c2", "secondary_proposer")
-    c_secondary_output_class = "VALID_SEARCH_REPLACE"
+    c_secondary = _make_candidate("c2", "secondary_proposer",
+                                  output_class="VALID_SEARCH_REPLACE")
 
-    # Current behavior: primary always wins regardless of output_class
     resp = CandidateDecisionAdapter.select_candidate([c_secondary, c_primary])
-    assert resp.selected_candidate_id == "c1"  # primary wins by role
+    # Secondary should win because it has better output_class
+    assert resp.selected_candidate_id == "c2"
 
 
 def test_existing_selection_falls_back_to_role_priority():
