@@ -290,7 +290,12 @@ class PromptBuilder:
             f"<copy the canonical SEARCH span above exactly>\n"
             f"=======\n"
             f"<your fix here>\n"
-            f">>>>>>> REPLACE\n"
+            f">>>>>>> REPLACE\n\n"
+            f"FORBIDDEN (will be rejected):\n"
+            f"- Markdown code fences (```) around SEARCH/REPLACE\n"
+            f"- Unified diff format (--- a/ or +++ b/)\n"
+            f"- Explanations, prose, or text before/after blocks\n"
+            f"- Missing SEARCH or REPLACE markers\n"
         )
 
         reminder = (
