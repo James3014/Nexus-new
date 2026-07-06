@@ -392,6 +392,27 @@ class HealOrchestrator:
                 # Fallback: use IDs if content read fails
                 memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
 
+        # C6AA: Extract bounded CodeIntel context for retry
+        codeintel_context = self._extract_codeintel_context_for_retry(ctx)
+        codeintel_hash = hashlib.sha256(codeintel_context.encode()).hexdigest()[:16] if codeintel_context else ""
+
+        # C6AB: Retrieve successful repair patterns for retry guidance
+        research_patterns_text = ""
+        research_pattern_count = 0
+        research_hash = ""
+        try:
+            from nexus.services.local_heal.repair_pattern_retrieval import (
+                retrieve_successful_repair_patterns,
+                format_research_patterns_for_prompt,
+            )
+            _jsonl_path = Path(__file__).resolve().parents[3] / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+            _patterns = retrieve_successful_repair_patterns(str(_jsonl_path), limit=5)
+            research_pattern_count = len(_patterns)
+            research_patterns_text = format_research_patterns_for_prompt(_patterns)
+            research_hash = hashlib.sha256(research_patterns_text.encode()).hexdigest()[:16] if research_patterns_text else ""
+        except Exception:
+            pass
+
         semantic_prompt = PromptBuilder.build_verification_guided_retry_prompt(
             original_user_prompt=original_prompt,
             verification_report=verifier_failure,
@@ -404,6 +425,8 @@ class HealOrchestrator:
             verifier_exit_code=vec,
             verifier_command_hash=vch,
             memory_lessons=memory_lessons_text,
+            codeintel_context=codeintel_context,
+            research_patterns=research_patterns_text,
         )
         
         # C15-3C: Record pass-through metadata
@@ -468,6 +491,19 @@ class HealOrchestrator:
                 "semantic_retry_prompt_len": semantic_prompt_len,
                 "semantic_retry_prompt_hash": semantic_prompt_hash,
                 "semantic_retry_prompt_has_verifier_evidence": semantic_prompt_has_verifier_evidence,
+                "semantic_retry_codeintel_injected": bool(codeintel_context),
+                "semantic_retry_codeintel_nodes": len(codeintel_context.splitlines()) if codeintel_context else 0,
+                "semantic_retry_codeintel_edges": 0,
+                "semantic_retry_codeintel_context_hash": codeintel_hash,
+                "semantic_retry_research_patterns_injected": bool(research_patterns_text),
+                "semantic_retry_research_pattern_count": research_pattern_count,
+                "semantic_retry_research_context_hash": research_hash,
+                "semantic_retry_belief_used": bool(getattr(ctx.op, "_belief_budget_used", False)),
+                "semantic_retry_belief_before": getattr(ctx.op, "_belief_before", None),
+                "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get("belief_after") if hasattr(ctx.op, "_belief_trace") and isinstance(getattr(ctx.op, "_belief_trace", None), dict) else None,
+                "semantic_retry_uncertainty_delta": getattr(ctx.op, "_uncertainty_delta", None),
+                "semantic_retry_budget_policy": str(getattr(ctx.op, "_budget_policy", "")),
+                "semantic_retry_budget_rounds": int(getattr(ctx.op, "_budget_rounds", 2)),
                 "semantic_retry_raw_response_len": raw_resp_len,
                 "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500] if raw_resp_excerpt else "",
                 "semantic_retry_response_is_none": resp_is_none,
@@ -648,6 +684,19 @@ class HealOrchestrator:
             "semantic_retry_prompt_len": semantic_prompt_len,
             "semantic_retry_prompt_hash": semantic_prompt_hash,
             "semantic_retry_prompt_has_verifier_evidence": semantic_prompt_has_verifier_evidence,
+            "semantic_retry_codeintel_injected": bool(codeintel_context),
+            "semantic_retry_codeintel_nodes": len(codeintel_context.splitlines()) if codeintel_context else 0,
+            "semantic_retry_codeintel_edges": 0,
+            "semantic_retry_codeintel_context_hash": codeintel_hash,
+            "semantic_retry_research_patterns_injected": bool(research_patterns_text),
+            "semantic_retry_research_pattern_count": research_pattern_count,
+            "semantic_retry_research_context_hash": research_hash,
+            "semantic_retry_belief_used": bool(getattr(ctx.op, "_belief_budget_used", False)),
+            "semantic_retry_belief_before": getattr(ctx.op, "_belief_before", None),
+            "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get("belief_after") if hasattr(ctx.op, "_belief_trace") and isinstance(getattr(ctx.op, "_belief_trace", None), dict) else None,
+            "semantic_retry_uncertainty_delta": getattr(ctx.op, "_uncertainty_delta", None),
+            "semantic_retry_budget_policy": str(getattr(ctx.op, "_budget_policy", "")),
+            "semantic_retry_budget_rounds": int(getattr(ctx.op, "_budget_rounds", 2)),
             "semantic_retry_raw_response_len": raw_resp_len,
             "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500] if raw_resp_excerpt else "",
             "semantic_retry_response_is_none": resp_is_none,
@@ -678,6 +727,42 @@ class HealOrchestrator:
         Each round preserves replace-only contract.
         Max rounds bounded to prevent infinite loops.
         """
+        # C6AC: Resolve budget from belief confidence instead of hardcoded constant
+        belief_before = None
+        uncertainty_delta = None
+        budget_policy = "moderate"
+        try:
+            from nexus.services.local_heal.belief_budget_policy import resolve_retry_budget
+            from nexus.core.belief_engine import BeliefEngine
+
+            task_id = str(getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""))
+            assumption = f"local_heal:{task_id}:repair_outcome"
+            engine = BeliefEngine()
+            belief_before = float(engine.get_confidence(task_id, assumption))
+
+            # Compute uncertainty_delta from existing trace or fresh calculation
+            existing_trace = getattr(ctx.op, "_belief_trace", None)
+            if isinstance(existing_trace, dict):
+                uncertainty_delta = existing_trace.get("uncertainty_delta")
+            if uncertainty_delta is None:
+                uncertainty_delta = 0.0
+
+            budget = resolve_retry_budget(
+                belief_before=belief_before,
+                uncertainty_delta=uncertainty_delta,
+            )
+            max_rounds = budget["max_rounds"]
+            budget_policy = budget["policy"]
+        except Exception:
+            pass
+
+        # Store budget info on ctx.op for telemetry in _attempt_semantic_retry
+        ctx.op._belief_budget_used = belief_before is not None
+        ctx.op._belief_before = belief_before
+        ctx.op._uncertainty_delta = uncertainty_delta
+        ctx.op._budget_policy = budget_policy
+        ctx.op._budget_rounds = max_rounds
+
         for round_num in range(max_rounds):
             # Extract current unmet assertions from verifier output
             verifier_stdout = getattr(ctx.op, "verifier_stdout_excerpt", "")
@@ -688,7 +773,8 @@ class HealOrchestrator:
                 # No more assertions to fix — try single retry with full checklist
                 return self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
 
-            # Focus on first (highest priority) unmet assertion
+            # Z5: Use autoreason to prioritize assertions by fixability
+            assertions = self._prioritize_assertions_with_autoreason(assertions, ctx)
             focused_assertion = assertions[0]
             focused_report = f"FOCUS: Fix this specific issue:\n{focused_assertion}\n\nFull verifier output:\n{evaluation_report}"
 
@@ -706,6 +792,108 @@ class HealOrchestrator:
 
         # After max rounds, try one final retry with all remaining assertions
         return self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
+
+    def _prioritize_assertions_with_autoreason(
+        self, assertions: list[str], ctx: HealContext,
+    ) -> list[str]:
+        """Rank assertions by fixability/importance for multipass retry.
+
+        Uses deterministic heuristics with optional autoreason advisory.
+        Advisory only: cannot override verifier. Falls back to original order
+        when autoreason is unavailable or fails.
+        """
+        if len(assertions) <= 1:
+            return assertions
+
+        def _assertion_priority(assertion: str) -> tuple[int, int, int]:
+            lower = assertion.lower()
+            type_rank = 0
+            if "timeout" in lower:
+                type_rank = 3
+            elif "assert" in lower or "assertion" in lower:
+                type_rank = 2
+            elif "exception" in lower or "error" in lower:
+                type_rank = 1
+            length_penalty = len(assertion)
+            specificity = -assertion.count(" ")
+            return (type_rank, specificity, length_penalty)
+
+        try:
+            from nexus.engine.autoreason_service import AutoreasonService
+
+            candidates = [
+                {
+                    "candidate_id": chr(ord("A") + i),
+                    "summary": assertion,
+                    "evidence_refs": [],
+                    "score": float(i),
+                }
+                for i, assertion in enumerate(assertions)
+            ]
+
+            service = AutoreasonService(judge_count=min(3, len(assertions)))
+            result = service.run(
+                candidates=candidates,
+                task_desc=getattr(ctx.op, "problem_statement", "") or "",
+                stop_threshold=2,
+            )
+
+            if result.get("status") == "SUCCESS":
+                borda_scores = result.get("borda_scores", {})
+                if borda_scores:
+                    scored = [(borda_scores.get(chr(ord("A") + i), 0.0), i, a)
+                              for i, a in enumerate(assertions)]
+                    scored.sort(key=lambda x: (-x[0], x[1]))
+                    return [a for _, _, a in scored]
+        except Exception:
+            pass
+
+        return sorted(assertions, key=_assertion_priority, reverse=True)
+
+    def _extract_codeintel_context_for_retry(self, ctx: HealContext) -> str:
+        """Extract bounded CodeIntel context for retry prompt.
+
+        Uses RuntimeASTExtractor to get function/class/callsite nodes
+        from the target file. Returns bounded text summary (max 1500 chars).
+        Fail-open: returns empty string on any error.
+        """
+        try:
+            target_file = self._resolve_target_file(ctx)
+            if target_file is None:
+                return ""
+
+            from nexus.services.local_heal.evidence_graph import RuntimeASTExtractor
+
+            nodes, edges, risks = RuntimeASTExtractor.extract_from_file(str(target_file))
+            if not nodes:
+                return ""
+
+            target_symbol = self._extract_target_symbol(ctx)
+            lines = []
+            lines.append(f"Target: {target_symbol or 'unknown'} in {target_file.name}")
+
+            callers = []
+            for e in edges:
+                src = next((n for n in nodes if n["node_id"] == e["source_node_id"]), None)
+                tgt = next((n for n in nodes if n["node_id"] == e["target_node_id"]), None)
+                if src and tgt:
+                    callers.append(f"{src['name']} calls {tgt['name']}")
+            if callers:
+                lines.append("Call relationships: " + "; ".join(callers[:5]))
+
+            functions = [n["name"] for n in nodes if n["type"] == "function" and n["name"] != target_symbol]
+            if functions:
+                lines.append(f"Other functions in file: {', '.join(functions[:8])}")
+
+            imports = [n["name"] for n in nodes if n["type"] == "import"]
+            if imports:
+                lines.append(f"Imports: {', '.join(imports[:5])}")
+
+            context = "\n".join(lines)
+            return context[:1500]
+
+        except Exception:
+            return ""
 
     def _extract_target_symbol(self, ctx: HealContext) -> str:
         """Extract target symbol from plan or localized files."""

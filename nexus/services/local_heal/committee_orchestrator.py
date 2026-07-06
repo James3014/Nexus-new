@@ -133,6 +133,99 @@ class CommitteeOrchestrator(HealOrchestrator):
         logger.info(f"  🏆 Diagnosis selected: model={selected['model']} conf={selected.get('confidence', 0)}")
         return selected
 
+    def _invoke_audit_model(self, model: str, ctx: HealContext) -> dict:
+        """Invoke a single model for audit/verification. Returns audit dict."""
+        from nexus.services.local_heal.llm_client import OllamaLLMClient
+        from nexus.engine.local_model_policy import LocalModelPolicy
+
+        decision = LocalModelPolicy.select_model(
+            task_type="swe_repair", phase="audit",
+            context={"reasoning_mode": getattr(ctx.op, "reasoning_mode", "INTUITIVE")},
+        )
+        timeout = decision.get("timeout_seconds", 120)
+        options = decision.get("ollama_options")
+
+        patch_text = str(getattr(ctx.op, "final_patch", "") or "")[:2000]
+        prompt = (
+            f"Review this patch and determine if it correctly fixes the bug.\n"
+            f"Output JSON with:\n"
+            f"1. verdict: 'pass' or 'fail'\n"
+            f"2. confidence: Your confidence (0.0-1.0)\n"
+            f"3. reason: Brief explanation\n\n"
+            f"Problem: {str(ctx.op.problem_statement)[:1500]}\n"
+            f"Patch:\n{patch_text}"
+        )
+        try:
+            client = OllamaLLMClient()
+            response = client.generate(
+                system_prompt="You are a code reviewer. Evaluate patches concisely.",
+                user_prompt=prompt,
+                model=model,
+                timeout=timeout,
+                options=options,
+            )
+            import json, re
+            match = re.search(r"\{.*\}", response or "", re.DOTALL)
+            if match:
+                parsed = json.loads(match.group(0))
+                verdict = str(parsed.get("verdict", "fail")).lower()
+                return {
+                    "verdict": "pass" if verdict == "pass" else "fail",
+                    "confidence": float(parsed.get("confidence", 0.5)),
+                    "reason": str(parsed.get("reason", ""))[:500],
+                    "model": model,
+                    "status": "success",
+                }
+            return {"verdict": "fail", "confidence": 0.3, "reason": (response or "")[:500], "model": model, "status": "parsed_failed"}
+        except Exception as e:
+            return {"verdict": "fail", "confidence": 0.0, "reason": "", "model": model, "status": f"error:{type(e).__name__}"}
+
+    def audit_with_committee(self, ctx: HealContext) -> dict | None:
+        """C6AE: Multi-model independent audit → Borda selects best."""
+        route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
+        signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+        if not signal_snapshot.get("audit_committee_enabled", False):
+            return None
+
+        audit_models = signal_snapshot.get("audit_models", [])
+        if len(audit_models) < 2:
+            logger.warning("audit_committee_enabled but <2 audit_models, skipping")
+            return None
+
+        logger.info(f"--- [AUDIT COMMITTEE] k={len(audit_models)} ---")
+        audits = []
+        for model in audit_models:
+            result = self._invoke_audit_model(model, ctx)
+            audits.append(result)
+            logger.info(f"  🔍 Audit from {model}: verdict={result.get('verdict', 'unknown')} conf={result.get('confidence', 0)}")
+
+        selected = _borda_select_diagnosis(audits)
+        if not selected or selected.get("status", "").startswith("error"):
+            logger.warning("  ❌ All audit models failed, keeping original verify result")
+            return None
+
+        ctx.op._committee_audit = selected
+        ctx.op._committee_audit_trace = {
+            "schema": "nexus.local_heal.committee_audit.v1",
+            "enabled": True,
+            "candidate_count": len(audits),
+            "audits": audits,
+            "selected_model": selected.get("model", ""),
+            "selected_verdict": selected.get("verdict", ""),
+            "selected_confidence": selected.get("confidence", 0.0),
+        }
+
+        if selected.get("verdict") == "pass":
+            ctx.op.solve_eligible = True
+            ctx.op.failure_reason = ""
+            logger.info(f"  🏆 Audit PASSED: model={selected['model']} conf={selected.get('confidence', 0)}")
+        else:
+            ctx.op.solve_eligible = False
+            ctx.op.failure_reason = f"COMMITTEE_AUDIT_REJECTION: {selected.get('reason', '')}"
+            logger.info(f"  ❌ Audit FAILED: model={selected['model']} reason={selected.get('reason', '')}")
+
+        return selected
+
     def run(self, ctx: HealContext) -> HealContext:
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
         signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
@@ -454,6 +547,9 @@ class CommitteeOrchestrator(HealOrchestrator):
             ctx.op._committee_trace["committee_receipt"]["verifier_evidence_passed"] = verifier_evidence_passed
             ctx.op._committee_trace["committee_receipt"]["verifier_evidence_fields"] = verifier_evidence_fields
             ctx.op._committee_trace["committee_receipt"]["verifier_rejection_reason"] = str(verify_res.failure_reason if not verify_res.success else "")
+
+            # C6AE: A-phase committee audit (after verify)
+            self.audit_with_committee(ctx)
         else:
             ctx.op.failure_reason = "COMMITTEE_SELECTION_FAILURE"
 
