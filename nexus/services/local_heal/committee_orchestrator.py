@@ -346,6 +346,13 @@ class CommitteeOrchestrator(HealOrchestrator):
                 ctx.op.solve_eligible = True
             else:
                 ctx.op.failure_reason = f"VERIFIER_REJECTION:{verify_res.failure_reason}"
+
+            # Project verifier evidence truth into committee receipt
+            verifier_evidence_passed = bool(getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False))
+            verifier_evidence_fields = str(getattr(ctx.op, "_orchestrator_verifier_evidence_fields", "") or "")
+            ctx.op._committee_trace["committee_receipt"]["verifier_evidence_passed"] = verifier_evidence_passed
+            ctx.op._committee_trace["committee_receipt"]["verifier_evidence_fields"] = verifier_evidence_fields
+            ctx.op._committee_trace["committee_receipt"]["verifier_rejection_reason"] = str(verify_res.failure_reason if not verify_res.success else "")
         else:
             ctx.op.failure_reason = "COMMITTEE_SELECTION_FAILURE"
 
