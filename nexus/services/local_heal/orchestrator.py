@@ -521,6 +521,11 @@ class HealOrchestrator:
             return False
 
         # 7. Parse SEARCH/REPLACE from response
+        # C6U: Force anchored_edit mode for retry to enable replace-only contract
+        import os
+        original_protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE")
+        os.environ["NEXUS_PROTOCOL_MODE"] = "anchored_edit"
+        
         parser = SolidSearchReplaceProtocol()
         
         # C15-5E Path B: Unified-Diff-to-SSRP Converter for Semantic Retry
@@ -548,6 +553,12 @@ class HealOrchestrator:
                     response = converted_ssrp
 
         intents_or_error = parser.parse(response, anchor_text=canonical_search)
+        
+        # Restore original protocol mode
+        if original_protocol_mode is None:
+            os.environ.pop("NEXUS_PROTOCOL_MODE", None)
+        else:
+            os.environ["NEXUS_PROTOCOL_MODE"] = original_protocol_mode
         if hasattr(intents_or_error, "kind"):
             parse_kind_name = intents_or_error.kind.name
             ctx.op.model_decisions[-1]["status"] = parse_kind_name
