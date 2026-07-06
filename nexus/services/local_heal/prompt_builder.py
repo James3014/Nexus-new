@@ -4,6 +4,7 @@ from nexus.services.local_heal.knowledge_injector import ParserHardeningKnowledg
 from nexus.services.local_heal.failure_memory import build_failure_context
 from nexus.services.local_heal.failure_feedback_builder import build_verifier_evidence_section
 from nexus.services.local_heal.interface import LocalizedFile
+from nexus.services.local_heal.prompt_sections import CapabilityPromptInjector
 
 class PromptBuilder:
     """🛡️ Nexus Prompt Engineering & Contract Management (Linus Principles: Explicit & Reliable)"""
@@ -246,13 +247,22 @@ class PromptBuilder:
         verifier_exit_code: int | str = "",
         verifier_command_hash: str = "",
         memory_lessons: str = "",
+        codeintel_context: str = "",
+        research_patterns: str = "",
+        sections: CapabilityPromptInjector | None = None,
     ) -> str:
         """T1.5: Build a verification-guided retry prompt.
 
         Fixes the canonical SEARCH span and asks the LLM to rewrite only REPLACE
         based on verifier failure output.
         C6P: Accepts optional memory_lessons for active guidance.
+        C6AJ: Accepts optional CapabilityPromptInjector for modular section assembly.
         """
+        # C6AJ: If sections provided, use modular assembly
+        if sections is not None:
+            sections_text = sections.render_all()
+            return original_user_prompt + sections_text if sections_text else original_user_prompt
+
         header = (
             "\n\n⚠️ [NEXUS SEMANTIC RETRY — VERIFICATION-GUIDED]\n"
             f"Retry #{retry_count}: The previous patch was applied but verification FAILED.\n"
@@ -331,4 +341,25 @@ class PromptBuilder:
                 "Consider these lessons when fixing the code.\n"
             )
 
-        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + assertion_checklist + memory_section + reminder
+        # C6AA: Add bounded CodeIntel context for dependency awareness
+        codeintel_section = ""
+        if codeintel_context:
+            bounded = codeintel_context[:1500]
+            codeintel_section = (
+                "\n### CODEINTEL CONTEXT (dependency/caller awareness)\n"
+                f"{bounded}\n"
+                "Consider these dependencies when writing your REPLACE block.\n"
+                "Do NOT modify code outside the target symbol's scope.\n"
+            )
+
+        # C6AB: Add research repair patterns for actionable guidance
+        research_section = ""
+        if research_patterns:
+            bounded = research_patterns[:1500]
+            research_section = (
+                "\n### RESEARCH REPAIR PATTERNS (from prior successful repairs)\n"
+                f"{bounded}\n"
+                "Consider these proven patterns when writing your REPLACE block.\n"
+            )
+
+        return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + assertion_checklist + codeintel_section + research_section + memory_section + reminder
