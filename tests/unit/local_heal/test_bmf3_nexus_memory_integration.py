@@ -285,7 +285,7 @@ def test_learning_closure_live_findings_memory_store_round_trip(tmp_path):
 
 def test_orchestrator_finalize_attaches_ctx_memory_trace_before_receipt(tmp_path, monkeypatch):
     class FakeMemoryAdapter:
-        def __init__(self):
+        def __init__(self, *args, **kwargs):
             self.last_metadata = {}
 
         def retrieve_reranked(self, **kwargs):

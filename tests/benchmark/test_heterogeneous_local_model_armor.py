@@ -13,7 +13,11 @@ from nexus.services.local_heal.local_model_executor import (
 def test_local_portfolio_diagnostic_deterministic():
     """Deterministic test: local portfolio with heterogeneous candidates."""
     # Generate candidates
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(
+        primary_model="qwen2.5-coder:7b-instruct",
+        secondary_model="deepseek-coder:6.7b-instruct",
+        judge_model="qwen2.5-s2t-advisor:3b",
+    )
     candidates = provider.generate_candidates(
         task_id="local-portfolio-1",
         problem_statement="fix code",
@@ -25,7 +29,7 @@ def test_local_portfolio_diagnostic_deterministic():
     )
 
     # Judge selects
-    selector = JudgeSelector()
+    selector = JudgeSelector(judge_model="qwen2.5-s2t-advisor:3b")
     receipt = selector.select(candidates)
     assert receipt.judge_invoked is True
     assert receipt.judge_cannot_verify is True
@@ -49,7 +53,11 @@ def test_local_portfolio_diagnostic_deterministic():
 
 def test_local_portfolio_disagreement_triggers_secondary():
     """Disagreement triggers secondary proposer."""
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(
+        primary_model="qwen2.5-coder:7b-instruct",
+        secondary_model="deepseek-coder:6.7b-instruct",
+        judge_model="qwen2.5-s2t-advisor:3b",
+    )
     candidates = provider.generate_candidates(
         task_id="local-portfolio-2",
         problem_statement="fix code",
@@ -67,7 +75,11 @@ def test_local_portfolio_disagreement_triggers_secondary():
 
 def test_local_portfolio_no_secondary_without_trigger():
     """No secondary without disagreement/uncertainty."""
-    provider = HeterogeneousCandidateProvider()
+    provider = HeterogeneousCandidateProvider(
+        primary_model="qwen2.5-coder:7b-instruct",
+        secondary_model="deepseek-coder:6.7b-instruct",
+        judge_model="qwen2.5-s2t-advisor:3b",
+    )
     candidates = provider.generate_candidates(
         task_id="local-portfolio-3",
         problem_statement="fix code",
@@ -82,7 +94,7 @@ def test_local_portfolio_no_secondary_without_trigger():
 
 def test_judge_cannot_verify():
     """Judge selection receipt has judge_cannot_verify=True."""
-    selector = JudgeSelector()
+    selector = JudgeSelector(judge_model="qwen2.5-s2t-advisor:3b")
     from nexus.services.local_heal.heterogeneous_candidate_provider import HeterogeneousCandidate
     candidates = [HeterogeneousCandidate(
         candidate_id="c1", model_name="qwen2.5-coder:7b", role="primary_proposer",

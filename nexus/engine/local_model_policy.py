@@ -11,6 +11,9 @@ class ModelProfile:
     """
     @classmethod
     def get_api_type(cls, model_name: str) -> str:
+        model_lower = model_name.lower()
+        if "qwythos" in model_lower:
+            return "chat"
         return "generate"
 
     @classmethod

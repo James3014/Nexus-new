@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.orchestrator import HealOrchestrator
+from nexus.services.local_heal.memory_trace import MemoryTrace
 
 
 def test_memory_influence_on_repair_decision(tmp_path):
@@ -32,9 +34,27 @@ def test_memory_influence_on_repair_decision(tmp_path):
         op_on.system_prompt = "system prompt text with memory optimization"
         op_on.user_prompt = "user prompt text"
 
-        ctx_on = HealContext(op=op_on, gov=GovernanceContext())
-        orchestrator = HealOrchestrator(phases=[], governance_gate=GovernanceGate())
-        orchestrator.run(ctx_on)
+        # Mock memory trace
+        finding_id = f"lh-{task[2:]}"
+        mock_trace = MemoryTrace(
+            available=True,
+            trace_status="TRACE_AVAILABLE",
+            retrieved_count=1,
+            selected_ids=[finding_id],
+            memory_evidence_ids=[finding_id],
+            primary_selected_id=finding_id,
+            provenance_count=1,
+            no_memory_match=False,
+            verifier_status="PASS",
+        )
+
+        def mock_attach_memory(self, ctx, _trace=mock_trace):
+            ctx.op._memory_influence_trace = _trace
+
+        with patch.object(HealOrchestrator, "_attach_memory_influence_trace", mock_attach_memory):
+            ctx_on = HealContext(op=op_on, gov=GovernanceContext())
+            orchestrator = HealOrchestrator(phases=[], governance_gate=GovernanceGate())
+            orchestrator.run(ctx_on)
 
         # 2. nexus_memory_off
         op_off = OperationalContext(

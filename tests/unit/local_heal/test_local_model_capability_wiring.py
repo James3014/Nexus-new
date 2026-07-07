@@ -78,7 +78,7 @@ def test_external_only_caps():
     wiring = build_local_model_capability_wiring()
     external_only = [name for name, w in wiring.items() if w.status == CapabilityWiringStatus.EXTERNAL_ONLY]
     for name in ["swarm_multi_agent", "drone", "ultra_review", "hyper_sprint", "nightshift",
-                  "codeintel", "lancedb", "belief", "mempalace", "research", "ui_validator",
+                  "lancedb", "belief", "mempalace", "research", "ui_validator",
                   "external_productivity"]:
         assert name in external_only, f"{name} should be external_only"
 

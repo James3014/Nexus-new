@@ -167,3 +167,91 @@ def test_delegated_retry_signal_in_raw_meta_telemetry():
         "delegated_retry_proposer_count_expected": len(candidate_models),
     }
     assert raw_meta["delegated_retry_proposer_count_expected"] == 2
+
+
+def test_capability_planner_injects_committee_model_specs():
+    """CapabilityPlanner must inject proposer_specs and judge_model for local_committee_only topology."""
+    import os
+    from nexus.engine.capability_planner import CapabilityPlanner
+
+    env_vars = {
+        "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR": "1",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "local_committee_only",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "qwen2.5-coder:7b-instruct",
+        "NEXUS_C15_PRIMARY_PROPOSER_MODEL": "qwen2.5-coder:7b-instruct",
+        "NEXUS_C15_SECONDARY_PROPOSER_MODEL": "deepseek-coder:6.7b-instruct",
+        "NEXUS_C15_JUDGE_MODEL": "qwen2.5-s2t-advisor:3b",
+    }
+    with patch.dict(os.environ, env_vars, clear=False):
+        planner = CapabilityPlanner()
+        plan = planner.plan(
+            task_desc="test task",
+            task_type="bugfix",
+            route={"recommended_flow": "local_heal"},
+        )
+        ss = plan.signal_snapshot
+        assert ss["execution_topology"] == "local_committee_only"
+        assert ss["local_committee_enabled"] is True
+        assert "proposer_specs" in ss
+        assert len(ss["proposer_specs"]) == 2
+        assert ss["proposer_specs"][0]["model"] == "qwen2.5-coder:7b-instruct"
+        assert ss["proposer_specs"][0]["role"] == "primary"
+        assert ss["proposer_specs"][1]["model"] == "deepseek-coder:6.7b-instruct"
+        assert ss["proposer_specs"][1]["role"] == "secondary"
+        assert ss["judge_model"] == "qwen2.5-s2t-advisor:3b"
+
+
+def test_capability_planner_injects_delegated_retry_candidates():
+    """CapabilityPlanner must inject delegated_retry_candidate_models for committee/pipeline topologies."""
+    import os
+    from nexus.engine.capability_planner import CapabilityPlanner
+
+    env_vars = {
+        "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR": "1",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "localheal_pipeline",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "qwen2.5-coder:7b-instruct",
+        "NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS": "qwen2.5-coder:7b-instruct,deepseek-coder:6.7b-instruct,ornith:9b",
+    }
+    with patch.dict(os.environ, env_vars, clear=False):
+        planner = CapabilityPlanner()
+        plan = planner.plan(
+            task_desc="test task",
+            task_type="bugfix",
+            route={"recommended_flow": "local_heal"},
+        )
+        ss = plan.signal_snapshot
+        assert ss["execution_topology"] == "localheal_pipeline"
+        assert "delegated_retry_candidate_models" in ss
+        assert len(ss["delegated_retry_candidate_models"]) == 3
+        assert "ornith:9b" in ss["delegated_retry_candidate_models"]
+
+
+def test_capability_planner_default_delegated_retry_candidates():
+    """CapabilityPlanner must inject default delegated_retry_candidate_models when env not set."""
+    import os
+    from nexus.engine.capability_planner import CapabilityPlanner
+
+    env_vars = {
+        "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR": "1",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "local_committee_only",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "qwen2.5-coder:7b-instruct",
+    }
+    # Clear delegated retry env var to test defaults
+    env_vars_cleared = {k: v for k, v in env_vars.items()}
+    env_vars_cleared["NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS"] = ""
+    with patch.dict(os.environ, env_vars_cleared, clear=False):
+        planner = CapabilityPlanner()
+        plan = planner.plan(
+            task_desc="test task",
+            task_type="bugfix",
+            route={"recommended_flow": "local_heal"},
+        )
+        ss = plan.signal_snapshot
+        # Should have default candidates from proposer models
+        assert "delegated_retry_candidate_models" in ss
+        assert len(ss["delegated_retry_candidate_models"]) == 2
+        assert "qwen2.5-coder:7b-instruct" in ss["delegated_retry_candidate_models"]
+        assert "deepseek-coder:6.7b-instruct" in ss["delegated_retry_candidate_models"]

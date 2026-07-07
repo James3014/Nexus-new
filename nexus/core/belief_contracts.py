@@ -117,8 +117,11 @@ class CapabilityReceipt:
                 
         if self.telemetries.get("wall_time_ms", 0) <= 0:
             return TelemetryVerificationResult(False, TelemetryReasonCodes.WALL_TIME_INVALID, "wall_time_ms must be strictly greater than 0")
-        if self.telemetries.get("token_usage", 0) <= 0:
-            return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "token_usage must be strictly greater than 0")
+        # token_usage is only required for capabilities that invoke a model
+        model_calls = self.telemetries.get("model_calls", 0)
+        token_usage = self.telemetries.get("token_usage", 0)
+        if model_calls > 0 and token_usage <= 0:
+            return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "Model call occurred but token_usage is 0 or missing")
             
         return TelemetryVerificationResult(True, TelemetryReasonCodes.SUCCESS, "Telemetry verification passed successfully")
 

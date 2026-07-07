@@ -370,6 +370,7 @@ class LocalHealPipelineCapabilityExecutor:
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                         # OllamaLLMClient passes (system_prompt, user_prompt) as two strings
                         # LocalModelProviderRequest passes a single request object
+                        api_type = kwargs.get("api_type", "generate")
                         if user_prompt is not None:
                             prompt = f"{system_prompt_or_req}\n\n{user_prompt}"
                             model_name = kwargs.get("model", "") or _pipeline_model_name
@@ -384,6 +385,7 @@ class LocalHealPipelineCapabilityExecutor:
                             evidence_refs=ctx.evidence_refs,
                             model_name=model_name,
                             timeout_sec=_provider_timeout_sec,
+                            api_type=api_type,
                         )
                         prov_resp = real_provider.generate(prov_req)
 
@@ -392,13 +394,35 @@ class LocalHealPipelineCapabilityExecutor:
                             try:
                                 import json as _json
                                 import urllib.request as _urllib_request
-                                ollama_url = "http://127.0.0.1:11434/api/generate"
-                                payload = {"model": model_name, "prompt": prompt, "stream": False}
+                                endpoint = "/api/chat" if api_type == "chat" else "/api/generate"
+                                ollama_url = f"http://127.0.0.1:11434{endpoint}"
+                                if api_type == "chat":
+                                    sys_marker = "[SYSTEM]\n"
+                                    user_marker = "\n\n[USER]\n"
+                                    system_content = ""
+                                    user_content = prompt
+                                    if sys_marker in prompt and user_marker in prompt:
+                                        parts = prompt.split(sys_marker, 1)
+                                        after_sys = parts[1]
+                                        sys_end = after_sys.find(user_marker)
+                                        if sys_end != -1:
+                                            system_content = after_sys[:sys_end]
+                                            user_content = after_sys[sys_end + len(user_marker):]
+                                    messages = []
+                                    if system_content:
+                                        messages.append({"role": "system", "content": system_content})
+                                    messages.append({"role": "user", "content": user_content})
+                                    payload = {"model": model_name, "messages": messages, "stream": False}
+                                else:
+                                    payload = {"model": model_name, "prompt": prompt, "stream": False}
                                 req_data = _json.dumps(payload).encode("utf-8")
                                 req = _urllib_request.Request(ollama_url, data=req_data, headers={"Content-Type": "application/json"})
                                 with _urllib_request.urlopen(req, timeout=_provider_timeout_sec) as resp:
                                     resp_json = _json.loads(resp.read().decode("utf-8"))
-                                    raw_text = resp_json.get("response", "")
+                                    if api_type == "chat":
+                                        raw_text = resp_json.get("message", {}).get("content", "")
+                                    else:
+                                        raw_text = resp_json.get("response", "")
                                     _last_provider_diag = {
                                         "provider_invoked": True,
                                         "model_called": True,

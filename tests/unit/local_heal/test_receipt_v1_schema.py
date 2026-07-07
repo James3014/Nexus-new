@@ -46,6 +46,7 @@ def _make_mock_ctx(**overrides):
     ctx.expected_stop_layer = "verification"
     ctx.expected_reason_family = "SOLVED"
     ctx._latency_ledger = None
+    ctx._claim_delivery_gate = overrides.get("_claim_delivery_gate", {"claim_gate_passed": overrides.get("solve_eligible", False)})
     return ctx
 
 

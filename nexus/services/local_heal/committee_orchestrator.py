@@ -26,6 +26,38 @@ def _compute_patch_hash(patch_text: str) -> str:
     return hashlib.sha256(patch_text.encode("utf-8")).hexdigest()[:16] if patch_text else ""
 
 
+def _direct_ollama_generate(system_prompt: str, user_prompt: str, *, model: str = "", timeout: int | None = None, options=None, api_type: str = "generate", **kwargs) -> str:
+    """C6AX: Minimal direct Ollama API call via urllib for D/A committee model invocation.
+    Used when no provider is available (local_committee_only bridge path)."""
+    import json as _json
+    import urllib.request as _urlreq
+    if api_type == "chat":
+        endpoint = "/api/chat"
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        payload: Dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    else:
+        endpoint = "/api/generate"
+        full_prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        payload = {"model": model, "prompt": full_prompt, "stream": False}
+    url = os.environ.get("NEXUS_OLLAMA_URL", f"http://127.0.0.1:11434{endpoint}").strip()
+    # Strip any full URL override to just endpoint when it's a full api/generate URL
+    if "/api/" not in url:
+        url = f"http://127.0.0.1:11434{endpoint}"
+    if options:
+        payload["options"] = options
+    req_data = _json.dumps(payload).encode("utf-8")
+    req = _urlreq.Request(url, data=req_data, headers={"Content-Type": "application/json"})
+    timeout_val = timeout if timeout and timeout > 0 else 120
+    with _urlreq.urlopen(req, timeout=timeout_val) as resp:
+        body = _json.loads(resp.read().decode("utf-8"))
+    if api_type == "chat":
+        return str(body.get("message", {}).get("content", ""))
+    return str(body.get("response", ""))
+
+
 def _borda_select_diagnosis(diagnoses: list[dict]) -> dict | None:
     """Borda voting: aggregate confidence-weighted rankings, select best."""
     if not diagnoses:
@@ -73,7 +105,7 @@ class CommitteeOrchestrator(HealOrchestrator):
             f"Repro: {str(getattr(ctx.op, 'repro_evidence', ''))[:1000]}"
         )
         try:
-            client = OllamaLLMClient()
+            client = OllamaLLMClient(generate_fn=_direct_ollama_generate)
             response = client.generate(
                 system_prompt="You are a diagnostic assistant. Analyze bugs concisely.",
                 user_prompt=prompt,
@@ -100,7 +132,12 @@ class CommitteeOrchestrator(HealOrchestrator):
         """C6AD: Multi-model independent diagnosis → Borda selects best."""
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
         signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
-        if not signal_snapshot.get("diagnosis_committee_enabled", False):
+        gate_open = bool(signal_snapshot.get("diagnosis_committee_enabled", False))
+        # C6AW: telemetry — record gate state regardless of outcome
+        ctx.op._diagnosis_committee_enabled_runtime = gate_open
+        ctx.op._diagnosis_committee_invoked = False
+        ctx.op._diagnosis_committee_selected_model = ""
+        if not gate_open:
             return None
 
         diagnosis_models = signal_snapshot.get("diagnosis_models", [])
@@ -130,6 +167,9 @@ class CommitteeOrchestrator(HealOrchestrator):
             "selected_root_cause": selected.get("root_cause", ""),
             "selected_confidence": selected.get("confidence", 0.0),
         }
+        # C6AW: telemetry — record successful invocation
+        ctx.op._diagnosis_committee_invoked = True
+        ctx.op._diagnosis_committee_selected_model = selected.get("model", "")
         logger.info(f"  🏆 Diagnosis selected: model={selected['model']} conf={selected.get('confidence', 0)}")
         return selected
 
@@ -156,7 +196,7 @@ class CommitteeOrchestrator(HealOrchestrator):
             f"Patch:\n{patch_text}"
         )
         try:
-            client = OllamaLLMClient()
+            client = OllamaLLMClient(generate_fn=_direct_ollama_generate)
             response = client.generate(
                 system_prompt="You are a code reviewer. Evaluate patches concisely.",
                 user_prompt=prompt,
@@ -184,7 +224,12 @@ class CommitteeOrchestrator(HealOrchestrator):
         """C6AE: Multi-model independent audit → Borda selects best."""
         route_ctx = ctx.op.route_context if hasattr(ctx.op, "route_context") else {}
         signal_snapshot = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
-        if not signal_snapshot.get("audit_committee_enabled", False):
+        gate_open = bool(signal_snapshot.get("audit_committee_enabled", False))
+        # C6AW: telemetry — record gate state regardless of outcome
+        ctx.op._audit_committee_enabled_runtime = gate_open
+        ctx.op._audit_committee_invoked = False
+        ctx.op._audit_committee_selected_model = ""
+        if not gate_open:
             return None
 
         audit_models = signal_snapshot.get("audit_models", [])
@@ -214,6 +259,10 @@ class CommitteeOrchestrator(HealOrchestrator):
             "selected_verdict": selected.get("verdict", ""),
             "selected_confidence": selected.get("confidence", 0.0),
         }
+
+        # C6AW: telemetry — record successful invocation
+        ctx.op._audit_committee_invoked = True
+        ctx.op._audit_committee_selected_model = selected.get("model", "")
 
         if selected.get("verdict") == "pass":
             ctx.op.solve_eligible = True

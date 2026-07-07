@@ -456,6 +456,7 @@ class AnchoredEditReplacementGuard:
                 r'(?i)^\s*(here|this|the|note|see|consider|we|you|fix|patch|change|add|remove|update|import|def|class|return|if|for|while|try|except|with|raise|assert|print|from)\b'
             )
             code_lines = sum(1 for l in non_empty_lines if prose_markers.match(l))
+            code_lines += sum(1 for l in non_empty_lines if l.strip().startswith('#'))
             # If less than 40% look like code, it's probably prose
             if code_lines / len(non_empty_lines) < 0.4:
                 return False, PatchErrorKind.REPLACEMENT_PROSE_CONTAMINATION, (

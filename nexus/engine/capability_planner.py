@@ -886,8 +886,42 @@ class CapabilityPlanner:
             if topology == "local_committee_only":
                 signal_snapshot["committee_profile"] = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
                 signal_snapshot["local_committee_enabled"] = True
+                # Inject committee model specs (downstream consumer reads from signal_snapshot)
+                _primary = os.environ.get("NEXUS_C15_PRIMARY_PROPOSER_MODEL", "qwen2.5-coder:7b-instruct")
+                _secondary = os.environ.get("NEXUS_C15_SECONDARY_PROPOSER_MODEL", "deepseek-coder:6.7b-instruct")
+                _judge = os.environ.get("NEXUS_C15_JUDGE_MODEL", "qwen2.5-s2t-advisor:3b")
+                signal_snapshot["proposer_specs"] = [
+                    {"model": _primary, "role": "primary"},
+                    {"model": _secondary, "role": "secondary"},
+                ]
+                signal_snapshot["judge_model"] = _judge
+                # C6AW: D/A committee gate activation — inject gate flags + model lists
+                # so diagnose_with_committee() and audit_with_committee() execute in runtime.
+                # Defaults: use proposer models as diagnosis/audit models (≥2 required by gate).
+                # Override via NEXUS_C15_DIAGNOSIS_MODELS / NEXUS_C15_AUDIT_MODELS env vars.
+                signal_snapshot["diagnosis_committee_enabled"] = True
+                signal_snapshot["audit_committee_enabled"] = True
+                _diag_raw = os.environ.get("NEXUS_C15_DIAGNOSIS_MODELS", "").strip()
+                signal_snapshot["diagnosis_models"] = (
+                    [m.strip() for m in _diag_raw.split(",") if m.strip()]
+                    if _diag_raw else [_primary, _secondary]
+                )
+                _audit_raw = os.environ.get("NEXUS_C15_AUDIT_MODELS", "").strip()
+                signal_snapshot["audit_models"] = (
+                    [m.strip() for m in _audit_raw.split(",") if m.strip()]
+                    if _audit_raw else [_primary, _secondary]
+                )
             else:
                 signal_snapshot["local_committee_enabled"] = False
+            # Inject delegated retry candidate models for localheal_pipeline topology
+            _dr_candidates_raw = os.environ.get("NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS", "").strip()
+            if _dr_candidates_raw:
+                signal_snapshot["delegated_retry_candidate_models"] = [m.strip() for m in _dr_candidates_raw.split(",") if m.strip()]
+            elif topology in ("local_committee_only", "localheal_pipeline"):
+                # Default: use proposer models as delegated retry candidates
+                _primary = os.environ.get("NEXUS_C15_PRIMARY_PROPOSER_MODEL", "qwen2.5-coder:7b-instruct")
+                _secondary = os.environ.get("NEXUS_C15_SECONDARY_PROPOSER_MODEL", "deepseek-coder:6.7b-instruct")
+                signal_snapshot["delegated_retry_candidate_models"] = [_primary, _secondary]
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",

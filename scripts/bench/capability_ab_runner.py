@@ -1965,9 +1965,10 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
     desc += (
         "\n\nNexus wearing contract:"
         "\n- MemPalace: keep the solution inside the task scope and enforce explicit governance constraints."
-        "\n- Belief: when evidence is incomplete or confidence is low, prefer a conservative fix backed by tests."
-        "\n- Artifact/Claim: treat completion claims as valid only when backed by concrete artifacts or passing checks."
     )
+    if not os.environ.get("NEXUS_ABLATION_SUPPRESS_BELIEF") == "1":
+        desc += "\n- Belief: when evidence is incomplete or confidence is low, prefer a conservative fix backed by tests."
+    desc += "\n- Artifact/Claim: treat completion claims as valid only when backed by concrete artifacts or passing checks."
     if task.capability_activation_contract == "required" and expected:
         desc += (
             "\n\nNexus route oracle contract:"

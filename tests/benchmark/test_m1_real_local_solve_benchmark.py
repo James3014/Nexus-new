@@ -5,6 +5,7 @@ import pytest
 from scripts.bench.m1_real_local_solve_benchmark import (
     build_task_specs,
     classify_solve_mechanism,
+    load_completed_task_ids,
     resolve_receipt_path,
     select_task_specs,
 )
@@ -431,3 +432,73 @@ def test_c15_benchmark_env_provider_timeout_override(monkeypatch):
         _make_spec(), Path("/tmp/verify.py"), "/usr/bin/python3",
     )
     assert row["signal_snapshot"]["provider_timeout_sec"] == 240
+
+
+# ── C4C: Resume + Independent Execution Tests ──────────────────────
+
+
+def test_load_completed_task_ids_empty_when_no_file(tmp_path):
+    """No JSONL file => empty set."""
+    result = load_completed_task_ids(tmp_path / "nonexistent.jsonl")
+    assert result == set()
+
+
+def test_load_completed_task_ids_reads_existing_results(tmp_path):
+    """JSONL with 2 rows => 2 task_ids."""
+    jsonl = tmp_path / "results.jsonl"
+    jsonl.write_text(
+        '{"task_id": "task-a", "solved": true}\n'
+        '{"task_id": "task-b", "solved": false}\n'
+    )
+    result = load_completed_task_ids(jsonl)
+    assert result == {"task-a", "task-b"}
+
+
+def test_load_completed_task_ids_skips_malformed_lines(tmp_path):
+    """Malformed JSON lines are silently skipped."""
+    jsonl = tmp_path / "results.jsonl"
+    jsonl.write_text(
+        '{"task_id": "task-a", "solved": true}\n'
+        'NOT JSON\n'
+        '{"task_id": "task-b", "solved": false}\n'
+    )
+    result = load_completed_task_ids(jsonl)
+    assert result == {"task-a", "task-b"}
+
+
+def test_load_completed_task_ids_skips_empty_task_id(tmp_path):
+    """Rows with empty task_id are skipped."""
+    jsonl = tmp_path / "results.jsonl"
+    jsonl.write_text(
+        '{"task_id": "task-a", "solved": true}\n'
+        '{"task_id": "", "solved": false}\n'
+        '{"solved": true}\n'
+    )
+    result = load_completed_task_ids(jsonl)
+    assert result == {"task-a"}
+
+
+def test_select_task_specs_independent_execution():
+    """Each matrix combination can be selected independently by task_id."""
+    specs = build_task_specs()
+    task_ids = [spec["task_id"] for spec in specs]
+    # Each task_id should be selectable independently
+    for tid in task_ids:
+        filtered = select_task_specs(specs, [tid])
+        assert len(filtered) == 1
+        assert filtered[0]["task_id"] == tid
+
+
+def test_select_task_specs_multiple_independent_selections():
+    """Multiple task_ids can be selected together."""
+    specs = build_task_specs()
+    filtered = select_task_specs(specs, ["toy-math-solve", "toy-math-verifier-evidence-gap"])
+    assert len(filtered) == 2
+    ids = {spec["task_id"] for spec in filtered}
+    assert ids == {"toy-math-solve", "toy-math-verifier-evidence-gap"}
+
+
+def test_default_provider_timeout_increased():
+    """DEFAULT_PROVIDER_TIMEOUT must be 300 ( increased from 120 for C4C)."""
+    from scripts.bench.m1_real_local_solve_benchmark import DEFAULT_PROVIDER_TIMEOUT
+    assert DEFAULT_PROVIDER_TIMEOUT == 300

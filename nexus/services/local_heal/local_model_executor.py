@@ -172,6 +172,33 @@ def _build_unified_diff_from_search_and_replacement(
                     if _search_first in _l:
                         _anchor_line = _i
                         break
+
+            # C6BD: git pre-image fallback — search_text not in current source
+            if _anchor_line == 1 and request.repo_root and target_file:
+                import subprocess as _sp
+                _repo = _Path(request.repo_root)
+                _git_dir = _repo / ".git"
+                if _git_dir.exists() or _git_dir.is_dir():
+                    _search_first_line = str(search_text).strip().splitlines()[0].strip()
+                    if _search_first_line:
+                        _log_res = _sp.run(
+                            ["git", "log", "--all", "--oneline", "--diff-filter=M",
+                             "-S", _search_first_line[:80], "--", target_file],
+                            cwd=str(_repo), capture_output=True, text=True, timeout=30,
+                        )
+                        _fix_commits = [l.split()[0] for l in _log_res.stdout.strip().splitlines() if l.strip()]
+                        if _fix_commits:
+                            _fix = _fix_commits[0]
+                            _show_res = _sp.run(
+                                ["git", "show", f"{_fix}^:{target_file}"],
+                                cwd=str(_repo), capture_output=True, text=True, timeout=30,
+                            )
+                            if _show_res.returncode == 0:
+                                _pre_lines = _show_res.stdout.splitlines()
+                                for _i, _l in enumerate(_pre_lines, 1):
+                                    if _search_first_line in _l:
+                                        _anchor_line = _i
+                                        break
         except Exception:
             pass
 
@@ -199,7 +226,7 @@ def _build_unified_diff_from_search_and_replacement(
                 new_len = int(m.group(4))
                 extra = m.group(5)
                 adj_old = _anchor_line + old_start - 1
-                adj_new = _anchor_line + new_start - 1
+                adj_new = _anchor_line + new_start - 1 if new_start > 0 else _anchor_line
                 line = f"@@ -{adj_old},{old_len} +{adj_new},{new_len} @@{extra}\n"
         adjusted_lines.append(line)
     return "".join(adjusted_lines)
@@ -360,6 +387,55 @@ def _extract_search_excerpt_from_projected_patch(unified_diff: str) -> str:
         if line.startswith((" ", "-")):
             search_lines.append(line[1:])
     return "\n".join(search_lines).strip()
+
+
+def forensic_apply_mismatch(
+    *,
+    apply_error: str,
+    locked_search: str,
+    source_text: str,
+    target_file: str = "",
+) -> str:
+    """C6AZ: Forensic-only apply mismatch classifier.
+
+    Maps apply failures to a single root cause from the C6AZ taxonomy:
+      - search_span_mismatch
+      - wrong_target_file
+      - wrong_target_region
+      - syntax_shape_invalid
+      - partial_match_but_anchor_rejected
+      - unknown_apply_failure
+
+    This function does NOT change runtime behavior. It is for forensic analysis only.
+    """
+    error_lower = (apply_error or "").lower()
+
+    # 1. Syntax shape invalid
+    if "corrupt patch" in error_lower or "malformed patch" in error_lower:
+        return "syntax_shape_invalid"
+
+    # 2. Wrong target file
+    if target_file and target_file not in error_lower and "patch does not apply" not in error_lower:
+        # Error references a different file than expected
+        if "no such file" in error_lower or "file not found" in error_lower:
+            return "wrong_target_file"
+
+    # 3. Search span mismatch vs partial match — only when "patch does not apply"
+    locked = (locked_search or "").strip()
+    source = source_text or ""
+    if "patch does not apply" in error_lower:
+        if locked and source:
+            if locked in source:
+                # Full match exists but patch still rejected — anchor shape issue
+                return "partial_match_but_anchor_rejected"
+            if locked[:50] in source:
+                # Partial match — first 50 chars found but rest doesn't match
+                return "partial_match_but_anchor_rejected"
+            # No match at all — locked_search doesn't exist in source
+            return "search_span_mismatch"
+        return "search_span_mismatch"
+
+    return "unknown_apply_failure"
 
 
 def _classify_apply_failure_root_cause(
@@ -561,9 +637,10 @@ def compute_failure_class(
     if provider_error and provider_error.strip():
         return "provider_error", ""
 
-    # Priority 2: empty response
-    if output_len == 0:
-        return "empty_response", ""
+    # Priority 2: parse failures that consumed model output
+    # Must come before output_len check: a parse error explains why output_len is 0
+    if parse_error_kind and parse_error_kind != "none":
+        return f"parse_failed:{parse_error_kind}", ""
 
     # Priority 3: terminal patch lifecycle states must override earlier pipeline
     # parsing failures once a real candidate has been projected/applied.
@@ -918,7 +995,39 @@ class LocalModelExecutor:
             if failure_feedback_present and failure_feedback_text:
                 enhanced_problem += f"\n\n{failure_feedback_text}"
             enhanced_problem += memory_context
-            
+
+            # C6AX: D-phase committee diagnosis — bridge D/A into local_committee_only path.
+            # Construct minimal HealContext so CommitteeOrchestrator.diagnose_with_committee()
+            # can read gate flags + diagnosis_models from signal_snapshot.
+            # No-op (returns None) when diagnosis_committee_enabled is absent → fail-closed.
+            from nexus.services.local_heal.context import HealContext as _DAHealContext, OperationalContext as _DAOpCtx, GovernanceContext as _DAGovCtx
+            from nexus.services.local_heal.committee_orchestrator import CommitteeOrchestrator as _DAOrchCls
+            from pathlib import Path as _DAPath
+            _da_op = _DAOpCtx(
+                instance_id=request.task_id,
+                repo_dir=_DAPath(str(getattr(request, "source_root", "/tmp"))),
+                problem_statement=enhanced_problem,
+                route_context=request.route_context,
+            )
+            _da_ctx = _DAHealContext(op=_da_op, gov=_DAGovCtx())
+            _da_orch = _DAOrchCls.__new__(_DAOrchCls)
+            _diagnosis_result = _da_orch.diagnose_with_committee(_da_ctx)
+            _diagnosis_committee_invoked = bool(getattr(_da_op, "_diagnosis_committee_invoked", False))
+            _diagnosis_committee_selected_model = str(getattr(_da_op, "_diagnosis_committee_selected_model", ""))
+            # Record D/A telemetry into signal_snapshot so it flows to finalized row
+            if isinstance(signal_snapshot, dict):
+                signal_snapshot["diagnosis_committee_invoked"] = _diagnosis_committee_invoked
+                signal_snapshot["diagnosis_committee_selected_model"] = _diagnosis_committee_selected_model
+
+            # C6AY: Inject D-phase diagnosis guidance into candidate generation prompt.
+            # Fail-closed: empty/malformed diagnosis does not pollute prompt.
+            enhanced_problem, _diagnosis_guidance_injected, _diagnosis_guidance_hash = _inject_diagnosis_guidance(
+                enhanced_problem, _diagnosis_result
+            )
+            if isinstance(signal_snapshot, dict):
+                signal_snapshot["diagnosis_guidance_injected"] = _diagnosis_guidance_injected
+                signal_snapshot["diagnosis_guidance_hash"] = _diagnosis_guidance_hash
+
             from nexus.services.local_heal.local_committee_candidate_provider import LocalCommitteeCandidateProvider
             from nexus.services.local_heal.candidate_decision_adapter import CandidateDecisionAdapter
             
@@ -948,6 +1057,17 @@ class LocalModelExecutor:
             local_model_called = any(not c.abstained for c in candidates)
             
             selected_patch = decision.selected_candidate_patch
+
+            # C6AX: A-phase committee audit — audit the winner patch via CommitteeOrchestrator.
+            # No-op (returns None) when audit_committee_enabled is absent → fail-closed.
+            _da_op.final_patch = selected_patch
+            _audit_result = _da_orch.audit_with_committee(_da_ctx)
+            _audit_committee_invoked = bool(getattr(_da_op, "_audit_committee_invoked", False))
+            _audit_committee_selected_model = str(getattr(_da_op, "_audit_committee_selected_model", ""))
+            if isinstance(signal_snapshot, dict):
+                signal_snapshot["audit_committee_invoked"] = _audit_committee_invoked
+                signal_snapshot["audit_committee_selected_model"] = _audit_committee_selected_model
+
             patch_meta = {}
             retry_available = False
             retry_not_invoked_reason = ""
@@ -1028,6 +1148,7 @@ class LocalModelExecutor:
                                     model_name=model_name,
                                     timeout_sec=provider_timeout_sec,
                                     options=_opts,
+                                    api_type=api_type or "generate",
                                 )
                                 prov_resp = provider.generate(prov_req)
                                 return prov_resp.output_text or ""
@@ -1085,6 +1206,7 @@ class LocalModelExecutor:
 
             if selected_patch.strip():
                 candidate_isolation_attempted = True
+                _apply_search_text = str(locked_search) if locked_search else ""
                 apply_receipt = run_isolated_workspace_apply(
                     IsolatedApplyRequest(
                         task_id=request.task_id,
@@ -1093,6 +1215,7 @@ class LocalModelExecutor:
                         unified_diff=selected_patch,
                         selected_candidate_hash=selected_hash,
                         mutation_allowed=mutation_allowed,
+                        search_text=_apply_search_text,
                     )
                 )
                 isolated_apply_status = apply_receipt.patch_apply_status
@@ -1472,6 +1595,7 @@ class LocalModelExecutor:
                         target_file_hash_at_apply = _sha256_text(at_apply_text)
 
                 if candidate_isolation_attempted:
+                    _apply_search_text = str(locked_search) if locked_search else ""
                     apply_receipt = run_isolated_workspace_apply(
                         IsolatedApplyRequest(
                             task_id=request.task_id,
@@ -1480,6 +1604,7 @@ class LocalModelExecutor:
                             unified_diff=candidate_patch,
                             selected_candidate_hash=candidate_hash,
                             mutation_allowed=mutation_allowed,
+                            search_text=_apply_search_text,
                         )
                     )
                     isolated_apply_status = apply_receipt.patch_apply_status
@@ -1820,6 +1945,7 @@ class LocalModelExecutor:
                                 model_name=model_name,
                                 timeout_sec=provider_timeout_sec,
                                 options=_opts,
+                                api_type=api_type or "generate",
                             )
                             prov_resp = provider.generate(prov_req)
                             delegated_retry_provider_response_is_none = prov_resp is None
@@ -2037,6 +2163,7 @@ class LocalModelExecutor:
                                         unified_diff=_cp_patch,
                                         selected_candidate_hash=_cp_patch_hash,
                                         mutation_allowed=True,
+                                        search_text=str(locked_search) if locked_search else "",
                                     )
                                 )
                                 _apply_status = _cp_apply.patch_apply_status
@@ -2361,11 +2488,20 @@ class LocalModelExecutor:
                 f"Source Anchor Hash: {source_anchor_hash[:16] if source_anchor_hash else 'none'}\n"
                 f"Locked Search Span that will be replaced:\n"
                 f"```\n{locked_search}\n```\n\n"
-                f"Provide the replacement code inside a REPLACE block exactly like this:\n"
+                f"Output format (required — exactly this, nothing else):\n"
                 f"<<<<<<< REPLACE\n"
-                f"[replacement code goes here]\n"
+                f"...\n"
                 f">>>>>>> REPLACE\n\n"
-                f"Do not include any other text, explanation, markdown formatting, or markdown code fences outside the REPLACE block.\n"
+                f"WRONG — backtick-wrapped (will be REJECTED):\n"
+                f"```\n<<<<<<< REPLACE\n"
+                f"...\n"
+                f">>>>>>> REPLACE\n```\n\n"
+                f"WRONG — explanations before or after the REPLACE block (will be REJECTED):\n"
+                f"# Here is the fix\n"
+                f"<<<<<<< REPLACE\n"
+                f"...\n"
+                f">>>>>>> REPLACE\n\n"
+                f"Output ONLY code between <<<<<<< and >>>>>>>. No backticks. No explanations. No comments. Code only.\n"
             )
         else:
 
@@ -2477,6 +2613,29 @@ class LocalModelExecutor:
         )
 
 
+def _inject_diagnosis_guidance(
+    enhanced_problem: str,
+    diagnosis_result: dict | None,
+) -> tuple[str, bool, str]:
+    """C6AY: Inject D-phase diagnosis root_cause into candidate generation prompt.
+
+    Returns (updated_problem, guidance_injected, guidance_hash).
+    Fail-closed: empty/malformed/None diagnosis does not pollute prompt.
+    """
+    _diag_root_cause = ""
+    if isinstance(diagnosis_result, dict):
+        _diag_root_cause = str(diagnosis_result.get("root_cause", "") or "").strip()
+    if not _diag_root_cause:
+        return enhanced_problem, False, ""
+    import hashlib as _hl
+    updated = enhanced_problem + (
+        f"\n\nCommittee Diagnosis: {_diag_root_cause}"
+        f"\nUse this diagnosis to prioritize the most likely faulty logic/location."
+    )
+    _hash = _hl.sha256(_diag_root_cause.encode("utf-8")).hexdigest()[:16]
+    return updated, True, _hash
+
+
 def _normalize_candidate_patch(
     request: LocalModelExecutorRequest,
     locked_search: str,
@@ -2547,6 +2706,14 @@ def _normalize_candidate_patch(
         locked_search,
         replacement,
     )
+    if not normalized.strip():
+        # empty_after_cleanup: replacement identical to locked_search → no diff
+        return "", {
+            "protocol_parse_failed": True,
+            "error_kind": "EMPTY_AFTER_CLEANUP",
+            "error_message": "Replacement identical to search anchor — no diff produced.",
+            **unwrap_meta,
+        }
     return normalized, {
         "protocol_used": "solid_search_replace",
         "normalized": True,

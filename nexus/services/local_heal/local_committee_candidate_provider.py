@@ -120,11 +120,20 @@ class LocalCommitteeCandidateProvider:
                     f"Target Symbol: {target_symbol}\n"
                     f"Locked Search Span that will be replaced:\n"
                     f"```\n{locked_search}\n```\n\n"
-                    f"Provide the replacement code inside a REPLACE block exactly like this:\n"
+                    f"Output format (required — exactly this, nothing else):\n"
                     f"<<<<<<< REPLACE\n"
-                    f"[replacement code goes here]\n"
+                    f"...\n"
                     f">>>>>>> REPLACE\n\n"
-                    f"Do not include any other text, explanation, markdown formatting, or markdown code fences outside the REPLACE block."
+                    f"WRONG — backtick-wrapped (will be REJECTED):\n"
+                    f"```\n<<<<<<< REPLACE\n"
+                    f"...\n"
+                    f">>>>>>> REPLACE\n```\n\n"
+                    f"WRONG — explanations before or after the REPLACE block (will be REJECTED):\n"
+                    f"# Here is the fix\n"
+                    f"<<<<<<< REPLACE\n"
+                    f"...\n"
+                    f">>>>>>> REPLACE\n\n"
+                    f"Output ONLY code between <<<<<<< and >>>>>>>. No backticks. No explanations. No comments. Code only."
                 )
             else:
                 prompt = (

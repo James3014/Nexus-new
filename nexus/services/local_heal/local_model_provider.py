@@ -19,6 +19,7 @@ class LocalModelProviderRequest:
     timeout_sec: float = 120.0
     max_output_chars: int = 4000
     options: dict[str, Any] | None = None
+    api_type: str = "generate"
 
 
 @dataclass(frozen=True)
@@ -124,13 +125,36 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 effective_timeout_sec=request.timeout_sec,
             )
             
-        url = os.environ.get("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434/api/generate").strip()
-        
-        payload = {
-            "model": model_name,
-            "prompt": request.prompt,
-            "stream": False
-        }
+        if request.api_type == "chat":
+            raw_prompt = request.prompt
+            system_content = ""
+            user_content = raw_prompt
+            sys_marker = "[SYSTEM]\n"
+            user_marker = "\n\n[USER]\n"
+            if sys_marker in raw_prompt and user_marker in raw_prompt:
+                parts = raw_prompt.split(sys_marker, 1)
+                after_sys = parts[1]
+                sys_end = after_sys.find(user_marker)
+                if sys_end != -1:
+                    system_content = after_sys[:sys_end]
+                    user_content = after_sys[sys_end + len(user_marker):]
+            messages = []
+            if system_content:
+                messages.append({"role": "system", "content": system_content})
+            messages.append({"role": "user", "content": user_content})
+            url = os.environ.get("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434/api/chat").strip()
+            payload = {
+                "model": model_name,
+                "messages": messages,
+                "stream": False
+            }
+        else:
+            url = os.environ.get("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434/api/generate").strip()
+            payload = {
+                "model": model_name,
+                "prompt": request.prompt,
+                "stream": False
+            }
         if request.options:
             payload["options"] = request.options
         
@@ -146,7 +170,10 @@ class OllamaLocalModelProvider(LocalModelProvider):
             with urllib.request.urlopen(req, timeout=request.timeout_sec) as resp:
                 resp_data = resp.read().decode("utf-8")
                 resp_json = json.loads(resp_data)
-                raw_text = resp_json.get("response", "")
+                if request.api_type == "chat":
+                    raw_text = resp_json.get("message", {}).get("content", "")
+                else:
+                    raw_text = resp_json.get("response", "")
                 elapsed = time.monotonic() - t0
                 
                 truncated = False

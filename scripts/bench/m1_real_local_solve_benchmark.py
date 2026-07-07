@@ -79,20 +79,38 @@ def build_task_specs() -> list[dict]:
             "target_file": "astropy/table/table.py",
             "test_file": "verify_13236.py",
             "target_symbol": "__init__",
-            "locked_search": "if hasattr(data, 'dtype') and len(getattr(data, 'dtype', [])) > 1:\n            self._data = data.view(type('NdarrayMixin', (), {'__array__': lambda self: self._data})())",
+            "locked_search": (
+                "        # Structured ndarray gets viewed as a mixin unless already a valid\n"
+                "        # mixin class\n"
+                "        if (not isinstance(data, Column) and not data_is_mixin\n"
+                "                and isinstance(data, np.ndarray) and len(data.dtype) > 1):\n"
+                "            data = data.view(NdarrayMixin)\n"
+                "            data_is_mixin = True\n"
+            ),
+            "problem_statement": (
+                "Fix astropy/table/table.py so that data.view(NdarrayMixin) is not called "
+                "in this path. The patched file must not contain 'view(NdarrayMixin)'."
+            ),
             "buggy_code": (
+                "from .ndarray_mixin import NdarrayMixin\n"
+                "\n"
                 "class Table:\n"
                 "    def __init__(self, data=None):\n"
-                "        self._data = data\n"
-                "        if hasattr(data, 'dtype') and len(getattr(data, 'dtype', [])) > 1:\n"
-                "            self._data = data.view(type('NdarrayMixin', (), {'__array__': lambda self: self._data})())\n"
-                "    def __getitem__(self, key):\n"
-                "        return self._data[key]\n"
+                "        data_is_mixin = False\n"
+                "        Column = type('Column', (), {})\n"
+                "        import numpy as np\n"
+                "\n"
+                "        # Structured ndarray gets viewed as a mixin unless already a valid\n"
+                "        # mixin class\n"
+                "        if (not isinstance(data, Column) and not data_is_mixin\n"
+                "                and isinstance(data, np.ndarray) and len(data.dtype) > 1):\n"
+                "            data = data.view(NdarrayMixin)\n"
+                "            data_is_mixin = True\n"
             ),
             "verify_script": (
                 "import sys\n"
                 "c = open('astropy/table/table.py').read()\n"
-                "sys.exit(0 if 'NdarrayMixin' not in c or 'view(NdarrayMixin)' not in c else 1)\n"
+                "sys.exit(0 if 'view(NdarrayMixin)' not in c else 1)\n"
             ),
             "expected_capabilities": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
             "execution_topology": "local_committee_only",
@@ -104,7 +122,15 @@ def build_task_specs() -> list[dict]:
             "target_file": "sympy/functions/special/zeta_functions.py",
             "test_file": "sympy/functions/special/tests/test_zeta_functions.py",
             "target_symbol": "eval",
-            "locked_search": "if a is S.One:",
+            "locked_search": (
+                "        if a is S.One:\n"
+                "            pass\n"
+            ),
+            "problem_statement": (
+                "Fix sympy/functions/special/zeta_functions.py so that the eval "
+                "method uses 'a == S.One' instead of 'a is S.One'. "
+                "The patched file must contain 'a == S.One'."
+            ),
             "buggy_code": (
                 "class zeta:\n"
                 "    def eval(self):\n"
@@ -355,6 +381,29 @@ def build_task_specs() -> list[dict]:
     ]
 
 
+def load_completed_task_ids(jsonl_path: Path) -> set[str]:
+    """Read existing JSONL and return task_ids that have already completed."""
+    completed: set[str] = set()
+    if not jsonl_path.exists():
+        return completed
+    try:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                    task_id = row.get("task_id", "")
+                    if task_id:
+                        completed.add(task_id)
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        pass
+    return completed
+
+
 def select_task_specs(task_specs: list[dict], selected_task_ids: list[str] | None) -> list[dict]:
     if not selected_task_ids:
         return task_specs
@@ -374,6 +423,7 @@ def run_benchmark(
     primary_proposer_model: str | None = None,
     secondary_proposer_model: str | None = None,
     delegated_retry_candidate_models: str | None = None,
+    resume: bool = False,
 ):
     print("=== M1 Real Local Solve Benchmark Runner ===")
     if not check_ollama_availability():
@@ -391,8 +441,13 @@ def run_benchmark(
     os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
 
-    # 1. Clear previous outputs
-    if JSONL_PATH.exists() and os.environ.get("NEXUS_BENCHMARK_APPEND") != "1":
+    # 1. Clear previous outputs (unless resume)
+    completed_task_ids: set[str] = set()
+    if resume:
+        completed_task_ids = load_completed_task_ids(JSONL_PATH)
+        if completed_task_ids:
+            print(f"Resume mode: {len(completed_task_ids)} completed task(s) found: {sorted(completed_task_ids)}")
+    elif JSONL_PATH.exists() and os.environ.get("NEXUS_BENCHMARK_APPEND") != "1":
         JSONL_PATH.unlink()
 
     # 2. Define benchmark tasks
@@ -404,6 +459,9 @@ def run_benchmark(
 
     for spec in tasks_specs:
         task_id = spec["task_id"]
+        if resume and task_id in completed_task_ids:
+            print(f"\n--- Skipping Task: {task_id} (already completed) ---")
+            continue
         print(f"\n--- Running Task: {task_id} ---")
         attempted += 1
         
@@ -591,7 +649,7 @@ def run_benchmark(
                 "task_id": task_id,
                 "repo": spec["repo"],
                 "model": "qwen2.5-coder:7b",
-                "execution_topology": spec["execution_topology"],
+            "execution_topology": os.environ.get("NEXUS_ABLATION_FORCE_LOCAL_ONLY", spec["execution_topology"]),
                 "route_truth_source": "CapabilityPlanner",
                 "adapter_output_is_route_truth": False,
                 "local_model_called": local_model_called,
@@ -855,7 +913,7 @@ DEFAULT_EXECUTOR_MODEL = "qwen2.5-coder:7b-instruct"
 DEFAULT_JUDGE_MODEL = "qwen2.5-s2t-advisor:3b"
 DEFAULT_PRIMARY_PROPOSER = "qwen2.5-coder:7b-instruct"
 DEFAULT_SECONDARY_PROPOSER = "deepseek-coder:6.7b-instruct"
-DEFAULT_PROVIDER_TIMEOUT = 120
+DEFAULT_PROVIDER_TIMEOUT = 300
 
 
 def build_c15_benchmark_row(
@@ -901,7 +959,7 @@ def build_c15_benchmark_row(
         "target_symbol": spec["target_symbol"],
         "locked_search": spec["locked_search"],
         "signal_snapshot": {
-            "execution_topology": spec["execution_topology"],
+            "execution_topology": os.environ.get("NEXUS_ABLATION_FORCE_LOCAL_ONLY", spec["execution_topology"]),
             "protocol_mode": "anchored_edit",
             "model_call_allowed": True,
             "executor_provider": "ollama",
@@ -915,6 +973,12 @@ def build_c15_benchmark_row(
                 {"model": sp, "role": "secondary"},
             ],
             "delegated_retry_candidate_models": [m.strip() for m in dr_candidates_raw.split(",") if m.strip()] if dr_candidates_raw else [],
+            # C6AX: D/A committee gate flags — enables diagnose_with_committee / audit_with_committee
+            "local_committee_enabled": True,
+            "diagnosis_committee_enabled": True,
+            "audit_committee_enabled": True,
+            "diagnosis_models": [pp, sp],
+            "audit_models": [pp, sp],
         },
         "python_executable": sys_executable,
     }
@@ -970,6 +1034,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated list of models for heterogeneous delegated retry candidates.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help="Skip task_ids that already have results in the JSONL file.",
+    )
     return parser.parse_args()
 
 
@@ -983,4 +1053,5 @@ if __name__ == "__main__":
         primary_proposer_model=args.primary_proposer_model,
         secondary_proposer_model=args.secondary_proposer_model,
         delegated_retry_candidate_models=args.delegated_retry_candidate_models,
+        resume=args.resume,
     )

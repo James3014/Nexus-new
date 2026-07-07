@@ -318,15 +318,20 @@ class SkillsRouter:
         except Exception as e:
             logger.debug("[OutcomeMemory] learning_closure writeback failed: %s", e)
 
-        # 5.5: RC-2 抗幻覺閉環：對 claim_gate / artifact_gate 執行 is_claimable 警告檢查
+        # 5.5: RC-2 抗幻覺閉環 fail-closed：claim_gate / artifact_gate 的 is_claimable 必須為 True
+        sealed_receipts = []
         for _cr in receipts:
             if _cr.capability_name in ("claim_gate", "artifact_gate"):
                 if _cr.gate_passed and not _cr.is_claimable:
-                    logger.warning(
-                        "\U0001f6a8 [AntiHallucination] %s gate_passed=True but is_claimable=False: %s",
+                    logger.error(
+                        "\U0001f6a8 [AntiHallucination-FailClosed] %s gate_passed=True but is_claimable=False — forcing gate_passed=False. reason: %s",
                         _cr.capability_name,
                         _cr.verify_telemetry.reason,
                     )
+                    from dataclasses import replace
+                    _cr = replace(_cr, gate_passed=False)
+            sealed_receipts.append(_cr)
+        receipts = sealed_receipts
 
         # 6. 包裝成果並回傳給舊接口 (向下相容)
         candidates = []

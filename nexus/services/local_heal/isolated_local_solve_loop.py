@@ -158,6 +158,7 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
     else:
         from nexus.services.local_heal.diff_repair import repair_malformed_diff
         
+        _apply_search_text = str(request.locked_search) if request.locked_search else ""
         apply_req = IsolatedApplyRequest(
             task_id=request.task_id,
             source_root=request.source_root,
@@ -166,13 +167,14 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
             selected_candidate_hash=envelope.candidate_hash,
             work_dir=request.work_dir,
             mutation_allowed=request.mutation_allowed,
+            search_text=_apply_search_text,
         )
         apply_receipt = run_isolated_workspace_apply(apply_req)
-        
+
         orig_outside = False
         if anchor.span_start > 0 and anchor.span_end > 0:
             orig_outside = is_patch_outside_span(envelope.unified_diff, anchor.span_start, anchor.span_end)
-            
+
         if (apply_receipt.patch_apply_status == "failed" or orig_outside) and request.locked_search:
             from dataclasses import replace
             repaired_diff, rep_receipt = repair_malformed_diff(
@@ -197,6 +199,7 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
                     selected_candidate_hash=envelope.candidate_hash,
                     work_dir=request.work_dir,
                     mutation_allowed=request.mutation_allowed,
+                    search_text=_apply_search_text,
                 )
                 apply_receipt = run_isolated_workspace_apply(apply_req)
         

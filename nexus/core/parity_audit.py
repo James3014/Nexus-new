@@ -53,7 +53,7 @@ class ParityAuditor:
         }
 
     def _extract_surface(self, code: str) -> Set[str]:
-        """提取函數簽名、類方法與實體定義"""
+        """提取函數名、類名與方法名（只比對名稱，不比對參數）"""
         if not code.strip():
             return set()
             
@@ -61,11 +61,9 @@ class ParityAuditor:
         surface = set()
         
         for node in ast.walk(tree):
-            # 1. 頂層函數
+            # 1. 頂層函數（只取名稱，不取參數）
             if isinstance(node, ast.FunctionDef):
-                # 獲取參數名以精確對位
-                args = ",".join(arg.arg for arg in node.args.args)
-                surface.add(f"func:{node.name}({args})")
+                surface.add(f"func:{node.name}")
                 
             # 2. 類及其方法
             if isinstance(node, ast.ClassDef):

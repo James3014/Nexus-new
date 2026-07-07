@@ -363,3 +363,72 @@ class PromptBuilder:
             )
 
         return original_user_prompt + header + search_lock + instruction + verifier_section + evidence_section + assertion_checklist + codeintel_section + research_section + memory_section + reminder
+
+    @staticmethod
+    def build_retry_prompt_with_injector(
+        original_user_prompt: str,
+        verification_report: str,
+        canonical_search_span: str,
+        target_file: str,
+        injector: "CapabilityPromptInjector | None" = None,
+        retry_count: int = 1,
+    ) -> str:
+        """C6AJ: Build retry prompt using CapabilityPromptInjector for modular section assembly."""
+        from nexus.services.local_heal.prompt_sections import CapabilityPromptInjector
+
+        header = (
+            "\n\n⚠️ [NEXUS SEMANTIC RETRY — VERIFICATION-GUIDED]\n"
+            f"Retry #{retry_count}: The previous patch was applied but verification FAILED.\n"
+        )
+
+        verifier_section = (
+            f"### VERIFICATION FAILURE REPORT\n"
+            f"```\n{verification_report}\n```\n\n"
+            f"The patch compiled and was applied, but the test still FAILS.\n"
+            f"This means the REPLACE block does not address the root cause.\n\n"
+        )
+
+        search_lock = (
+            f"### CANONICAL SEARCH SPAN (LOCKED — DO NOT MODIFY)\n"
+            f"The following SEARCH block has been verified to match the source file exactly.\n"
+            f"You MUST use this EXACT SEARCH block — do NOT change it.\n"
+            f"Do NOT add line numbers, do NOT paraphrase, do NOT reconstruct from memory.\n"
+            f"Copy the EXACT text below into your SEARCH block:\n"
+            f"```\n{canonical_search_span}\n```\n\n"
+        )
+
+        instruction = (
+            f"### INSTRUCTION\n"
+            f"1. Keep the SEARCH block above EXACTLY as-is.\n"
+            f"2. Analyze the verification failure to understand what the code actually needs.\n"
+            f"3. Write ONLY a new REPLACE block that fixes the root cause.\n"
+            f"4. The REPLACE block MUST address ALL failing assertions from the verifier.\n"
+            f"5. Do NOT output a no-op patch (SEARCH and REPLACE must differ).\n"
+            f"6. Your REPLACE must satisfy EVERY condition listed in the FAILING ASSERTIONS section.\n"
+            f"7. Output format:\n"
+            f"FILE: {target_file}\n"
+            f"<<<<<<< SEARCH\n"
+            f"<copy the canonical SEARCH span above exactly>\n"
+            f"=======\n"
+            f"<your fix here>\n"
+            f">>>>>>> REPLACE\n\n"
+            f"FORBIDDEN (will be rejected):\n"
+            f"- Markdown code fences (```) around SEARCH/REPLACE\n"
+            f"- Unified diff format (--- a/ or +++ b/)\n"
+            f"- Explanations, prose, or text before/after blocks\n"
+            f"- Missing SEARCH or REPLACE markers\n"
+            f"- No-op patches where SEARCH equals REPLACE\n"
+        )
+
+        reminder = (
+            "\n\nREMINDER: Output one SEARCH/REPLACE block. "
+            "Keep the SEARCH block exactly as shown above. "
+            "Fix only the REPLACE block.\n"
+        )
+
+        # Render injector sections
+        injector_sections = ""
+        if injector:
+            injector_sections = injector.render_all()
+
+        return original_user_prompt + header + search_lock + instruction + verifier_section + injector_sections + reminder
