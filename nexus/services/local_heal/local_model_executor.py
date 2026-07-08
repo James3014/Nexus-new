@@ -2656,6 +2656,7 @@ class LocalModelExecutor:
                     raw_meta=raw_meta,
                     request=request,
                     signal_snapshot=signal_snapshot,
+                    candidate_producer=None,
                 )
                 if _p4_result:
                     raw_meta.update(_p4_result)
@@ -2976,12 +2977,14 @@ def _try_invoke_p4_committee(
     raw_meta: dict,
     request: LocalModelExecutorRequest,
     signal_snapshot: dict,
+    candidate_producer: Any | None = None,
 ) -> dict | None:
     """P4-I4: Attempt P4 committee invocation from P3 hard-case path.
 
     Returns None if gate blocks. Returns receipt fragment if invoked.
     """
     from nexus.services.local_heal.committee_routed_tool import (
+        CommitteeCandidateProducer,
         CommitteeRoutedToolRequest,
         evaluate_and_execute,
     )
@@ -3006,7 +3009,7 @@ def _try_invoke_p4_committee(
         verifier_allowed=signal_snapshot.get("verifier_allowed", True),
     )
 
-    result = evaluate_and_execute(p4_request)
+    result = evaluate_and_execute(p4_request, candidate_producer=candidate_producer)
     raw_meta["p4_committee_gate_evaluated"] = True
     raw_meta["p4_committee_invocation_allowed"] = result.invocation_allowed
 

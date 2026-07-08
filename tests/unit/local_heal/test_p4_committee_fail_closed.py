@@ -54,17 +54,16 @@ def test_judge_invalid_selection_fail_closed():
 
 
 def test_apply_fail_solved_false():
-    """P4-I6: Apply failure → solved_by_committee=False."""
+    """P4-R3: Apply failure → solved_by_committee=False."""
     result = CommitteeRoutedToolResult(
         invoked=True,
         invocation_allowed=True,
         selected_candidate_apply_status="failed",
-        solved_by_committee=True,  # wrong!
+        solved_by_committee=True,  # wrong — should be caught
     )
     result = _check_fail_closed(result)
-    # No failure_reasons → not caught by _check_fail_closed
-    # But apply_status="failed" should prevent solved=True
-    assert result.solved_by_committee is True  # _check_fail_closed doesn't check apply_status
+    assert result.solved_by_committee is False
+    assert result.receipt_fragment.get("p4_fail_closed") is True
 
 
 def test_verifier_fail_solved_false():
@@ -126,6 +125,85 @@ def test_fail_closed_fields_in_receipt():
     assert receipt["p4_no_candidate_reason"] == "all_empty"
     assert receipt["p4_malformed_candidate_count"] == 2
     assert receipt["p4_fail_closed"] is True
+
+
+def test_fail_closed_catches_verifier_status_without_failure_reasons():
+    """P4-R3: Verifier status=fail caught even without explicit failure_reasons."""
+    result = CommitteeRoutedToolResult(
+        invoked=True,
+        invocation_allowed=True,
+        winner_found=True,
+        selected_candidate_apply_status="applied",
+        selected_candidate_verifier_status="fail",
+        solved_by_committee=True,  # wrong
+    )
+    result = _check_fail_closed(result)
+    assert result.solved_by_committee is False
+    assert result.receipt_fragment.get("p4_fail_closed") is True
+
+
+def test_fail_closed_catches_hash_mismatch_without_failure_reasons():
+    """P4-R3: Hash mismatch caught even without explicit failure_reasons."""
+    result = CommitteeRoutedToolResult(
+        invoked=True,
+        invocation_allowed=True,
+        winner_found=True,
+        selected_candidate_apply_status="applied",
+        selected_candidate_verifier_status="pass",
+        solved_by_committee=True,  # wrong
+        receipt_fragment={"p4_selected_candidate_hash_matches_applied": False},
+    )
+    result = _check_fail_closed(result)
+    assert result.solved_by_committee is False
+    assert result.receipt_fragment.get("p4_fail_closed") is True
+
+
+def test_fail_closed_catches_claim_gate_without_failure_reasons():
+    """P4-R3: Claim gate not passed caught without explicit failure_reasons."""
+    result = CommitteeRoutedToolResult(
+        invoked=True,
+        invocation_allowed=True,
+        winner_found=True,
+        selected_candidate_apply_status="applied",
+        selected_candidate_verifier_status="pass",
+        solved_by_committee=True,  # wrong
+        receipt_fragment={"p4_committee_claim_gate_passed": False},
+    )
+    result = _check_fail_closed(result)
+    assert result.solved_by_committee is False
+    assert result.receipt_fragment.get("p4_fail_closed") is True
+
+
+def test_fail_closed_winner_not_found_without_failure_reasons():
+    """P4-R3: winner_found=False caught without explicit failure_reasons."""
+    result = CommitteeRoutedToolResult(
+        invoked=True,
+        invocation_allowed=True,
+        winner_found=False,
+        solved_by_committee=True,  # wrong
+    )
+    result = _check_fail_closed(result)
+    assert result.solved_by_committee is False
+    assert result.receipt_fragment.get("p4_fail_closed") is True
+
+
+def test_fail_closed_all_good_does_not_override():
+    """P4-R3: All conditions pass → fail_closed not set."""
+    result = CommitteeRoutedToolResult(
+        invoked=True,
+        invocation_allowed=True,
+        winner_found=True,
+        selected_candidate_apply_status="applied",
+        selected_candidate_verifier_status="pass",
+        solved_by_committee=True,
+        receipt_fragment={
+            "p4_selected_candidate_hash_matches_applied": True,
+            "p4_committee_claim_gate_passed": True,
+        },
+    )
+    result = _check_fail_closed(result)
+    assert result.solved_by_committee is True
+    assert result.receipt_fragment.get("p4_fail_closed") is not True
 
 
 def test_forbidden_fallback_detected_and_blocked():

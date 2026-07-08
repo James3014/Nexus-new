@@ -516,6 +516,11 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         # P4-I2: Committee activation gate fields
         "p4_committee_gate_evaluated": bool(getattr(ctx, "p4_committee_gate_evaluated", False)),
         "p4_committee_activation_inputs": dict(getattr(ctx, "p4_committee_activation_inputs", {}) or {}),
+        # P4-R1: Candidate producer tracking fields
+        "p4_candidate_producer_present": bool(getattr(ctx, "p4_candidate_producer_present", False)),
+        "p4_candidate_producer_invoked": bool(getattr(ctx, "p4_candidate_producer_invoked", False)),
+        "p4_candidate_producer_name": str(getattr(ctx, "p4_candidate_producer_name", "") or ""),
+        "p4_candidate_producer_error": str(getattr(ctx, "p4_candidate_producer_error", "") or ""),
         # P4-I3: Candidate adapter fields
         "p4_raw_candidate_count": int(getattr(ctx, "p4_raw_candidate_count", 0) or 0),
         "p4_rejected_candidate_count": int(getattr(ctx, "p4_rejected_candidate_count", 0) or 0),
@@ -524,6 +529,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "p4_committee_invocation_source": str(getattr(ctx, "p4_committee_invocation_source", "") or ""),
         # P4-I5: Committee winner reapply + claim gate fields
         "p4_committee_claim_gate_passed": bool(getattr(ctx, "p4_committee_claim_gate_passed", False)),
+        "p4_selected_candidate_hash_matches_applied": bool(getattr(ctx, "p4_selected_candidate_hash_matches_applied", False)),
         # P4-I6: Fail-closed tracking fields
         "p4_zero_winner": bool(getattr(ctx, "p4_zero_winner", False)),
         "p4_no_candidate_reason": str(getattr(ctx, "p4_no_candidate_reason", "") or ""),
