@@ -32,6 +32,29 @@ def _extract_committee_trace(ctx: Any) -> dict[str, Any]:
     return {}
 
 
+def _extract_output_understanding_metadata(ctx: Any) -> dict[str, Any]:
+    """P1-3: Extract canonical output understanding metadata when present.
+
+    Additive only — returns empty dict if fields are absent.
+    """
+    # Try to get from ctx.raw_model_metadata first (executor response path)
+    raw_meta = getattr(ctx, "raw_model_metadata", None) or {}
+    if not isinstance(raw_meta, dict):
+        raw_meta = {}
+
+    result = {}
+    for key in (
+        "output_understanding_format",
+        "output_understanding_success",
+        "output_understanding_normalization_steps",
+        "output_understanding_source_format",
+    ):
+        if key in raw_meta:
+            result[key] = raw_meta[key]
+
+    return result
+
+
 def _nexus_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
@@ -506,6 +529,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
             "memory_influence": _extract_memory_trace(ctx),
             # U3-HETEROGENEOUS-ROUTE-LIFT: opt-in committee trace
             "committee": _extract_committee_trace(ctx),
+            # P1-3: Canonical output understanding metadata (additive)
+            **_extract_output_understanding_metadata(ctx),
         },
 
         # --- S1-prep: StrategyTrace-only (no execution effect) ---
