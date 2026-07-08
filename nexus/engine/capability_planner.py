@@ -889,6 +889,16 @@ class CapabilityPlanner:
             # N2.8 topology metadata additions
             topology = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
             signal_snapshot["execution_topology"] = topology
+
+            # P3-I1: Cloud-with-local-assist shadow routing (override topology when flag enabled)
+            if os.environ.get("NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW", "0") == "1":
+                signal_snapshot["p3_shadow_route"] = True
+                signal_snapshot["execution_topology"] = "cloud_with_local_assist"
+                signal_snapshot["cloud_used"] = False
+                signal_snapshot["cloud_candidate_generated"] = False
+                signal_snapshot["local_assist_used"] = False
+                signal_snapshot["assist_stages_activated"] = []
+                signal_snapshot["p3_route_status"] = "shadow_no_cloud_endpoint"
             if topology == "local_committee_only":
                 signal_snapshot["committee_profile"] = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
                 signal_snapshot["local_committee_enabled"] = True

@@ -2406,6 +2406,33 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
+        # P3-I1: Cloud-with-local-assist shadow routing — fail-closed, no cloud endpoint
+        if execution_topology == "cloud_with_local_assist":
+            _shadow_meta = {
+                "execution_topology": "cloud_with_local_assist",
+                "p3_shadow_route": True,
+                "cloud_used": False,
+                "cloud_candidate_generated": False,
+                "local_assist_used": False,
+                "assist_stages_activated": [],
+                "p3_route_status": "shadow_no_cloud_endpoint",
+            }
+            armor_ok, armor_miss = validate_local_model_armor_metadata(_shadow_meta)
+            _shadow_meta["armor_receipt_complete"] = armor_ok
+            _shadow_meta["armor_receipt_missing_fields"] = armor_miss
+            return LocalModelExecutorResponse(
+                invoked=False,
+                local_model_called=False,
+                candidate_patch="",
+                candidate_hash=empty_hash,
+                reasoning_summary="cloud_with_local_assist_shadow_no_endpoint",
+                raw_model_metadata=_shadow_meta,
+                provider="none",
+                model_name="",
+                error="cloud_endpoint_not_available",
+                timeout=False,
+                evidence_refs=request.evidence_refs,
+            )
 
         # 9. Generate Candidate Patch for single_local_model
         signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}

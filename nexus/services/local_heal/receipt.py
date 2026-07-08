@@ -470,7 +470,14 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "wall_time_sec": float(getattr(ctx, "wall_time_sec", 0.0) or 0.0),
         # P2: Execution topology visibility
         "execution_topology": str(getattr(ctx, "execution_topology", "") or ""),
-        
+        # P3-I1: Shadow routing fields
+        "p3_shadow_route": bool(getattr(ctx, "p3_shadow_route", False)),
+        "cloud_used": bool(getattr(ctx, "cloud_used", False)),
+        "cloud_candidate_generated": bool(getattr(ctx, "cloud_candidate_generated", False)),
+        "local_assist_used": bool(getattr(ctx, "local_assist_used", False)),
+        "assist_stages_activated": list(getattr(ctx, "assist_stages_activated", []) or []),
+        "p3_route_status": str(getattr(ctx, "p3_route_status", "") or ""),
+
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),
         "sidecar_model": str(getattr(ctx, "_sidecar_model", "")),
