@@ -29,6 +29,11 @@ class ClaimDeliveryGate:
         candidate_hash_matches_applied = payload.get("candidate_hash_matches_applied", True)
         if not candidate_hash_matches_applied:
             reasons.append("candidate_hash_mismatch")
+        # P2-E: Target file presence check
+        candidate_target_file = str(payload.get("candidate_target_file", "") or "")
+        source_hash_present = bool(str(payload.get("source_hash", "") or "").strip())
+        if source_hash_present and not candidate_target_file.strip():
+            reasons.append("missing_candidate_target_file")
         if not payload.get("patch_applied"):
             reasons.append("patch_not_applied")
         if not refs:
@@ -78,6 +83,8 @@ def validate_context_claim_delivery(
             "unsupported": "unsupported" in failure_reason.lower(),
             # P2-C/D: Hash match from explicit param or op field
             "candidate_hash_matches_applied": candidate_hash_matches_applied,
+            # P2-E: Target file presence
+            "candidate_target_file": str(getattr(op, "candidate_target_file", "") or ""),
         }
     )
     out = {

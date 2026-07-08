@@ -1377,6 +1377,10 @@ class LocalModelExecutor:
             raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
             raw_meta["verifier_error_present"] = bool(isolated_verifier_error)
             raw_meta["verifier_receipt_exit_code_present"] = isolated_verifier_exit_code is not None
+            # P2-F: Store hash_match on route_context for orchestrator fallback
+            if isinstance(request.route_context, dict):
+                request.route_context["candidate_hash_matches_applied"] = hash_match
+
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=local_model_called,
@@ -2383,6 +2387,10 @@ class LocalModelExecutor:
             raw_meta["delegated_retry_provider_response_len"] = delegated_retry_provider_response_len
             raw_meta["delegated_retry_provider_response_type"] = delegated_retry_provider_response_type
             raw_meta["delegated_retry_provider_call_error"] = delegated_retry_provider_call_error
+
+            # P2-F: Store hash_match on route_context for orchestrator fallback
+            if isinstance(request.route_context, dict):
+                request.route_context["candidate_hash_matches_applied"] = hash_match
 
             return LocalModelExecutorResponse(
                 invoked=True,
