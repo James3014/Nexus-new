@@ -534,6 +534,18 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "p4_zero_winner": bool(getattr(ctx, "p4_zero_winner", False)),
         "p4_no_candidate_reason": str(getattr(ctx, "p4_no_candidate_reason", "") or ""),
         "p4_malformed_candidate_count": int(getattr(ctx, "p4_malformed_candidate_count", 0) or 0),
+        # P5-I7: Diversity selection receipt fields
+        "p5_diversity_selector_used": bool(getattr(ctx, "p5_diversity_selector_used", False)),
+        "p5_selection_strategy": str(getattr(ctx, "p5_selection_strategy", "") or ""),
+        "p5_candidate_count": int(getattr(ctx, "p5_candidate_count", 0) or 0),
+        "p5_duplicate_group_count": int(getattr(ctx, "p5_duplicate_group_count", 0) or 0),
+        "p5_popularity_trap_detected": bool(getattr(ctx, "p5_popularity_trap_detected", False)),
+        "p5_popularity_trap_reason": str(getattr(ctx, "p5_popularity_trap_reason", "") or ""),
+        "p5_selected_candidate_index": int(getattr(ctx, "p5_selected_candidate_index", -1) or -1),
+        "p5_selected_candidate_hash": str(getattr(ctx, "p5_selected_candidate_hash", "") or ""),
+        "p5_score_breakdown": list(getattr(ctx, "p5_score_breakdown", []) or []),
+        "p5_rejected_by_diversity": list(getattr(ctx, "p5_rejected_by_diversity", []) or []),
+        "p5_fail_closed": bool(getattr(ctx, "p5_fail_closed", False)),
         # P3-I7: Stage 5 escalation stub fields
         "stage5_escalation_performed": bool(getattr(ctx, "stage5_escalation_performed", False)),
         "stage5_escalation_recommended": bool(getattr(ctx, "stage5_escalation_recommended", False)),
