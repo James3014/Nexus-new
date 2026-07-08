@@ -483,6 +483,10 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "stage1_compact_prompt": str(getattr(ctx, "stage1_compact_prompt", "") or ""),
         "stage1_error_context": str(getattr(ctx, "stage1_error_context", "") or ""),
         "stage1_diagnosis_model": str(getattr(ctx, "stage1_diagnosis_model", "") or ""),
+        # P3-I4: Stage 2 cloud candidate fields
+        "cloud_provider": str(getattr(ctx, "cloud_provider", "") or ""),
+        "cloud_candidate_patch": str(getattr(ctx, "cloud_candidate_patch", "") or ""),
+        "cloud_candidate_hash": str(getattr(ctx, "cloud_candidate_hash", "") or ""),
 
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),

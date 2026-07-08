@@ -2406,18 +2406,26 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
-        # P3-I1/I3: Cloud-with-local-assist shadow routing with stage1 diagnosis
+        # P3-I1/I3/I4: Cloud-with-local-assist shadow routing with stage1+2
         if execution_topology == "cloud_with_local_assist":
             # P3-I3: Stage 1 local diagnosis
             stage1 = _p3_stage1_local_diagnosis(request)
+
+            # P3-I4: Stage 2 cloud candidate seam (fake provider)
+            cloud_provider = FakeCloudCandidateProvider()
+            cloud_response = cloud_provider.generate(request)
+
             _shadow_meta = {
                 "execution_topology": "cloud_with_local_assist",
                 "p3_shadow_route": True,
-                "cloud_used": False,
-                "cloud_candidate_generated": False,
+                "cloud_used": True,
+                "cloud_candidate_generated": bool(cloud_response.candidate_patch.strip()),
                 "local_assist_used": True,
-                "assist_stages_activated": ["stage1_local_diagnosis"],
-                "p3_route_status": "shadow_stage1_complete",
+                "assist_stages_activated": ["stage1_local_diagnosis", "stage2_cloud_candidate"],
+                "p3_route_status": "shadow_stage2_complete",
+                "cloud_provider": "fake_cloud",
+                "cloud_candidate_patch": cloud_response.candidate_patch,
+                "cloud_candidate_hash": cloud_response.candidate_hash,
                 **stage1,
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(_shadow_meta)
@@ -2428,11 +2436,11 @@ class LocalModelExecutor:
                 local_model_called=False,
                 candidate_patch="",
                 candidate_hash=empty_hash,
-                reasoning_summary="cloud_with_local_assist_shadow_stage1",
+                reasoning_summary="cloud_with_local_assist_shadow_stage2",
                 raw_model_metadata=_shadow_meta,
                 provider="none",
                 model_name="",
-                error="cloud_endpoint_not_available",
+                error="",
                 timeout=False,
                 evidence_refs=request.evidence_refs,
             )
@@ -2654,6 +2662,29 @@ def _inject_diagnosis_guidance(
     )
     _hash = _hl.sha256(_diag_root_cause.encode("utf-8")).hexdigest()[:16]
     return updated, True, _hash
+
+
+class FakeCloudCandidateProvider:
+    """P3-I4: Fake cloud candidate provider — always produces empty candidate.
+
+    Used when no real cloud endpoint is available. Seams for future real cloud integration.
+    """
+
+    def generate(self, request: LocalModelExecutorRequest) -> LocalModelExecutorResponse:
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        return LocalModelExecutorResponse(
+            invoked=False,
+            local_model_called=False,
+            candidate_patch="",
+            candidate_hash=empty_hash,
+            reasoning_summary="fake_cloud_no_endpoint",
+            raw_model_metadata={},
+            provider="fake_cloud",
+            model_name="",
+            error="",
+            timeout=False,
+            evidence_refs=request.evidence_refs,
+        )
 
 
 def _p3_stage1_local_diagnosis(request: LocalModelExecutorRequest) -> dict:
