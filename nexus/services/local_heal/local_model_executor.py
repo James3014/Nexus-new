@@ -735,13 +735,20 @@ class LocalModelExecutor:
         
         # 1. Handle Dry Run
         if request.dry_run:
+            from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
+            _p3_skeleton_request = {
+                "task_id": request.task_id,
+                "difficulty": request.route_context.get("difficulty", "") if isinstance(request.route_context, dict) else "",
+                "route_context": request.route_context if isinstance(request.route_context, dict) else {},
+            }
+            _p3_skeleton = compute_p3_route_skeleton(_p3_skeleton_request)
             return LocalModelExecutorResponse(
                 invoked=False,
                 local_model_called=False,
                 candidate_patch="",
                 candidate_hash=empty_hash,
                 reasoning_summary="dry_run_active",
-                raw_model_metadata={"dry_run": True, "execution_topology": execution_topology},
+                raw_model_metadata={"dry_run": True, "execution_topology": execution_topology, **p3_skeleton_to_dict(_p3_skeleton)},
                 provider="none",
                 model_name="",
                 error="dry_run",
@@ -1333,6 +1340,15 @@ class LocalModelExecutor:
             raw_meta["armor_receipt_missing_fields"] = armor_miss
             local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
             raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
+            # P3-A: Attach route skeleton metadata (shadow-only, no runtime behavior change)
+            from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
+            _p3_skeleton_request = {
+                "task_id": request.task_id,
+                "difficulty": request.route_context.get("difficulty", "") if isinstance(request.route_context, dict) else "",
+                "route_context": request.route_context if isinstance(request.route_context, dict) else {},
+            }
+            _p3_skeleton = compute_p3_route_skeleton(_p3_skeleton_request)
+            raw_meta.update(p3_skeleton_to_dict(_p3_skeleton))
             raw_meta["solved"] = bool(
                 hybrid_route is not None
                 and hybrid_route.route_mode.value == "local_only_executed"
@@ -1641,6 +1657,15 @@ class LocalModelExecutor:
             provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
             local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
             raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
+            # P3-A: Attach route skeleton metadata (shadow-only, no runtime behavior change)
+            from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
+            _p3_skeleton_request = {
+                "task_id": request.task_id,
+                "difficulty": request.route_context.get("difficulty", "") if isinstance(request.route_context, dict) else "",
+                "route_context": request.route_context if isinstance(request.route_context, dict) else {},
+            }
+            _p3_skeleton = compute_p3_route_skeleton(_p3_skeleton_request)
+            raw_meta.update(p3_skeleton_to_dict(_p3_skeleton))
 
             raw_meta["solved"] = bool(
                 pipeline_solve_eligible
@@ -2625,6 +2650,16 @@ class LocalModelExecutor:
         raw_meta["armor_receipt_missing_fields"] = armor_miss
         local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
         raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
+
+        # P3-A: Attach route skeleton metadata (shadow-only, no runtime behavior change)
+        from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
+        _p3_skeleton_request = {
+            "task_id": request.task_id,
+            "difficulty": request.route_context.get("difficulty", "") if isinstance(request.route_context, dict) else "",
+            "route_context": request.route_context if isinstance(request.route_context, dict) else {},
+        }
+        _p3_skeleton = compute_p3_route_skeleton(_p3_skeleton_request)
+        raw_meta.update(p3_skeleton_to_dict(_p3_skeleton))
 
         # P3-I6: Stage 4 local retry fallback — merge cloud meta into response
         _p3_cloud_meta = (request.route_context or {}).get("_p3_cloud_meta", {})

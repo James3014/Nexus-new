@@ -551,6 +551,23 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "stage5_escalation_recommended": bool(getattr(ctx, "stage5_escalation_recommended", False)),
         "stage5_escalation_reason": str(getattr(ctx, "stage5_escalation_reason", "") or ""),
         "stage5_escalation_target": str(getattr(ctx, "stage5_escalation_target", "") or ""),
+        # P3-A: Route skeleton fields (shadow-only, no runtime behavior change)
+        "p3_route_skeleton_enabled": bool(getattr(ctx, "p3_route_skeleton_enabled", False)),
+        "p3_route_authority": str(getattr(ctx, "p3_route_authority", "") or ""),
+        "p3_task_difficulty": str(getattr(ctx, "p3_task_difficulty", "") or ""),
+        "p3_intended_topology": str(getattr(ctx, "p3_intended_topology", "") or ""),
+        "p3_cloud_used": bool(getattr(ctx, "p3_cloud_used", False)),
+        "p3_cloud_call_invoked": bool(getattr(ctx, "p3_cloud_call_invoked", False)),
+        "p3_local_diagnosis_planned": bool(getattr(ctx, "p3_local_diagnosis_planned", False)),
+        "p3_cloud_candidate_generation_planned": bool(getattr(ctx, "p3_cloud_candidate_generation_planned", False)),
+        "p3_local_cheap_verifier_planned": bool(getattr(ctx, "p3_local_cheap_verifier_planned", False)),
+        "p3_local_retry_planned": bool(getattr(ctx, "p3_local_retry_planned", False)),
+        "p3_hybrid_committee_planned": bool(getattr(ctx, "p3_hybrid_committee_planned", False)),
+        "p3_assist_stages_activated": list(getattr(ctx, "p3_assist_stages_activated", []) or []),
+        "p3_runtime_behavior_changed": bool(getattr(ctx, "p3_runtime_behavior_changed", False)),
+        "p3_claim_eligible": bool(getattr(ctx, "p3_claim_eligible", False)),
+        "p3_public_claim_allowed": bool(getattr(ctx, "p3_public_claim_allowed", False)),
+        "p3_reason": str(getattr(ctx, "p3_reason", "") or ""),
 
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),
