@@ -22,6 +22,10 @@ class ShadowScore:
     selected_by_current: bool = False
     would_select_by_proposed: bool = False
     shadow_only: bool = True
+    # P5/EA-R4: Copyability telemetry
+    copyability_score: float = 0.0
+    decision_eligibility: str = "audit_only"  # "decision_eligible" | "audit_only" | "ignore_for_selection"
+    audit_only_reason: str = ""
 
 
 @dataclass
@@ -65,6 +69,47 @@ FEATURE_WEIGHTS = {
     "duplicate_penalty": -1.0,
     "evidence_gap_bonus": 1.0,
 }
+
+
+def compute_copyability_score(
+    lesson: dict[str, Any],
+    *,
+    verified_outcome: bool = False,
+) -> tuple[float, str, str]:
+    """P5/EA-R4: Compute copyability score for a lesson.
+
+    Returns (score, decision_eligibility, audit_only_reason).
+    """
+    # Base score from feature evidence
+    classification = str(lesson.get("classification", "")).lower()
+    has_verifier_pass = "verifier_pass" in classification
+    has_provenance = bool(lesson.get("provenance", ""))
+    has_summary = bool(lesson.get("summary", ""))
+
+    score = 0.0
+    if has_verifier_pass:
+        score += 0.4
+    if has_provenance:
+        score += 0.3
+    if has_summary:
+        score += 0.2
+    if verified_outcome:
+        score += 0.1
+
+    score = min(1.0, score)
+
+    # Decision eligibility
+    if score >= 0.80 and verified_outcome:
+        eligibility = "decision_eligible"
+        reason = "high_copyability_verified"
+    elif score >= 0.50:
+        eligibility = "audit_only"
+        reason = "medium_copyability"
+    else:
+        eligibility = "ignore_for_selection"
+        reason = "low_copyability"
+
+    return score, eligibility, reason
 
 
 def compute_shadow_features(
@@ -186,6 +231,12 @@ def shadow_score_lessons(
 
         proposed_score = sum(features[f] * FEATURE_WEIGHTS.get(f, 0.0) for f in features)
 
+        # P5/EA-R4: Compute copyability score
+        copyability_score, decision_eligibility, audit_only_reason = compute_copyability_score(
+            lesson,
+            verified_outcome=False,  # default: not verified
+        )
+
         scores.append(ShadowScore(
             lesson_id=lesson_id,
             current_score=float(lesson.get("relevance_score", 1.0)),
@@ -193,6 +244,9 @@ def shadow_score_lessons(
             feature_scores=features,
             selected_by_current=(i < limit),
             would_select_by_proposed=False,  # computed after sorting
+            copyability_score=copyability_score,
+            decision_eligibility=decision_eligibility,
+            audit_only_reason=audit_only_reason,
         ))
 
     # Sort by proposed score
