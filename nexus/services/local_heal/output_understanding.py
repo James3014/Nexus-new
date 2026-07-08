@@ -23,6 +23,11 @@ class CanonicalPatchCandidate:
     normalized_patch_hash: str
     normalization_steps: tuple[str, ...]
     safety_flags: tuple[str, ...]
+    # P2-1: Anchor fields
+    target_file: str = ""
+    target_symbol: str = ""
+    line_span: str = ""
+    old_block_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -155,4 +160,26 @@ def understand_output(raw_output: str) -> OutputUnderstandingResult:
         candidate=candidate,
         detected_format=fmt.value,
         failure_reason="",
+    )
+
+
+def enrich_candidate_with_anchor(
+    candidate: CanonicalPatchCandidate,
+    *,
+    target_file: str = "",
+    target_symbol: str = "",
+    line_span: str = "",
+    old_block_hash: str = "",
+) -> CanonicalPatchCandidate:
+    """P2-1: Produce a new candidate with anchor fields filled.
+
+    Uses dataclasses.replace() to preserve all original fields.
+    """
+    from dataclasses import replace
+    return replace(
+        candidate,
+        target_file=target_file,
+        target_symbol=target_symbol,
+        line_span=line_span,
+        old_block_hash=old_block_hash,
     )

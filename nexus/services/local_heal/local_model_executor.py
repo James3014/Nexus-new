@@ -2489,12 +2489,21 @@ class LocalModelExecutor:
         patch_meta = {}
 
         # P1-2: Read-only canonical understanding layer
-        from nexus.services.local_heal.output_understanding import understand_output, OutputFormat
+        from nexus.services.local_heal.output_understanding import understand_output, OutputFormat, enrich_candidate_with_anchor
         _understanding = understand_output(candidate_patch)
+
+        # P2-1: Enrich canonical candidate with anchor fields
+        _canonical_candidate = _understanding.candidate
+        if _canonical_candidate is not None:
+            _canonical_candidate = enrich_candidate_with_anchor(
+                _canonical_candidate,
+                target_file=request.target_file,
+                target_symbol=request.route_context.get("target_symbol", "") if isinstance(request.route_context, dict) else "",
+                old_block_hash=source_anchor_hash,
+            )
 
         # P1-4: Project canonical candidate content for supported formats
         _projection_source = "raw_output"
-        _canonical_candidate = _understanding.candidate
         _supported_projection_formats = {
             OutputFormat.SEARCH_REPLACE.value,
             OutputFormat.FENCED_SEARCH_REPLACE.value,
