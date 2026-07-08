@@ -60,6 +60,8 @@ class DiversitySelectionResult:
     score_breakdown: list[dict[str, Any]]
     rejected_by_diversity: list[dict[str, Any]]
     fail_closed: bool
+    failure_reasons: list[str] = field(default_factory=list)
+    trace_events: list[dict[str, Any]] = field(default_factory=list)
     failure_reasons: list[str]
 
 
@@ -496,14 +498,64 @@ def select_diverse_candidate(
             failure_reasons=[],
         )
 
+    # P5-V2: Create trace for selection decisions
+    from nexus.services.local_heal.selection_trace import SelectionTrace, SelectionTraceEvent
+    trace = SelectionTrace(trace_id="p5-selection", task_id="p5-selection")
+
     # Extract features for all candidates
     all_features = [extract_features(c, source_models[i]) for i, c in enumerate(candidates)]
+
+    # P5-V2: Trace feature extraction
+    for i, f in enumerate(all_features):
+        trace.append_event(SelectionTraceEvent(
+            event_id="",
+            parent_event_id=None,
+            phase="feature_extraction",
+            event_type="candidate_feature_extracted",
+            candidate_index=i,
+            candidate_hash=candidates[i].raw_output_hash,
+            inputs={"patch_length": f.patch_length, "line_count": f.line_count, "syntax_score": f.syntax_like_score, "safety_penalty": f.safety_penalty},
+            outputs={"target_file_match": f.target_file_match},
+            decision="scored",
+            reason=f"syntax={f.syntax_like_score}, safety={f.safety_penalty}",
+            reversible=False,
+        ))
 
     # Group near-duplicates
     groups = group_near_duplicates(all_features)
 
+    # P5-V2: Trace duplicate detection
+    trace.append_event(SelectionTraceEvent(
+        event_id="",
+        parent_event_id=None,
+        phase="duplicate_detection",
+        event_type="candidate_duplicate_grouped",
+        candidate_index=None,
+        candidate_hash=None,
+        inputs={"group_count": len(groups)},
+        outputs={"groups": [{"group_id": g.group_id, "indices": list(g.candidate_indices), "kind": g.duplicate_kind} for g in groups]},
+        decision="grouped",
+        reason=f"{len(groups)} duplicate groups found",
+        reversible=False,
+    ))
+
     # Detect popularity trap
     trap_decision = detect_popularity_trap(all_features, groups)
+
+    # P5-V2: Trace popularity trap
+    trace.append_event(SelectionTraceEvent(
+        event_id="",
+        parent_event_id=None,
+        phase="popularity_trap",
+        event_type="popularity_trap_detected",
+        candidate_index=None,
+        candidate_hash=None,
+        inputs={"dominant_group_id": trap_decision.dominant_group_id, "dominant_group_size": trap_decision.dominant_group_size},
+        outputs={"detected": trap_decision.detected, "action": trap_decision.recommended_action, "reason": trap_decision.reason},
+        decision="trap_detected" if trap_decision.detected else "noop",
+        reason=trap_decision.reason,
+        reversible=False,
+    ))
 
     # Compute dominant models and majority format
     model_counts: dict[str, int] = {}
@@ -531,6 +583,23 @@ def select_diverse_candidate(
     # Check if ALL candidates have final_score <= 0
     all_unsafe = all(s[0] <= 0 for s in scored)
     if all_unsafe:
+        # P5-V2: Trace fail_closed
+        trace.append_event(SelectionTraceEvent(
+            event_id="",
+            parent_event_id=None,
+            phase="selection",
+            event_type="selection_fail_closed",
+            candidate_index=None,
+            candidate_hash=None,
+            inputs={},
+            outputs={"failure_reasons": ["all_candidates_unsafe"]},
+            decision="fail_closed",
+            reason="all candidates unsafe",
+            reversible=False,
+        ))
+        trace.freeze()
+        trace_events = trace.to_receipt_fragment().get("p5_trace_events", [])
+
         cid = _build_candidate_id(candidates[0], 0)
         return DiversitySelectionResult(
             selected_candidate_id=cid,
@@ -546,6 +615,7 @@ def select_diverse_candidate(
             rejected_by_diversity=list(range(len(candidates))),
             fail_closed=True,
             failure_reasons=["all_candidates_unsafe"],
+            trace_events=trace_events,
         )
 
     # Sort: higher final_score first, then lower safety_penalty, then non-dominant, then lower index
@@ -564,6 +634,24 @@ def select_diverse_candidate(
     winner_score, winner_idx, winner_breakdown, winner_features = scored[0]
     winner_cid = _build_candidate_id(candidates[winner_idx], winner_idx)
 
+    # P5-V2: Trace winner selection
+    trace.append_event(SelectionTraceEvent(
+        event_id="",
+        parent_event_id=None,
+        phase="scoring",
+        event_type="candidate_scored",
+        candidate_index=winner_idx,
+        candidate_hash=candidates[winner_idx].raw_output_hash,
+        inputs={"winner_index": winner_idx},
+        outputs={"final_scores": {str(s[1]): s[0] for s in scored}},
+        decision="selected",
+        reason=f"winner=candidate[{winner_idx}], score={winner_score}",
+        reversible=False,
+    ))
+
+    trace.freeze()
+    trace_events = trace.to_receipt_fragment().get("p5_trace_events", [])
+
     return DiversitySelectionResult(
         selected_candidate_id=winner_cid,
         selected_candidate_hash=candidates[winner_idx].raw_output_hash,
@@ -578,4 +666,5 @@ def select_diverse_candidate(
         rejected_by_diversity=[],
         fail_closed=False,
         failure_reasons=[],
+        trace_events=trace_events,
     )

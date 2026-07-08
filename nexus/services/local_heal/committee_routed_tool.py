@@ -370,7 +370,25 @@ def evaluate_and_execute(
             p5_diversity_used = True
 
             if p5_result.fail_closed or p5_result.selected_index < 0:
-                # P5 selector failed — return fail-closed result
+                # P5 selector failed — return fail-closed result with trace
+                _receipt = {
+                    **gate,
+                    "p5_diversity_selector_used": True,
+                    "p5_selection_strategy": p5_result.selection_strategy,
+                    "p5_candidate_count": p5_result.candidate_count,
+                    "p5_duplicate_group_count": p5_result.duplicate_group_count,
+                    "p5_popularity_trap_detected": p5_result.popularity_trap_detected,
+                    "p5_popularity_trap_reason": p5_result.popularity_trap_reason,
+                    "p5_selected_candidate_index": p5_result.selected_index,
+                    "p5_selected_candidate_hash": p5_result.selected_candidate_hash,
+                    "p5_score_breakdown": p5_result.score_breakdown,
+                    "p5_rejected_by_diversity": p5_result.rejected_by_diversity,
+                    "p5_fail_closed": p5_result.fail_closed,
+                }
+                # P5-V2: Merge trace events
+                if p5_result.trace_events:
+                    _receipt["p5_trace_event_count"] = len(p5_result.trace_events)
+                    _receipt["p5_trace_events"] = p5_result.trace_events
                 return CommitteeRoutedToolResult(
                     invoked=True,
                     invocation_allowed=True,
@@ -379,20 +397,7 @@ def evaluate_and_execute(
                     winner_found=False,
                     solved_by_committee=False,
                     failure_reasons=[f"p5_selection_failed:{r}" for r in p5_result.failure_reasons],
-                    receipt_fragment={
-                        **gate,
-                        "p5_diversity_selector_used": True,
-                        "p5_selection_strategy": p5_result.selection_strategy,
-                        "p5_candidate_count": p5_result.candidate_count,
-                        "p5_duplicate_group_count": p5_result.duplicate_group_count,
-                        "p5_popularity_trap_detected": p5_result.popularity_trap_detected,
-                        "p5_popularity_trap_reason": p5_result.popularity_trap_reason,
-                        "p5_selected_candidate_index": p5_result.selected_index,
-                        "p5_selected_candidate_hash": p5_result.selected_candidate_hash,
-                        "p5_score_breakdown": p5_result.score_breakdown,
-                        "p5_rejected_by_diversity": p5_result.rejected_by_diversity,
-                        "p5_fail_closed": p5_result.fail_closed,
-                    },
+                    receipt_fragment=_receipt,
                 )
 
             winner = valid_candidates[p5_result.selected_index]
@@ -484,5 +489,10 @@ def evaluate_and_execute(
         result.receipt_fragment["p5_score_breakdown"] = p5_result.score_breakdown
         result.receipt_fragment["p5_rejected_by_diversity"] = p5_result.rejected_by_diversity
         result.receipt_fragment["p5_fail_closed"] = p5_result.fail_closed
+
+        # P5-V2: Merge trace events into receipt
+        if p5_result.trace_events:
+            result.receipt_fragment["p5_trace_event_count"] = len(p5_result.trace_events)
+            result.receipt_fragment["p5_trace_events"] = p5_result.trace_events
 
     return result

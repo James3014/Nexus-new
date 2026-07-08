@@ -93,6 +93,8 @@ class SelectionTrace:
                     "decision": e.decision,
                     "reason": e.reason,
                     "reversible": e.reversible,
+                    "inputs": e.inputs,
+                    "outputs": e.outputs,
                 }
                 for e in self.events
             ],
