@@ -2406,16 +2406,19 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
-        # P3-I1: Cloud-with-local-assist shadow routing — fail-closed, no cloud endpoint
+        # P3-I1/I3: Cloud-with-local-assist shadow routing with stage1 diagnosis
         if execution_topology == "cloud_with_local_assist":
+            # P3-I3: Stage 1 local diagnosis
+            stage1 = _p3_stage1_local_diagnosis(request)
             _shadow_meta = {
                 "execution_topology": "cloud_with_local_assist",
                 "p3_shadow_route": True,
                 "cloud_used": False,
                 "cloud_candidate_generated": False,
-                "local_assist_used": False,
-                "assist_stages_activated": [],
-                "p3_route_status": "shadow_no_cloud_endpoint",
+                "local_assist_used": True,
+                "assist_stages_activated": ["stage1_local_diagnosis"],
+                "p3_route_status": "shadow_stage1_complete",
+                **stage1,
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(_shadow_meta)
             _shadow_meta["armor_receipt_complete"] = armor_ok
@@ -2425,7 +2428,7 @@ class LocalModelExecutor:
                 local_model_called=False,
                 candidate_patch="",
                 candidate_hash=empty_hash,
-                reasoning_summary="cloud_with_local_assist_shadow_no_endpoint",
+                reasoning_summary="cloud_with_local_assist_shadow_stage1",
                 raw_model_metadata=_shadow_meta,
                 provider="none",
                 model_name="",
@@ -2651,6 +2654,57 @@ def _inject_diagnosis_guidance(
     )
     _hash = _hl.sha256(_diag_root_cause.encode("utf-8")).hexdigest()[:16]
     return updated, True, _hash
+
+
+def _p3_stage1_local_diagnosis(request: LocalModelExecutorRequest) -> dict:
+    """P3-I3: Deterministic local diagnosis for cloud_with_local_assist topology.
+
+    Extracts error context from request, produces compact prompt (≤500 chars).
+    Pure deterministic — no model calls.
+
+    Returns dict with:
+      - stage1_diagnosis_performed: bool
+      - stage1_diagnosis_summary: str
+      - stage1_compact_prompt: str
+      - stage1_error_context: str
+      - stage1_diagnosis_model: str ("deterministic")
+    """
+    problem = str(getattr(request, "problem_statement", "") or "")
+    evidence = list(getattr(request, "evidence_refs", []) or [])
+    target_file = str(getattr(request, "target_file", "") or "")
+    route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
+    signal = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+    target_symbol = str(signal.get("target_symbol", "") or "")
+
+    # Extract error context from problem statement
+    error_context = ""
+    if problem:
+        # Take first 200 chars as error context
+        error_context = problem[:200]
+
+    # Build compact prompt (≤500 chars)
+    parts = []
+    if target_file:
+        parts.append(f"File: {target_file}")
+    if target_symbol:
+        parts.append(f"Symbol: {target_symbol}")
+    if error_context:
+        parts.append(f"Context: {error_context}")
+    if evidence:
+        parts.append(f"Evidence: {', '.join(evidence[:3])}")
+
+    compact_prompt = " | ".join(parts)[:500]
+
+    # Summary
+    summary = f"Stage1 diagnosis: target={target_file}, symbol={target_symbol}, evidence_count={len(evidence)}"
+
+    return {
+        "stage1_diagnosis_performed": True,
+        "stage1_diagnosis_summary": summary,
+        "stage1_compact_prompt": compact_prompt,
+        "stage1_error_context": error_context,
+        "stage1_diagnosis_model": "deterministic",
+    }
 
 
 def _normalize_candidate_patch(

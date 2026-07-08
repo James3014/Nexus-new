@@ -477,6 +477,12 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "local_assist_used": bool(getattr(ctx, "local_assist_used", False)),
         "assist_stages_activated": list(getattr(ctx, "assist_stages_activated", []) or []),
         "p3_route_status": str(getattr(ctx, "p3_route_status", "") or ""),
+        # P3-I3: Stage 1 diagnosis fields
+        "stage1_diagnosis_performed": bool(getattr(ctx, "stage1_diagnosis_performed", False)),
+        "stage1_diagnosis_summary": str(getattr(ctx, "stage1_diagnosis_summary", "") or ""),
+        "stage1_compact_prompt": str(getattr(ctx, "stage1_compact_prompt", "") or ""),
+        "stage1_error_context": str(getattr(ctx, "stage1_error_context", "") or ""),
+        "stage1_diagnosis_model": str(getattr(ctx, "stage1_diagnosis_model", "") or ""),
 
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),
