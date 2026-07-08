@@ -50,6 +50,10 @@ class SolidSearchReplaceProtocol:
             OutputFormat.UNIFIED_DIFF: "UNIFIED_DIFF",
             OutputFormat.FENCED_SEARCH_REPLACE: "FENCED_SEARCH_REPLACE",
             OutputFormat.SEARCH_REPLACE: "VALID_SEARCH_REPLACE",
+            OutputFormat.PARTIAL_DIFF: "PARTIAL_DIFF",
+            OutputFormat.LINE_SPAN_EDIT: "LINE_SPAN_EDIT",
+            OutputFormat.FUNCTION_REPLACEMENT: "PLAIN_TEXT",
+            OutputFormat.NATURAL_LANGUAGE_REPAIR_INTENT: "NATURAL_LANGUAGE",
             OutputFormat.MALFORMED_OUTPUT: None,  # fall through to sub-classification
         }
 
