@@ -499,6 +499,11 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "stage4_local_retry_candidate_patch": str(getattr(ctx, "stage4_local_retry_candidate_patch", "") or ""),
         "stage4_local_retry_candidate_hash": str(getattr(ctx, "stage4_local_retry_candidate_hash", "") or ""),
         "stage4_local_retry_success": bool(getattr(ctx, "stage4_local_retry_success", False)),
+        # P3-I7: Stage 5 escalation stub fields
+        "stage5_escalation_performed": bool(getattr(ctx, "stage5_escalation_performed", False)),
+        "stage5_escalation_recommended": bool(getattr(ctx, "stage5_escalation_recommended", False)),
+        "stage5_escalation_reason": str(getattr(ctx, "stage5_escalation_reason", "") or ""),
+        "stage5_escalation_target": str(getattr(ctx, "stage5_escalation_target", "") or ""),
 
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),

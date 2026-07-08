@@ -74,9 +74,14 @@ def test_executor_shadow_runs_stage2():
     assert meta.get("cloud_candidate_patch") == ""
     assert "stage2_cloud_candidate" in meta.get("assist_stages_activated", [])
     assert "stage3_local_cheap_verifier" in meta.get("assist_stages_activated", [])
-    # P3-I6: executor falls through to local model
-    assert meta.get("p3_route_status") in ("shadow_stage3_verifier_blocked", "shadow_stage4_retry_complete", "shadow_stage4_retry_failed")
-
+    # P3-I7: stage5 sets final route status
+    assert meta.get("p3_route_status") in (
+        "shadow_stage3_verifier_blocked",
+        "shadow_stage4_retry_complete",
+        "shadow_stage4_retry_failed",
+        "shadow_stage5_escalation_recommended",
+        "shadow_stage5_retry_sufficient",
+    )
 
 def test_stage2_receipt_fields():
     """P3-I4: Receipt contains stage2 cloud candidate fields."""

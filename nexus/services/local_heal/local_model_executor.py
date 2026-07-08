@@ -2641,6 +2641,20 @@ class LocalModelExecutor:
             p3_status = "shadow_stage4_retry_complete" if raw_meta["stage4_local_retry_success"] else "shadow_stage4_retry_failed"
             raw_meta["p3_route_status"] = p3_status
 
+        # P3-I7: Stage 5 escalation stub (P3↔P4 boundary)
+        if _p3_cloud_meta:
+            stage5 = _p3_stage5_escalation_decision(
+                cloud_meta=_p3_cloud_meta,
+                local_retry_success=raw_meta.get("stage4_local_retry_success", False),
+                reason=raw_meta.get("stage3_verifier_reason", ""),
+            )
+            raw_meta.update(stage5)
+            if stage5.get("stage5_escalation_recommended", False):
+                raw_meta["p3_route_status"] = "shadow_stage5_escalation_recommended"
+            else:
+                raw_meta["p3_route_status"] = "shadow_stage5_retry_sufficient"
+            raw_meta["assist_stages_activated"] = raw_meta.get("assist_stages_activated", []) + ["stage5_escalation_stub"]
+
         return LocalModelExecutorResponse(
             invoked=prov_resp.provider_invoked,
             local_model_called=prov_resp.model_called,
@@ -2901,4 +2915,50 @@ def _normalize_candidate_patch(
         "protocol_used": "solid_search_replace",
         "normalized": True,
         **unwrap_meta,
+    }
+
+
+def _p3_stage5_escalation_decision(
+    cloud_meta: dict | None,
+    local_retry_success: bool,
+    reason: str = "",
+) -> dict:
+    """P3-I7: Deterministic escalation decision stub (P3↔P4 boundary).
+
+    Recommends escalation when local retry failed or verifier blocked + no retry patch.
+    Does NOT call committee (P4 responsibility).
+
+    Returns dict:
+      - stage5_escalation_performed: bool
+      - stage5_escalation_recommended: bool
+      - stage5_escalation_reason: str
+      - stage5_escalation_target: str ("committee" — stub, not called)
+    """
+    if not cloud_meta:
+        return {
+            "stage5_escalation_performed": True,
+            "stage5_escalation_recommended": False,
+            "stage5_escalation_reason": "no_cloud_pipeline_executed",
+            "stage5_escalation_target": "committee",
+        }
+
+    verifier_blocked = not cloud_meta.get("stage3_verifier_passed", False)
+    reason_str = str(reason or cloud_meta.get("stage3_verifier_reason", "") or "")
+
+    if local_retry_success:
+        return {
+            "stage5_escalation_performed": True,
+            "stage5_escalation_recommended": False,
+            "stage5_escalation_reason": "local_retry_sufficient",
+            "stage5_escalation_target": "committee",
+        }
+
+    # Retry failed → escalate regardless of verifier state
+    prefix = "verifier_blocked_and_retry_failed" if verifier_blocked else "retry_failed"
+    escalation_reason = f"{prefix}:{reason_str}" if reason_str else prefix
+    return {
+        "stage5_escalation_performed": True,
+        "stage5_escalation_recommended": True,
+        "stage5_escalation_reason": escalation_reason,
+        "stage5_escalation_target": "committee",
     }

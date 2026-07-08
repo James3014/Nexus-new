@@ -69,7 +69,7 @@ def test_stage4_fallback_generates_candidate():
     meta = resp.raw_model_metadata
     assert meta.get("p3_stage4_local_retry_performed") is True
     assert meta.get("stage4_local_retry_success") is True
-    assert meta.get("p3_route_status") == "shadow_stage4_retry_complete"
+    assert meta.get("p3_route_status") in ("shadow_stage4_retry_complete", "shadow_stage5_retry_sufficient")
     assert "stage4_local_retry" in meta.get("assist_stages_activated", [])
 
 
@@ -150,7 +150,7 @@ def test_stage4_fallback_empty_candidate():
     meta = resp.raw_model_metadata
     assert meta.get("p3_stage4_local_retry_performed") is True
     assert meta.get("stage4_local_retry_success") is False
-    assert meta.get("p3_route_status") == "shadow_stage4_retry_failed"
+    assert meta.get("p3_route_status") in ("shadow_stage4_retry_failed", "shadow_stage5_escalation_recommended")
 
 
 def test_stage4_does_not_run_when_not_cloud_topology():

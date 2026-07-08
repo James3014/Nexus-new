@@ -76,8 +76,14 @@ def test_p3_shadow_executor_does_not_crash():
     assert resp.raw_model_metadata.get("p3_shadow_route") is True
     assert resp.raw_model_metadata.get("cloud_used") is True
     assert resp.raw_model_metadata.get("local_assist_used") is True
-    # P3-I6: route status is now stage4
-    assert resp.raw_model_metadata.get("p3_route_status") in ("shadow_stage3_verifier_blocked", "shadow_stage4_retry_complete", "shadow_stage4_retry_failed")
+    # P3-I7: stage5 sets final route status
+    assert resp.raw_model_metadata.get("p3_route_status") in (
+        "shadow_stage3_verifier_blocked",
+        "shadow_stage4_retry_complete",
+        "shadow_stage4_retry_failed",
+        "shadow_stage5_escalation_recommended",
+        "shadow_stage5_retry_sufficient",
+    )
 
 
 def test_p3_shadow_receipt_contains_fields():
@@ -158,8 +164,14 @@ def test_p3_shadow_no_cloud_endpoint_fail_closed():
     meta = resp.raw_model_metadata
     assert meta.get("cloud_used") is True
     assert meta.get("cloud_candidate_generated") is False
-    # P3-I6: executor falls through to local model
-    assert meta.get("p3_route_status") in ("shadow_stage3_verifier_blocked", "shadow_stage4_retry_complete", "shadow_stage4_retry_failed")
+    # P3-I7: stage5 sets final route status
+    assert meta.get("p3_route_status") in (
+        "shadow_stage3_verifier_blocked",
+        "shadow_stage4_retry_complete",
+        "shadow_stage4_retry_failed",
+        "shadow_stage5_escalation_recommended",
+        "shadow_stage5_retry_sufficient",
+    )
 
 
 def test_p3_shadow_claim_gate_not_relaxed():
