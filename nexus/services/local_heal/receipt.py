@@ -48,6 +48,10 @@ def _extract_output_understanding_metadata(ctx: Any) -> dict[str, Any]:
         "output_understanding_success",
         "output_understanding_normalization_steps",
         "output_understanding_source_format",
+        # P2-2: Anchor fields
+        "output_understanding_candidate_target_file",
+        "output_understanding_candidate_target_symbol",
+        "output_understanding_candidate_old_block_hash",
     ):
         if key in raw_meta:
             result[key] = raw_meta[key]

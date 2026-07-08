@@ -259,3 +259,39 @@ def test_executor_injects_anchor_into_candidate():
     assert enriched.target_symbol == "my_func"
     assert enriched.old_block_hash == "abc123"
     assert enriched.source_format == "SEARCH_REPLACE"
+
+
+def test_understanding_meta_contains_anchor_fields_when_candidate_present():
+    """P2-2: After understand_output + enrich, simulated meta contains anchor keys."""
+    from nexus.services.local_heal.output_understanding import understand_output, enrich_candidate_with_anchor
+
+    raw = (
+        "<<<<<<< SEARCH\n"
+        "x = 1\n"
+        "=======\n"
+        "x = 2\n"
+        ">>>>>>> REPLACE"
+    )
+    result = understand_output(raw)
+    assert result.candidate is not None
+
+    enriched = enrich_candidate_with_anchor(
+        result.candidate,
+        target_file="foo.py",
+        target_symbol="bar",
+        old_block_hash="hash123",
+    )
+
+    # Simulate what executor builds in _understanding_meta
+    meta = {
+        "output_understanding_format": result.detected_format,
+        "output_understanding_success": result.success,
+    }
+    if enriched:
+        meta["output_understanding_candidate_target_file"] = enriched.target_file
+        meta["output_understanding_candidate_target_symbol"] = enriched.target_symbol
+        meta["output_understanding_candidate_old_block_hash"] = enriched.old_block_hash
+
+    assert meta["output_understanding_candidate_target_file"] == "foo.py"
+    assert meta["output_understanding_candidate_target_symbol"] == "bar"
+    assert meta["output_understanding_candidate_old_block_hash"] == "hash123"

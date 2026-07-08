@@ -2534,6 +2534,10 @@ class LocalModelExecutor:
         if _canonical_candidate:
             _understanding_meta["output_understanding_normalization_steps"] = list(_canonical_candidate.normalization_steps)
             _understanding_meta["output_understanding_source_format"] = _canonical_candidate.source_format
+            # P2-2: Propagate anchor fields
+            _understanding_meta["output_understanding_candidate_target_file"] = _canonical_candidate.target_file
+            _understanding_meta["output_understanding_candidate_target_symbol"] = _canonical_candidate.target_symbol
+            _understanding_meta["output_understanding_candidate_old_block_hash"] = _canonical_candidate.old_block_hash
 
         # P1-2: Fail-closed mapping for empty/refusal/malformed via understanding layer
         if not _understanding.success and candidate_hash == empty_hash:

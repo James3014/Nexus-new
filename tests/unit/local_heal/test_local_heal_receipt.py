@@ -67,3 +67,28 @@ def test_extraction_handles_missing_raw_model_metadata():
     ctx = FakeCtx()
     result = _extract_output_understanding_metadata(ctx)
     assert result == {}
+
+
+def test_extract_output_understanding_metadata_anchor_fields():
+    """P2-2: _extract_output_understanding_metadata() returns anchor keys when present."""
+    ctx = FakeCtx(raw_model_metadata={
+        "output_understanding_format": "SEARCH_REPLACE",
+        "output_understanding_candidate_target_file": "foo.py",
+        "output_understanding_candidate_target_symbol": "bar",
+        "output_understanding_candidate_old_block_hash": "hash123",
+    })
+    result = _extract_output_understanding_metadata(ctx)
+    assert result["output_understanding_candidate_target_file"] == "foo.py"
+    assert result["output_understanding_candidate_target_symbol"] == "bar"
+    assert result["output_understanding_candidate_old_block_hash"] == "hash123"
+
+
+def test_extract_output_understanding_metadata_anchor_fields_absent():
+    """P2-2: _extract_output_understanding_metadata() returns empty dict when anchor keys absent."""
+    ctx = FakeCtx(raw_model_metadata={
+        "output_understanding_format": "UNIFIED_DIFF",
+    })
+    result = _extract_output_understanding_metadata(ctx)
+    assert "output_understanding_candidate_target_file" not in result
+    assert "output_understanding_candidate_target_symbol" not in result
+    assert "output_understanding_candidate_old_block_hash" not in result
