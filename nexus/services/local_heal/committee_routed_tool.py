@@ -13,6 +13,7 @@ class CommitteeRoutedToolRequest:
     locked_search: str = ""
     source_hash: str = ""
     difficulty: str = ""
+    execution_topology: str = ""
     p3_route_status: str = ""
     hard_case_escalation_reason: str = ""
     evidence_refs: tuple[str, ...] = ()
@@ -81,10 +82,8 @@ def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRouted
     )
 
     # Build activation inputs from request
-    route_ctx = getattr(request, "route_context", {}) or {}
-    signal = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
     inputs = CommitteeActivationInput(
-        execution_topology=signal.get("execution_topology", "") or getattr(request, "execution_topology", ""),
+        execution_topology=request.execution_topology,
         p3_route_status=request.p3_route_status,
         hard_case_escalation_recommended=bool(request.hard_case_escalation_reason),
         difficulty=request.difficulty,
@@ -103,11 +102,14 @@ def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRouted
             receipt_fragment=gate,
         )
 
-    # Stub: no actual committee execution yet (P4-I4)
-    # For now, return empty result with gate info
+    # P4-I4: Stub committee execution (no real provider yet)
+    # P4-I5 will add actual candidate generation + selection
     return CommitteeRoutedToolResult(
         invoked=True,
         invocation_allowed=True,
+        candidate_count=0,
+        canonical_candidate_count=0,
+        winner_found=False,
         receipt_fragment=gate,
     )
 

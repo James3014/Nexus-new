@@ -2651,6 +2651,14 @@ class LocalModelExecutor:
             raw_meta.update(stage5)
             if stage5.get("stage5_escalation_recommended", False):
                 raw_meta["p3_route_status"] = "shadow_stage5_escalation_recommended"
+                # P4-I4: Try committee invocation when escalation recommended
+                _p4_result = _try_invoke_p4_committee(
+                    raw_meta=raw_meta,
+                    request=request,
+                    signal_snapshot=signal_snapshot,
+                )
+                if _p4_result:
+                    raw_meta.update(_p4_result)
             else:
                 raw_meta["p3_route_status"] = "shadow_stage5_retry_sufficient"
             raw_meta["assist_stages_activated"] = raw_meta.get("assist_stages_activated", []) + ["stage5_escalation_stub"]
@@ -2962,3 +2970,56 @@ def _p3_stage5_escalation_decision(
         "stage5_escalation_reason": escalation_reason,
         "stage5_escalation_target": "committee",
     }
+
+
+def _try_invoke_p4_committee(
+    raw_meta: dict,
+    request: LocalModelExecutorRequest,
+    signal_snapshot: dict,
+) -> dict | None:
+    """P4-I4: Attempt P4 committee invocation from P3 hard-case path.
+
+    Returns None if gate blocks. Returns receipt fragment if invoked.
+    """
+    from nexus.services.local_heal.committee_routed_tool import (
+        CommitteeRoutedToolRequest,
+        evaluate_and_execute,
+    )
+
+    # Extract proposer_specs and judge_model from signal_snapshot
+    proposer_specs = signal_snapshot.get("proposer_specs", []) or []
+    judge_model = signal_snapshot.get("judge_model", "") or ""
+
+    p4_request = CommitteeRoutedToolRequest(
+        task_id=request.task_id,
+        repo_root=request.repo_root,
+        target_file=request.target_file,
+        target_symbol=signal_snapshot.get("target_symbol", ""),
+        difficulty=signal_snapshot.get("difficulty", "") or raw_meta.get("task_difficulty", ""),
+        execution_topology=signal_snapshot.get("execution_topology", ""),
+        p3_route_status=raw_meta.get("p3_route_status", ""),
+        hard_case_escalation_reason=raw_meta.get("stage5_escalation_reason", ""),
+        evidence_refs=request.evidence_refs,
+        proposer_specs=proposer_specs,
+        judge_model=judge_model,
+        mutation_allowed=signal_snapshot.get("mutation_allowed", True),
+        verifier_allowed=signal_snapshot.get("verifier_allowed", True),
+    )
+
+    result = evaluate_and_execute(p4_request)
+    raw_meta["p4_committee_gate_evaluated"] = True
+    raw_meta["p4_committee_invocation_allowed"] = result.invocation_allowed
+
+    if not result.invocation_allowed:
+        raw_meta["p4_committee_blocked_reason"] = result.blocked_reason
+        raw_meta["assist_stages_activated"] = raw_meta.get("assist_stages_activated", []) + ["committee_gate_blocked"]
+        return None
+
+    raw_meta["p4_committee_invoked"] = True
+    raw_meta["p4_committee_invocation_source"] = "p3_hard_case_escalation"
+    raw_meta["assist_stages_activated"] = raw_meta.get("assist_stages_activated", []) + ["committee_routed_tool"]
+    raw_meta["p4_route_status"] = "p4_committee_invoked"
+
+    # Merge receipt fragment
+    raw_meta.update(result.receipt_fragment)
+    return raw_meta

@@ -520,6 +520,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "p4_raw_candidate_count": int(getattr(ctx, "p4_raw_candidate_count", 0) or 0),
         "p4_rejected_candidate_count": int(getattr(ctx, "p4_rejected_candidate_count", 0) or 0),
         "p4_rejected_candidate_reasons": list(getattr(ctx, "p4_rejected_candidate_reasons", []) or []),
+        # P4-I4: Committee invocation fields
+        "p4_committee_invocation_source": str(getattr(ctx, "p4_committee_invocation_source", "") or ""),
         # P3-I7: Stage 5 escalation stub fields
         "stage5_escalation_performed": bool(getattr(ctx, "stage5_escalation_performed", False)),
         "stage5_escalation_recommended": bool(getattr(ctx, "stage5_escalation_recommended", False)),

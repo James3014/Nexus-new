@@ -142,12 +142,12 @@ def test_evaluate_and_execute_allows_valid():
         repo_root="/tmp",
         target_file="foo.py",
         difficulty="hard",
+        execution_topology="cloud_with_local_assist",
         p3_route_status="shadow_stage5_escalation_recommended",
         hard_case_escalation_reason="retry_failed",
         proposer_specs=[{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
         judge_model="judge",
     )
-    req.route_context = {"signal_snapshot": {"execution_topology": "cloud_with_local_assist"}}
     result = evaluate_and_execute(req)
     assert result.invoked is True
     assert result.invocation_allowed is True
