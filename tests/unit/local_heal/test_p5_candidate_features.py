@@ -42,10 +42,10 @@ def test_unified_diff_features():
 def test_search_replace_features():
     """P5-I2: SEARCH/REPLACE format feature extraction."""
     patch = "<<<<<<< SEARCH\nold code\n=======\nnew code\n>>>>>>> REPLACE"
-    candidate = _make_candidate(patch=patch, source_format="SEARCH_REPLACE")
+    candidate = _make_candidate(patch=patch, source_format="SEARCH_REPLACE", target_file="")
     features = extract_features(candidate)
 
-    assert features.syntax_like_score == 1.0
+    assert features.syntax_like_score == 0.9
     assert features.source_format == "SEARCH_REPLACE"
     assert features.patch_length == len(patch)
 
@@ -62,13 +62,13 @@ def test_empty_patch_features():
 
 
 def test_nonempty_no_markers():
-    """P5-I2: Non-empty patch without structural markers → syntax_like_score = 0.5."""
-    patch = "x = 42\ny = x + 1\n"
-    candidate = _make_candidate(patch=patch)
+    """P5-I2: Non-empty patch with code tokens → syntax_like_score = 0.6."""
+    patch = "def calculate_sum(a, b):\n    result = a + b\n    return result\n"
+    candidate = _make_candidate(patch=patch, target_file="")
     features = extract_features(candidate)
 
-    assert features.syntax_like_score == 0.5
-    assert features.line_count == 2
+    assert features.syntax_like_score == 0.6
+    assert features.line_count == 3
     assert features.patch_length == len(patch)
 
 
@@ -81,8 +81,8 @@ def test_target_file_empty():
 
 
 def test_target_file_present():
-    """P5-I2: Non-empty target_file → target_file_match = True."""
-    candidate = _make_candidate(patch="x = 1", target_file="foo.py")
+    """P5-I2: target_file referenced in patch → target_file_match = True."""
+    candidate = _make_candidate(patch="fix foo.py function", target_file="foo.py")
     features = extract_features(candidate)
 
     assert features.target_file_match is True

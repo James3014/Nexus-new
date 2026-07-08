@@ -77,8 +77,26 @@ class CandidateFeatures:
     safety_penalty: float = 0.0
 
 
+def _compute_syntax_score(patch: str) -> float:
+    """P5-V1: More granular syntax-like scoring."""
+    if not patch.strip():
+        return 0.0
+    if len(patch.strip()) < 20:
+        return 0.2
+    if any(m in patch for m in ["--- ", "+++ ", "@@ "]):
+        return 1.0
+    if "<<<<<<<" in patch or "=======" in patch:
+        return 0.9
+    tokens = re.findall(r'\S+', patch)
+    code_like = sum(1 for t in tokens if any(c.isalpha() for c in t))
+    non_code = len(tokens) - code_like
+    if code_like > non_code:
+        return 0.6
+    return 0.1
+
+
 def extract_features(candidate: CanonicalPatchCandidate, model: str = "") -> CandidateFeatures:
-    """P5-I2: Extract interpretable features from a CanonicalPatchCandidate.
+    """P5-I2/V1: Extract interpretable features from a CanonicalPatchCandidate.
 
     Args:
         candidate: The canonical candidate to extract features from.
@@ -99,16 +117,15 @@ def extract_features(candidate: CanonicalPatchCandidate, model: str = "") -> Can
     tokens = re.findall(r'\S+', patch)
     token_set = frozenset(tokens)
 
-    # target_file_match
-    target_file_match = bool(candidate.target_file.strip())
+    # target_file_match: does the patch actually reference the target file?
+    target_file_match = bool(
+        candidate.target_file.strip()
+        and candidate.normalized_patch
+        and candidate.target_file.strip() in candidate.normalized_patch
+    )
 
-    # syntax_like_score
-    if not patch.strip():
-        syntax_like_score = 0.0
-    elif any(marker in patch for marker in ["--- ", "+++ ", "@@ ", "<<<<<<< ", ">>>>>>> "]):
-        syntax_like_score = 1.0
-    else:
-        syntax_like_score = 0.5
+    # syntax_like_score via granular scorer
+    syntax_like_score = _compute_syntax_score(patch)
 
     # safety_penalty
     if candidate.safety_flags:

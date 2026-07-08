@@ -93,24 +93,45 @@ def test_e2e_first_unsafe_second_safe():
 
         req = _valid_request()
         result = evaluate_and_execute(req, candidate_producer=producer)
-        # diversity_v1 should select higher-quality candidate
         assert result.winner_found is True
+        assert result.receipt_fragment.get("p5_selected_candidate_index") == 1
+        assert result.receipt_fragment.get("p5_diversity_selector_used") is True
     finally:
         _cleanup_p5()
 
 
-def test_e2e_all_unsafe_fail_closed():
-    """P5-I9 Scenario D: all candidates malformed/unsafe → fail_closed."""
+def test_e2e_zero_candidates():
+    """P5-I9: Empty candidates → zero_winner path."""
     _setup_p5()
     try:
-        # Empty candidates → zero_winner path
         def producer(req):
             return []
 
         req = _valid_request()
         result = evaluate_and_execute(req, candidate_producer=producer)
-        # No candidates → zero_winner
         assert result.winner_found is False
+    finally:
+        _cleanup_p5()
+
+
+def test_e2e_all_unsafe_fail_closed():
+    """P5-I9 Scenario D: all unsafe candidates → P5 fail_closed."""
+    _setup_p5()
+    try:
+        raw = [
+            _make_raw_candidate("x", safety_flags=("f1", "f2", "f3", "f4"), target_file=""),
+            _make_raw_candidate("y", safety_flags=("f1", "f2", "f3", "f4"), target_file=""),
+        ]
+
+        def producer(req):
+            return raw
+
+        req = _valid_request()
+        result = evaluate_and_execute(req, candidate_producer=producer)
+        assert result.winner_found is False
+        assert result.receipt_fragment.get("p5_fail_closed") is True
+        assert "p5_selection_failed:all_candidates_unsafe" in result.failure_reasons
+        assert result.solved_by_committee is False
     finally:
         _cleanup_p5()
 
