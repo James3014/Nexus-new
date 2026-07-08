@@ -2406,7 +2406,8 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
-        # P3-I1/I3/I4/I5: Cloud-with-local-assist shadow routing with stage1+2+3
+        # P3-I1/I3/I4/I5/I6: Cloud-with-local-assist shadow routing with stage1+2+3
+        # P3-I6: Stores cloud meta and FALLS THROUGH to local model for retry
         if execution_topology == "cloud_with_local_assist":
             # P3-I3: Stage 1 local diagnosis
             stage1 = _p3_stage1_local_diagnosis(request)
@@ -2424,7 +2425,7 @@ class LocalModelExecutor:
             else:
                 p3_status = "shadow_stage3_verifier_passed"
 
-            _shadow_meta = {
+            _cloud_meta = {
                 "execution_topology": "cloud_with_local_assist",
                 "p3_shadow_route": True,
                 "cloud_used": True,
@@ -2435,25 +2436,13 @@ class LocalModelExecutor:
                 "cloud_provider": "fake_cloud",
                 "cloud_candidate_patch": cloud_response.candidate_patch,
                 "cloud_candidate_hash": cloud_response.candidate_hash,
+                "p3_stage4_local_retry": True,
                 **stage1,
                 **stage3,
             }
-            armor_ok, armor_miss = validate_local_model_armor_metadata(_shadow_meta)
-            _shadow_meta["armor_receipt_complete"] = armor_ok
-            _shadow_meta["armor_receipt_missing_fields"] = armor_miss
-            return LocalModelExecutorResponse(
-                invoked=False,
-                local_model_called=False,
-                candidate_patch="",
-                candidate_hash=empty_hash,
-                reasoning_summary="cloud_with_local_assist_shadow_stage3",
-                raw_model_metadata=_shadow_meta,
-                provider="none",
-                model_name="",
-                error="",
-                timeout=False,
-                evidence_refs=request.evidence_refs,
-            )
+            # P3-I6: Store cloud meta to pass to local model path
+            request.route_context["_p3_cloud_meta"] = _cloud_meta
+            # FALL THROUGH to single_local_model instead of returning
 
         # 9. Generate Candidate Patch for single_local_model
         signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
@@ -2636,6 +2625,22 @@ class LocalModelExecutor:
         raw_meta["armor_receipt_missing_fields"] = armor_miss
         local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
         raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
+
+        # P3-I6: Stage 4 local retry fallback — merge cloud meta into response
+        _p3_cloud_meta = (request.route_context or {}).get("_p3_cloud_meta", {})
+        if _p3_cloud_meta:
+            _meta = _p3_cloud_meta.copy()
+            _meta["p3_stage4_local_retry_performed"] = True
+            _meta["stage4_local_retry_model"] = prov_resp.model_name or prov_req.model_name or "unknown"
+            _meta["stage4_local_retry_candidate_patch"] = candidate_patch or ""
+            _meta["stage4_local_retry_candidate_hash"] = candidate_hash or ""
+            _meta["stage4_local_retry_success"] = bool(candidate_patch.strip())
+            _meta["assist_stages_activated"] = _meta.get("assist_stages_activated", []) + ["stage4_local_retry"]
+            _meta.update(raw_meta)  # merge local model results
+            raw_meta = _meta
+            p3_status = "shadow_stage4_retry_complete" if raw_meta["stage4_local_retry_success"] else "shadow_stage4_retry_failed"
+            raw_meta["p3_route_status"] = p3_status
+
         return LocalModelExecutorResponse(
             invoked=prov_resp.provider_invoked,
             local_model_called=prov_resp.model_called,

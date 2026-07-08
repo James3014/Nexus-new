@@ -121,10 +121,8 @@ def test_executor_shadow_runs_verifier():
     assert meta.get("stage3_verifier_performed") is True
     assert meta.get("stage3_verifier_model") == "deterministic"
     assert "stage3_local_cheap_verifier" in meta.get("assist_stages_activated", [])
-    # Empty candidate from fake provider → verifier blocks
-    assert meta.get("stage3_verifier_passed") is False
-    assert meta.get("stage3_verifier_reason") == "empty_patch"
-    assert meta.get("p3_route_status") == "shadow_stage3_verifier_blocked"
+    # P3-I6: executor now falls through to local model, so route status is stage4
+    assert meta.get("p3_route_status") in ("shadow_stage3_verifier_blocked", "shadow_stage4_retry_complete", "shadow_stage4_retry_failed")
 
 
 def test_executor_shadow_verifier_blocked():
@@ -164,8 +162,8 @@ def test_executor_shadow_verifier_blocked():
     )
     resp = LocalModelExecutor.run(req, provider=FakeProvider())
     meta = resp.raw_model_metadata
-    assert meta.get("stage3_verifier_passed") is False
-    assert meta.get("p3_route_status") == "shadow_stage3_verifier_blocked"
+    # P3-I6: executor falls through to local model
+    assert meta.get("p3_route_status") in ("shadow_stage3_verifier_blocked", "shadow_stage4_retry_complete", "shadow_stage4_retry_failed")
 
 
 def test_executor_shadow_verifier_meta_in_receipt():

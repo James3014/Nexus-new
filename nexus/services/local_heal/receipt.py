@@ -492,6 +492,13 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "stage3_verifier_passed": bool(getattr(ctx, "stage3_verifier_passed", False)),
         "stage3_verifier_reason": str(getattr(ctx, "stage3_verifier_reason", "") or ""),
         "stage3_verifier_model": str(getattr(ctx, "stage3_verifier_model", "") or ""),
+        # P3-I6: Stage 4 local retry fields
+        "p3_stage4_local_retry": bool(getattr(ctx, "p3_stage4_local_retry", False)),
+        "p3_stage4_local_retry_performed": bool(getattr(ctx, "p3_stage4_local_retry_performed", False)),
+        "stage4_local_retry_model": str(getattr(ctx, "stage4_local_retry_model", "") or ""),
+        "stage4_local_retry_candidate_patch": str(getattr(ctx, "stage4_local_retry_candidate_patch", "") or ""),
+        "stage4_local_retry_candidate_hash": str(getattr(ctx, "stage4_local_retry_candidate_hash", "") or ""),
+        "stage4_local_retry_success": bool(getattr(ctx, "stage4_local_retry_success", False)),
 
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),
