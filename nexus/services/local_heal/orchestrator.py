@@ -951,7 +951,12 @@ class HealOrchestrator:
         try:
             from nexus.services.local_heal.claim_delivery_gate import validate_context_claim_delivery
 
-            validate_context_claim_delivery(ctx)
+            # P2-D: Derive hash_match from ctx.op for claim gate
+            _hash_match = getattr(ctx.op, "selected_candidate_hash_matches_applied", None)
+            if _hash_match is None:
+                _route_ctx = getattr(ctx.op, "route_context", {}) or {}
+                _hash_match = _route_ctx.get("candidate_hash_matches_applied", None)
+            validate_context_claim_delivery(ctx, candidate_hash_matches_applied=_hash_match)
         except Exception as exc:
             errors.append(exc.__class__.__name__)
             ctx.op._claim_delivery_gate = {

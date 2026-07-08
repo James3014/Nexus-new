@@ -50,9 +50,22 @@ class ClaimDeliveryGate:
         )
 
 
-def validate_context_claim_delivery(ctx: Any, gate: ClaimDeliveryGate | None = None) -> dict[str, Any]:
+def validate_context_claim_delivery(
+    ctx: Any,
+    gate: ClaimDeliveryGate | None = None,
+    *,
+    candidate_hash_matches_applied: bool | None = None,
+) -> dict[str, Any]:
     op = ctx.op if hasattr(ctx, "op") else ctx
     failure_reason = str(getattr(op, "failure_reason", "") or "")
+    # P2-D: Resolve hash match — explicit param > op field > route_context > True (backward compat)
+    if candidate_hash_matches_applied is None:
+        candidate_hash_matches_applied = getattr(op, "selected_candidate_hash_matches_applied", None)
+    if candidate_hash_matches_applied is None:
+        route_ctx = getattr(op, "route_context", {}) or {}
+        candidate_hash_matches_applied = route_ctx.get("candidate_hash_matches_applied", True)
+    if candidate_hash_matches_applied is None:
+        candidate_hash_matches_applied = True
     decision = (gate or ClaimDeliveryGate()).validate(
         {
             "verifier_status": "pass" if getattr(op, "solve_eligible", False) and not failure_reason else "fail",
@@ -63,8 +76,8 @@ def validate_context_claim_delivery(ctx: Any, gate: ClaimDeliveryGate | None = N
             "owner_gated": "owner" in failure_reason.lower(),
             "owner_approved": bool(getattr(op, "owner_approved", False)),
             "unsupported": "unsupported" in failure_reason.lower(),
-            # P2-C: Hash match from op
-            "candidate_hash_matches_applied": getattr(op, "selected_candidate_hash_matches_applied", True),
+            # P2-C/D: Hash match from explicit param or op field
+            "candidate_hash_matches_applied": candidate_hash_matches_applied,
         }
     )
     out = {

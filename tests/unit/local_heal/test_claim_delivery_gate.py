@@ -71,3 +71,39 @@ def test_validate_context_claim_delivery_reads_hash_match_from_op():
     out = validate_context_claim_delivery(FakeCtx(), gate=gate)
     assert out["claim_gate_passed"] is False
     assert "candidate_hash_mismatch" in out["failure_reasons"]
+
+
+def test_validate_context_explicit_param_overrides_op():
+    """P2-D: Explicit candidate_hash_matches_applied param overrides op field."""
+    class FakeOp:
+        solve_eligible = True
+        evaluation_report = "pass"
+        source_hash = "abc123"
+        final_patch = "patch"
+        selected_candidate_hash_matches_applied = True
+
+    class FakeCtx:
+        op = FakeOp()
+
+    gate = ClaimDeliveryGate()
+    out = validate_context_claim_delivery(FakeCtx(), gate=gate, candidate_hash_matches_applied=False)
+    assert out["claim_gate_passed"] is False
+    assert "candidate_hash_mismatch" in out["failure_reasons"]
+
+
+def test_validate_context_fallback_to_route_context():
+    """P2-D: Falls back to route_context when op field absent."""
+    class FakeOp:
+        solve_eligible = True
+        evaluation_report = "pass"
+        source_hash = "abc123"
+        final_patch = "patch"
+        route_context = {"candidate_hash_matches_applied": False}
+
+    class FakeCtx:
+        op = FakeOp()
+
+    gate = ClaimDeliveryGate()
+    out = validate_context_claim_delivery(FakeCtx(), gate=gate)
+    assert out["claim_gate_passed"] is False
+    assert "candidate_hash_mismatch" in out["failure_reasons"]
