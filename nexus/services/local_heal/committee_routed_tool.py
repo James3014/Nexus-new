@@ -71,3 +71,41 @@ def build_committee_receipt_fragment(result: CommitteeRoutedToolResult) -> dict:
         "p4_failure_reasons": result.failure_reasons,
         "p4_fail_closed": bool(result.failure_reasons),
     }
+
+
+def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRoutedToolResult:
+    """Evaluate gate → if allowed, execute committee (stub for now)."""
+    from nexus.services.local_heal.committee_activation_gate import (
+        CommitteeActivationInput,
+        evaluate_committee_activation,
+    )
+
+    # Build activation inputs from request
+    route_ctx = getattr(request, "route_context", {}) or {}
+    signal = route_ctx.get("signal_snapshot", {}) if isinstance(route_ctx, dict) else {}
+    inputs = CommitteeActivationInput(
+        execution_topology=signal.get("execution_topology", "") or getattr(request, "execution_topology", ""),
+        p3_route_status=request.p3_route_status,
+        hard_case_escalation_recommended=bool(request.hard_case_escalation_reason),
+        difficulty=request.difficulty,
+        local_committee_enabled=True,
+        proposer_specs=request.proposer_specs,
+        judge_model=request.judge_model,
+    )
+
+    gate = evaluate_committee_activation(inputs)
+
+    if not gate["invocation_allowed"]:
+        return CommitteeRoutedToolResult(
+            invoked=False,
+            invocation_allowed=False,
+            blocked_reason=gate["blocked_reason"],
+            receipt_fragment=gate,
+        )
+
+    # Stub: no actual committee execution yet (P4-I4)
+    return CommitteeRoutedToolResult(
+        invoked=True,
+        invocation_allowed=True,
+        receipt_fragment=gate,
+    )

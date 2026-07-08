@@ -513,6 +513,9 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "p4_solved_by_committee": bool(getattr(ctx, "p4_solved_by_committee", False)),
         "p4_failure_reasons": list(getattr(ctx, "p4_failure_reasons", []) or []),
         "p4_fail_closed": bool(getattr(ctx, "p4_fail_closed", False)),
+        # P4-I2: Committee activation gate fields
+        "p4_committee_gate_evaluated": bool(getattr(ctx, "p4_committee_gate_evaluated", False)),
+        "p4_committee_activation_inputs": dict(getattr(ctx, "p4_committee_activation_inputs", {}) or {}),
         # P3-I7: Stage 5 escalation stub fields
         "stage5_escalation_performed": bool(getattr(ctx, "stage5_escalation_performed", False)),
         "stage5_escalation_recommended": bool(getattr(ctx, "stage5_escalation_recommended", False)),
