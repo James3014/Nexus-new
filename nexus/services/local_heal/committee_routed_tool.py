@@ -348,6 +348,12 @@ def evaluate_and_execute(
     p5_result = None
     rejected_indices = {r["index"] for r in rejections}
 
+    # Build raw_index_map: valid_candidates[i] → raw_candidates[j]
+    raw_index_map: list[int] = []
+    for raw_idx in range(len(raw_candidates)):
+        if raw_idx not in rejected_indices:
+            raw_index_map.append(raw_idx)
+
     if os.environ.get("NEXUS_ENABLE_P5_DIVERSITY_SELECTION", "0") == "1":
         try:
             from nexus.services.local_heal.diversity_selector import select_diverse_candidate
@@ -410,10 +416,21 @@ def evaluate_and_execute(
 
     # Determine winner source model from raw candidates
     winner_source_model = ""
-    for i, raw in enumerate(raw_candidates):
-        if i not in rejected_indices:
-            winner_source_model = str(raw.get("model", "") or raw.get("model_name", "") or "")
-            break
+    if p5_diversity_used and p5_result is not None and not p5_result.fail_closed and p5_result.selected_index >= 0:
+        # P5-V4: use raw_index_map to find the correct raw candidate
+        raw_winner_idx = raw_index_map[p5_result.selected_index] if p5_result.selected_index < len(raw_index_map) else -1
+        if 0 <= raw_winner_idx < len(raw_candidates):
+            winner_source_model = str(
+                raw_candidates[raw_winner_idx].get("model", "")
+                or raw_candidates[raw_winner_idx].get("model_name", "")
+                or ""
+            )
+    if not winner_source_model:
+        # Fallback: first non-rejected raw candidate (pre-P5 behavior)
+        for i, raw in enumerate(raw_candidates):
+            if i not in rejected_indices:
+                winner_source_model = str(raw.get("model", "") or raw.get("model_name", "") or "")
+                break
 
     # Re-apply in isolated workspace
     apply_result = _apply_candidate(winner, request)
