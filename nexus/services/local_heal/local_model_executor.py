@@ -1174,6 +1174,9 @@ class LocalModelExecutor:
                     evidence_refs=decision.decision_evidence_refs or request.evidence_refs,
                     local_model_called=local_model_called,
                     mutation_allowed=mutation_allowed,
+                    # P2-3: Anchor fields
+                    candidate_target_file=request.target_file,
+                    candidate_target_symbol=request.route_context.get("target_symbol", "") if isinstance(request.route_context, dict) else "",
                 )
                 hybrid_route = candidate_isolation_to_hybrid_route(isolation_receipt)
 
@@ -1563,6 +1566,9 @@ class LocalModelExecutor:
                             or repair_exec.telemetries.get("patch_synthesis_model_called", False)
                         ),
                         mutation_allowed=mutation_allowed,
+                        # P2-3: Anchor fields
+                        candidate_target_file=request.target_file,
+                        candidate_target_symbol=request.route_context.get("target_symbol", "") if isinstance(request.route_context, dict) else "",
                     )
                     hybrid_route = candidate_isolation_to_hybrid_route(isolation_receipt)
                     candidate_hash_empty = (candidate_hash == empty_hash)

@@ -27,6 +27,10 @@ class CandidateIsolationReceipt:
     public_claim_allowed: bool = False
     production_ready: bool = False
     repaired_by_rule: str = "none"
+    # P2-3: Anchor fields
+    candidate_target_file: str = ""
+    candidate_target_symbol: str = ""
+    candidate_old_block_hash: str = ""
 
 
 def validate_candidate_isolation_receipt(receipt: CandidateIsolationReceipt) -> list[str]:
@@ -42,6 +46,9 @@ def validate_candidate_isolation_receipt(receipt: CandidateIsolationReceipt) -> 
         blockers.append("missing_selected_candidate_hash")
     if not receipt.applied_patch_hash.strip():
         blockers.append("missing_applied_patch_hash")
+    # P2-3: Anchor validation — if hash present, target_file must be present
+    if receipt.selected_candidate_hash.strip() and not receipt.candidate_target_file.strip():
+        blockers.append("missing_candidate_target_file")
         
     is_repaired = receipt.repaired_by_rule and receipt.repaired_by_rule != "none"
     if not is_repaired:
