@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -60,6 +61,71 @@ class DiversitySelectionResult:
     rejected_by_diversity: list[dict[str, Any]]
     fail_closed: bool
     failure_reasons: list[str]
+
+
+@dataclass(frozen=True)
+class CandidateFeatures:
+    candidate_hash: str
+    source_model: str
+    source_format: str
+    patch_length: int
+    line_count: int
+    token_set: frozenset[str]
+    target_file_match: bool
+    syntax_like_score: float
+    safety_penalty: float
+
+
+def extract_features(candidate: CanonicalPatchCandidate, model: str = "") -> CandidateFeatures:
+    """P5-I2: Extract interpretable features from a CanonicalPatchCandidate.
+
+    Args:
+        candidate: The canonical candidate to extract features from.
+        model: Optional source model name override.
+
+    Returns:
+        CandidateFeatures with extraction results.
+    """
+    patch = candidate.normalized_patch or ""
+
+    # patch_length
+    patch_length = len(patch)
+
+    # line_count
+    line_count = len(patch.splitlines()) if patch.strip() else 0
+
+    # token_set
+    tokens = re.findall(r'\S+', patch)
+    token_set = frozenset(tokens)
+
+    # target_file_match
+    target_file_match = bool(candidate.target_file.strip())
+
+    # syntax_like_score
+    if not patch.strip():
+        syntax_like_score = 0.0
+    elif any(marker in patch for marker in ["--- ", "+++ ", "@@ ", "<<<<<<< ", ">>>>>>> "]):
+        syntax_like_score = 1.0
+    else:
+        syntax_like_score = 0.5
+
+    # safety_penalty
+    if candidate.safety_flags:
+        safety_penalty = min(1.0, len(candidate.safety_flags) * 0.3)
+    else:
+        safety_penalty = 0.0
+
+    return CandidateFeatures(
+        candidate_hash=candidate.raw_output_hash,
+        source_model=model or "",
+        source_format=candidate.source_format,
+        patch_length=patch_length,
+        line_count=line_count,
+        token_set=token_set,
+        target_file_match=target_file_match,
+        syntax_like_score=syntax_like_score,
+        safety_penalty=safety_penalty,
+    )
 
 
 def _sha256(text: str) -> str:
