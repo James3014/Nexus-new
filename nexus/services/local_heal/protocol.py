@@ -4,6 +4,7 @@ import ast
 from typing import List, Tuple, Dict, Any
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind, PatchMismatchSubclass
 from nexus.services.local_heal.validator import validate_syntax
+from nexus.services.local_heal.output_understanding import _detect_format, OutputFormat
 
 @dataclass
 class PatchIntent:
@@ -40,21 +41,42 @@ class SolidSearchReplaceProtocol:
 
     @staticmethod
     def classify_format(raw: str) -> str:
+        # P1.5: Delegate to canonical _detect_format() first
+        detected = _detect_format(raw)
+
+        # Map OutputFormat enum to protocol.py string labels
+        _format_map = {
+            OutputFormat.EMPTY_OR_REFUSAL: None,  # handled below
+            OutputFormat.UNIFIED_DIFF: "UNIFIED_DIFF",
+            OutputFormat.FENCED_SEARCH_REPLACE: "FENCED_SEARCH_REPLACE",
+            OutputFormat.SEARCH_REPLACE: "VALID_SEARCH_REPLACE",
+            OutputFormat.MALFORMED_OUTPUT: None,  # fall through to sub-classification
+        }
+
+        if detected == OutputFormat.EMPTY_OR_REFUSAL:
+            if not raw or not raw.strip():
+                return "EMPTY"
+            return "REFUSAL"
+
+        if detected in _format_map and _format_map[detected] is not None:
+            return _format_map[detected]
+
+        # MALFORMED_OUTPUT: fall through to existing sub-classification
         if not raw or not raw.strip():
             return "EMPTY"
-            
-        # Refusal check
+
+        # Refusal check (redundant safety net)
         refusal_keywords = ["i apologize", "i cannot", "i'm sorry", "sorry", "as an ai", "unfortunately", "llm refused fix", "cannot fulfill"]
         lower_raw = raw.lower()
         if any(kw in lower_raw for kw in refusal_keywords) and "<<<<<<< SEARCH" not in raw:
             return "REFUSAL"
-        
+
         # Check for unified diff headers or hunks
         has_diff_headers = ("--- a/" in raw and "+++ b/" in raw) or ("--- " in raw and "+++ " in raw)
         has_hunk = "@@ " in raw
         if has_diff_headers or (has_hunk and ("---" in raw or "+++" in raw)):
             return "UNIFIED_DIFF"
-            
+
         # Check for SSRP
         has_search = "<<<<<<< SEARCH" in raw
         has_replace = ">>>>>>> REPLACE" in raw
@@ -62,18 +84,18 @@ class SolidSearchReplaceProtocol:
             if "```" in raw:
                 return "FENCED_SEARCH_REPLACE"
             return "VALID_SEARCH_REPLACE"
-            
+
         if has_search or has_replace:
             return "MALFORMED_SEARCH_REPLACE"
-            
+
         if "```" in raw:
             return "MARKDOWN_FENCED"
-            
+
         # Code indicators for plain_text vs natural_language
         code_keywords = ["def ", "import ", "class ", "return ", "const ", "let ", "function ", "var ", "sys.", "os.", "print("]
         if any(kw in raw for kw in code_keywords) or ("=" in raw and len(raw.splitlines()) > 1):
             return "PLAIN_TEXT"
-            
+
         return "NATURAL_LANGUAGE"
 
 
