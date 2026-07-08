@@ -890,15 +890,38 @@ class CapabilityPlanner:
             topology = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
             signal_snapshot["execution_topology"] = topology
 
-            # P3-I1: Cloud-with-local-assist shadow routing (override topology when flag enabled)
+            # P3-I2: Difficulty router — override topology based on task difficulty
             if os.environ.get("NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW", "0") == "1":
-                signal_snapshot["p3_shadow_route"] = True
-                signal_snapshot["execution_topology"] = "cloud_with_local_assist"
-                signal_snapshot["cloud_used"] = False
-                signal_snapshot["cloud_candidate_generated"] = False
-                signal_snapshot["local_assist_used"] = False
-                signal_snapshot["assist_stages_activated"] = []
-                signal_snapshot["p3_route_status"] = "shadow_no_cloud_endpoint"
+                difficulty = str(route.get("difficulty", "") or "").lower()
+                if not difficulty:
+                    difficulty = os.environ.get("NEXUS_P3_DIFFICULTY", "").lower()
+                if not difficulty:
+                    task_lower = task_desc.lower()
+                    if any(kw in task_lower for kw in ("complex", "hard", "cross-module", "multi-step")):
+                        difficulty = "hard"
+                    elif any(kw in task_lower for kw in ("simple", "trivial", "easy")):
+                        difficulty = "easy"
+                    else:
+                        difficulty = "medium"
+
+                signal_snapshot["task_difficulty"] = difficulty
+                signal_snapshot["route_policy_version"] = "p3_difficulty_router_v1"
+
+                if difficulty in ("medium", "hard"):
+                    signal_snapshot["p3_shadow_route"] = True
+                    signal_snapshot["execution_topology"] = "cloud_with_local_assist"
+                    signal_snapshot["cloud_used"] = False
+                    signal_snapshot["cloud_candidate_generated"] = False
+                    signal_snapshot["local_assist_used"] = False
+                    signal_snapshot["assist_stages_activated"] = []
+                    signal_snapshot["p3_route_status"] = "shadow_no_cloud_endpoint"
+                    signal_snapshot["route_selected_by"] = "p3_difficulty_router"
+                    signal_snapshot["route_reason"] = f"difficulty={difficulty}_shadow_enabled"
+                else:
+                    signal_snapshot["p3_shadow_route"] = False
+                    signal_snapshot["execution_topology"] = "local_only"
+                    signal_snapshot["route_selected_by"] = "p3_difficulty_router"
+                    signal_snapshot["route_reason"] = "difficulty=easy"
             if topology == "local_committee_only":
                 signal_snapshot["committee_profile"] = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
                 signal_snapshot["local_committee_enabled"] = True
