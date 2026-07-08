@@ -25,6 +25,10 @@ class ClaimDeliveryGate:
             reasons.append("missing_verifier_artifact")
         if not str(payload.get("source_hash") or "").strip():
             reasons.append("missing_source_hash")
+        # P2-C: Hash mismatch blocks claim
+        candidate_hash_matches_applied = payload.get("candidate_hash_matches_applied", True)
+        if not candidate_hash_matches_applied:
+            reasons.append("candidate_hash_mismatch")
         if not payload.get("patch_applied"):
             reasons.append("patch_not_applied")
         if not refs:
@@ -59,6 +63,8 @@ def validate_context_claim_delivery(ctx: Any, gate: ClaimDeliveryGate | None = N
             "owner_gated": "owner" in failure_reason.lower(),
             "owner_approved": bool(getattr(op, "owner_approved", False)),
             "unsupported": "unsupported" in failure_reason.lower(),
+            # P2-C: Hash match from op
+            "candidate_hash_matches_applied": getattr(op, "selected_candidate_hash_matches_applied", True),
         }
     )
     out = {

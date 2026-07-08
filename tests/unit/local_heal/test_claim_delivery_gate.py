@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import pytest
+from nexus.services.local_heal.claim_delivery_gate import (
+    ClaimDeliveryGate,
+    validate_context_claim_delivery,
+)
+
+
+def _valid_payload(**overrides):
+    base = {
+        "verifier_status": "pass",
+        "verifier_artifact": "verification_report.txt",
+        "source_hash": "abc123",
+        "patch_applied": True,
+        "artifact_refs": ["patch.diff"],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_claim_delivery_gate_hash_mismatch_blocks_claim():
+    """P2-C: candidate_hash_matches_applied=False → claim_gate_passed=False."""
+    gate = ClaimDeliveryGate()
+    decision = gate.validate(_valid_payload(candidate_hash_matches_applied=False))
+    assert decision.claim_gate_passed is False
+    assert "candidate_hash_mismatch" in decision.reasons
+
+
+def test_claim_delivery_gate_hash_match_no_blocker():
+    """P2-C: candidate_hash_matches_applied=True → no blocker."""
+    gate = ClaimDeliveryGate()
+    decision = gate.validate(_valid_payload(candidate_hash_matches_applied=True))
+    assert decision.claim_gate_passed is True
+    assert "candidate_hash_mismatch" not in decision.reasons
+
+
+def test_claim_delivery_gate_hash_absent_default_true():
+    """P2-C: No candidate_hash_matches_applied in payload → backward compat."""
+    gate = ClaimDeliveryGate()
+    decision = gate.validate(_valid_payload())
+    assert decision.claim_gate_passed is True
+    assert "candidate_hash_mismatch" not in decision.reasons
+
+
+def test_claim_delivery_gate_hash_mismatch_with_missing_source_hash():
+    """P2-C: Both hash mismatch AND missing source_hash → both reasons present."""
+    gate = ClaimDeliveryGate()
+    decision = gate.validate(_valid_payload(
+        candidate_hash_matches_applied=False,
+        source_hash="",
+    ))
+    assert decision.claim_gate_passed is False
+    assert "candidate_hash_mismatch" in decision.reasons
+    assert "missing_source_hash" in decision.reasons
+
+
+def test_validate_context_claim_delivery_reads_hash_match_from_op():
+    """P2-C: validate_context reads selected_candidate_hash_matches_applied from op."""
+    class FakeOp:
+        solve_eligible = True
+        evaluation_report = "pass"
+        source_hash = "abc123"
+        final_patch = "patch"
+        selected_candidate_hash_matches_applied = False
+
+    class FakeCtx:
+        op = FakeOp()
+
+    gate = ClaimDeliveryGate()
+    out = validate_context_claim_delivery(FakeCtx(), gate=gate)
+    assert out["claim_gate_passed"] is False
+    assert "candidate_hash_mismatch" in out["failure_reasons"]
