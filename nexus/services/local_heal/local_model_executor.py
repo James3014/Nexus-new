@@ -2656,7 +2656,7 @@ class LocalModelExecutor:
                     raw_meta=raw_meta,
                     request=request,
                     signal_snapshot=signal_snapshot,
-                    candidate_producer=None,
+                    candidate_producer=_make_default_committee_producer(provider, signal_snapshot, request),
                 )
                 if _p4_result:
                     raw_meta.update(_p4_result)
@@ -2971,6 +2971,46 @@ def _p3_stage5_escalation_decision(
         "stage5_escalation_reason": escalation_reason,
         "stage5_escalation_target": "committee",
     }
+
+
+def _make_default_committee_producer(
+    provider: LocalModelProvider | None,
+    signal_snapshot: dict,
+    request: LocalModelExecutorRequest,
+) -> Any | None:
+    """Create a default CommitteeCandidateProducer from the existing provider.
+
+    Returns None if provider is None (causes evaluate_and_execute to fail-closed).
+    The producer wraps provider.generate() output as a raw committee candidate dict.
+    """
+    if provider is None:
+        return None
+
+    def _producer(p4_request: Any) -> list[dict[str, Any]]:
+        model_name = signal_snapshot.get("executor_model", "") or "default"
+        prov_req = LocalModelProviderRequest(
+            task_id=request.task_id,
+            prompt=request.problem_statement,
+            evidence_refs=request.evidence_refs,
+            model_name=model_name,
+        )
+        try:
+            prov_resp = provider.generate(prov_req)
+        except Exception:
+            return []
+
+        output = (prov_resp.output_text or "").strip()
+        if not output:
+            return []
+
+        return [{
+            "candidate_patch": output,
+            "format": "UNIFIED_DIFF",
+            "model": prov_resp.model_name or model_name,
+            "candidate_id": f"{request.task_id}#default-committee",
+        }]
+
+    return _producer
 
 
 def _try_invoke_p4_committee(

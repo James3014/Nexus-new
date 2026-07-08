@@ -98,7 +98,7 @@ def build_committee_receipt_fragment(result: CommitteeRoutedToolResult) -> dict:
         "p4_selected_candidate_hash_matches_applied": result.receipt_fragment.get("p4_selected_candidate_hash_matches_applied", False),
         "p4_committee_claim_gate_passed": result.receipt_fragment.get("p4_committee_claim_gate_passed", False),
         "p4_failure_reasons": result.failure_reasons,
-        "p4_fail_closed": bool(result.failure_reasons),
+        "p4_fail_closed": result.receipt_fragment.get("p4_fail_closed", bool(result.failure_reasons)),
     }
 
 
@@ -219,21 +219,25 @@ def _build_zero_winner_result(gate: dict, raw: list, rejections: list) -> Commit
         invoked=True,
         invocation_allowed=True,
         candidate_count=len(raw),
+        raw_candidate_count=len(raw),
         canonical_candidate_count=0,
         winner_found=False,
         solved_by_committee=False,
         failure_reasons=[r.get("reason", "unknown") for r in rejections],
         receipt_fragment={
             **gate,
-            "rejection_details": rejections,
-            "p4_zero_winner": True,
-            "p4_no_candidate_reason": no_candidate_reason,
-            "p4_malformed_candidate_count": malformed_count,
-            "p4_rejected_candidate_reasons": [r.get("reason", "") for r in rejections],
             "p4_fail_closed": True,
         },
     )
-    return _check_fail_closed(result)
+    result = _check_fail_closed(result)
+    result.receipt_fragment = build_committee_receipt_fragment(result)
+    # Preserve zero-winner-specific diagnostic fields
+    result.receipt_fragment["rejection_details"] = rejections
+    result.receipt_fragment["p4_zero_winner"] = True
+    result.receipt_fragment["p4_no_candidate_reason"] = no_candidate_reason
+    result.receipt_fragment["p4_malformed_candidate_count"] = malformed_count
+    result.receipt_fragment["p4_rejected_candidate_reasons"] = [r.get("reason", "") for r in rejections]
+    return result
 
 
 def evaluate_and_execute(
@@ -402,11 +406,12 @@ def evaluate_and_execute(
             "p4_raw_candidate_count": len(raw_candidates),
             "p4_selected_candidate_hash_matches_applied": hash_matches_applied,
             "p4_committee_claim_gate_passed": claim_gate_passed,
-            "apply_result": apply_result,
-            "verifier_result": verifier_result,
-            "claim_decision": {
-                "claim_gate_passed": claim_gate_passed,
-            },
         },
     )
-    return _check_fail_closed(result)
+    result = _check_fail_closed(result)
+    result.receipt_fragment = build_committee_receipt_fragment(result)
+    # Preserve detailed diagnostic fields in receipt_fragment
+    result.receipt_fragment["apply_result"] = apply_result
+    result.receipt_fragment["verifier_result"] = verifier_result
+    result.receipt_fragment["claim_decision"] = {"claim_gate_passed": claim_gate_passed}
+    return result
