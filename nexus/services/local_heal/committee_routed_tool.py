@@ -343,7 +343,7 @@ def evaluate_and_execute(
         result.receipt_fragment["p4_raw_candidate_count"] = len(raw_candidates)
         return result
 
-    # Select winner (first valid for now — no diversity engine)
+    # P5-Ix: winner selection — placeholder for P5 diversity selector
     winner = valid_candidates[0]
 
     # Determine winner source model from raw candidates

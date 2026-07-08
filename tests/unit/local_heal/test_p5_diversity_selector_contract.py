@@ -88,7 +88,7 @@ class TestMultipleCandidates:
     def test_contract_only_first_valid_strategy(self):
         a = _make_candidate(index=0, raw_output="--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new_a\n")
         b = _make_candidate(index=1, raw_output="--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new_b\n")
-        result = select_diverse_candidate([a, b])
+        result = select_diverse_candidate([a, b], strategy="contract_only_first_valid")
         assert result.selection_strategy == "contract_only_first_valid"
 
     def test_selects_first_candidate(self):
