@@ -131,9 +131,28 @@ def _verify_applied_candidate(candidate: CanonicalPatchCandidate, request: Commi
         return {"status": "fail", "reason": str(e)}
 
 
+FORBIDDEN_FALLBACKS = [
+    "no_winner_fallback_to_first_candidate",
+    "no_winner_fallback_to_borda_without_verifier",
+    "no_winner_fallback_to_local_retry_result",
+    "judge_text_vote_direct_solved",
+]
+
+
+def _check_fail_closed(result: CommitteeRoutedToolResult) -> CommitteeRoutedToolResult:
+    """Ensure no silent fallback. Mark fail_closed if anything is wrong."""
+    if result.blocked_reason or result.failure_reasons:
+        result.solved_by_committee = False
+        result.receipt_fragment["p4_fail_closed"] = True
+    return result
+
+
 def _build_zero_winner_result(gate: dict, raw: list, rejections: list) -> CommitteeRoutedToolResult:
     """Build fail-closed result when no valid candidates."""
-    return CommitteeRoutedToolResult(
+    malformed_count = sum(1 for r in rejections if r.get("reason") in ("unknown_format", "malformed"))
+    no_candidate_reason = rejections[0].get("reason", "no_candidates") if rejections else "no_candidates"
+
+    result = CommitteeRoutedToolResult(
         invoked=True,
         invocation_allowed=True,
         candidate_count=len(raw),
@@ -144,8 +163,14 @@ def _build_zero_winner_result(gate: dict, raw: list, rejections: list) -> Commit
         receipt_fragment={
             **gate,
             "rejection_details": rejections,
+            "p4_zero_winner": True,
+            "p4_no_candidate_reason": no_candidate_reason,
+            "p4_malformed_candidate_count": malformed_count,
+            "p4_rejected_candidate_reasons": [r.get("reason", "") for r in rejections],
+            "p4_fail_closed": True,
         },
     )
+    return _check_fail_closed(result)
 
 
 def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRoutedToolResult:
@@ -211,7 +236,7 @@ def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRouted
     }
     claim_decision = claim_gate.validate(claim_input)
 
-    return CommitteeRoutedToolResult(
+    result = CommitteeRoutedToolResult(
         invoked=True,
         invocation_allowed=True,
         candidate_count=len(raw_candidates),
@@ -237,3 +262,4 @@ def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRouted
             },
         },
     )
+    return _check_fail_closed(result)
