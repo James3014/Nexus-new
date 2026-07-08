@@ -317,22 +317,104 @@ def _build_candidate_id(candidate: CanonicalPatchCandidate, index: int) -> str:
     return f"{candidate.raw_output_hash[:16]}#{index}"
 
 
+def _score_candidate(
+    features: CandidateFeatures,
+    index: int,
+    all_features: list[CandidateFeatures],
+    groups: list[DuplicateGroup],
+    trap_decision: PopularityTrapDecision,
+    dominant_models: set[str],
+    majority_format: str,
+) -> tuple[float, dict[str, Any]]:
+    """P5-I5: Score a single candidate for diversity-aware selection.
+
+    Returns (final_score, breakdown_dict).
+    """
+    # quality_score = syntax_like_score (range 0-1)
+    quality_score = features.syntax_like_score
+
+    # model_diversity_bonus = 0.2 per unique model not in dominant group
+    model_diversity_bonus = 0.0
+    if features.source_model and features.source_model not in dominant_models:
+        model_diversity_bonus = 0.2
+
+    # format_diversity_bonus = 0.1 if candidate format differs from majority
+    format_diversity_bonus = 0.0
+    if features.source_format != majority_format:
+        format_diversity_bonus = 0.1
+
+    # target_match_bonus = 0.3 if target_file_match else 0
+    target_match_bonus = 0.3 if features.target_file_match else 0.0
+
+    # duplicate_penalty = 0.2 per other candidate in same duplicate group
+    duplicate_penalty = 0.0
+    for group in groups:
+        if index in group.candidate_indices:
+            other_count = len(group.candidate_indices) - 1
+            duplicate_penalty = 0.2 * other_count
+            break
+
+    # popularity_trap_penalty = 0.5 if dominant group is penalized and candidate is in it
+    popularity_trap_penalty = 0.0
+    if trap_decision.detected and trap_decision.recommended_action == "penalize_dominant_group":
+        # Check if candidate is in dominant group
+        for group in groups:
+            if group.group_id == trap_decision.dominant_group_id:
+                if index in group.candidate_indices:
+                    popularity_trap_penalty = 0.5
+                break
+
+    # safety_penalty = CandidateFeatures.safety_penalty
+    safety_penalty = features.safety_penalty
+
+    final_score = (
+        quality_score
+        + model_diversity_bonus
+        + format_diversity_bonus
+        + target_match_bonus
+        - duplicate_penalty
+        - popularity_trap_penalty
+        - safety_penalty
+    )
+
+    breakdown = {
+        "candidate_id": features.candidate_hash[:16] + f"#{index}",
+        "index": index,
+        "source_model": features.source_model,
+        "source_format": features.source_format,
+        "quality_score": quality_score,
+        "model_diversity_bonus": model_diversity_bonus,
+        "format_diversity_bonus": format_diversity_bonus,
+        "target_match_bonus": target_match_bonus,
+        "duplicate_penalty": duplicate_penalty,
+        "popularity_trap_penalty": popularity_trap_penalty,
+        "safety_penalty": safety_penalty,
+        "final_score": final_score,
+    }
+
+    return final_score, breakdown
+
+
 def select_diverse_candidate(
     candidates: list[CanonicalPatchCandidate],
     *,
     source_models: list[str] | None = None,
     strategy: str = "diversity_v1",
 ) -> DiversitySelectionResult:
-    """P5-I1: Select the most diverse candidate from a list of valid candidates.
+    """P5-I5: Select the most diverse candidate from a list of valid candidates.
 
-    This is the contract-only implementation (P5-I1). It does NOT yet perform
-    diversity-aware selection — it returns the first valid candidate and records
-    the strategy. Future P5 iterations will upgrade selectivity.
+    Scoring formula:
+    final_score = quality_score + model_diversity_bonus + format_diversity_bonus
+                 + target_match_bonus - duplicate_penalty - popularity_trap_penalty
+                 - safety_penalty
+
+    Tie-break: higher final_score → lower safety_penalty → non-dominant group → lower index.
 
     Args:
         candidates: Valid CanonicalPatchCandidate list (already adapted).
         source_models: Optional source model names per candidate index.
-        strategy: Selection strategy name. I1 accepts "diversity_v1".
+        strategy: Selection strategy name. "diversity_v1" enables diversity scoring.
+                  "contract_only_first_valid" returns index 0 (backward compat).
 
     Returns:
         DiversitySelectionResult with selection decision and explainability fields.
@@ -377,21 +459,104 @@ def select_diverse_candidate(
             failure_reasons=[],
         )
 
-    # Multiple candidates — contract-only: select first valid
-    cid = _build_candidate_id(candidates[0], 0)
+    # Contract-only strategy: return first valid without scoring
+    if strategy == "contract_only_first_valid":
+        cid = _build_candidate_id(candidates[0], 0)
+        return DiversitySelectionResult(
+            selected_candidate_id=cid,
+            selected_candidate_hash=candidates[0].raw_output_hash,
+            selected_index=0,
+            selection_strategy="contract_only_first_valid",
+            candidate_count=len(candidates),
+            diversity_candidate_count=len(candidates),
+            duplicate_group_count=0,
+            popularity_trap_detected=False,
+            popularity_trap_reason="",
+            score_breakdown=[{"candidate_id": cid, "index": 0, "strategy": "contract_only_first_valid"}],
+            rejected_by_diversity=[],
+            fail_closed=False,
+            failure_reasons=[],
+        )
+
+    # Extract features for all candidates
+    all_features = [extract_features(c, source_models[i]) for i, c in enumerate(candidates)]
+
+    # Group near-duplicates
+    groups = group_near_duplicates(all_features)
+
+    # Detect popularity trap
+    trap_decision = detect_popularity_trap(all_features, groups)
+
+    # Compute dominant models and majority format
+    model_counts: dict[str, int] = {}
+    for f in all_features:
+        if f.source_model:
+            model_counts[f.source_model] = model_counts.get(f.source_model, 0) + 1
+    dominant_models = set()
+    if model_counts:
+        max_count = max(model_counts.values())
+        dominant_models = {m for m, c in model_counts.items() if c == max_count}
+
+    format_counts: dict[str, int] = {}
+    for f in all_features:
+        format_counts[f.source_format] = format_counts.get(f.source_format, 0) + 1
+    majority_format = max(format_counts, key=format_counts.get) if format_counts else ""
+
+    # Score all candidates
+    scored: list[tuple[float, int, dict[str, Any], CandidateFeatures]] = []
+    for i, (c, f) in enumerate(zip(candidates, all_features)):
+        final_score, breakdown = _score_candidate(
+            f, i, all_features, groups, trap_decision, dominant_models, majority_format,
+        )
+        scored.append((final_score, i, breakdown, f))
+
+    # Check if ALL candidates have final_score <= 0
+    all_unsafe = all(s[0] <= 0 for s in scored)
+    if all_unsafe:
+        cid = _build_candidate_id(candidates[0], 0)
+        return DiversitySelectionResult(
+            selected_candidate_id=cid,
+            selected_candidate_hash=candidates[0].raw_output_hash,
+            selected_index=0,
+            selection_strategy="diversity_v1",
+            candidate_count=len(candidates),
+            diversity_candidate_count=len(candidates),
+            duplicate_group_count=len(groups),
+            popularity_trap_detected=trap_decision.detected,
+            popularity_trap_reason=trap_decision.reason,
+            score_breakdown=[s[2] for s in scored],
+            rejected_by_diversity=list(range(len(candidates))),
+            fail_closed=True,
+            failure_reasons=["all_candidates_unsafe"],
+        )
+
+    # Sort: higher final_score first, then lower safety_penalty, then non-dominant, then lower index
+    def sort_key(item):
+        score, idx, breakdown, features = item
+        in_dominant = False
+        for group in groups:
+            if idx in group.candidate_indices and group.group_id == trap_decision.dominant_group_id:
+                in_dominant = True
+                break
+        return (-score, features.safety_penalty, 1 if in_dominant else 0, idx)
+
+    scored.sort(key=sort_key)
+
+    # Select winner
+    winner_score, winner_idx, winner_breakdown, winner_features = scored[0]
+    winner_cid = _build_candidate_id(candidates[winner_idx], winner_idx)
+
     return DiversitySelectionResult(
-        selected_candidate_id=cid,
-        selected_candidate_hash=candidates[0].raw_output_hash,
-        selected_index=0,
-        selection_strategy="contract_only_first_valid",
+        selected_candidate_id=winner_cid,
+        selected_candidate_hash=candidates[winner_idx].raw_output_hash,
+        selected_index=winner_idx,
+        selection_strategy="diversity_v1",
         candidate_count=len(candidates),
         diversity_candidate_count=len(candidates),
-        duplicate_group_count=0,
-        popularity_trap_detected=False,
-        popularity_trap_reason="",
-        score_breakdown=[
-            {"candidate_id": cid, "index": 0, "strategy": "contract_only_first_valid"},
-        ],
+        duplicate_group_count=len(groups),
+        popularity_trap_detected=trap_decision.detected,
+        popularity_trap_reason=trap_decision.reason,
+        score_breakdown=[s[2] for s in scored],
         rejected_by_diversity=[],
         fail_closed=False,
         failure_reasons=[],
