@@ -7631,3 +7631,168 @@ def test_unified_diff_compatibility_unchanged(monkeypatch) -> None:
     assert resp.candidate_patch.strip().startswith("--- a/")
     assert "return 42" in resp.candidate_patch
 
+
+# ============================================================
+# P1-4: Executor Canonical Candidate Projection Tests
+# ============================================================
+
+
+def test_canonical_candidate_projection_search_replace() -> None:
+    """P1-4: Canonical candidate normalized content used for search/replace projection."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    sr_output = (
+        "<<<<<<< SEARCH\n"
+        "old code\n"
+        "=======\n"
+        "new code\n"
+        ">>>>>>> REPLACE"
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = sr_output
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t6",
+        problem_statement="fix code",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "anchored_edit",
+            },
+            "locked_search": "old code",
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "SEARCH_REPLACE"
+    assert resp.raw_model_metadata.get("output_understanding_success") is True
+    assert resp.raw_model_metadata.get("output_understanding_projection_source") == "canonical_candidate"
+
+
+def test_canonical_candidate_projection_unified_diff() -> None:
+    """P1-4: Canonical candidate normalized content used for unified diff projection."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    diff_output = (
+        "--- a/foo.py\n"
+        "+++ b/foo.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " def foo():\n"
+        "-    pass\n"
+        "+    return 42\n"
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = diff_output
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t7",
+        problem_statement="fix foo",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "standard",
+            }
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "UNIFIED_DIFF"
+    assert resp.raw_model_metadata.get("output_understanding_success") is True
+    assert resp.raw_model_metadata.get("output_understanding_projection_source") == "canonical_candidate"
+    assert resp.candidate_patch.strip().startswith("--- a/")
+
+
+def test_fallback_when_canonical_candidate_absent() -> None:
+    """P1-4: Fallback to raw output when canonical candidate is absent or unsupported."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    malformed_output = "Here is some random text with no structure."
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = malformed_output
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t8",
+        problem_statement="fix x",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "anchored_edit",
+            },
+            "locked_search": "old code",
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "MALFORMED_OUTPUT"
+    assert resp.raw_model_metadata.get("output_understanding_success") is False
+    assert resp.raw_model_metadata.get("output_understanding_projection_source") == "raw_output"
+

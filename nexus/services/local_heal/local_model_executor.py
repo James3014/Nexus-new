@@ -2489,11 +2489,29 @@ class LocalModelExecutor:
         patch_meta = {}
 
         # P1-2: Read-only canonical understanding layer
-        from nexus.services.local_heal.output_understanding import understand_output
+        from nexus.services.local_heal.output_understanding import understand_output, OutputFormat
         _understanding = understand_output(candidate_patch)
 
-        if candidate_patch.strip():
-            candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
+        # P1-4: Project canonical candidate content for supported formats
+        _projection_source = "raw_output"
+        _canonical_candidate = _understanding.candidate
+        _supported_projection_formats = {
+            OutputFormat.SEARCH_REPLACE.value,
+            OutputFormat.FENCED_SEARCH_REPLACE.value,
+            OutputFormat.UNIFIED_DIFF.value,
+        }
+        _patch_input = candidate_patch
+        if (
+            _canonical_candidate
+            and _understanding.success
+            and _canonical_candidate.source_format in _supported_projection_formats
+            and _canonical_candidate.normalized_patch.strip()
+        ):
+            _patch_input = _canonical_candidate.normalized_patch
+            _projection_source = "canonical_candidate"
+
+        if _patch_input.strip():
+            candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, _patch_input)
             candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
         else:
             candidate_hash = empty_hash
@@ -2502,10 +2520,11 @@ class LocalModelExecutor:
         _understanding_meta = {
             "output_understanding_format": _understanding.detected_format,
             "output_understanding_success": _understanding.success,
+            "output_understanding_projection_source": _projection_source,
         }
-        if _understanding.candidate:
-            _understanding_meta["output_understanding_normalization_steps"] = list(_understanding.candidate.normalization_steps)
-            _understanding_meta["output_understanding_source_format"] = _understanding.candidate.source_format
+        if _canonical_candidate:
+            _understanding_meta["output_understanding_normalization_steps"] = list(_canonical_candidate.normalization_steps)
+            _understanding_meta["output_understanding_source_format"] = _canonical_candidate.source_format
 
         # P1-2: Fail-closed mapping for empty/refusal/malformed via understanding layer
         if not _understanding.success and candidate_hash == empty_hash:
