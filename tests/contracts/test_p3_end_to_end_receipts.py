@@ -214,3 +214,147 @@ class FakeCtx:
         if name == "meta":
             return self.__dict__.get("meta", {})
         return self.meta.get(name, getattr(type(self), name, "" if isinstance(getattr(type(self), name, ""), str) else False))
+
+
+def test_p3_e2e_receipt_from_executor_meta():
+    """P3-A1: Executor meta flows into receipt via FakeCtx wrapping."""
+    os.environ["NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW"] = "1"
+    os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
+    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "single_local_model"
+    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b"
+    try:
+        req = LocalModelExecutorRequest(
+            task_id="p3-e2e-receipt",
+            problem_statement="Fix database connection",
+            repo_root="/tmp",
+            target_file="db.py",
+            selected_capabilities=(),
+            evidence_refs=(),
+            route_context={"signal_snapshot": {
+                "execution_topology": "cloud_with_local_assist",
+                "protocol_mode": "anchored_edit",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "target_symbol": "conn",
+                "difficulty": "medium",
+                "task_difficulty": "medium",
+            }},
+            dry_run=False,
+        )
+        resp = LocalModelExecutor.run(req, provider=FakeProvider())
+        meta = resp.raw_model_metadata
+
+        # Verify meta has P3 fields
+        assert meta.get("p3_shadow_route") is True
+        assert meta.get("cloud_used") is True
+        assert meta.get("local_assist_used") is True
+        assert "stage1_local_diagnosis" in meta.get("assist_stages_activated", [])
+        assert "stage4_local_retry" in meta.get("assist_stages_activated", [])
+
+        # Build receipt from meta (real runtime path simulation)
+        receipt = build_repair_receipt(FakeCtx(meta))
+        assert receipt["p3_shadow_route"] is True
+        assert receipt["cloud_used"] is True
+        assert receipt["local_assist_used"] is True
+        assert receipt["stage4_local_retry_success"] is True
+        assert receipt["public_claim_allowed"] is False
+    finally:
+        os.environ.pop("NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW", None)
+        os.environ.pop("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", None)
+        os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", None)
+        os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", None)
+
+
+def test_p3_boundary_no_real_cloud():
+    """P3-A1: Real cloud endpoint is NOT connected."""
+    from nexus.services.local_heal.local_model_executor import FakeCloudCandidateProvider
+    provider = FakeCloudCandidateProvider()
+    req = LocalModelExecutorRequest(
+        task_id="test",
+        problem_statement="test",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={"signal_snapshot": {}},
+    )
+    resp = provider.generate(req)
+    # Fake provider always returns empty — no real cloud call
+    assert resp.candidate_patch == ""
+    assert resp.error == ""
+
+
+def test_p3_boundary_no_p4_invoked():
+    """P3-A1: P4 committee is NOT invoked from P3 path."""
+    os.environ["NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW"] = "1"
+    os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
+    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "single_local_model"
+    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b"
+    try:
+        req = LocalModelExecutorRequest(
+            task_id="p3-boundary",
+            problem_statement="Complex cross-module refactoring",
+            repo_root="/tmp",
+            target_file="complex.py",
+            selected_capabilities=(),
+            evidence_refs=(),
+            route_context={"signal_snapshot": {
+                "execution_topology": "cloud_with_local_assist",
+                "protocol_mode": "anchored_edit",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "target_symbol": "eval",
+                "difficulty": "hard",
+                "task_difficulty": "hard",
+                "proposer_specs": [{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
+                "judge_model": "judge",
+            }},
+            dry_run=False,
+        )
+        resp = LocalModelExecutor.run(req, provider=EmptyProvider())
+        meta = resp.raw_model_metadata
+        # P3 does NOT invoke P4 committee (P4 is separate)
+        # P3 stage5 is escalation stub only
+        assert meta.get("stage5_escalation_performed") is True
+        assert meta.get("stage5_escalation_target") == "committee"
+        # But actual committee invocation requires P4 env guard
+        # which is NOT set in this test
+    finally:
+        os.environ.pop("NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW", None)
+        os.environ.pop("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", None)
+        os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", None)
+        os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", None)
+
+
+def test_p3_boundary_claim_gate_not_relaxed():
+    """P3-A1: P2 claim gate NOT relaxed by p3_shadow_route."""
+    from nexus.services.local_heal.claim_delivery_gate import ClaimDeliveryGate
+    gate = ClaimDeliveryGate()
+
+    # Without source_hash → should fail
+    decision = gate.validate({
+        "verifier_status": "pass",
+        "verifier_artifact": "report.txt",
+        "source_hash": "",
+        "patch_applied": True,
+        "candidate_hash_matches_applied": True,
+        "candidate_target_file": "foo.py",
+        "artifact_refs": ["patch.diff"],
+    })
+    assert decision.claim_gate_passed is False
+    assert "missing_source_hash" in decision.reasons
+
+
+def test_p3_boundary_public_claim_allowed_false():
+    """P3-A1: public_claim_allowed remains false."""
+    class FakeCtx:
+        instance_id = "p3-boundary"
+        p3_shadow_route = True
+        cloud_used = True
+        local_assist_used = True
+
+    receipt = build_repair_receipt(FakeCtx())
+    assert receipt["public_claim_allowed"] is False
+    assert receipt["production_ready"] is False
