@@ -159,6 +159,54 @@ def _memory_usefulness_impl(used_by_later_stage: bool, outcome: str, age_hours: 
     )
 
 
+def _quota_degradation_risk_impl(
+    cloud_budget_ratio: float,
+    committee_budget_ratio: float,
+    candidate_count: int,
+) -> FuzzyFunctionResult:
+    """EA-R10: Quota degradation risk scoring."""
+    score = 0.0
+    reasons = []
+
+    if cloud_budget_ratio < 0.2:
+        score += 0.4
+        reasons.append(f"cloud_low={cloud_budget_ratio:.2f}")
+    elif cloud_budget_ratio < 0.5:
+        score += 0.2
+        reasons.append(f"cloud_constrained={cloud_budget_ratio:.2f}")
+
+    if committee_budget_ratio < 0.2:
+        score += 0.3
+        reasons.append(f"committee_low={committee_budget_ratio:.2f}")
+    elif committee_budget_ratio < 0.5:
+        score += 0.15
+        reasons.append(f"committee_constrained={committee_budget_ratio:.2f}")
+
+    if candidate_count > 5:
+        score += 0.1
+        reasons.append(f"high_candidate_count={candidate_count}")
+
+    score = min(1.0, score)
+
+    if score >= 0.6:
+        label = "high"
+    elif score >= 0.3:
+        label = "medium"
+    else:
+        label = "low"
+
+    return FuzzyFunctionResult(
+        name="quota_degradation_risk_v1",
+        version="1.0",
+        score=score,
+        label=label,
+        confidence=1.0,
+        reasons=reasons,
+        backend="deterministic",
+        deterministic=True,
+    )
+
+
 # Register all deterministic backends
 register(
     "candidate_quality_v1",
@@ -215,4 +263,21 @@ register(
         claim_boundary="Placeholder only. No real usefulness assessment implemented.",
     ),
     _memory_usefulness_impl,
+)
+
+register(
+    "quota_degradation_risk_v1",
+    FuzzyFunctionSpec(
+        name="quota_degradation_risk_v1",
+        version="1.0",
+        input_schema={
+            "cloud_budget_ratio": "float",
+            "committee_budget_ratio": "float",
+            "candidate_count": "int",
+        },
+        output_schema={"score": "float", "label": "str"},
+        backend="deterministic",
+        claim_boundary="Risk score is heuristic-based. Does not predict actual quota degradation.",
+    ),
+    _quota_degradation_risk_impl,
 )
