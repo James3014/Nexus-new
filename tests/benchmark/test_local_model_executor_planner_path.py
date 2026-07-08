@@ -134,6 +134,17 @@ def test_local_model_executor_real_provider_smoke(monkeypatch, tmp_path):
         urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2.0)
     except Exception:
         pytest.skip("Ollama is not running locally")
+    try:
+        _req = urllib.request.urlopen(
+            "http://localhost:11434/api/show",
+            data=json.dumps({"name": "qwen2.5-coder:7b"}).encode(),
+            timeout=3.0,
+        )
+        _resp = json.loads(_req.read().decode())
+        if not _resp.get("modelfile"):
+            pytest.skip("Required model qwen2.5-coder:7b not installed")
+    except Exception:
+        pytest.skip("Required model qwen2.5-coder:7b not available")
 
     # 1. Enable local model executor environment gate
     monkeypatch.setenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "1")
