@@ -82,13 +82,27 @@ def _run_ab_arm_extended(arm_name, p6_enabled, budget_class, local_available=Tru
         candidate_counts = [3, 5, 8]
         requested = candidate_counts[variant % len(candidate_counts)]
         result = evaluate_p6_runtime_hook(requested_candidate_count=requested, local_available=local_available)
+
+        # P6-B8: Distinguish quota scenario from runtime decision
+        runtime_evaluated = result.p6_enabled and result.decision is not None
+        runtime_budget_class = result.decision.quota_budget_class if result.decision else "not_evaluated"
+        runtime_action = result.degradation_action if runtime_evaluated else "keep_full_committee"
+        runtime_reason = result.decision.reason if result.decision else "flag_off_default"
+
         return {
             "task_id": f"ab_{arm_name}_v{variant}",
-            "run_id": f"b7_{arm_name}_v{variant}",
+            "run_id": f"b8_{arm_name}_v{variant}",
             "arm": arm_name,
             "p6_enabled": result.p6_enabled,
-            "quota_known": result.decision.quota_budget_class != "unknown" if result.decision else True,
-            "budget_class": result.decision.quota_budget_class if result.decision else "unknown",
+            # P6-B8: Quota scenario (what we're testing)
+            "quota_scenario_budget_class": budget_class.value,
+            "quota_scenario_known": budget_class != BudgetClass.UNKNOWN,
+            # P6-B8: Runtime decision (what actually happened)
+            "runtime_decision_evaluated": runtime_evaluated,
+            "runtime_decision_budget_class": runtime_budget_class,
+            "runtime_decision_action": runtime_action,
+            "runtime_decision_reason": runtime_reason,
+            # Existing fields
             "degradation_action": result.degradation_action,
             "candidate_count_requested": requested,
             "candidate_count_actual": result.candidate_count_limit if result.candidate_count_limit else requested,
@@ -109,6 +123,7 @@ def _run_ab_arm_extended(arm_name, p6_enabled, budget_class, local_available=Tru
             "unsafe_action_detected": False,
             "fail_closed": result.degradation_action == "fail_closed",
             "receipt_complete": True,
+            "flag_off_default_behavior_preserved": not result.p6_enabled,
         }
     finally:
         os.environ.pop("NEXUS_ENABLE_P6_QUOTA_DEGRADATION", None)
@@ -160,9 +175,9 @@ def test_guarded_ab_all_arms():
     assert memory_override == 0
 
     # Gate: unknown quota never healthy
-    unknown_rows = [r for r in rows if r["budget_class"] == "unknown"]
+    unknown_rows = [r for r in rows if r["quota_scenario_budget_class"] == "unknown"]
     for r in unknown_rows:
-        assert r["budget_class"] != "healthy"
+        assert r["runtime_decision_budget_class"] != "healthy"
 
     # Gate: verifier_required_rate = 100%
     for r in rows:
@@ -254,3 +269,30 @@ def test_unknown_never_healthy():
     row = _run_ab_arm("on_unknown", True, BudgetClass.UNKNOWN)
     assert row["budget_class"] != "healthy"
     assert row["degradation_action"] == "fail_closed"
+
+
+def test_off_arms_have_runtime_decision_not_evaluated():
+    """P6-B8: All off arms have runtime_decision_evaluated=false."""
+    off_rows = [_run_ab_arm_extended(f"off_{bc.value}", False, bc, variant=0)
+                for bc in [BudgetClass.HEALTHY, BudgetClass.CONSTRAINED, BudgetClass.EXHAUSTED, BudgetClass.UNKNOWN]]
+    for row in off_rows:
+        assert row["runtime_decision_evaluated"] is False
+        assert row["runtime_decision_budget_class"] == "not_evaluated"
+        assert row["flag_off_default_behavior_preserved"] is True
+
+
+def test_on_arms_have_runtime_decision_evaluated():
+    """P6-B8: All on arms have runtime_decision_evaluated=true."""
+    on_rows = [_run_ab_arm_extended(f"on_{bc.value}", True, bc, variant=0)
+               for bc in [BudgetClass.HEALTHY, BudgetClass.CONSTRAINED, BudgetClass.EXHAUSTED, BudgetClass.UNKNOWN]]
+    for row in on_rows:
+        assert row["runtime_decision_evaluated"] is True
+        assert row["runtime_decision_budget_class"] != "not_evaluated"
+
+
+def test_off_arms_preserve_quota_scenario():
+    """P6-B8: Off arms preserve quota_scenario_budget_class correctly."""
+    for bc in [BudgetClass.HEALTHY, BudgetClass.CONSTRAINED, BudgetClass.EXHAUSTED, BudgetClass.UNKNOWN]:
+        row = _run_ab_arm_extended(f"off_{bc.value}", False, bc, variant=0)
+        assert row["quota_scenario_budget_class"] == bc.value
+        assert row["degradation_action"] == "keep_full_committee"
