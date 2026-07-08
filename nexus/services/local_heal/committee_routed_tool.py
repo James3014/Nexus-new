@@ -104,8 +104,27 @@ def evaluate_and_execute(request: CommitteeRoutedToolRequest) -> CommitteeRouted
         )
 
     # Stub: no actual committee execution yet (P4-I4)
+    # For now, return empty result with gate info
     return CommitteeRoutedToolResult(
         invoked=True,
         invocation_allowed=True,
         receipt_fragment=gate,
     )
+
+
+def adapt_candidates(
+    raw_candidates: list[dict],
+    target_file: str,
+    target_symbol: str,
+) -> dict:
+    """Adapt raw candidates to canonical. Returns result summary."""
+    from nexus.services.local_heal.committee_candidate_adapter import adapt_committee_candidates
+
+    valid, rejections = adapt_committee_candidates(raw_candidates, target_file, target_symbol)
+    return {
+        "raw_candidate_count": len(raw_candidates),
+        "canonical_candidate_count": len(valid),
+        "rejected_count": len(rejections),
+        "rejection_reasons": [r.get("reason", "") for r in rejections],
+        "candidate_hashes": [c.candidate_id for c in valid],
+    }

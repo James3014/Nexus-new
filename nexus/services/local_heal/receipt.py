@@ -516,6 +516,10 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         # P4-I2: Committee activation gate fields
         "p4_committee_gate_evaluated": bool(getattr(ctx, "p4_committee_gate_evaluated", False)),
         "p4_committee_activation_inputs": dict(getattr(ctx, "p4_committee_activation_inputs", {}) or {}),
+        # P4-I3: Candidate adapter fields
+        "p4_raw_candidate_count": int(getattr(ctx, "p4_raw_candidate_count", 0) or 0),
+        "p4_rejected_candidate_count": int(getattr(ctx, "p4_rejected_candidate_count", 0) or 0),
+        "p4_rejected_candidate_reasons": list(getattr(ctx, "p4_rejected_candidate_reasons", []) or []),
         # P3-I7: Stage 5 escalation stub fields
         "stage5_escalation_performed": bool(getattr(ctx, "stage5_escalation_performed", False)),
         "stage5_escalation_recommended": bool(getattr(ctx, "stage5_escalation_recommended", False)),
