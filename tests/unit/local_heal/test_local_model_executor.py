@@ -7380,4 +7380,254 @@ def test_delegated_retry_committee_candidates_have_unique_ids(tmp_path) -> None:
     assert "delegated-retry-02" in ds_cand["candidate_id"]
 
 
+# ============================================================
+# P1-2: Executor Read-Only Adoption Tests
+# ============================================================
+
+
+def test_output_understanding_called_on_single_local_model_path(monkeypatch) -> None:
+    """P1-2: Prove canonical understanding is called on the local output path."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = "--- a/foo.py\n+++ b/foo.py\n@@ -1,3 +1,3 @@\n old\n-new\n+new\n"
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t1",
+        problem_statement="fix x",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "standard",
+            }
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") is not None
+    assert resp.raw_model_metadata.get("output_understanding_success") is True
+
+
+def test_search_replace_compatibility_unchanged(monkeypatch) -> None:
+    """P1-2: Existing search/replace path remains green."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    sr_output = (
+        "<<<<<<< SEARCH\n"
+        "old code\n"
+        "=======\n"
+        "new code\n"
+        ">>>>>>> REPLACE"
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = sr_output
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t2",
+        problem_statement="fix code",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "anchored_edit",
+            },
+            "locked_search": "old code",
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "SEARCH_REPLACE"
+    assert resp.raw_model_metadata.get("output_understanding_success") is True
+
+
+def test_malformed_output_fails_closed_through_executor() -> None:
+    """P1-2: Malformed output maps to existing executor failure handling."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = "Here is some random text with no structure."
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t3",
+        problem_statement="fix x",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "anchored_edit",
+            },
+            "locked_search": "old code",
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "MALFORMED_OUTPUT"
+    assert resp.raw_model_metadata.get("output_understanding_success") is False
+
+
+def test_refusal_empty_output_fails_closed() -> None:
+    """P1-2: Refusal/empty output fails closed through executor handling."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = "I apologize, but I cannot fix this issue."
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t4",
+        problem_statement="fix x",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "anchored_edit",
+            },
+            "locked_search": "old code",
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "EMPTY_OR_REFUSAL"
+    assert resp.raw_model_metadata.get("output_understanding_success") is False
+
+
+def test_unified_diff_compatibility_unchanged(monkeypatch) -> None:
+    """P1-2: Existing unified diff path remains green through executor."""
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+
+    diff_output = (
+        "--- a/foo.py\n"
+        "+++ b/foo.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " def foo():\n"
+        "-    pass\n"
+        "+    return 42\n"
+    )
+
+    class FakeProvider:
+        def generate(self, req):
+            class R:
+                output_text = diff_output
+                output_truncated = False
+                error = ""
+                timed_out = False
+                requested_timeout_sec = 120.0
+                effective_timeout_sec = 120.0
+                elapsed_sec = 0.1
+                provider_invoked = True
+                model_called = True
+                model_name = "test-model"
+            return R()
+
+    req = LocalModelExecutorRequest(
+        task_id="t5",
+        problem_statement="fix foo",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "single_local_model",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "standard",
+            }
+        },
+        dry_run=False,
+    )
+    resp = LocalModelExecutor.run(req, provider=FakeProvider())
+    assert resp.raw_model_metadata.get("output_understanding_format") == "UNIFIED_DIFF"
+    assert resp.raw_model_metadata.get("output_understanding_success") is True
+    assert resp.candidate_patch.strip().startswith("--- a/")
+    assert "return 42" in resp.candidate_patch
 

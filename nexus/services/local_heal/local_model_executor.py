@@ -2487,11 +2487,31 @@ class LocalModelExecutor:
         
         candidate_patch = prov_resp.output_text
         patch_meta = {}
+
+        # P1-2: Read-only canonical understanding layer
+        from nexus.services.local_heal.output_understanding import understand_output
+        _understanding = understand_output(candidate_patch)
+
         if candidate_patch.strip():
             candidate_patch, patch_meta = _normalize_candidate_patch(request, locked_search, candidate_patch)
             candidate_hash = hashlib.sha256(candidate_patch.encode("utf-8")).hexdigest() if candidate_patch.strip() else empty_hash
         else:
             candidate_hash = empty_hash
+
+        # P1-2: Inject understanding metadata after _normalize_candidate_patch
+        _understanding_meta = {
+            "output_understanding_format": _understanding.detected_format,
+            "output_understanding_success": _understanding.success,
+        }
+        if _understanding.candidate:
+            _understanding_meta["output_understanding_normalization_steps"] = list(_understanding.candidate.normalization_steps)
+            _understanding_meta["output_understanding_source_format"] = _understanding.candidate.source_format
+
+        # P1-2: Fail-closed mapping for empty/refusal/malformed via understanding layer
+        if not _understanding.success and candidate_hash == empty_hash:
+            _understanding_meta["protocol_parse_failed"] = True
+            _understanding_meta["error_kind"] = f"OUTPUT_UNDERSTANDING:{_understanding.failure_reason}"
+            _understanding_meta["error_message"] = _understanding.failure_reason
             
         provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
         
@@ -2513,6 +2533,7 @@ class LocalModelExecutor:
             "locked_search_present": bool(locked_search.strip()),
             "failure_feedback_present": failure_feedback_present,
             "final_authority": "NexusVerifier",
+            **_understanding_meta,
         }
         armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
         raw_meta["armor_receipt_complete"] = armor_ok
