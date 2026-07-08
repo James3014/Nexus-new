@@ -879,7 +879,13 @@ class CapabilityPlanner:
             signal_snapshot["executor_provider"] = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", "ollama")
             signal_snapshot["executor_model"] = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
             signal_snapshot["local_executor_authority"] = "candidate_only"
-            
+            # P3 Fix: Critical signal_snapshot fields for executor consumption
+            signal_snapshot["protocol_mode"] = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
+            signal_snapshot["model_call_allowed"] = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "0") == "1"
+            signal_snapshot["candidate_enabled"] = True
+            signal_snapshot["mutation_allowed"] = True
+            signal_snapshot["verifier_allowed"] = True
+
             # N2.8 topology metadata additions
             topology = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
             signal_snapshot["execution_topology"] = topology
