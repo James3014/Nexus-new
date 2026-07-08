@@ -230,6 +230,8 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         local_model_called=request.local_model_called,
         mutation_allowed=request.mutation_allowed,
         repaired_by_rule=repair_receipt.repaired_by_rule,
+        candidate_target_file=request.target_file,
+        candidate_target_symbol=request.target_symbol,
     )
     
     hr_decision = candidate_isolation_to_hybrid_route(isolation_receipt)

@@ -128,6 +128,7 @@ def test_strict_claim_delivery_gate_rejects_fake_and_receipt_only_payloads():
             "verifier_status": "pass",
             "verifier_artifact": "verification_report.txt",
             "source_hash": "sha256:abc",
+            "candidate_target_file": "f.py",
             "patch_applied": True,
             "artifact_refs": ["patch.diff"],
         }

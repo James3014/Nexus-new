@@ -64,6 +64,7 @@ def run_local_solve_dry_run_loop(
         evidence_refs=request.evidence_refs,
         local_model_called=request.local_model_called,
         mutation_allowed=request.mutation_allowed and apply_receipt.patch_apply_status == "applied",
+        candidate_target_file=envelope.target_file,
     )
     
     hr_decision = candidate_isolation_to_hybrid_route(isolation_receipt)

@@ -3698,7 +3698,7 @@ def test_failure_class_empty_response():
         contains_markdown_fence=False,
         pipeline_failure_reason="",
     )
-    assert fc == "empty_response"
+    assert fc == "unknown_with_reason"
     assert ur == ""
 
 
@@ -3778,7 +3778,7 @@ def test_failure_class_fenced_output():
         contains_markdown_fence=True,
         pipeline_failure_reason="",
     )
-    assert fc == "fenced_output"
+    assert fc == "parse_failed:REPLACEMENT_MARKDOWN_FENCE"
     assert ur == ""
 
 
@@ -4381,7 +4381,7 @@ def test_orchestrator_semantic_retry_uses_shared_patch_phase_client(tmp_path, mo
 
     monkeypatch.setattr(
         "nexus.services.local_heal.protocol.SolidSearchReplaceProtocol.parse",
-        lambda self, response: [PatchIntent(file_path=target_rel, search="old", replace="new")],
+        lambda self, response, **kwargs: [PatchIntent(file_path=target_rel, search="old", replace="new")],
     )
     monkeypatch.setattr(
         "nexus.services.local_heal.patch_applier.PatchApplier.apply_and_validate",
