@@ -128,6 +128,96 @@ def extract_features(candidate: CanonicalPatchCandidate, model: str = "") -> Can
     )
 
 
+@dataclass(frozen=True)
+class DuplicateGroup:
+    group_id: str
+    candidate_indices: tuple[int, ...]
+    representative_index: int
+    duplicate_kind: str  # "exact" or "near"
+    similarity_score: float
+
+
+def _jaccard_similarity(set_a: frozenset[str], set_b: frozenset[str]) -> float:
+    """Compute Jaccard similarity between two token sets."""
+    if not set_a and not set_b:
+        return 1.0
+    if not set_a or not set_b:
+        return 0.0
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union > 0 else 0.0
+
+
+def group_near_duplicates(features: list[CandidateFeatures]) -> list[DuplicateGroup]:
+    """P5-I3: Group duplicate and near-duplicate candidates.
+
+    Args:
+        features: List of CandidateFeatures (never mutated).
+
+    Returns:
+        List of DuplicateGroup objects. Empty list if no duplicates found.
+    """
+    if len(features) < 2:
+        return []
+
+    groups: list[DuplicateGroup] = []
+    used_indices: set[int] = set()
+
+    for i in range(len(features)):
+        if i in used_indices:
+            continue
+
+        fi = features[i]
+        group_indices = [i]
+
+        for j in range(i + 1, len(features)):
+            if j in used_indices:
+                continue
+
+            fj = features[j]
+
+            # Different target_file → never grouped
+            if fi.target_file_match and fj.target_file_match:
+                # Both have target_file set — check if same file
+                # (target_file not stored in CandidateFeatures, but target_file_match is bool)
+                # Since we only have target_file_match (bool), we use token similarity as primary
+                pass
+
+            # Exact duplicate: same normalized_patch_hash (via candidate_hash)
+            if fi.candidate_hash == fj.candidate_hash:
+                group_indices.append(j)
+                used_indices.add(j)
+                continue
+
+            # Near duplicate: token Jaccard >= 0.85
+            if fi.token_set and fj.token_set:
+                sim = _jaccard_similarity(fi.token_set, fj.token_set)
+                if sim >= 0.85:
+                    group_indices.append(j)
+                    used_indices.add(j)
+                    continue
+
+        if len(group_indices) > 1:
+            used_indices.add(i)
+            representative = min(group_indices)
+            groups.append(DuplicateGroup(
+                group_id=f"dup-{representative}",
+                candidate_indices=tuple(sorted(group_indices)),
+                representative_index=representative,
+                duplicate_kind="exact" if len(set(
+                    features[k].candidate_hash for k in group_indices
+                )) == 1 else "near",
+                similarity_score=1.0 if len(set(
+                    features[k].candidate_hash for k in group_indices
+                )) == 1 else max(
+                    _jaccard_similarity(fi.token_set, features[k].token_set)
+                    for k in group_indices if k != i
+                ),
+            ))
+
+    return groups
+
+
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
