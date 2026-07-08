@@ -1,0 +1,118 @@
+[
+  {
+    "case_id": "E1-A_first_bad_second_good",
+    "candidates": [
+      {"candidate_patch": "x", "format": "UNIFIED_DIFF", "model": "bad-model"},
+      {"candidate_patch": "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-a\n+b", "format": "UNIFIED_DIFF", "model": "good-model"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "bad-model",
+      "p5_on_selected_model": "good-model",
+      "p5_on_selected_index": 1,
+      "selection_should_change": true,
+      "p5_fail_closed": false
+    }
+  },
+  {
+    "case_id": "E1-B_duplicate_majority_unique",
+    "candidates": [
+      {"candidate_patch": "x = 1", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "x = 1", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "--- a/bar.py\n+++ b/bar.py\n@@ -1 +1 @@\n-a\n+b", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "deepseek",
+      "p5_on_selected_index": 2,
+      "selection_should_change": true,
+      "p5_fail_closed": false,
+      "p5_popularity_trap_detected": true
+    }
+  },
+  {
+    "case_id": "E1-C_all_unsafe_fail_closed",
+    "candidates": [
+      {"candidate_patch": "x", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "y", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "",
+      "p5_on_selected_index": 0,
+      "selection_should_change": false,
+      "p5_fail_closed": true,
+      "p5_winner_found": false
+    }
+  },
+  {
+    "case_id": "E1-D_first_malformed_second_valid",
+    "candidates": [
+      {"candidate_patch": "random text", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-a\n+b", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "deepseek",
+      "p5_on_selected_index": 1,
+      "selection_should_change": true,
+      "p5_fail_closed": false
+    }
+  },
+  {
+    "case_id": "E1-E_same_model_duplicates_vs_unique",
+    "candidates": [
+      {"candidate_patch": "x = 1", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "x = 1", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "x = 1", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "--- a/bar.py\n+++ b/bar.py\n@@ -1 +1 @@\n-a\n+b", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "deepseek",
+      "p5_on_selected_index": 3,
+      "selection_should_change": true,
+      "p5_fail_closed": false,
+      "p5_popularity_trap_detected": true
+    }
+  },
+  {
+    "case_id": "E1-F_same_patch_different_format",
+    "candidates": [
+      {"candidate_patch": "def calculate_sum(a, b):\n    result = a + b\n    return result\n", "format": "SEARCH_REPLACE", "model": "qwen"},
+      {"candidate_patch": "def multiply(a, b):\n    result = a * b\n    return result\n", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "deepseek",
+      "selection_should_change": true,
+      "p5_fail_closed": false
+    }
+  },
+  {
+    "case_id": "E1-G_target_file_mismatch_vs_target_match",
+    "candidates": [
+      {"candidate_patch": "fix something", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "fix foo.py function call", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "deepseek",
+      "selection_should_change": true,
+      "p5_fail_closed": false
+    }
+  },
+  {
+    "case_id": "E1-H_tie_break_stability",
+    "candidates": [
+      {"candidate_patch": "--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-a\n+b", "format": "UNIFIED_DIFF", "model": "qwen"},
+      {"candidate_patch": "--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-a\n+b", "format": "UNIFIED_DIFF", "model": "deepseek"}
+    ],
+    "expected": {
+      "p5_off_selected_model": "qwen",
+      "p5_on_selected_model": "qwen",
+      "p5_on_selected_index": 0,
+      "selection_should_change": false,
+      "p5_fail_closed": false
+    }
+  }
+]
