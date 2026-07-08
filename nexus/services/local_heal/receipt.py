@@ -468,6 +468,8 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "model_phase_split": model_split,
         "model_calls": model_calls,
         "wall_time_sec": float(getattr(ctx, "wall_time_sec", 0.0) or 0.0),
+        # P2: Execution topology visibility
+        "execution_topology": str(getattr(ctx, "execution_topology", "") or ""),
         
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),

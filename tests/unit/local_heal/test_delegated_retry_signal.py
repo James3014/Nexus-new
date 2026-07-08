@@ -8,6 +8,8 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+rank_bm25 = pytest.importorskip("rank_bm25", reason="rank_bm25 not installed")
+
 
 def test_delegated_retry_candidate_models_survives_signal_snapshot():
     """delegated_retry_candidate_models must be readable from signal_snapshot in route_context."""
