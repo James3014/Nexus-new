@@ -66,14 +66,15 @@ class DiversitySelectionResult:
 @dataclass(frozen=True)
 class CandidateFeatures:
     candidate_hash: str
-    source_model: str
-    source_format: str
-    patch_length: int
-    line_count: int
-    token_set: frozenset[str]
-    target_file_match: bool
-    syntax_like_score: float
-    safety_penalty: float
+    target_file: str = ""
+    source_model: str = ""
+    source_format: str = ""
+    patch_length: int = 0
+    line_count: int = 0
+    token_set: frozenset[str] = field(default_factory=frozenset)
+    target_file_match: bool = False
+    syntax_like_score: float = 0.0
+    safety_penalty: float = 0.0
 
 
 def extract_features(candidate: CanonicalPatchCandidate, model: str = "") -> CandidateFeatures:
@@ -117,6 +118,7 @@ def extract_features(candidate: CanonicalPatchCandidate, model: str = "") -> Can
 
     return CandidateFeatures(
         candidate_hash=candidate.raw_output_hash,
+        target_file=candidate.target_file or "",
         source_model=model or "",
         source_format=candidate.source_format,
         patch_length=patch_length,
@@ -176,12 +178,11 @@ def group_near_duplicates(features: list[CandidateFeatures]) -> list[DuplicateGr
 
             fj = features[j]
 
-            # Different target_file → never grouped
-            if fi.target_file_match and fj.target_file_match:
-                # Both have target_file set — check if same file
-                # (target_file not stored in CandidateFeatures, but target_file_match is bool)
-                # Since we only have target_file_match (bool), we use token similarity as primary
-                pass
+            # Different target_file → never grouped (even if same hash)
+            actual_target_i = fi.target_file or ""
+            actual_target_j = fj.target_file or ""
+            if actual_target_i and actual_target_j and actual_target_i != actual_target_j:
+                continue
 
             # Exact duplicate: same normalized_patch_hash (via candidate_hash)
             if fi.candidate_hash == fj.candidate_hash:
@@ -274,7 +275,7 @@ def detect_popularity_trap(
         for idx in dominant.candidate_indices:
             if idx < len(features):
                 models.add(features[idx].source_model)
-        if len(models) == 1 and models.pop():
+        if len(models) == 1 and any(models):
             trap_reasons.append("model_homogeneity")
 
     if not trap_reasons:

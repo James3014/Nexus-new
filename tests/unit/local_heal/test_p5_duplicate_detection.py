@@ -64,10 +64,7 @@ def test_different_target_file_not_grouped():
     groups = group_near_duplicates([f1, f2])
 
     # Same hash but different target_file — should NOT be grouped
-    # (current implementation uses hash as primary, but target_file mismatch should block)
-    # Actually, looking at the code, different target_file_match (both True) doesn't block
-    # This test verifies the current behavior
-    assert len(groups) == 1  # exact hash match still groups
+    assert len(groups) == 0
 
 
 def test_different_semantic_patch_not_grouped():

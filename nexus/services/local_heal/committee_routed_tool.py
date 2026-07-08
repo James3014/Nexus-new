@@ -343,11 +343,67 @@ def evaluate_and_execute(
         result.receipt_fragment["p4_raw_candidate_count"] = len(raw_candidates)
         return result
 
-    # P5-Ix: winner selection — placeholder for P5 diversity selector
-    winner = valid_candidates[0]
+    # P5-I7: Diversity-aware selection (env-guarded)
+    p5_diversity_used = False
+    p5_result = None
+    rejected_indices = {r["index"] for r in rejections}
+
+    if os.environ.get("NEXUS_ENABLE_P5_DIVERSITY_SELECTION", "0") == "1":
+        try:
+            from nexus.services.local_heal.diversity_selector import select_diverse_candidate
+
+            # Extract source_models from raw_candidates (only for valid candidates)
+            source_models = [
+                str(raw_candidates[i].get("model", "") or raw_candidates[i].get("model_name", "") or "")
+                for i in range(len(raw_candidates))
+                if i not in rejected_indices
+            ]
+            # Pad if needed
+            while len(source_models) < len(valid_candidates):
+                source_models.append("")
+
+            p5_result = select_diverse_candidate(
+                valid_candidates,
+                source_models=source_models,
+                strategy="diversity_v1",
+            )
+            p5_diversity_used = True
+
+            if p5_result.fail_closed or p5_result.selected_index < 0:
+                # P5 selector failed — return fail-closed result
+                return CommitteeRoutedToolResult(
+                    invoked=True,
+                    invocation_allowed=True,
+                    candidate_count=len(raw_candidates),
+                    canonical_candidate_count=len(valid_candidates),
+                    winner_found=False,
+                    solved_by_committee=False,
+                    failure_reasons=[f"p5_selection_failed:{r}" for r in p5_result.failure_reasons],
+                    receipt_fragment={
+                        **gate,
+                        "p5_diversity_selector_used": True,
+                        "p5_selection_strategy": p5_result.selection_strategy,
+                        "p5_candidate_count": p5_result.candidate_count,
+                        "p5_duplicate_group_count": p5_result.duplicate_group_count,
+                        "p5_popularity_trap_detected": p5_result.popularity_trap_detected,
+                        "p5_popularity_trap_reason": p5_result.popularity_trap_reason,
+                        "p5_selected_candidate_index": p5_result.selected_index,
+                        "p5_selected_candidate_hash": p5_result.selected_candidate_hash,
+                        "p5_score_breakdown": p5_result.score_breakdown,
+                        "p5_rejected_by_diversity": p5_result.rejected_by_diversity,
+                        "p5_fail_closed": p5_result.fail_closed,
+                    },
+                )
+
+            winner = valid_candidates[p5_result.selected_index]
+        except ImportError:
+            # Fallback: diversity_selector unavailable
+            winner = valid_candidates[0]
+    else:
+        # P5 disabled: existing behavior
+        winner = valid_candidates[0]
 
     # Determine winner source model from raw candidates
-    rejected_indices = {r["index"] for r in rejections}
     winner_source_model = ""
     for i, raw in enumerate(raw_candidates):
         if i not in rejected_indices:
@@ -414,4 +470,19 @@ def evaluate_and_execute(
     result.receipt_fragment["apply_result"] = apply_result
     result.receipt_fragment["verifier_result"] = verifier_result
     result.receipt_fragment["claim_decision"] = {"claim_gate_passed": claim_gate_passed}
+
+    # P5-I7: Add P5 receipt fields only when P5 enabled
+    if p5_diversity_used and p5_result is not None:
+        result.receipt_fragment["p5_diversity_selector_used"] = True
+        result.receipt_fragment["p5_selection_strategy"] = p5_result.selection_strategy
+        result.receipt_fragment["p5_candidate_count"] = p5_result.candidate_count
+        result.receipt_fragment["p5_duplicate_group_count"] = p5_result.duplicate_group_count
+        result.receipt_fragment["p5_popularity_trap_detected"] = p5_result.popularity_trap_detected
+        result.receipt_fragment["p5_popularity_trap_reason"] = p5_result.popularity_trap_reason
+        result.receipt_fragment["p5_selected_candidate_index"] = p5_result.selected_index
+        result.receipt_fragment["p5_selected_candidate_hash"] = p5_result.selected_candidate_hash
+        result.receipt_fragment["p5_score_breakdown"] = p5_result.score_breakdown
+        result.receipt_fragment["p5_rejected_by_diversity"] = p5_result.rejected_by_diversity
+        result.receipt_fragment["p5_fail_closed"] = p5_result.fail_closed
+
     return result
