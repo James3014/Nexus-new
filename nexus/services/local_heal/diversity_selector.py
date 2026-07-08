@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
+from nexus.services.local_heal.fuzzy_functions import evaluate as fuzzy_evaluate
 
 
 @dataclass(frozen=True)
@@ -209,10 +210,17 @@ def group_near_duplicates(features: list[CandidateFeatures]) -> list[DuplicateGr
                 used_indices.add(j)
                 continue
 
-            # Near duplicate: token Jaccard >= 0.85
+            # P5-V3: Near duplicate via fuzzy function
             if fi.token_set and fj.token_set:
                 sim = _jaccard_similarity(fi.token_set, fj.token_set)
-                if sim >= 0.85:
+                same_target = bool(fi.target_file and fj.target_file and fi.target_file == fj.target_file)
+                sim_result = fuzzy_evaluate(
+                    "duplicate_similarity_v1",
+                    jaccard_similarity=sim,
+                    same_hash=(fi.candidate_hash == fj.candidate_hash),
+                    same_target=same_target,
+                )
+                if sim_result.score >= 0.85:
                     group_indices.append(j)
                     used_indices.add(j)
                     continue
@@ -275,27 +283,29 @@ def detect_popularity_trap(
     dominant_size = len(dominant.candidate_indices)
     candidate_count = len(features)
 
-    # Check trap conditions
-    trap_reasons = []
-
-    for idx in dominant.candidate_indices:
-        if idx < len(features):
-            fi = features[idx]
-            if not fi.target_file_match:
-                trap_reasons.append("dominant_group_has_missing_target_file")
-            if fi.syntax_like_score < 0.5:
-                trap_reasons.append("dominant_group_has_low_syntax_score")
-            if fi.safety_penalty > 0:
-                trap_reasons.append("dominant_group_has_safety_penalty")
+    # P5-V3: Use fuzzy function for trap risk
+    dominant_features = [features[idx] for idx in dominant.candidate_indices if idx < len(features)]
+    has_low_syntax = any(f.syntax_like_score < 0.5 for f in dominant_features)
+    has_safety_penalty = any(f.safety_penalty > 0 for f in dominant_features)
 
     # Model homogeneity check
-    if dominant_size > candidate_count / 2:
-        models = set()
-        for idx in dominant.candidate_indices:
-            if idx < len(features):
-                models.add(features[idx].source_model)
-        if len(models) == 1 and any(models):
-            trap_reasons.append("model_homogeneity")
+    models = set()
+    for idx in dominant.candidate_indices:
+        if idx < len(features):
+            models.add(features[idx].source_model)
+    model_homogeneous = len(models) == 1 and dominant_size > candidate_count / 2 and any(models)
+
+    risk_result = fuzzy_evaluate(
+        "popularity_trap_risk_v1",
+        dominant_group_ratio=dominant_size / candidate_count,
+        has_low_syntax=has_low_syntax,
+        has_safety_penalty=has_safety_penalty,
+        model_homogeneous=model_homogeneous,
+    )
+
+    trap_reasons = []
+    if risk_result.score > 0:
+        trap_reasons.extend(risk_result.reasons)
 
     if not trap_reasons:
         return PopularityTrapDecision(
@@ -346,12 +356,17 @@ def _score_candidate(
     dominant_models: set[str],
     majority_format: str,
 ) -> tuple[float, dict[str, Any]]:
-    """P5-I5: Score a single candidate for diversity-aware selection.
+    """P5-I5/V3: Score a single candidate for diversity-aware selection.
 
     Returns (final_score, breakdown_dict).
     """
-    # quality_score = syntax_like_score (range 0-1)
-    quality_score = features.syntax_like_score
+    # P5-V3: Use fuzzy function for quality scoring
+    quality_result = fuzzy_evaluate(
+        "candidate_quality_v1",
+        syntax_like_score=features.syntax_like_score,
+        safety_penalty=features.safety_penalty,
+    )
+    quality_score = quality_result.score
 
     # model_diversity_bonus = 0.2 per unique model not in dominant group
     model_diversity_bonus = 0.0
@@ -410,6 +425,12 @@ def _score_candidate(
         "popularity_trap_penalty": popularity_trap_penalty,
         "safety_penalty": safety_penalty,
         "final_score": final_score,
+        "fuzzy_function": {
+            "name": "candidate_quality_v1",
+            "version": "1.0",
+            "backend": "deterministic",
+            "label": quality_result.label,
+        },
     }
 
     return final_score, breakdown

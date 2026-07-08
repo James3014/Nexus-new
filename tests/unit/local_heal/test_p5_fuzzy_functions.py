@@ -37,19 +37,11 @@ def test_duplicate_similarity_exact():
 
 def test_duplicate_similarity_near():
     """P5-F0: duplicate_similarity_v1: near with same target (score >= 0.85)."""
-    # 0.95 * 0.8 = 0.76 < 0.85, so need higher jaccard
-    # 0.99 * 0.8 = 0.792 still < 0.85
-    # Formula: score = jaccard * (0.8 if same_target else 0.5)
-    # For score >= 0.85 with same_target: jaccard >= 0.85/0.8 = 1.0625 (impossible)
-    # Actually same_hash=True gives score=1.0 directly
-    # So "near" label requires score >= 0.85 but < 1.0
-    # With same_target=False: score = jaccard * 0.5, need jaccard >= 1.7 (impossible)
-    # The formula means "near" is only achievable via same_hash=True (exact)
-    # Let's test with same_hash=False, same_target=True, jaccard=0.99 → score=0.792, label="none"
-    # This is expected behavior — "near" requires exact match or very high jaccard without penalty
+    # P5-V3: score = jaccard_similarity (no multiplier)
+    # For score >= 0.85: jaccard >= 0.85
     result = evaluate("duplicate_similarity_v1", jaccard_similarity=0.99, same_hash=False, same_target=True)
-    assert result.score == 0.99 * 0.8  # 0.792
-    assert result.label == "none"  # 0.792 < 0.85
+    assert result.score == 0.99
+    assert result.label == "near"  # 0.99 >= 0.85
 
 
 def test_duplicate_similarity_different():

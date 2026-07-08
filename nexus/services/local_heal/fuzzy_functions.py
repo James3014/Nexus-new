@@ -80,7 +80,8 @@ def _duplicate_similarity_impl(jaccard_similarity: float, same_hash: bool, same_
     if same_hash:
         score = 1.0
     else:
-        score = jaccard_similarity * (0.8 if same_target else 0.5)
+        # P5-V3: Match original inline behavior — no multiplier for same_target
+        score = jaccard_similarity
 
     if same_hash:
         label = "exact"
