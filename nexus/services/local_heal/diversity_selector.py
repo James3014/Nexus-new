@@ -218,6 +218,97 @@ def group_near_duplicates(features: list[CandidateFeatures]) -> list[DuplicateGr
     return groups
 
 
+@dataclass(frozen=True)
+class PopularityTrapDecision:
+    detected: bool
+    dominant_group_id: str
+    dominant_group_size: int
+    candidate_count: int
+    reason: str
+    recommended_action: str  # "penalize_dominant_group", "fail_closed", "none"
+
+
+def detect_popularity_trap(
+    features: list[CandidateFeatures],
+    groups: list[DuplicateGroup],
+) -> PopularityTrapDecision:
+    """P5-I4: Detect popularity trap in candidate groups.
+
+    Trap detected when dominant group has ANY:
+    - target_file_match=False for any member
+    - syntax_like_score < 0.5 for any member
+    - safety_penalty > 0 for any member
+    - group size > 50% of total AND all same source_model family
+    """
+    if not features or not groups:
+        return PopularityTrapDecision(
+            detected=False,
+            dominant_group_id="",
+            dominant_group_size=0,
+            candidate_count=len(features),
+            reason="no_groups",
+            recommended_action="none",
+        )
+
+    # Find dominant group (largest)
+    dominant = max(groups, key=lambda g: len(g.candidate_indices))
+    dominant_size = len(dominant.candidate_indices)
+    candidate_count = len(features)
+
+    # Check trap conditions
+    trap_reasons = []
+
+    for idx in dominant.candidate_indices:
+        if idx < len(features):
+            fi = features[idx]
+            if not fi.target_file_match:
+                trap_reasons.append("dominant_group_has_missing_target_file")
+            if fi.syntax_like_score < 0.5:
+                trap_reasons.append("dominant_group_has_low_syntax_score")
+            if fi.safety_penalty > 0:
+                trap_reasons.append("dominant_group_has_safety_penalty")
+
+    # Model homogeneity check
+    if dominant_size > candidate_count / 2:
+        models = set()
+        for idx in dominant.candidate_indices:
+            if idx < len(features):
+                models.add(features[idx].source_model)
+        if len(models) == 1 and models.pop():
+            trap_reasons.append("model_homogeneity")
+
+    if not trap_reasons:
+        return PopularityTrapDecision(
+            detected=False,
+            dominant_group_id=dominant.group_id,
+            dominant_group_size=dominant_size,
+            candidate_count=candidate_count,
+            reason="no_trap",
+            recommended_action="none",
+        )
+
+    # Determine action
+    all_unsafe = all(
+        features[idx].safety_penalty > 0 or features[idx].syntax_like_score < 0.5
+        for idx in dominant.candidate_indices
+        if idx < len(features)
+    )
+
+    if all_unsafe:
+        action = "fail_closed"
+    else:
+        action = "penalize_dominant_group"
+
+    return PopularityTrapDecision(
+        detected=True,
+        dominant_group_id=dominant.group_id,
+        dominant_group_size=dominant_size,
+        candidate_count=candidate_count,
+        reason=";".join(trap_reasons),
+        recommended_action=action,
+    )
+
+
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
