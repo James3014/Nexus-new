@@ -487,6 +487,11 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         "cloud_provider": str(getattr(ctx, "cloud_provider", "") or ""),
         "cloud_candidate_patch": str(getattr(ctx, "cloud_candidate_patch", "") or ""),
         "cloud_candidate_hash": str(getattr(ctx, "cloud_candidate_hash", "") or ""),
+        # P3-I5: Stage 3 verifier fields
+        "stage3_verifier_performed": bool(getattr(ctx, "stage3_verifier_performed", False)),
+        "stage3_verifier_passed": bool(getattr(ctx, "stage3_verifier_passed", False)),
+        "stage3_verifier_reason": str(getattr(ctx, "stage3_verifier_reason", "") or ""),
+        "stage3_verifier_model": str(getattr(ctx, "stage3_verifier_model", "") or ""),
 
         # --- Sidecar Tracking ---
         "sidecar_enabled": bool(getattr(ctx, "_sidecar_enabled", False)),

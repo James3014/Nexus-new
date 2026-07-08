@@ -76,7 +76,7 @@ def test_p3_shadow_executor_does_not_crash():
     assert resp.raw_model_metadata.get("p3_shadow_route") is True
     assert resp.raw_model_metadata.get("cloud_used") is True
     assert resp.raw_model_metadata.get("local_assist_used") is True
-    assert resp.raw_model_metadata.get("p3_route_status") == "shadow_stage2_complete"
+    assert resp.raw_model_metadata.get("p3_route_status") == "shadow_stage3_verifier_blocked"
 
 
 def test_p3_shadow_receipt_contains_fields():
@@ -157,7 +157,7 @@ def test_p3_shadow_no_cloud_endpoint_fail_closed():
     meta = resp.raw_model_metadata
     assert meta.get("cloud_used") is True
     assert meta.get("cloud_candidate_generated") is False
-    assert meta.get("p3_route_status") == "shadow_stage2_complete"
+    assert meta.get("p3_route_status") == "shadow_stage3_verifier_blocked"
     assert resp.local_model_called is False
 
 

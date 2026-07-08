@@ -73,7 +73,8 @@ def test_executor_shadow_runs_stage2():
     assert meta.get("cloud_provider") == "fake_cloud"
     assert meta.get("cloud_candidate_patch") == ""
     assert "stage2_cloud_candidate" in meta.get("assist_stages_activated", [])
-    assert meta.get("p3_route_status") == "shadow_stage2_complete"
+    assert "stage3_local_cheap_verifier" in meta.get("assist_stages_activated", [])
+    assert meta.get("p3_route_status") == "shadow_stage3_verifier_blocked"
 
 
 def test_stage2_receipt_fields():

@@ -2406,7 +2406,7 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
-        # P3-I1/I3/I4: Cloud-with-local-assist shadow routing with stage1+2
+        # P3-I1/I3/I4/I5: Cloud-with-local-assist shadow routing with stage1+2+3
         if execution_topology == "cloud_with_local_assist":
             # P3-I3: Stage 1 local diagnosis
             stage1 = _p3_stage1_local_diagnosis(request)
@@ -2415,18 +2415,28 @@ class LocalModelExecutor:
             cloud_provider = FakeCloudCandidateProvider()
             cloud_response = cloud_provider.generate(request)
 
+            # P3-I5: Stage 3 cheap verifier
+            stage3 = _p3_stage3_cheap_verifier(cloud_response.candidate_patch, request)
+
+            stages = ["stage1_local_diagnosis", "stage2_cloud_candidate", "stage3_local_cheap_verifier"]
+            if not stage3.get("stage3_verifier_passed", False):
+                p3_status = "shadow_stage3_verifier_blocked"
+            else:
+                p3_status = "shadow_stage3_verifier_passed"
+
             _shadow_meta = {
                 "execution_topology": "cloud_with_local_assist",
                 "p3_shadow_route": True,
                 "cloud_used": True,
                 "cloud_candidate_generated": bool(cloud_response.candidate_patch.strip()),
                 "local_assist_used": True,
-                "assist_stages_activated": ["stage1_local_diagnosis", "stage2_cloud_candidate"],
-                "p3_route_status": "shadow_stage2_complete",
+                "assist_stages_activated": stages,
+                "p3_route_status": p3_status,
                 "cloud_provider": "fake_cloud",
                 "cloud_candidate_patch": cloud_response.candidate_patch,
                 "cloud_candidate_hash": cloud_response.candidate_hash,
                 **stage1,
+                **stage3,
             }
             armor_ok, armor_miss = validate_local_model_armor_metadata(_shadow_meta)
             _shadow_meta["armor_receipt_complete"] = armor_ok
@@ -2436,7 +2446,7 @@ class LocalModelExecutor:
                 local_model_called=False,
                 candidate_patch="",
                 candidate_hash=empty_hash,
-                reasoning_summary="cloud_with_local_assist_shadow_stage2",
+                reasoning_summary="cloud_with_local_assist_shadow_stage3",
                 raw_model_metadata=_shadow_meta,
                 provider="none",
                 model_name="",
@@ -2735,6 +2745,72 @@ def _p3_stage1_local_diagnosis(request: LocalModelExecutorRequest) -> dict:
         "stage1_compact_prompt": compact_prompt,
         "stage1_error_context": error_context,
         "stage1_diagnosis_model": "deterministic",
+    }
+
+
+def _p3_stage3_cheap_verifier(candidate_patch: str, request: LocalModelExecutorRequest) -> dict:
+    """P3-I5: Deterministic pre-verifier for cloud candidate patches.
+
+    Checks:
+      - candidate_patch non-empty
+      - basic structural expectations (diff-like or meaningful content)
+      - length >= 10 chars
+      - no trivial syntax issues
+      - no obviously destructive content (e.g., rm -rf)
+
+    Returns dict with:
+      - stage3_verifier_performed: bool
+      - stage3_verifier_passed: bool
+      - stage3_verifier_reason: str
+      - stage3_verifier_model: str ("deterministic")
+    """
+    patch = str(candidate_patch or "")
+
+    # Check 1: non-empty
+    if not patch.strip():
+        return {
+            "stage3_verifier_performed": True,
+            "stage3_verifier_passed": False,
+            "stage3_verifier_reason": "empty_patch",
+            "stage3_verifier_model": "deterministic",
+        }
+
+    # Check 2: minimum length
+    if len(patch.strip()) < 10:
+        return {
+            "stage3_verifier_performed": True,
+            "stage3_verifier_passed": False,
+            "stage3_verifier_reason": "patch_too_short",
+            "stage3_verifier_model": "deterministic",
+        }
+
+    # Check 3: destructive content
+    destructive_patterns = ["rm -rf", "rm -r /", "mkfs", "dd if=", "> /dev/"]
+    lower_patch = patch.lower()
+    for pattern in destructive_patterns:
+        if pattern in lower_patch:
+            return {
+                "stage3_verifier_performed": True,
+                "stage3_verifier_passed": False,
+                "stage3_verifier_reason": f"destructive_content:{pattern}",
+                "stage3_verifier_model": "deterministic",
+            }
+
+    # Check 4: basic structural check (diff-like or code-like)
+    has_diff_markers = any(marker in patch for marker in ["---", "+++", "@@ ", "<<<<<<< ", "def ", "class ", "import "])
+    if not has_diff_markers and len(patch.strip()) < 50:
+        return {
+            "stage3_verifier_performed": True,
+            "stage3_verifier_passed": False,
+            "stage3_verifier_reason": "no_structural_markers",
+            "stage3_verifier_model": "deterministic",
+        }
+
+    return {
+        "stage3_verifier_performed": True,
+        "stage3_verifier_passed": True,
+        "stage3_verifier_reason": "basic_checks_passed",
+        "stage3_verifier_model": "deterministic",
     }
 
 

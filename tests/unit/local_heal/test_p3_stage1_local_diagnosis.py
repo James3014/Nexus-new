@@ -104,7 +104,7 @@ def test_executor_shadow_runs_stage1():
     assert meta.get("stage1_diagnosis_performed") is True
     assert meta.get("stage1_diagnosis_model") == "deterministic"
     assert "stage1_local_diagnosis" in meta.get("assist_stages_activated", [])
-    assert meta.get("p3_route_status") == "shadow_stage2_complete"
+    assert meta.get("p3_route_status") == "shadow_stage3_verifier_blocked"
     assert meta.get("local_assist_used") is True
 
 
