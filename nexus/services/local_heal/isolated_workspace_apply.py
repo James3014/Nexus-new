@@ -110,58 +110,18 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
 
             # C6BD: retry with git pre-image when patch fails and search_text is provided
             if request.search_text and request.source_root:
-                _search_first = request.search_text.strip().splitlines()[0].strip() if request.search_text.strip() else ""
-                if _search_first:
-                    try:
-                        _log_r = subprocess.run(
-                            ["git", "log", "--all", "--oneline", "--diff-filter=M",
-                             "-S", _search_first[:80], "--", request.target_file],
-                            cwd=request.source_root, capture_output=True, text=True, timeout=30,
-                        )
-                        _fix_commits = [l.split()[0] for l in _log_r.stdout.strip().splitlines() if l.strip()]
-                        if _fix_commits:
-                            _fix = _fix_commits[0]
-                            _show_r = subprocess.run(
-                                ["git", "show", f"{_fix}^:{request.target_file}"],
-                                cwd=request.source_root, capture_output=True, text=True, timeout=30,
-                            )
-                            if _show_r.returncode == 0:
-                                _pre_src_path = os.path.join(tmpdir, request.target_file)
-                                os.makedirs(os.path.dirname(_pre_src_path), exist_ok=True)
-                                with open(_pre_src_path, "w", encoding="utf-8") as _f:
-                                    _f.write(_show_r.stdout)
-                                subprocess.run(["git", "add", request.target_file],
-                                    cwd=tmpdir, capture_output=True, timeout=5.0, check=True)
-                                _retry = subprocess.run(
-                                    ["git", "apply", "--unidiff-zero", "--whitespace=fix", patch_file],
-                                    cwd=tmpdir, capture_output=True, timeout=10.0,
-                                )
-                                if _retry.returncode == 0:
-                                    _diff_r = subprocess.run(
-                                        ["git", "diff", "--", request.target_file],
-                                        cwd=tmpdir, capture_output=True, text=True, timeout=5.0,
-                                    )
-                                    _actual_diff = _diff_r.stdout
-                                    if "---" in _actual_diff:
-                                        _idx = _actual_diff.find("---")
-                                        _actual_diff = _actual_diff[_idx:].strip()
-                                    _applied_hash = hashlib.sha256(_actual_diff.encode("utf-8")).hexdigest()
-                                    _matches = (_applied_hash == request.selected_candidate_hash)
-                                    return IsolatedApplyReceipt(
-                                        task_id=request.task_id,
-                                        workspace_path=tmpdir,
-                                        target_file=request.target_file,
-                                        patch_apply_status="applied",
-                                        patch_apply_error="",
-                                        selected_candidate_hash=request.selected_candidate_hash,
-                                        applied_patch_hash=_applied_hash,
-                                        selected_candidate_hash_matches_applied=_matches,
-                                        candidate_output_isolated=True,
-                                        mutation_allowed=True,
-                                        applied_patch_hash_source="git_preimage_retry",
-                                    )
-                    except Exception:
-                        pass
+                from nexus.experimental.c6bd_preimage_retry import run_c6bd_preimage_retry
+                retry_result = run_c6bd_preimage_retry(
+                    source_root=request.source_root,
+                    target_file=request.target_file,
+                    search_text=request.search_text,
+                    tmpdir=tmpdir,
+                    patch_file=patch_file,
+                    selected_candidate_hash=request.selected_candidate_hash,
+                    task_id=request.task_id,
+                )
+                if retry_result is not None:
+                    return retry_result
 
             return IsolatedApplyReceipt(
                 task_id=request.task_id,

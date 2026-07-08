@@ -175,30 +175,13 @@ def _build_unified_diff_from_search_and_replacement(
 
             # C6BD: git pre-image fallback — search_text not in current source
             if _anchor_line == 1 and request.repo_root and target_file:
-                import subprocess as _sp
-                _repo = _Path(request.repo_root)
-                _git_dir = _repo / ".git"
-                if _git_dir.exists() or _git_dir.is_dir():
-                    _search_first_line = str(search_text).strip().splitlines()[0].strip()
-                    if _search_first_line:
-                        _log_res = _sp.run(
-                            ["git", "log", "--all", "--oneline", "--diff-filter=M",
-                             "-S", _search_first_line[:80], "--", target_file],
-                            cwd=str(_repo), capture_output=True, text=True, timeout=30,
-                        )
-                        _fix_commits = [l.split()[0] for l in _log_res.stdout.strip().splitlines() if l.strip()]
-                        if _fix_commits:
-                            _fix = _fix_commits[0]
-                            _show_res = _sp.run(
-                                ["git", "show", f"{_fix}^:{target_file}"],
-                                cwd=str(_repo), capture_output=True, text=True, timeout=30,
-                            )
-                            if _show_res.returncode == 0:
-                                _pre_lines = _show_res.stdout.splitlines()
-                                for _i, _l in enumerate(_pre_lines, 1):
-                                    if _search_first_line in _l:
-                                        _anchor_line = _i
-                                        break
+                from nexus.experimental.c6bd_preimage_retry import resolve_anchor_from_preimage
+                _anchor_line = resolve_anchor_from_preimage(
+                    repo_root=request.repo_root,
+                    target_file=target_file,
+                    search_text=str(search_text),
+                    current_anchor=_anchor_line,
+                )
         except Exception:
             pass
 
@@ -389,55 +372,6 @@ def _extract_search_excerpt_from_projected_patch(unified_diff: str) -> str:
     return "\n".join(search_lines).strip()
 
 
-def forensic_apply_mismatch(
-    *,
-    apply_error: str,
-    locked_search: str,
-    source_text: str,
-    target_file: str = "",
-) -> str:
-    """C6AZ: Forensic-only apply mismatch classifier.
-
-    Maps apply failures to a single root cause from the C6AZ taxonomy:
-      - search_span_mismatch
-      - wrong_target_file
-      - wrong_target_region
-      - syntax_shape_invalid
-      - partial_match_but_anchor_rejected
-      - unknown_apply_failure
-
-    This function does NOT change runtime behavior. It is for forensic analysis only.
-    """
-    error_lower = (apply_error or "").lower()
-
-    # 1. Syntax shape invalid
-    if "corrupt patch" in error_lower or "malformed patch" in error_lower:
-        return "syntax_shape_invalid"
-
-    # 2. Wrong target file
-    if target_file and target_file not in error_lower and "patch does not apply" not in error_lower:
-        # Error references a different file than expected
-        if "no such file" in error_lower or "file not found" in error_lower:
-            return "wrong_target_file"
-
-    # 3. Search span mismatch vs partial match — only when "patch does not apply"
-    locked = (locked_search or "").strip()
-    source = source_text or ""
-    if "patch does not apply" in error_lower:
-        if locked and source:
-            if locked in source:
-                # Full match exists but patch still rejected — anchor shape issue
-                return "partial_match_but_anchor_rejected"
-            if locked[:50] in source:
-                # Partial match — first 50 chars found but rest doesn't match
-                return "partial_match_but_anchor_rejected"
-            # No match at all — locked_search doesn't exist in source
-            return "search_span_mismatch"
-        return "search_span_mismatch"
-
-    return "unknown_apply_failure"
-
-
 def _classify_apply_failure_root_cause(
     *,
     target_file: str,
@@ -448,45 +382,32 @@ def _classify_apply_failure_root_cause(
     target_file_hash_after_restore: str,
     target_file_hash_at_apply: str,
 ) -> str:
-    if not projected_patch.strip():
-        return "unknown_apply_failure"
+    from nexus.experimental.forensic_apply_mismatch import classify_apply_failure_root_cause
+    return classify_apply_failure_root_cause(
+        target_file=target_file,
+        projected_patch=projected_patch,
+        apply_error=apply_error,
+        current_source_text=current_source_text,
+        target_file_hash_before_apply=target_file_hash_before_apply,
+        target_file_hash_after_restore=target_file_hash_after_restore,
+        target_file_hash_at_apply=target_file_hash_at_apply,
+    )
 
-    projected_header = _extract_projected_patch_header(projected_patch)
-    old_path, new_path = _extract_projected_patch_paths(projected_patch)
-    target_norm = os.path.normpath(target_file)
-    has_hunk_header = any(line.startswith("@@") for line in projected_patch.splitlines())
 
-    if not projected_header or not has_hunk_header:
-        return "patch_format_invalid"
-
-    if old_path != target_norm or new_path != target_norm:
-        return "projected_patch_header_mismatch"
-
-    if (
-        target_file_hash_after_restore
-        and target_file_hash_at_apply
-        and target_file_hash_after_restore != target_file_hash_at_apply
-    ):
-        return "target_file_state_drift"
-
-    search_excerpt = _extract_search_excerpt_from_projected_patch(projected_patch)
-    if search_excerpt and current_source_text and search_excerpt not in current_source_text:
-        return "search_block_mismatch_current_source"
-
-    if (
-        target_file_hash_before_apply
-        and target_file_hash_after_restore
-        and target_file_hash_before_apply != target_file_hash_after_restore
-    ):
-        return "workspace_pollution_before_apply"
-
-    error_lower = (apply_error or "").lower()
-    if "patch does not apply" in error_lower:
-        return "search_block_mismatch_current_source" if search_excerpt else "workspace_pollution_before_apply"
-    if "corrupt patch" in error_lower or "malformed patch" in error_lower:
-        return "patch_format_invalid"
-
-    return "projected_patch_body_mismatch"
+def forensic_apply_mismatch(
+    *,
+    apply_error: str,
+    locked_search: str,
+    source_text: str,
+    target_file: str = "",
+) -> str:
+    from nexus.experimental.forensic_apply_mismatch import forensic_apply_mismatch as _impl
+    return _impl(
+        apply_error=apply_error,
+        locked_search=locked_search,
+        source_text=source_text,
+        target_file=target_file,
+    )
 
 
 def build_local_model_provider_from_signal_snapshot(
