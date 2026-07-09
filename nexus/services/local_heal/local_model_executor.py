@@ -59,6 +59,7 @@ class LocalModelExecutorResponse:
     error: str
     timeout: bool
     evidence_refs: tuple[str, ...]
+    cascade_stages_run: tuple[str, ...] = ()
 
 
 def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
@@ -80,7 +81,7 @@ def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
     if "protocol_mode" not in signal_snapshot:
         raise ValueError("Missing protocol_mode in signal_snapshot")
         
-    if topology != "local_committee_only":
+    if topology not in ("local_committee_only", "local_cascade"):
         if "executor_model" not in signal_snapshot:
             raise ValueError("Missing executor_model in signal_snapshot")
     
@@ -2444,6 +2445,84 @@ class LocalModelExecutor:
                 error="",
                 timeout=False,
                 evidence_refs=request.evidence_refs,
+            )
+
+        # 8c. Local Cascade topology — run multiple models in sequence, pick first success
+        if execution_topology == "local_cascade":
+            signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
+            protocol_mode = signal_snapshot["protocol_mode"]
+            provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+
+            from nexus.services.local_heal.local_cascade_orchestrator import (
+                run_local_cascade,
+                LocalCascadeRequest,
+                DEFAULT_CASCADE_MODELS,
+            )
+
+            cascade_models = tuple(signal_snapshot.get("cascade_models", DEFAULT_CASCADE_MODELS))
+            cascade_request = LocalCascadeRequest(
+                task_id=request.task_id,
+                problem_statement=request.problem_statement,
+                cascade_models=cascade_models,
+                target_file=target_file,
+                evidence_refs=request.evidence_refs,
+                provider_name=provider_name,
+            )
+            cascade_receipt = run_local_cascade(cascade_request, provider=provider)
+
+            if cascade_receipt.fail_closed:
+                return LocalModelExecutorResponse(
+                    invoked=True,
+                    local_model_called=True,
+                    candidate_patch="",
+                    candidate_hash=empty_hash,
+                    reasoning_summary="cascade_fail_closed",
+                    raw_model_metadata={
+                        "execution_topology": "local_cascade",
+                        "cascade_models": cascade_models,
+                        "cascade_stages_run": cascade_receipt.stages_run,
+                        "cascade_stages_failed": cascade_receipt.stages_failed,
+                        "cascade_failed_at_final_stage": True,
+                        "provider": provider_name,
+                    },
+                    provider=provider_name,
+                    model_name=",".join(cascade_receipt.stages_run) if cascade_receipt.stages_run else "",
+                    error="all_cascade_models_failed",
+                    timeout=False,
+                    evidence_refs=request.evidence_refs,
+                    cascade_stages_run=cascade_receipt.stages_run,
+                )
+
+            winner_provider_req = LocalModelProviderRequest(
+                task_id=request.task_id,
+                prompt=request.problem_statement,
+                evidence_refs=request.evidence_refs,
+                model_name=cascade_receipt.winner_model,
+            )
+            winner_provider_resp = provider.generate(winner_provider_req)
+            candidate_patch = winner_provider_resp.output_text
+
+            return LocalModelExecutorResponse(
+                invoked=True,
+                local_model_called=True,
+                candidate_patch=candidate_patch,
+                candidate_hash=cascade_receipt.winner_candidate_hash,
+                reasoning_summary=f"cascade_winner_{cascade_receipt.winner_model}",
+                raw_model_metadata={
+                    "execution_topology": "local_cascade",
+                    "cascade_models": cascade_models,
+                    "cascade_stages_run": cascade_receipt.stages_run,
+                    "cascade_stages_failed": cascade_receipt.stages_failed,
+                    "cascade_winner_model": cascade_receipt.winner_model,
+                    "cascade_failed_at_final_stage": False,
+                    "provider": provider_name,
+                },
+                provider=provider_name,
+                model_name=cascade_receipt.winner_model,
+                error="",
+                timeout=False,
+                evidence_refs=request.evidence_refs,
+                cascade_stages_run=cascade_receipt.stages_run,
             )
 
         # P3-I1/I3/I4/I5/I6: Cloud-with-local-assist shadow routing with stage1+2+3
