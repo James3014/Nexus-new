@@ -1,0 +1,19 @@
+{
+  "drill_version": "1.0",
+  "simulated_only": true,
+  "runtime_changed": false,
+  "rollback_triggers_tested": [
+    "unsafe_action",
+    "public_claim",
+    "production_ready",
+    "real_evidence"
+  ],
+  "rollback_actions": [
+    "set_env_guard_off",
+    "verify_runtime_unchanged",
+    "record_reason"
+  ],
+  "expected_decision": "P6_CLOSED_HELDOUT_DRY_RUN_READY",
+  "public_claim_allowed": false,
+  "production_ready": false
+}

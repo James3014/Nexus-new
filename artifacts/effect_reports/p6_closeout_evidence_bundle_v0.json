@@ -1,0 +1,25 @@
+{
+  "bundle_version": "1.0",
+  "artifacts": {
+    "g1_harness_report": "docs/reports/p6_g1_heldout_dry_run_harness_skeleton_v0.md",
+    "g2_dry_run_receipts": "artifacts/effect_reports/p6_heldout_dry_run_receipts_v0.jsonl",
+    "g3_monitor_canary_trace": "artifacts/effect_reports/p6_heldout_monitor_canary_trace_v0.jsonl",
+    "g4_p3_handoff_trace": "artifacts/effect_reports/p6_p3_handoff_trace_v0.jsonl",
+    "g5_closeout_decision": "docs/reports/p6_g5_final_closeout_decision_v0.md",
+    "g7_runbook_drill": "artifacts/effect_reports/p6_rollback_drill_v0.json"
+  },
+  "safety_assertions": {
+    "real_execution_evidence_present": false,
+    "runtime_behavior_changed": false,
+    "public_claim_allowed": false,
+    "production_ready": false,
+    "solved_by_p6": false,
+    "claim_eligible_by_p6": false,
+    "p3_topology_override": false,
+    "p4_verifier_override": false,
+    "claim_gate_override": false
+  },
+  "final_decision": "P6_CLOSED_HELDOUT_DRY_RUN_READY",
+  "final_public_claim_allowed": false,
+  "final_production_ready": false
+}
