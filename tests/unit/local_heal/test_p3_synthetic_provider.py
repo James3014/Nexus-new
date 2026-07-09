@@ -29,6 +29,37 @@ def test_valid_request_produces_synthetic_candidate():
     assert resp.synthetic_provider_invoked is True
     assert resp.candidate_is_synthetic is True
     assert resp.synthetic_candidate_id != ""
+    assert resp.canonical_candidate_available is True
+
+
+# ============================================================
+# P3-O1-2: valid request sets canonical_candidate_available=true
+# ============================================================
+
+
+def test_valid_request_sets_canonical_available():
+    req = compute_synthetic_provider_request(
+        compact_prompt_hash="abc123",
+        env_guard_present=True,
+        allow_synthetic_candidate=True,
+    )
+    resp = process_synthetic_provider_request(req)
+    assert resp.canonical_candidate_available is True
+
+
+# ============================================================
+# P3-O1-3: valid request keeps candidate_is_synthetic=true
+# ============================================================
+
+
+def test_valid_request_keeps_synthetic():
+    req = compute_synthetic_provider_request(
+        compact_prompt_hash="abc123",
+        env_guard_present=True,
+        allow_synthetic_candidate=True,
+    )
+    resp = process_synthetic_provider_request(req)
+    assert resp.candidate_is_synthetic is True
 
 
 # ============================================================
@@ -55,6 +86,7 @@ def test_missing_env_guard_blocks():
     resp = process_synthetic_provider_request(req)
     assert resp.request_accepted is False
     assert resp.synthetic_provider_invoked is False
+    assert resp.canonical_candidate_available is False
     assert "env_guard_missing" in resp.blocked_reasons
 
 
@@ -70,6 +102,7 @@ def test_missing_prompt_hash_blocks():
     )
     resp = process_synthetic_provider_request(req)
     assert resp.request_accepted is False
+    assert resp.canonical_candidate_available is False
     assert "compact_prompt_hash_missing" in resp.blocked_reasons
 
 
@@ -86,6 +119,7 @@ def test_dry_run_false_blocks():
     )
     resp = process_synthetic_provider_request(req)
     assert resp.request_accepted is False
+    assert resp.canonical_candidate_available is False
     assert "non_dry_run_blocked" in resp.blocked_reasons
 
 
@@ -102,6 +136,7 @@ def test_allow_synthetic_false_blocks():
     )
     resp = process_synthetic_provider_request(req)
     assert resp.request_accepted is False
+    assert resp.canonical_candidate_available is False
     assert "synthetic_candidate_not_allowed" in resp.blocked_reasons
 
 

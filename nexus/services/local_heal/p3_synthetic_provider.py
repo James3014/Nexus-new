@@ -115,6 +115,7 @@ def process_synthetic_provider_request(
     candidate_is_synthetic = request_accepted
     synthetic_candidate_id = ""
     synthetic_raw_output_hash = ""
+    canonical_candidate_available = False
 
     if request_accepted:
         synthetic_candidate_id = _compute_synthetic_candidate_id(
@@ -123,6 +124,7 @@ def process_synthetic_provider_request(
         synthetic_raw_output_hash = hashlib.sha256(
             synthetic_candidate_id.encode("utf-8")
         ).hexdigest()
+        canonical_candidate_available = bool(synthetic_candidate_id)
 
     reason_parts = []
     if not request_accepted:
@@ -144,7 +146,7 @@ def process_synthetic_provider_request(
         candidate_is_synthetic=candidate_is_synthetic,
         synthetic_candidate_id=synthetic_candidate_id,
         synthetic_raw_output_hash=synthetic_raw_output_hash,
-        canonical_candidate_available=False,
+        canonical_candidate_available=canonical_candidate_available,
         patch_apply_invoked=False,
         runtime_behavior_changed=False,
         full_verifier_required=True,
