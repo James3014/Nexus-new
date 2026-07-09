@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nexus.services.local_heal.quota_state import QuotaState
 
 
 @dataclass(frozen=True)
@@ -15,7 +18,7 @@ class ClaimDeliveryDecision:
 class ClaimDeliveryGate:
     """Strict proof-backed local-heal claim/delivery validator."""
 
-    def validate(self, payload: dict[str, Any]) -> ClaimDeliveryDecision:
+    def validate(self, payload: dict[str, Any], quota_state: QuotaState | None = None) -> ClaimDeliveryDecision:
         reasons: list[str] = []
         refs = [str(item).strip() for item in payload.get("artifact_refs", []) if str(item).strip()]
         verifier_status = str(payload.get("verifier_status") or "").lower()
@@ -42,6 +45,10 @@ class ClaimDeliveryGate:
             reasons.append("owner_gated_requires_approval")
         if payload.get("unsupported"):
             reasons.append("unsupported_task")
+        if quota_state is not None and payload.get("route_mode") == "LOCAL_ONLY_EXECUTED":
+            reason = "local_only_executed_with_quota"
+            if reason not in reasons:
+                reasons.append(reason)
         passed = not reasons
         return ClaimDeliveryDecision(
             claim_gate_passed=passed,

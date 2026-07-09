@@ -55,6 +55,7 @@ class HybridRouteDecision:
     blockers: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
     schema: str = HYBRID_ROUTE_DECISION_SCHEMA
+    degradation_reason_chain: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         blockers = validate_hybrid_route_decision(self.to_dict())
@@ -83,6 +84,7 @@ class HybridRouteDecision:
             "fallback_block_reason": self.fallback_block_reason,
             "blockers": list(self.blockers),
             "metadata": dict(self.metadata),
+            "degradation_reason_chain": list(self.degradation_reason_chain),
         }
 
 
@@ -108,6 +110,7 @@ def hybrid_route_decision_from_payload(payload: Mapping[str, Any]) -> HybridRout
         blockers=tuple(str(item) for item in payload.get("blockers", []) or []),
         metadata=dict(payload.get("metadata", {}) or {}),
         schema=str(payload.get("schema", HYBRID_ROUTE_DECISION_SCHEMA)),
+        degradation_reason_chain=tuple(str(item) for item in payload.get("degradation_reason_chain", []) or []),
     )
 
 
