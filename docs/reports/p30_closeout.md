@@ -1,0 +1,21 @@
+# P30 Closeout Report — AutonomicRouter Downgrade to Signal Source
+
+- **status**: P30_C_STATUS_PASS
+- **files changed across P30-A + P30-B**:
+  - `nexus/engine/autonomic_router.py` — added `mode_hint` field + telemetry writes
+  - `tests/engine/test_autonomic_router_signal_only.py` (new, 10 tests)
+  - `docs/reports/p30_a_autonomic_router_signal_hint.md` (P30-A report)
+  - `docs/reports/p30_b_override_audit.md` (P30-B report)
+  - `docs/reports/p30_closeout.md` (this file)
+- **commands run output**:
+  - `python3 -m pytest tests/engine/test_autonomic_router_signal_only.py -v` — 10 passed
+- **test count**: 10 new tests passing
+- **ADR alignment**: 對齊 `ADR-2026-07-08-capability-planner-downstream-enforcement.md` 邊界 8 (AutonomicRouter 降級為 signal source)
+  - 邊界 8 已從 ADR 遷移至 `Downloads/NEXUS_HYBRID_REPAIR_REPORT_20260708.md` §0.5
+  - ADR 邊界 5 聲明 `autonomic_router.py` 不能碰（for Phase 8 P0-P5）— P30 是 Phase 8 前的預清理，已完成
+- **next steps**:
+  - 11 個其他 override points 待 P31+ 處理:
+    - `nexus/engine/coordinator.py`: 2 hits (`swarm_mode`)
+    - `nexus/engine/autonomic_routing_service.py`: 7 hits (`autonomic_route`, `swarm_mode`, `force_external`)
+  - P30 is just the FIRST step; full override point removal is a multi-Phase effort
+- **governance boundary**: P30 is partial; only 3 violation writes confirmed clean from `autonomic_router.py`; 11 override points remain elsewhere
