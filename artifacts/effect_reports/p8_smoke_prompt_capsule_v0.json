@@ -1,0 +1,9 @@
+{
+  "capsule_version": "1.0",
+  "prompt_kind": "synthetic_one_line_json",
+  "raw_prompt_hash": "abc123def456",
+  "redacted_prompt": "{\"action\": \"echo\", \"message\": \"Nexus P8 smoke test complete\", \"timestamp\": \"REDACTED\"}",
+  "redacted_prompt_hash": "abc123def456",
+  "synthetic_prompt_only": true,
+  "prompt_capsule_valid": true
+}
