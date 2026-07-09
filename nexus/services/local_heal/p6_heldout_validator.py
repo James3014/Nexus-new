@@ -20,6 +20,10 @@ class P6HeldoutValidationResult:
     claim_gate_required_violations: int = 0
     production_ready_violations: int = 0
     default_runtime_allowed_violations: int = 0
+    unknown_quota_as_healthy_violations: int = 0
+    constrained_candidate_count_violations: int = 0
+    exhausted_local_unavailable_violations: int = 0
+    action_permission_consistency_violations: int = 0
     blocked_reasons: list[str] = field(default_factory=list)
 
 
@@ -89,6 +93,74 @@ def validate_heldout_fixture(rows: list[dict[str, Any]]) -> P6HeldoutValidationR
         if count > 0:
             blocked.append(f"{v}_violations")
 
+    # P6-E1: Safety rule checks
+    unknown_as_healthy = 0
+    constrained_count_violations = 0
+    exhausted_unavailable_violations = 0
+    action_perm_violations = 0
+    invalid_ids = []
+
+    for row in rows:
+        qs = row.get("quota_scenario", "")
+        action = row.get("expected_degradation_action", "")
+        cloud_ok = row.get("expected_cloud_allowed", True)
+        local_ok = row.get("expected_local_allowed", True)
+        committee_ok = row.get("expected_committee_allowed", True)
+        p5_ok = row.get("expected_p5_allowed", True)
+        pub_claim = row.get("public_claim_allowed", False)
+        cmin = row.get("expected_candidate_count_min", 0)
+        cmax = row.get("expected_candidate_count_max", 0)
+        verifier = row.get("verifier_required", True)
+        claim = row.get("claim_gate_required", True)
+
+        # Rule 1: unknown must not be healthy
+        if qs == "unknown" and action == "keep_full_committee":
+            unknown_as_healthy += 1
+            invalid_ids.append(row.get("case_id", ""))
+        if qs == "unknown" and cloud_ok is True:
+            unknown_as_healthy += 1
+            invalid_ids.append(row.get("case_id", ""))
+
+        # Rule 2: constrained count
+        if qs == "constrained" and action == "reduce_candidate_count":
+            if cmin < 2:
+                constrained_count_violations += 1
+                invalid_ids.append(row.get("case_id", ""))
+            if cmax < cmin:
+                constrained_count_violations += 1
+                invalid_ids.append(row.get("case_id", ""))
+
+        # Rule 3: exhausted_local_unavailable
+        if qs == "exhausted_local_unavailable" and action not in ("fail_closed", "diagnosis_only"):
+            exhausted_unavailable_violations += 1
+            invalid_ids.append(row.get("case_id", ""))
+
+        # Rule 4: action/permission consistency
+        if action == "keep_full_committee" and committee_ok is False:
+            action_perm_violations += 1
+            invalid_ids.append(row.get("case_id", ""))
+        if action == "reduce_candidate_count" and (committee_ok is False or cmin < 2):
+            action_perm_violations += 1
+            invalid_ids.append(row.get("case_id", ""))
+        if action == "local_only" and cloud_ok is True:
+            action_perm_violations += 1
+            invalid_ids.append(row.get("case_id", ""))
+        if action == "fail_closed" and (cloud_ok is True or local_ok is True or committee_ok is True or p5_ok is True):
+            action_perm_violations += 1
+            invalid_ids.append(row.get("case_id", ""))
+        if action == "diagnosis_only" and pub_claim is True:
+            action_perm_violations += 1
+            invalid_ids.append(row.get("case_id", ""))
+
+    if unknown_as_healthy > 0:
+        blocked.append("unknown_quota_as_healthy")
+    if constrained_count_violations > 0:
+        blocked.append("constrained_candidate_count_violations")
+    if exhausted_unavailable_violations > 0:
+        blocked.append("exhausted_local_unavailable_violations")
+    if action_perm_violations > 0:
+        blocked.append("action_permission_consistency_violations")
+
     valid = len(blocked) == 0
 
     return P6HeldoutValidationResult(
@@ -98,12 +170,16 @@ def validate_heldout_fixture(rows: list[dict[str, Any]]) -> P6HeldoutValidationR
         quota_scenarios_present=sorted(quota_scenarios),
         action_distribution=action_dist,
         missing_required_fields=sorted(missing_fields),
-        invalid_cases=[],
+        invalid_cases=list(set(invalid_ids)),
         public_claim_allowed_violations=violations["public_claim_allowed"],
         verifier_required_violations=violations["verifier_required"],
         claim_gate_required_violations=violations["claim_gate_required"],
         production_ready_violations=violations["production_ready"],
         default_runtime_allowed_violations=violations["default_runtime_allowed"],
+        unknown_quota_as_healthy_violations=unknown_as_healthy,
+        constrained_candidate_count_violations=constrained_count_violations,
+        exhausted_local_unavailable_violations=exhausted_unavailable_violations,
+        action_permission_consistency_violations=action_perm_violations,
         blocked_reasons=blocked,
     )
 
