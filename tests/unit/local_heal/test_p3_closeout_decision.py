@@ -411,3 +411,33 @@ def test_final_production_ready_false_always():
         authority_coupling_present=True,
     )
     assert decision.final_production_ready is False
+
+
+# ============================================================
+# Q1-1: p6_advisory_only=false triggers rollback
+# ============================================================
+
+
+def test_p6_not_advisory_only_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_advisory_only=False,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "p6_not_advisory_only" in decision.blocked_reasons
+
+
+# ============================================================
+# Q1-2: p6_advisory_only=true does not trigger rollback
+# ============================================================
+
+
+def test_p6_advisory_only_true_ok():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_advisory_only=True,
+    )
+    assert decision.decision == "P3_CLOSED_SYNTHETIC_PROVIDER_TRACE_READY"
+    assert "p6_not_advisory_only" not in decision.blocked_reasons

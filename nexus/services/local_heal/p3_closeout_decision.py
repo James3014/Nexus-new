@@ -127,6 +127,9 @@ def compute_p3_closeout_decision(
     if p6_p5_override_attempted:
         blocked_reasons.append("p6_p5_override")
 
+    if not p6_advisory_only:
+        blocked_reasons.append("p6_not_advisory_only")
+
     if p6_blocked:
         blocked_reasons.extend([f"p6_advisory:{r}" for r in p6_blocked])
 
@@ -137,6 +140,7 @@ def compute_p3_closeout_decision(
         final_public_claim_allowed, final_production_ready,
         p6_topology_override_attempted, p6_verifier_override_attempted,
         p6_claim_gate_override_attempted, p6_p5_override_attempted,
+        not p6_advisory_only,
     ])
 
     authority_gates_pass = all([
