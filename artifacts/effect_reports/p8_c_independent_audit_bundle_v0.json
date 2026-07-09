@@ -1,0 +1,32 @@
+{
+  "bundle_version": "1.0",
+  "final_audit_decision": "P8_C_AUDIT_BLOCKED_WITH_REASONS",
+  "c1_manifest_ref": "docs/reports/p8_c1_a_smoke_evidence_manifest_v0.md",
+  "c2_receipt_audit_ref": "docs/reports/p8_c2_smoke_receipt_structural_audit_v0.md",
+  "c3_redaction_audit_ref": "docs/reports/p8_c3_redaction_secret_exposure_audit_v0.md",
+  "c4_call_budget_audit_ref": "docs/reports/p8_c4_call_count_cost_timeout_audit_v0.md",
+  "c5_authority_audit_ref": "docs/reports/p8_c5_p2_p4_authority_no_apply_audit_v0.md",
+  "c6_p9_readiness_ref": "docs/reports/p8_c6_independent_p9_readiness_decision_v0.md",
+  "p7_final_seal_ref": "docs/reports/p7_final_armor_integration_seal_report_v0.md",
+  "network_call_count": 0,
+  "smoke_completed": false,
+  "p9_may_start": false,
+  "rollback_required": false,
+  "api_key_logged": false,
+  "raw_prompt_logged": false,
+  "raw_response_logged": false,
+  "patch_apply_invoked": false,
+  "runtime_behavior_changed": false,
+  "solved_claim": false,
+  "claim_eligible": false,
+  "public_claim_allowed": false,
+  "production_ready": false,
+  "p2_hash_truth_required": true,
+  "p2_anchor_truth_required": true,
+  "p4_verifier_required": true,
+  "p4_claim_gate_required": true,
+  "bundle_complete": true,
+  "blocked_reasons": [
+    "smoke_not_completed"
+  ]
+}
