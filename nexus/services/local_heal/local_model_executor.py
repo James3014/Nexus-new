@@ -737,6 +737,7 @@ class LocalModelExecutor:
         if request.dry_run:
             from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
             from nexus.services.local_heal.p3_local_diagnosis import compute_p3_local_diagnosis, p3_diagnosis_to_dict
+            from nexus.services.local_heal.p3_dry_run_receipt import compute_p3_dry_run_receipt, p3_dry_run_receipt_to_dict
             _p3_skeleton_request = {
                 "task_id": request.task_id,
                 "difficulty": request.route_context.get("difficulty", "") if isinstance(request.route_context, dict) else "",
@@ -750,13 +751,19 @@ class LocalModelExecutor:
                 request_metadata=_p3_diag_request,
                 p3_skeleton={"p3_task_difficulty": _p3_skeleton.task_difficulty},
             )
+            _p3_dry_run_receipt = compute_p3_dry_run_receipt(
+                route_metadata={"p3_intended_topology": _p3_skeleton.intended_topology, "p3_task_difficulty": _p3_skeleton.task_difficulty},
+                diagnosis_metadata=p3_diagnosis_to_dict(_p3_diag),
+                guard_state=_p3_skeleton.intended_topology and "env_guarded_dry_run" or "shadow_only",
+                env_guard_override=False,
+            )
             return LocalModelExecutorResponse(
                 invoked=False,
                 local_model_called=False,
                 candidate_patch="",
                 candidate_hash=empty_hash,
                 reasoning_summary="dry_run_active",
-                raw_model_metadata={"dry_run": True, "execution_topology": execution_topology, **p3_skeleton_to_dict(_p3_skeleton), **p3_diagnosis_to_dict(_p3_diag)},
+                raw_model_metadata={"dry_run": True, "execution_topology": execution_topology, **p3_skeleton_to_dict(_p3_skeleton), **p3_diagnosis_to_dict(_p3_diag), **p3_dry_run_receipt_to_dict(_p3_dry_run_receipt)},
                 provider="none",
                 model_name="",
                 error="dry_run",
