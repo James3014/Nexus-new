@@ -66,3 +66,39 @@ def test_autonomic_router_route_returns_mode_hint(router):
     forecast = {"est_tokens": 1500}
     plan = router.route(task, state, forecast)
     assert plan.mode_hint == plan.mode
+
+
+def test_autonomic_router_state_metadata_only_has_telemetry_keys(router):
+    task = "update docs entry"
+    state = NexusState(task_id="test_p30_h")
+    forecast = {"est_tokens": 1500}
+    router.route(task, state, forecast)
+    allowed = {"est_tokens", "autonomic_reason"}
+    for key in state.metadata:
+        if key in allowed:
+            continue
+    for key in ("autonomic_route", "swarm_mode", "force_external"):
+        assert key not in state.metadata
+
+
+def test_autonomic_router_does_not_create_new_override_keys(router):
+    tasks = ["update docs", "fix bug", "research topic", "deploy package"]
+    state = NexusState(task_id="test_p30_i")
+    for task in tasks:
+        forecast = {"est_tokens": 100}
+        router.route(task, state, forecast)
+    override_keys = {"autonomic_route", "swarm_mode", "force_external"}
+    telemetry_keys = {"est_tokens", "autonomic_reason"}
+    for key in state.metadata:
+        assert key not in override_keys or key in telemetry_keys
+
+
+def test_autonomic_router_consistent_with_capability_planner_authority(router):
+    task = "update docs entry"
+    state = NexusState(task_id="test_p30_j")
+    forecast = {"est_tokens": 1500}
+    plan = router.route(task, state, forecast)
+    assert hasattr(plan, "mode_hint")
+    assert plan.mode_hint == plan.mode
+    assert "autonomic_route" not in state.metadata
+    assert "swarm_mode" not in state.metadata
