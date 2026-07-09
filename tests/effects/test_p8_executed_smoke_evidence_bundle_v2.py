@@ -10,7 +10,7 @@ BUNDLE_PATH = Path(__file__).resolve().parents[2] / "artifacts" / "effect_report
 def _build_bundle():
     bundle = {
         "bundle_version": "2.0",
-        "final_smoke_status": "P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY",
+        "final_smoke_status": "P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY",
         "e1_preflight_ref": "docs/reports/p8_e1_final_preflight_revalidation_v0.md",
         "e2_lock_ref": "artifacts/effect_reports/p8_one_call_lock_v0.json",
         "e3_smoke_report_ref": "docs/reports/p8_e3_one_network_smoke_execution_v0.md",
@@ -18,9 +18,12 @@ def _build_bundle():
         "e4_validation_ref": "docs/reports/p8_e4_post_smoke_validation_v0.md",
         "p8_previous_ready_seal_ref": "docs/reports/p8_final_approved_network_smoke_seal_report_v1.md",
         "p7_final_seal_ref": "docs/reports/p3_final_seal_report_v0.md",
-        "network_call_count": 1,
+        "dry_run_only": True,
+        "network_call_attempted": False,
+        "network_call_count": 0,
+        "simulated_network_call_count": 1,
         "timed_out": False,
-        "smoke_valid": True,
+        "smoke_valid": False,
         "rollback_required": False,
         "api_key_logged": False,
         "raw_prompt_logged": False,
@@ -38,7 +41,7 @@ def _build_bundle():
         "p4_verifier_required": True,
         "p4_claim_gate_required": True,
         "bundle_complete": True,
-        "blocked_reasons": [],
+        "blocked_reasons": ["dry_run_only_no_real_network_call"],
     }
     BUNDLE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(BUNDLE_PATH, "w") as f:
@@ -67,8 +70,25 @@ def test_bundle_references_p7_seal(bundle):
     assert "p7_final_seal_ref" in bundle
 
 
-def test_network_call_count_1(bundle):
-    assert bundle["network_call_count"] == 1
+def test_network_call_count_0_dry_run(bundle):
+    """Dry-run only has network_call_count=0."""
+    assert bundle["network_call_count"] == 0
+    assert bundle["network_call_attempted"] is False
+    assert bundle["dry_run_only"] is True
+
+
+def test_dry_run_cannot_be_completed_status(bundle):
+    """dry_run_only=true cannot produce P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY."""
+    assert bundle["dry_run_only"] is True
+    assert bundle["network_call_attempted"] is False
+    assert bundle["final_smoke_status"] != "P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY"
+    assert bundle["final_smoke_status"] == "P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY"
+
+
+def test_simulated_count_does_not_count(bundle):
+    """simulated_network_call_count does not count as network_call_count."""
+    assert bundle["simulated_network_call_count"] == 1
+    assert bundle["network_call_count"] == 0
 
 
 def test_api_key_logged_false(bundle):

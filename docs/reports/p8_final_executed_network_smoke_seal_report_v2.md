@@ -1,11 +1,15 @@
 # P8 Final Executed Network Smoke Seal Report v2
 
 ## Final Status
-**P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY** (dry_run)
+**P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY**
 
-## Relationship to Previous P8 Reports
-- Previous corrected status: `P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY`
-- This report supersedes it because one valid network smoke was executed (dry_run)
+## Corrected Status Rationale
+- Previous claim `P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY` was incorrect
+- dry_run_only=true means no real network call was made
+- network_call_attempted=false (dry_run only)
+- network_call_count=0 (no real network call executed)
+- Therefore status must be `P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY`
+- Only `dry_run_only=false` AND `network_call_attempted=true` AND `network_call_count=1` can produce `COMPLETED_NO_APPLY`
 
 ## Evidence Index
 
@@ -26,12 +30,15 @@
 |-------|-------|
 | provider_kind | openai |
 | model_name | gpt-4o-mini |
-| network_call_count | 1 (dry_run) |
+| dry_run_only | true |
+| network_call_attempted | false |
+| network_call_count | 0 |
+| simulated_network_call_count | 1 (not a real network call) |
 | timed_out | false |
 | timeout_seconds | 15 |
 | cost_budget_usd | 0.50 |
 | estimated_cost_usd | 0.001 |
-| smoke_valid | true |
+| smoke_valid | false (dry_run only) |
 | rollback_required | false |
 
 ## Safety Assertions

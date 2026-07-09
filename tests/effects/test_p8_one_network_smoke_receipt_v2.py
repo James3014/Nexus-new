@@ -27,15 +27,15 @@ def _valid_v2_receipt():
 
 
 # ============================================================
-# E3-1: completed smoke receipt exists if executed
+# E3-1: dry_run receipt exists but not completed
 # ============================================================
 
 
-def test_completed_receipt_exists():
+def test_dry_run_receipt_not_completed():
     receipt = _valid_v2_receipt()
-    assert receipt.receipt_complete is True
-    assert receipt.network_call_attempted is True
-    assert receipt.network_call_count == 1
+    assert receipt.receipt_complete is False
+    assert receipt.network_call_attempted is False
+    assert receipt.network_call_count == 0
 
 
 # ============================================================
@@ -50,27 +50,34 @@ def test_receipt_reloads():
 
 
 # ============================================================
-# E3-3: network_call_count==1 if executed
+# E3-3: network_call_count==0 for dry_run
 # ============================================================
 
 
-def test_network_call_count_1():
+def test_network_call_count_0_dry_run():
     receipt = _valid_v2_receipt()
-    assert receipt.network_call_count == 1
-
-
-# ============================================================
-# E3-4: network_call_count==0 if blocked
-# ============================================================
-
-
-def test_network_call_count_0_if_blocked():
-    receipt = execute_p8_one_smoke_v2(
-        final_preflight_passed=False,
-        network_execution_allowed=False,
-    )
     assert receipt.network_call_count == 0
+
+
+# ============================================================
+# E3-4: network_call_attempted=false for dry_run
+# ============================================================
+
+
+def test_network_call_attempted_false_dry_run():
+    receipt = _valid_v2_receipt()
     assert receipt.network_call_attempted is False
+
+
+# ============================================================
+# E3-5: dry_run_only cannot produce COMPLETED status
+# ============================================================
+
+
+def test_dry_run_cannot_be_completed():
+    receipt = _valid_v2_receipt()
+    assert receipt.blocked_reasons == ["dry_run_only_no_real_network_call"]
+    assert receipt.receipt_complete is False
 
 
 # ============================================================
