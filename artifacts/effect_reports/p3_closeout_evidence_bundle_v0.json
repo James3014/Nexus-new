@@ -1,0 +1,29 @@
+{
+  "p3_closeout_bundle_version": "1.0",
+  "p3_closeout_final_decision": "P3_CLOSED_SYNTHETIC_PROVIDER_TRACE_READY",
+  "p3_closeout_evidence_references": {
+    "O1_candidate_availability_normalization": "docs/reports/p3_o1_synthetic_provider_candidate_availability_normalization_v0.md",
+    "O2_synthetic_e2e_trace": "docs/reports/p3_o2_synthetic_provider_e2e_trace_harness_v0.md",
+    "O3_synthetic_trace_artifact": "artifacts/effect_reports/p3_synthetic_e2e_trace_v0.jsonl",
+    "O4_authority_coupling": "docs/reports/p3_o4_p2_p4_authority_coupling_contract_v0.md",
+    "O5_authority_coupled_trace": "artifacts/effect_reports/p3_authority_coupled_synthetic_trace_v0.jsonl",
+    "O6_p6_advisory_consumer": "docs/reports/p3_o6_p6_advisory_handoff_consumer_contract_v0.md",
+    "O7_closeout_decision": "docs/reports/p3_o7_integrated_closeout_decision_v0.md"
+  },
+  "p3_closeout_safety_assertions": {
+    "real_provider_invoked": false,
+    "network_invoked": false,
+    "api_key_used": false,
+    "patch_apply_invoked": false,
+    "runtime_behavior_changed": false,
+    "solved_by_p3": false,
+    "claim_eligible_by_p3": false,
+    "public_claim_allowed": false,
+    "production_ready": false,
+    "p2_hash_truth_required": true,
+    "p2_anchor_truth_required": true,
+    "p4_full_verifier_required": true,
+    "p4_claim_gate_required": true,
+    "p6_advisory_only": true
+  }
+}
