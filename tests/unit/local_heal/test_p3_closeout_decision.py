@@ -245,3 +245,169 @@ def test_json_serializable():
     )
     d = p3_closeout_decision_to_dict(decision)
     assert isinstance(json.dumps(d), str)
+
+
+# ============================================================
+# P0-1: authority_coupling_blocked_reasons non-empty blocks
+# ============================================================
+
+
+def test_authority_coupling_blocked_reasons_blocks():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        authority_coupling_blocked_reasons=["p2_hash_truth_missing"],
+    )
+    assert decision.decision == "P3_CLOSED_BLOCKED"
+    assert any("authority_coupling:p2_hash_truth_missing" in r for r in decision.blocked_reasons)
+
+
+# ============================================================
+# P0-2: p6_advisory_blocked_reasons non-empty blocks
+# ============================================================
+
+
+def test_p6_advisory_blocked_reasons_blocks():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_advisory_blocked_reasons=["p6_topology_override_attempted"],
+    )
+    assert decision.decision == "P3_CLOSED_BLOCKED"
+    assert any("p6_advisory:p6_topology_override_attempted" in r for r in decision.blocked_reasons)
+
+
+# ============================================================
+# P0-3: P6 topology override attempt triggers rollback
+# ============================================================
+
+
+def test_p6_topology_override_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_topology_override_attempted=True,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "p6_topology_override" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-4: P6 P4 verifier override attempt triggers rollback
+# ============================================================
+
+
+def test_p6_verifier_override_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_verifier_override_attempted=True,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "p6_verifier_override" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-5: P6 claim gate override attempt triggers rollback
+# ============================================================
+
+
+def test_p6_claim_gate_override_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_claim_gate_override_attempted=True,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "p6_claim_gate_override" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-6: P6 P5 override attempt triggers rollback
+# ============================================================
+
+
+def test_p6_p5_override_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p6_p5_override_attempted=True,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "p6_p5_override" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-7: claim_eligible_by_p3=true triggers rollback
+# ============================================================
+
+
+def test_claim_eligible_by_p3_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        claim_eligible_by_p3=True,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "claim_eligible_by_p3" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-8: p2_anchor_truth_required=false triggers rollback
+# ============================================================
+
+
+def test_p2_anchor_truth_not_required_triggers_rollback():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        p2_anchor_truth_required=False,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "p2_anchor_truth_not_required" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-9: multiple violations all appear in blocked_reasons
+# ============================================================
+
+
+def test_multiple_violations_all_recorded():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+        real_provider_invoked=True,
+        network_invoked=True,
+        final_public_claim_allowed=True,
+    )
+    assert decision.decision == "P3_CLOSED_ROLLBACK_REQUIRED"
+    assert "real_provider_invoked" in decision.blocked_reasons
+    assert "network_invoked" in decision.blocked_reasons
+    assert "public_claim_allowed" in decision.blocked_reasons
+
+
+# ============================================================
+# P0-10: final_public_claim_allowed=false always for valid decisions
+# ============================================================
+
+
+def test_final_public_claim_allowed_false_always():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+    )
+    assert decision.final_public_claim_allowed is False
+    assert decision.final_production_ready is False
+
+
+# ============================================================
+# P0-11: final_production_ready=false always for valid decisions
+# ============================================================
+
+
+def test_final_production_ready_false_always():
+    decision = compute_p3_closeout_decision(
+        synthetic_trace_present=True,
+        authority_coupling_present=True,
+    )
+    assert decision.final_production_ready is False

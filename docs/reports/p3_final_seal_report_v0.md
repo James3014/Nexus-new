@@ -1,7 +1,7 @@
 # P3 Final Seal Report
 
 ## Final Status
-**P3_CLOSED_SYNTHETIC_PROVIDER_TRACE_READY**
+**P3_CLOSED_SYNTHETIC_PROVIDER_TRACE_READY** (verified P0)
 
 ## Evidence Index
 
@@ -15,6 +15,7 @@
 | O6 P6 Advisory Consumer | `docs/reports/p3_o6_p6_advisory_handoff_consumer_contract_v0.md` |
 | O7 Closeout Decision | `docs/reports/p3_o7_integrated_closeout_decision_v0.md` |
 | O8 Evidence Bundle | `artifacts/effect_reports/p3_closeout_evidence_bundle_v0.json` |
+| P0 Closeout Gate Verification | `docs/reports/p3_p0_closeout_gate_verification_v0.md` |
 
 ## Safety Assertions
 
@@ -34,6 +35,8 @@
 | p4_full_verifier_required | true |
 | p4_claim_gate_required | true |
 | p6_advisory_only | true |
+| authority_coupling_blocked_reasons_consumed | true |
+| p6_advisory_blocked_reasons_consumed | true |
 
 ## What P3 Now Provides
 
@@ -45,7 +48,8 @@
 - Dry-run invariants
 - P2/P4 authority coupling
 - P6 advisory consumption contract
-- Final closeout decision
+- Final closeout decision (hardened to consume blocked reasons)
+- Closeout gate verification (P0)
 
 ## What P3 Does Not Provide
 
