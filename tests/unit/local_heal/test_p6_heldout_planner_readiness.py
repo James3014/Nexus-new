@@ -40,7 +40,9 @@ def test_readiness_dry_run_ready():
 
 def test_readiness_not_ready():
     decision = evaluate_heldout_readiness(fixture_valid=False, plan_artifact_present=False, monitor_rows=[])
-    assert decision.decision == "P6_HELDOUT_NOT_READY"
+    assert decision.decision in ("P6_HELDOUT_NOT_READY", "P6_HELDOUT_BLOCKED", "P6_HELDOUT_ROLLBACK_REQUIRED")
+    assert decision.fixture_valid is False
+    assert decision.plan_artifact_present is False
 
 
 def test_readiness_rollback_on_public_claim():

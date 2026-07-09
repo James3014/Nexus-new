@@ -3,7 +3,13 @@ from typing import List, Dict, Any, Tuple
 import ast
 import re
 from pathlib import Path
-from rank_bm25 import BM25Okapi
+
+try:
+    from rank_bm25 import BM25Okapi
+    _RANK_BM25_AVAILABLE = True
+except ModuleNotFoundError:
+    BM25Okapi = None  # type: ignore[assignment,misc]
+    _RANK_BM25_AVAILABLE = False
 
 @dataclass
 class LocalizationBundle:
@@ -132,8 +138,15 @@ class GranularMethodLocalizer:
             return []
         
         tokenized_corpus = [self._tokenize(doc["content"]) for doc in documents]
-        bm25 = BM25Okapi(tokenized_corpus)
-        bm25_scores = bm25.get_scores(self._tokenize(issue_description))
+        if _RANK_BM25_AVAILABLE and BM25Okapi is not None:
+            bm25 = BM25Okapi(tokenized_corpus)
+            bm25_scores = bm25.get_scores(self._tokenize(issue_description))
+        else:
+            query_tokens = set(self._tokenize(issue_description))
+            bm25_scores = []
+            for tokens in tokenized_corpus:
+                overlap = len(query_tokens & set(tokens))
+                bm25_scores.append(float(overlap))
 
         # Symbol & Definition Boost
         symbol_bonus = 500.0
