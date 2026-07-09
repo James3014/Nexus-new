@@ -21,6 +21,7 @@ class ExecutionPlan:
     confidence: float
     skill_id: Optional[str] = None
     matched_policies: List[str] = field(default_factory=list)
+    mode_hint: str = ""
 
 class AutonomicRouter:
     """
@@ -122,4 +123,7 @@ class AutonomicRouter:
                     mode = "swarm"
                     logger.info("🛡️ [P2:MFP] %s, forcing L2/L3 route.", mfp.reason)
 
-        return ExecutionPlan(mode=mode, reason=f"Final-Perf: {len(matched_list)}", confidence=1.0, matched_policies=matched_list)
+        state.metadata["est_tokens"] = forecast.get("est_tokens", 0)
+        plan = ExecutionPlan(mode=mode, mode_hint=mode, reason=f"Final-Perf: {len(matched_list)}", confidence=1.0, matched_policies=matched_list)
+        state.metadata["autonomic_reason"] = plan.reason
+        return plan
