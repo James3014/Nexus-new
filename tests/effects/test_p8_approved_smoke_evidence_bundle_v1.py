@@ -10,7 +10,7 @@ BUNDLE_PATH = Path(__file__).resolve().parents[2] / "artifacts" / "effect_report
 def _build_bundle():
     bundle = {
         "bundle_version": "1.0",
-        "final_smoke_status": "P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY",
+        "final_smoke_status": "P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY",
         "approval_artifact_ref": "artifacts/effect_reports/p8_human_approval_artifact_v0.json",
         "boundary_report_ref": "docs/reports/p8_b2_approval_boundary_reconciliation_v0.md",
         "prompt_capsule_ref": "docs/reports/p8_b3_synthetic_smoke_prompt_capsule_v0.md",
@@ -18,7 +18,9 @@ def _build_bundle():
         "smoke_receipt_ref": "artifacts/effect_reports/p8_one_network_smoke_receipt_v1.json",
         "post_smoke_validation_ref": "docs/reports/p8_b6_post_smoke_safety_validator_v0.md",
         "p7_final_seal_ref": "docs/reports/p3_final_seal_report_v0.md",
-        "network_call_count": 1,
+        "network_call_attempted": False,
+        "network_call_count": 0,
+        "dry_run_only": True,
         "timed_out": False,
         "smoke_valid": True,
         "rollback_required": False,
@@ -66,8 +68,10 @@ def test_bundle_references_p7_seal(bundle):
     assert "p7_final_seal_ref" in bundle
 
 
-def test_network_call_count_1(bundle):
-    assert bundle["network_call_count"] == 1
+def test_network_call_count_0_dry_run(bundle):
+    """Dry-run only has network_call_count=0."""
+    assert bundle["network_call_count"] == 0
+    assert bundle["network_call_attempted"] is False
 
 
 def test_api_key_logged_false(bundle):
@@ -115,3 +119,18 @@ def test_p2_p4_gates_true(bundle):
 
 def test_json_serializable(bundle):
     assert isinstance(json.dumps(bundle), str)
+
+
+def test_dry_run_cannot_be_completed_status(bundle):
+    """Dry-run only cannot produce P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY."""
+    assert bundle["network_call_attempted"] is False
+    assert bundle["network_call_count"] == 0
+    assert bundle["final_smoke_status"] != "P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY"
+    assert bundle["final_smoke_status"] == "P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY"
+
+
+def test_status_rule_dry_run_ready(bundle):
+    """dry_run_only=true plus network_call_attempted=false must be READY, not COMPLETED."""
+    assert bundle["dry_run_only"] is True
+    assert bundle["network_call_attempted"] is False
+    assert bundle["final_smoke_status"] == "P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY"

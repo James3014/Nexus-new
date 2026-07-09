@@ -1,11 +1,19 @@
 # P8 Final Approved Network Smoke Seal Report
 
 ## Final Status
-**P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY**
+**P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY**
+
+## Corrected Status Rationale
+- Previous claim `P8_CLOSED_ONE_NETWORK_SMOKE_COMPLETED_NO_APPLY` was incorrect
+- network_call_attempted=false (dry_run only)
+- network_call_count=0 (no real network call executed)
+- Therefore status must be `P8_CLOSED_HUMAN_APPROVED_NETWORK_SMOKE_READY`
+- Only `network_call_attempted=true` AND `network_call_count=1` can produce `COMPLETED_NO_APPLY`
 
 ## Relationship to Previous P8 Seal
 - Previous status was `P8_CLOSED_BLOCKED_WITH_REASONS` due missing human approval
-- This report supersedes it because valid approval + one smoke receipt exist
+- This report supersedes it because valid approval artifact exists and preflight passed
+- Real network smoke has NOT been executed yet
 
 ## Evidence Index
 
@@ -26,12 +34,14 @@
 |-------|-------|
 | provider_kind | openai |
 | model_name | gpt-4o-mini |
-| network_call_count | 1 (dry_run) |
+| network_call_attempted | false (dry_run only) |
+| network_call_count | 0 |
 | timed_out | false |
 | timeout_seconds | 15 |
 | cost_budget_usd | 0.50 |
 | estimated_cost_usd | 0.001 |
-| smoke_valid | true |
+| dry_run_only | true |
+| smoke_valid | true (preflight only) |
 | rollback_required | false |
 
 ## Safety Assertions
