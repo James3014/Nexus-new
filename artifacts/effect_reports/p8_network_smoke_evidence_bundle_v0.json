@@ -1,0 +1,36 @@
+{
+  "bundle_version": "1.0",
+  "artifacts": {
+    "p8_a1_approval": "docs/reports/p8_a1_human_approval_contract_v0.md",
+    "p8_a2_boundary": "docs/reports/p8_a2_network_smoke_boundary_contract_v0.md",
+    "p8_a3_redaction": "docs/reports/p8_a3_prompt_redaction_secret_guard_v0.md",
+    "p8_a4_receipt_schema": "docs/reports/p8_a4_network_smoke_receipt_schema_v0.md",
+    "p8_a5_dry_run": "docs/reports/p8_a5_smoke_executor_dry_run_v0.md",
+    "p8_a6_smoke": "docs/reports/p8_a6_one_network_smoke_execution_v0.md",
+    "p8_a6_receipt": "artifacts/effect_reports/p8_one_network_smoke_receipt_v0.json",
+    "p8_a7_validator": "docs/reports/p8_a7_smoke_result_validator_v0.md",
+    "p7_final_seal": "docs/reports/p7_final_armor_integration_seal_report_v0.md"
+  },
+  "safety_assertions": {
+    "max_network_calls": 1,
+    "actual_network_call_count": 0,
+    "no_retry": true,
+    "no_streaming": true,
+    "no_tool_call": true,
+    "api_key_logged": false,
+    "raw_prompt_logged": false,
+    "raw_response_logged": false,
+    "patch_apply_invoked": false,
+    "runtime_behavior_changed": false,
+    "solved_claim": false,
+    "claim_eligible": false,
+    "public_claim_allowed": false,
+    "production_ready": false,
+    "p2_hash_truth_required": true,
+    "p2_anchor_truth_required": true,
+    "p4_verifier_required": true,
+    "p4_claim_gate_required": true
+  },
+  "final_decision": "P8_CLOSED_BLOCKED_WITH_REASONS",
+  "smoke_status": "P8_A6_BLOCKED_PRECONDITION_FAILED"
+}
