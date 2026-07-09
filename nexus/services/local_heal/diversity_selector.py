@@ -5,6 +5,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from nexus.services.local_heal.local_cascade_orchestrator import LocalCascadeReceipt
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 from nexus.services.local_heal.fuzzy_functions import evaluate as fuzzy_evaluate
 
@@ -61,9 +62,9 @@ class DiversitySelectionResult:
     score_breakdown: list[dict[str, Any]]
     rejected_by_diversity: list[dict[str, Any]]
     fail_closed: bool
-    failure_reasons: list[str] = field(default_factory=list)
     trace_events: list[dict[str, Any]] = field(default_factory=list)
-    failure_reasons: list[str]
+    failure_reasons: list[str] = field(default_factory=list)
+    cascade_aware: bool = False
 
 
 @dataclass(frozen=True)
@@ -688,4 +689,66 @@ def select_diverse_candidate(
         fail_closed=False,
         failure_reasons=[],
         trace_events=trace_events,
+    )
+
+
+def select_from_cascade(
+    cascade_receipt: LocalCascadeReceipt,
+    all_stage_candidates: list[CanonicalPatchCandidate],
+) -> DiversitySelectionResult:
+    if not all_stage_candidates:
+        return DiversitySelectionResult(
+            selected_candidate_id="",
+            selected_candidate_hash=cascade_receipt.winner_candidate_hash,
+            selected_index=-1,
+            selection_strategy="cascade_aware",
+            candidate_count=0,
+            diversity_candidate_count=0,
+            duplicate_group_count=0,
+            popularity_trap_detected=False,
+            popularity_trap_reason="",
+            score_breakdown=[],
+            rejected_by_diversity=[],
+            fail_closed=False,
+            failure_reasons=[],
+            cascade_aware=True,
+        )
+
+    if len(all_stage_candidates) == 1:
+        c = all_stage_candidates[0]
+        cid = _build_candidate_id(c, 0)
+        return DiversitySelectionResult(
+            selected_candidate_id=cid,
+            selected_candidate_hash=c.raw_output_hash,
+            selected_index=0,
+            selection_strategy="cascade_aware_single",
+            candidate_count=1,
+            diversity_candidate_count=1,
+            duplicate_group_count=0,
+            popularity_trap_detected=False,
+            popularity_trap_reason="",
+            score_breakdown=[{"candidate_id": cid, "index": 0, "strategy": "cascade_aware_single"}],
+            rejected_by_diversity=[],
+            fail_closed=False,
+            failure_reasons=[],
+            cascade_aware=True,
+        )
+
+    base = select_diverse_candidate(all_stage_candidates)
+    return DiversitySelectionResult(
+        selected_candidate_id=base.selected_candidate_id,
+        selected_candidate_hash=base.selected_candidate_hash,
+        selected_index=base.selected_index,
+        selection_strategy="cascade_aware_diversity",
+        candidate_count=base.candidate_count,
+        diversity_candidate_count=base.diversity_candidate_count,
+        duplicate_group_count=base.duplicate_group_count,
+        popularity_trap_detected=base.popularity_trap_detected,
+        popularity_trap_reason=base.popularity_trap_reason,
+        score_breakdown=base.score_breakdown,
+        rejected_by_diversity=base.rejected_by_diversity,
+        fail_closed=base.fail_closed,
+        failure_reasons=base.failure_reasons,
+        trace_events=base.trace_events,
+        cascade_aware=True,
     )
