@@ -3,16 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from nexus.services.local_heal.p3_dry_run_schema import validate_p3_dry_run_schema
+
 
 @dataclass(frozen=True)
 class P3DryRunInvariantResult:
-    """P3-L4: Dry-run hook invariant gate.
+    """P3-L4/M1: Dry-run hook invariant gate with strict schema.
 
     Validates LocalModelExecutor dry-run receipt block.
-    Fails closed on unsafe metadata.
+    Fails closed on missing fields, wrong types, or unsafe values.
     """
     invariant_version: str
     invariant_passed: bool
+    schema_passed: bool
     provider_not_invoked: bool
     network_not_invoked: bool
     api_key_not_used: bool
@@ -28,15 +31,17 @@ class P3DryRunInvariantResult:
 
 
 def validate_p3_dry_run_receipt(receipt: dict[str, Any]) -> P3DryRunInvariantResult:
-    """Validate P3 dry-run receipt block against safety invariants.
+    """Validate P3 dry-run receipt block against strict schema + safety invariants.
 
-    Fails closed: any violation causes invariant_passed=false.
+    Fails closed: any missing field, wrong type, or unsafe value fails.
     """
-    blocked_reasons: list[str] = []
+    schema_result = validate_p3_dry_run_schema(receipt)
+    blocked_reasons: list[str] = list(schema_result.blocked_reasons)
 
     def _check(field_name: str, expected: Any, invariant_name: str) -> bool:
         if field_name not in receipt:
-            return True
+            blocked_reasons.append(f"missing:{field_name}")
+            return False
         if receipt[field_name] == expected:
             return True
         blocked_reasons.append(f"{invariant_name}:{field_name}={receipt[field_name]}")
@@ -55,6 +60,7 @@ def validate_p3_dry_run_receipt(receipt: dict[str, Any]) -> P3DryRunInvariantRes
     production_not_ready = _check("p3_l_production_ready", False, "production_ready")
 
     invariant_passed = all([
+        schema_result.schema_passed,
         provider_not_invoked,
         network_not_invoked,
         api_key_not_used,
@@ -69,8 +75,9 @@ def validate_p3_dry_run_receipt(receipt: dict[str, Any]) -> P3DryRunInvariantRes
     ])
 
     return P3DryRunInvariantResult(
-        invariant_version="1.0",
+        invariant_version="2.0",
         invariant_passed=invariant_passed,
+        schema_passed=schema_result.schema_passed,
         provider_not_invoked=provider_not_invoked,
         network_not_invoked=network_not_invoked,
         api_key_not_used=api_key_not_used,
@@ -91,6 +98,7 @@ def p3_dry_run_invariant_to_dict(result: P3DryRunInvariantResult) -> dict[str, A
     return {
         "p3_l_invariant_version": result.invariant_version,
         "p3_l_invariant_passed": result.invariant_passed,
+        "p3_l_schema_passed": result.schema_passed,
         "p3_l_provider_not_invoked": result.provider_not_invoked,
         "p3_l_network_not_invoked": result.network_not_invoked,
         "p3_l_api_key_not_used": result.api_key_not_used,
