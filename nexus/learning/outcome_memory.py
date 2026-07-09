@@ -162,6 +162,21 @@ class OutcomeMemoryManager:
         return policy
 
     @classmethod
+    def append_worker_write(cls, receipt: dict[str, Any], *, project_root: Path | None = None) -> dict[str, Any]:
+        if "task_id" not in receipt:
+            raise ValueError("Missing required field: task_id")
+        if "worker_name" not in receipt:
+            raise ValueError("Missing required field: worker_name")
+        storage_path = _resolve(project_root, cls.STORAGE_PATH)
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        with storage_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(receipt, ensure_ascii=False, sort_keys=True) + "\n")
+        return {
+            "status": "PASS",
+            "storage_path": str(cls.STORAGE_PATH),
+        }
+
+    @classmethod
     def load_recent_records(cls, *, project_root: Path | None = None, limit: int = RECENT_LIMIT) -> list[dict[str, Any]]:
         storage_path = _resolve(project_root, cls.STORAGE_PATH)
         if not storage_path.exists():

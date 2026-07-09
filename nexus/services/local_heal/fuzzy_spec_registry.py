@@ -15,6 +15,9 @@ class FuzzyFunctionSpec:
     deterministic_backend: str
     paw_backend_available: bool = False
     paw_runtime_allowed: bool = False
+    paw_compiled_lora_path: str = ""
+    paw_interpreter_model: str = "Qwen3-0.6B"
+    paw_compile_trigger: dict[str, Any] = field(default_factory=dict)
     calibration_fixture: str = ""
     safety_scope: str = ""
     receipt_fields: list[str] = field(default_factory=list)
@@ -29,6 +32,7 @@ FUZZY_FUNCTION_SPECS: dict[str, FuzzyFunctionSpec] = {
         input_schema={"syntax_like_score": "float", "safety_penalty": "float"},
         output_schema={"score": "float", "label": "str"},
         deterministic_backend="candidate_quality_v1",
+        paw_backend_available=True,
         calibration_fixture="fuzzy_reward_calibration_v0.json",
         safety_scope="Candidate selection only. Does not affect runtime patch quality.",
         receipt_fields=["quality_score", "quality_label"],
@@ -40,6 +44,7 @@ FUZZY_FUNCTION_SPECS: dict[str, FuzzyFunctionSpec] = {
         input_schema={"jaccard_similarity": "float", "same_hash": "bool", "same_target": "bool"},
         output_schema={"score": "float", "label": "str"},
         deterministic_backend="duplicate_similarity_v1",
+        paw_backend_available=True,
         calibration_fixture="fuzzy_reward_calibration_v0.json",
         safety_scope="Duplicate detection only. Does not affect patch content.",
         receipt_fields=["similarity_score", "similarity_label"],
@@ -56,6 +61,7 @@ FUZZY_FUNCTION_SPECS: dict[str, FuzzyFunctionSpec] = {
         },
         output_schema={"score": "float", "label": "str"},
         deterministic_backend="popularity_trap_risk_v1",
+        paw_backend_available=True,
         calibration_fixture="fuzzy_reward_calibration_v0.json",
         safety_scope="Diversity selection only. Does not affect candidate generation.",
         receipt_fields=["trap_risk_score", "trap_risk_label"],

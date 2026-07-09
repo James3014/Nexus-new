@@ -46,10 +46,14 @@ def test_spec_has_deterministic_backend():
 
 
 def test_paw_backend_not_available():
-    """PAW-F1: PAW backend is not available by default."""
+    """PAW-F1: PAW backend availability per spec."""
     specs = list_fuzzy_function_specs()
+    paw_enabled = {"candidate_quality_v1", "duplicate_similarity_v1", "popularity_trap_risk_v1"}
     for spec in specs:
-        assert spec.paw_backend_available is False
+        if spec.function_name in paw_enabled:
+            assert spec.paw_backend_available is True
+        else:
+            assert spec.paw_backend_available is False
         assert spec.paw_runtime_allowed is False
 
 
