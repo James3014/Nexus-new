@@ -4,6 +4,10 @@ from dataclasses import dataclass
 import subprocess
 from typing import Any
 
+KNOWN_BUGGY_SYMBOLS: tuple[str, ...] = (
+    "view(NdarrayMixin)",
+)
+
 
 @dataclass(frozen=True)
 class IsolatedVerifierRequest:
@@ -25,6 +29,7 @@ class IsolatedVerifierReceipt:
     verifier_allowed: bool
     public_claim_allowed: bool = False
     production_ready: bool = False
+    tests_run: list[dict[str, Any]] | None = None
 
 
 def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierReceipt:
@@ -106,3 +111,15 @@ def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierR
             verifier_error=f"verifier_internal_error: {str(e)}",
             verifier_allowed=True,
         )
+
+
+def compute_semantic_correctness(receipt: IsolatedVerifierReceipt) -> bool:
+    if not receipt.tests_run:
+        return False
+    if receipt.verifier_status != "pass":
+        return False
+    output = receipt.stdout_tail + receipt.stderr_tail
+    for symbol in KNOWN_BUGGY_SYMBOLS:
+        if symbol in output:
+            return False
+    return True
