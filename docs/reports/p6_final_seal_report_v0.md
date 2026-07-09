@@ -6,6 +6,13 @@
 
 P6 is closed as env-guarded, receipt-backed, non-production quota-aware degradation. Evidence complete. No production rollout.
 
+## Hotfix History
+
+| Package | Commit | Description |
+|---------|--------|-------------|
+| H1 | `b4a6d68d7` | Closeout decision gate hardening (11 safety gates enforced) |
+| H2 | `b4a6d68d7` | Handoff rollback trace preservation (full context kept) |
+
 ## Evidence Index
 
 | Package | Artifact | Path |
