@@ -26,6 +26,7 @@ def build_completion_envelope(
     retryable: bool | None = None,
     blocker_type: str | None = None,
     next_action: str | None = None,
+    semantic_correctness_passed: bool | None = None,
 ) -> dict[str, Any]:
     artifacts = [str(path) for path in (artifact_paths or [])]
     evidence = [str(path) for path in (evidence_paths or [])]
@@ -88,6 +89,7 @@ def build_completion_envelope(
         "rollback_evidence": list(rollback_evidence or []),
         "execution_path": execution_path,
         "tests_run": tests,
+        "semantic_correctness_passed": semantic_correctness_passed,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

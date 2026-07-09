@@ -69,3 +69,51 @@ def test_build_completion_envelope_supports_blocked_governance_state():
     assert payload["retryable"] is False
     assert payload["blocker_type"] == "governance"
     assert payload["next_action"] == "stop"
+
+
+def test_completion_envelope_default_semantic_correctness_none():
+    payload = build_completion_envelope(
+        command_name="run",
+        task_name="test task",
+        runtime_ok=True,
+        execution_path="cli->engine",
+    )
+    assert "semantic_correctness_passed" in payload
+    assert payload["semantic_correctness_passed"] is None
+
+
+def test_completion_envelope_semantic_correctness_pass_true():
+    payload = build_completion_envelope(
+        command_name="run",
+        task_name="test task",
+        runtime_ok=True,
+        execution_path="cli->engine",
+        semantic_correctness_passed=True,
+    )
+    assert payload["semantic_correctness_passed"] is True
+
+
+def test_completion_envelope_semantic_correctness_pass_false():
+    payload = build_completion_envelope(
+        command_name="run",
+        task_name="test task",
+        runtime_ok=True,
+        execution_path="cli->engine",
+        semantic_correctness_passed=False,
+    )
+    assert payload["semantic_correctness_passed"] is False
+
+
+def test_completion_envelope_existing_keys_unchanged():
+    payload = build_completion_envelope(
+        command_name="run",
+        task_name="test task",
+        runtime_ok=True,
+        execution_path="cli->engine",
+    )
+    assert payload["command_name"] == "run"
+    assert payload["task_name"] == "test task"
+    assert payload["status"] == "SUCCESS"
+    assert payload["semantic_status"] == "VERIFIED"
+    assert payload["runtime_classification"] == "verified_pass"
+    assert "semantic_correctness_passed" in payload
