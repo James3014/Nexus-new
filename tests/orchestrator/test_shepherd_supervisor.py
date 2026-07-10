@@ -7,6 +7,7 @@ from nexus.orchestrator.shepherd_supervisor import (
     ActionTrace,
     ForkReceipt,
 )
+from nexus.orchestrator.sub_agent import SubAgent, SubAgentRegistry
 
 
 class TestShepherdSupervisor:
@@ -48,3 +49,40 @@ class TestShepherdSupervisor:
         assert receipt.subagent_id == "agent-x"
         trace = sup.observe("nonexistent")
         assert trace is None
+
+    # === L3-E: real SHEPHERD ===
+
+    def test_real_shepherd_fork_grabs_existing_definition(self):
+        registry = SubAgentRegistry()
+        registry.register(SubAgent(subagent_id="agent-1", definition="original_def"))
+        sup = ShepherdSupervisor(registry=registry)
+        receipt = sup.fork("agent-1", "new_def")
+        assert receipt.old_definition == "original_def"
+
+    def test_real_shepherd_fork_warns_on_missing_subagent(self):
+        sup = ShepherdSupervisor()
+        receipt = sup.fork("nonexistent", "new_def")
+        assert receipt.old_definition == ""
+
+    def test_real_shepherd_observe_grabs_last_action(self):
+        sup = ShepherdSupervisor()
+        sup.record_trace(ActionTrace("agent-1", 1, "act1", "ok", 1.0))
+        sup.record_trace(ActionTrace("agent-1", 2, "act2", "ok", 2.0))
+        trace = sup.observe("agent-1")
+        assert trace is not None
+        assert trace.step == 2
+
+    def test_real_shepherd_replay_to_grabs_history(self):
+        sup = ShepherdSupervisor()
+        for i in range(5):
+            sup.record_trace(ActionTrace("agent-1", i, f"act{i}", "ok", float(i)))
+        replay = sup.replay_to("agent-1", 2)
+        assert len(replay) == 3
+
+    def test_real_shepherd_sub_agent_registry_basic(self):
+        registry = SubAgentRegistry()
+        agent = SubAgent(subagent_id="a1", definition="def1")
+        registry.register(agent)
+        assert registry.get("a1") is agent
+        assert registry.get("nonexistent") is None
+        assert "a1" in registry.list_ids()
