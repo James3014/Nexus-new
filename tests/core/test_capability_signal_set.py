@@ -29,3 +29,24 @@ def test_core_skill_signal_set_equal_to_engine():
     cs = CoreSkillSignalSet(top_skill_ids=("a", "b"), skill_confidence=0.8, trust_level="high", source="test")
     es = EngineSkillSignalSet(top_skill_ids=("a", "b"), skill_confidence=0.8, trust_level="high", source="test")
     assert cs.to_dict() == es.to_dict()
+
+
+def test_signal_set_model_size_field_optional():
+    from nexus.core.capability_signal_set import CapabilitySignalSet
+    ss = CapabilitySignalSet(
+        task_id="t1", task_desc="d", risk_level="NORMAL",
+        impact_complexity=1.0, belief_confidence=0.7,
+        skills_triggered=[], tenant_id="default",
+    )
+    assert ss.model_size is None
+
+
+def test_signal_set_model_size_can_be_set():
+    from nexus.core.capability_signal_set import CapabilitySignalSet
+    ss = CapabilitySignalSet(
+        task_id="t1", task_desc="d", risk_level="NORMAL",
+        impact_complexity=1.0, belief_confidence=0.7,
+        skills_triggered=[], tenant_id="default",
+        model_size=7_000_000_000,
+    )
+    assert ss.model_size == 7_000_000_000

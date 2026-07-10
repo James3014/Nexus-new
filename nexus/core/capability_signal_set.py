@@ -20,6 +20,7 @@ class CapabilitySignalSet:
     metadata: Dict[str, Any] = field(default_factory=dict)
     codeintel_query_available: bool = False
     codeintel_evidence: Dict[str, Any] = field(default_factory=dict)
+    model_size: Optional[int] = None
 
     @classmethod
     def from_context(
@@ -106,6 +107,8 @@ class CapabilitySignalSet:
             except Exception:
                 pass
 
+        model_size = context.get("model_size")
+
         return cls(
             task_id=task_id,
             task_desc=task_desc,
@@ -115,6 +118,7 @@ class CapabilitySignalSet:
             skills_triggered=skills_triggered,
             tenant_id=tenant_id,
             metadata=dict(context),
+            model_size=model_size,
         )
 
 
