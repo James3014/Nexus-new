@@ -881,7 +881,7 @@ class CapabilityPlanner:
             signal_snapshot["local_executor_authority"] = "candidate_only"
             # P3 Fix: Critical signal_snapshot fields for executor consumption
             signal_snapshot["protocol_mode"] = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
-            signal_snapshot["model_call_allowed"] = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "0") == "1"
+            signal_snapshot["model_call_allowed"] = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1") == "1"
             signal_snapshot["candidate_enabled"] = True
             signal_snapshot["mutation_allowed"] = True
             signal_snapshot["verifier_allowed"] = True

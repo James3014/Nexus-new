@@ -1963,13 +1963,22 @@ class LocalModelExecutor:
                     python_executable = str(route_ctx.get("python_executable", "") or "")
                     # C15-5C: inject verifier stdout/stderr into PatchError.message
                     # so committee models receive concrete failure evidence, not just exit code.
+                    # N1: Assertion-grounded signals extraction
                     _dr_verifier_stdout = str(raw_meta.get("verifier_stdout_excerpt", "") or "")
                     _dr_verifier_stderr = str(raw_meta.get("verifier_stderr_excerpt", "") or "")
+                    _dr_failure_kind = str(raw_meta.get("verifier_failure_kind", "") or "")
                     _dr_patch_error_msg = f"Verifier failed with exit code {raw_meta['verifier_exit_code']}"
                     if _dr_verifier_stdout:
                         _dr_patch_error_msg += f"\n### VERIFIER STDOUT\n{_dr_verifier_stdout}"
                     if _dr_verifier_stderr:
                         _dr_patch_error_msg += f"\n### VERIFIER STDERR\n{_dr_verifier_stderr}"
+                    if _dr_failure_kind == "assertion_failure" and _dr_verifier_stdout:
+                        _dr_assertion_lines = []
+                        for _line in _dr_verifier_stdout.split("\n"):
+                            if "assert" in _line.lower() or "AssertionError" in _line or "FAIL" in _line:
+                                _dr_assertion_lines.append(_line.strip())
+                        if _dr_assertion_lines:
+                            _dr_patch_error_msg += "\n### ASSERTION-GROUNDED FAILURE SIGNALS\n" + "\n".join(_dr_assertion_lines) + "\n\nThe assertion above is the GROUND TRUTH: your patch must make this assertion pass. Do NOT change the test — fix the source code."
                     retry_prompt = SelfCorrector().build_retry_prompt(
                         original_user_prompt=request.problem_statement,
                         error=PatchError(

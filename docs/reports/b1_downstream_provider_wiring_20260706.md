@@ -7,8 +7,8 @@
 
 | File | Change |
 |---|---|
-| `nexus/services/local_heal/heterogeneous_candidate_provider.py` | Removed hardcoded model defaults; `primary_model` required; fail-closed on missing |
-| `nexus/services/local_heal/judge_selector.py` | Removed hardcoded judge model default; `judge_model` required; fail-closed on missing |
+| `nexus/services/local_heal/heterogeneous_candidate_provider.py` | ✅ Removed hardcoded model defaults; `primary_model` required; fail-closed on missing |
+| `nexus/services/local_heal/judge_selector.py` | ✅ Removed hardcoded judge model default; `judge_model` required; fail-closed on missing |
 | `tests/unit/local_heal/test_heterogeneous_candidate_provider.py` | Updated to pass models explicitly; added fail-closed test |
 | `tests/unit/local_heal/test_judge_selector.py` | Updated to pass models explicitly; added fail-closed test |
 
