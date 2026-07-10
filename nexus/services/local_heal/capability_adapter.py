@@ -80,6 +80,19 @@ def build_local_model_provider(
     return InertLocalModelProvider()
 
 
+def build_local_model_provider_from_env(
+    env: Mapping[str, str],
+    controls: Mapping[str, Any],
+    injected_fn_key: str,
+) -> LocalModelProvider:
+    signal_snapshot = {
+        "model_call_allowed": env.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1") == "1",
+        "executor_provider": env.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", "ollama"),
+        "executor_model": env.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b"),
+    }
+    return build_local_model_provider(signal_snapshot, controls, injected_fn_key)
+
+
 class LocalHealCapabilityAdapter:
     @staticmethod
     def run(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
