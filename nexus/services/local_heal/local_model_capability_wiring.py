@@ -446,3 +446,141 @@ def classify_selected_capabilities(
             result["unsupported_capabilities"].append(name)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# N30R-W1: Planner SSD → Executor Capability Projection
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LocalExecutorCapabilityProjection:
+    """Canonical projection from Planner SSD route map to Executor selected_capabilities."""
+    selected_capabilities: tuple[str, ...]
+    source: str
+    planner_selected_count: int
+    projected_count: int
+    dropped_capabilities: tuple[str, ...]
+    unknown_capabilities: tuple[str, ...]
+    advisory_capabilities: tuple[str, ...]
+    executable_capabilities: tuple[str, ...]
+    dependency_errors: tuple[str, ...]
+    valid: bool
+    failure_reason: str
+
+
+def project_planner_capabilities_for_local_executor(
+    signal_snapshot: dict[str, Any],
+) -> LocalExecutorCapabilityProjection:
+    """Project Planner SSD route map capabilities to Executor selected_capabilities.
+
+    Priority 1: explicit top-level 'selected_capabilities' if present and non-empty.
+    Priority 2: ssd_route_map.capability_reasons keys.
+    Validates against local model executor wiring registry.
+    """
+    # Priority 1: explicit top-level
+    explicit_caps = signal_snapshot.get("selected_capabilities")
+    if explicit_caps and isinstance(explicit_caps, (list, tuple)) and len(explicit_caps) > 0:
+        source = "explicit_selected_capabilities"
+        planner_caps = list(explicit_caps)
+    else:
+        # Priority 2: SSD route map
+        ssd = signal_snapshot.get("ssd_route_map", {})
+        if not isinstance(ssd, dict):
+            return LocalExecutorCapabilityProjection(
+                selected_capabilities=(), source="ssd_missing",
+                planner_selected_count=0, projected_count=0,
+                dropped_capabilities=(), unknown_capabilities=(),
+                advisory_capabilities=(), executable_capabilities=(),
+                dependency_errors=(), valid=False,
+                failure_reason="ssd_route_map_not_dict",
+            )
+        capability_reasons = ssd.get("capability_reasons", {})
+        if not isinstance(capability_reasons, dict):
+            return LocalExecutorCapabilityProjection(
+                selected_capabilities=(), source="ssd_capability_reasons_not_dict",
+                planner_selected_count=0, projected_count=0,
+                dropped_capabilities=(), unknown_capabilities=(),
+                advisory_capabilities=(), executable_capabilities=(),
+                dependency_errors=(), valid=False,
+                failure_reason="ssd_capability_reasons_not_dict",
+            )
+        planner_caps = list(capability_reasons.keys())
+        source = "ssd_route_map_capability_reasons"
+
+        # Validate count consistency
+        declared_count = ssd.get("selected_capability_count", 0)
+        if declared_count and declared_count != len(planner_caps):
+            return LocalExecutorCapabilityProjection(
+                selected_capabilities=tuple(planner_caps), source=source,
+                planner_selected_count=declared_count, projected_count=0,
+                dropped_capabilities=(), unknown_capabilities=(),
+                advisory_capabilities=(), executable_capabilities=(),
+                dependency_errors=(), valid=False,
+                failure_reason=f"ssd_selected_count_mismatch:declared={declared_count},actual={len(planner_caps)}",
+            )
+
+    planner_selected_count = len(planner_caps)
+
+    # Build wiring map for classification
+    try:
+        wiring_map = build_local_model_capability_wiring()
+    except Exception:
+        wiring_map = {}
+
+    executable = []
+    advisory = []
+    unknown = []
+    dropped = []
+    dependency_errors = []
+
+    for cap in planner_caps:
+        cap_str = str(cap).strip()
+        if not cap_str:
+            continue
+
+        wiring = wiring_map.get(cap_str)
+        if wiring is None:
+            unknown.append(cap_str)
+            continue
+
+        if wiring.local_model_supported:
+            if wiring.status in (CapabilityWiringStatus.LOCALHEAL_EXECUTABLE,
+                                 CapabilityWiringStatus.EXECUTABLE,
+                                 CapabilityWiringStatus.GATE_EXECUTABLE):
+                executable.append(cap_str)
+            elif wiring.status in (CapabilityWiringStatus.ADVISORY_EXECUTABLE,
+                                   CapabilityWiringStatus.METADATA_ONLY):
+                advisory.append(cap_str)
+            else:
+                advisory.append(cap_str)
+        else:
+            advisory.append(cap_str)
+
+    # Validate dependencies if present
+    ssd = signal_snapshot.get("ssd_route_map", {})
+    deps = ssd.get("capability_dependencies", {}) if isinstance(ssd, dict) else {}
+    if isinstance(deps, dict):
+        for cap, dep_list in deps.items():
+            if cap not in planner_caps:
+                continue
+            if isinstance(dep_list, (list, tuple)):
+                for dep in dep_list:
+                    if dep not in planner_caps:
+                        dependency_errors.append(f"{cap}_depends_on_{dep}_not_selected")
+
+    # All planner-selected capabilities go to executor (executor decides binding)
+    projected = tuple(planner_caps)
+
+    return LocalExecutorCapabilityProjection(
+        selected_capabilities=projected,
+        source=source,
+        planner_selected_count=planner_selected_count,
+        projected_count=len(projected),
+        dropped_capabilities=tuple(dropped),
+        unknown_capabilities=tuple(unknown),
+        advisory_capabilities=tuple(advisory),
+        executable_capabilities=tuple(executable),
+        dependency_errors=tuple(dependency_errors),
+        valid=True,
+        failure_reason="",
+    )

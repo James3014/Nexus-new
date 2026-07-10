@@ -53,6 +53,7 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
     LocalModelProviderRequest,
 )
+from nexus.services.local_heal.local_model_capability_wiring import project_planner_capabilities_for_local_executor
 
 
 REAL_CORE_ARM_ID = "N30R_B_7B_REAL_CORE"
@@ -207,12 +208,30 @@ def run_real_core_bridge(
 
     assert signal_snapshot == snapshot_copy, "PLANNER SNAPSHOT WAS MUTATED"
 
+    import tempfile as _tempfile
+    workspace = _tempfile.mkdtemp(prefix=f"n30r-{task.task_id}-")
+    target_relpath = task.source_relpath
+    target_abs_path = os.path.join(workspace, target_relpath)
+    os.makedirs(os.path.dirname(target_abs_path), exist_ok=True)
+    with open(target_abs_path, "w", encoding="utf-8") as wf:
+        wf.write(orig_code)
+
+    projection = project_planner_capabilities_for_local_executor(signal_snapshot)
+    if not projection.valid:
+        wall_time = time.time() - start
+        return _fail_closed_result(
+            wall_time, f"capability_projection_invalid:{projection.failure_reason}",
+            signal_snapshot=signal_snapshot, planner_called=True,
+            orig_code=orig_code, task=task, run_id=run_id,
+            seed=seed, trial_index=trial_index,
+        )
+
     executor_request = LocalModelExecutorRequest(
         task_id=task.task_id,
         problem_statement=task.task_statement,
-        repo_root="",
-        target_file="f.py",
-        selected_capabilities=tuple(signal_snapshot.get("selected_capabilities", ())),
+        repo_root=workspace,
+        target_file=target_relpath,
+        selected_capabilities=projection.selected_capabilities,
         evidence_refs=(f"n30r-{task.task_id}-ref",),
         receipt_context={
             "benchmark_run_id": run_id,
@@ -286,8 +305,16 @@ def run_real_core_bridge(
     verifier_status = meta.get("isolated_verifier_status", meta.get("verifier_result", "not_run"))
     semantic_retry_count = int(meta.get("semantic_retry_count", 0))
 
-    candidate_isolated = bool(meta.get("candidate_isolated", meta.get("candidate_output_isolated", False)))
+    candidate_isolation_attempted = bool(meta.get("candidate_isolation_attempted", False))
+    candidate_output_isolated = bool(meta.get("candidate_output_isolated", False))
+    candidate_hash_empty = not bool(candidate_hash)
     selected_candidate_hash = meta.get("selected_candidate_hash", "")
+    candidate_isolated = (
+        candidate_isolation_attempted
+        and candidate_output_isolated
+        and not candidate_hash_empty
+        and bool(selected_candidate_hash)
+    )
 
     terminal_status = N30RTerminalStatus.CONTRACT_INVALID.value
     if executor_response.invoked and raw_output:
@@ -335,8 +362,8 @@ def run_real_core_bridge(
         legacy_adapter_called=False,
         model_call_count=1 + semantic_retry_count,
         semantic_retry_count=semantic_retry_count,
-        candidate_id=candidate_hash,
-        candidate_workspace_id="",
+        candidate_id=candidate_hash if not candidate_hash_empty else "",
+        candidate_workspace_id=workspace,
         production_receipt_sha256=production_receipt_hash,
         execution_path_kind="nexus_production_localheal_pipeline",
     )
