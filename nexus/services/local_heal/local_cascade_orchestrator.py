@@ -45,6 +45,7 @@ class LocalCascadeReceipt:
     winner_candidate_hash: str
     failed_at_final_stage: bool
     fail_closed: bool
+    cross_stage_winner_stage: str = ""
 
 
 def _get_provider(provider_name: str) -> LocalModelProvider:
@@ -92,4 +93,102 @@ def run_local_cascade(request: LocalCascadeRequest, *, provider: LocalModelProvi
         winner_candidate_hash="",
         failed_at_final_stage=True,
         fail_closed=True,
+    )
+
+
+def run_local_cascade_with_borda(
+    request: LocalCascadeRequest,
+    *,
+    provider: LocalModelProvider | None = None,
+    similarity_threshold: float = 0.85,
+) -> tuple[LocalCascadeReceipt, Any | None]:
+    if provider is None:
+        provider = _get_provider(request.provider_name)
+    stages_run: list[str] = []
+    stages_failed: list[str] = []
+    outputs: list[tuple[str, str]] = []
+
+    for model in request.cascade_models:
+        provider_request = LocalModelProviderRequest(
+            task_id=request.task_id,
+            prompt=request.problem_statement,
+            evidence_refs=request.evidence_refs,
+            model_name=model,
+        )
+        response = provider.generate(provider_request)
+        stages_run.append(model)
+
+        if response.model_called and response.output_text.strip():
+            outputs.append((model, response.output_text))
+        else:
+            stages_failed.append(model)
+
+    if not outputs:
+        return (
+            LocalCascadeReceipt(
+                task_id=request.task_id,
+                stages_run=tuple(stages_run),
+                stages_failed=tuple(stages_failed),
+                winner_model="",
+                winner_candidate_hash="",
+                failed_at_final_stage=True,
+                fail_closed=True,
+                cross_stage_winner_stage="",
+            ),
+            None,
+        )
+
+    from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
+    candidates = [
+        CanonicalPatchCandidate(
+            source_format="SEARCH_REPLACE",
+            raw_output=text,
+            raw_output_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            normalized_patch=text,
+            normalized_patch_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            normalization_steps=(),
+            safety_flags=(),
+            target_file=request.target_file,
+            target_symbol="",
+        )
+        for _, text in outputs
+    ]
+
+    from nexus.services.local_heal.diversity_selector import select_with_diversity
+    diversity_result = select_with_diversity(candidates, similarity_threshold=similarity_threshold)
+
+    if diversity_result.fail_closed or diversity_result.selected_index < 0:
+        winner_model, winner_text = outputs[0]
+        winner_hash = hashlib.sha256(winner_text.encode("utf-8")).hexdigest()
+        return (
+            LocalCascadeReceipt(
+                task_id=request.task_id,
+                stages_run=tuple(stages_run),
+                stages_failed=tuple(stages_failed),
+                winner_model=winner_model,
+                winner_candidate_hash=winner_hash,
+                failed_at_final_stage=False,
+                fail_closed=False,
+                cross_stage_winner_stage=winner_model,
+            ),
+            diversity_result,
+        )
+
+    winner_idx = diversity_result.selected_index
+    winner_model = outputs[winner_idx][0] if winner_idx < len(outputs) else ""
+    winner_text = outputs[winner_idx][1] if winner_idx < len(outputs) else ""
+    winner_hash = hashlib.sha256(winner_text.encode("utf-8")).hexdigest() if winner_text else ""
+
+    return (
+        LocalCascadeReceipt(
+            task_id=request.task_id,
+            stages_run=tuple(stages_run),
+            stages_failed=tuple(stages_failed),
+            winner_model=winner_model,
+            winner_candidate_hash=winner_hash,
+            failed_at_final_stage=False,
+            fail_closed=False,
+            cross_stage_winner_stage=winner_model,
+        ),
+        diversity_result,
     )

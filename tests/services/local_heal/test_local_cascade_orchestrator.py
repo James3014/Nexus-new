@@ -72,6 +72,8 @@ def test_run_local_cascade_uses_inert_provider():
     assert receipt.fail_closed
 
 
+
+
 def test_local_cascade_request_frozen():
     request = LocalCascadeRequest(task_id="t1", problem_statement="fix")
     with pytest.raises(FrozenInstanceError):

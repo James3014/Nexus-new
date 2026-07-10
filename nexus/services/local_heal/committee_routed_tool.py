@@ -343,9 +343,11 @@ def evaluate_and_execute(
         result.receipt_fragment["p4_raw_candidate_count"] = len(raw_candidates)
         return result
 
-    # P5-I7: Diversity-aware selection (env-guarded)
+    # P5-I7 / P7-A: Diversity-aware selection (env-guarded, P7 supersedes P5)
     p5_diversity_used = False
     p5_result = None
+    p7_diversity_used = False
+    p7_result = None
     rejected_indices = {r["index"] for r in rejections}
 
     # Build raw_index_map: valid_candidates[i] → raw_candidates[j]
@@ -354,7 +356,50 @@ def evaluate_and_execute(
         if raw_idx not in rejected_indices:
             raw_index_map.append(raw_idx)
 
-    if os.environ.get("NEXUS_ENABLE_P5_DIVERSITY_SELECTION", "0") == "1":
+    p7_enabled = os.environ.get("NEXUS_ENABLE_P7_DIVERSITY_AWARE", "0") == "1"
+    p5_enabled = os.environ.get("NEXUS_ENABLE_P5_DIVERSITY_SELECTION", "0") == "1"
+
+    if p7_enabled:
+        try:
+            from nexus.services.local_heal.diversity_selector import select_with_diversity
+
+            p7_result = select_with_diversity(valid_candidates)
+            p7_diversity_used = True
+
+            if p7_result.fail_closed or p7_result.selected_index < 0:
+                _receipt = {
+                    **gate,
+                    "p7_diversity_aware": True,
+                    "p7_selection_strategy": p7_result.selection_strategy,
+                    "p7_candidate_count": p7_result.candidate_count,
+                    "p7_popularity_trap_detected": p7_result.popularity_trap_detected,
+                    "p7_popularity_trap_reason": p7_result.popularity_trap_reason,
+                    "p7_selected_candidate_index": p7_result.selected_index,
+                    "p7_selected_candidate_hash": p7_result.selected_candidate_hash,
+                    "p7_score_breakdown": p7_result.score_breakdown,
+                    "p7_rejected_by_diversity": p7_result.rejected_by_diversity,
+                    "p7_fail_closed": p7_result.fail_closed,
+                    "p7_trace_event_count": len(p7_result.trace_events) if p7_result.trace_events else 0,
+                    "p7_trace_events": p7_result.trace_events,
+                }
+                return CommitteeRoutedToolResult(
+                    invoked=True,
+                    invocation_allowed=True,
+                    candidate_count=len(raw_candidates),
+                    canonical_candidate_count=len(valid_candidates),
+                    winner_found=False,
+                    solved_by_committee=False,
+                    failure_reasons=[f"p7_selection_failed:{r}" for r in p7_result.failure_reasons],
+                    receipt_fragment=_receipt,
+                )
+
+            winner = valid_candidates[p7_result.selected_index]
+
+            # Promote selected_index for winner_source_model lookup
+            _diversity_selected_index = p7_result.selected_index
+        except ImportError:
+            winner = valid_candidates[0]
+    elif p5_enabled:
         try:
             from nexus.services.local_heal.diversity_selector import select_diverse_candidate
 
@@ -411,12 +456,20 @@ def evaluate_and_execute(
             # Fallback: diversity_selector unavailable
             winner = valid_candidates[0]
     else:
-        # P5 disabled: existing behavior
+        # P5/P7 disabled: existing behavior
         winner = valid_candidates[0]
 
     # Determine winner source model from raw candidates
     winner_source_model = ""
-    if p5_diversity_used and p5_result is not None and not p5_result.fail_closed and p5_result.selected_index >= 0:
+    if p7_diversity_used and p7_result is not None and not p7_result.fail_closed and p7_result.selected_index >= 0:
+        raw_winner_idx = raw_index_map[p7_result.selected_index] if p7_result.selected_index < len(raw_index_map) else -1
+        if 0 <= raw_winner_idx < len(raw_candidates):
+            winner_source_model = str(
+                raw_candidates[raw_winner_idx].get("model", "")
+                or raw_candidates[raw_winner_idx].get("model_name", "")
+                or ""
+            )
+    if not winner_source_model and p5_diversity_used and p5_result is not None and not p5_result.fail_closed and p5_result.selected_index >= 0:
         # P5-V4: use raw_index_map to find the correct raw candidate
         raw_winner_idx = raw_index_map[p5_result.selected_index] if p5_result.selected_index < len(raw_index_map) else -1
         if 0 <= raw_winner_idx < len(raw_candidates):
@@ -493,8 +546,22 @@ def evaluate_and_execute(
     result.receipt_fragment["verifier_result"] = verifier_result
     result.receipt_fragment["claim_decision"] = {"claim_gate_passed": claim_gate_passed}
 
-    # P5-I7: Add P5 receipt fields only when P5 enabled
-    if p5_diversity_used and p5_result is not None:
+    # P7-A / P5-I7: Add receipt fields for the active selector
+    if p7_diversity_used and p7_result is not None:
+        result.receipt_fragment["p7_diversity_aware"] = True
+        result.receipt_fragment["p7_selection_strategy"] = p7_result.selection_strategy
+        result.receipt_fragment["p7_candidate_count"] = p7_result.candidate_count
+        result.receipt_fragment["p7_popularity_trap_detected"] = p7_result.popularity_trap_detected
+        result.receipt_fragment["p7_popularity_trap_reason"] = p7_result.popularity_trap_reason
+        result.receipt_fragment["p7_selected_candidate_index"] = p7_result.selected_index
+        result.receipt_fragment["p7_selected_candidate_hash"] = p7_result.selected_candidate_hash
+        result.receipt_fragment["p7_score_breakdown"] = p7_result.score_breakdown
+        result.receipt_fragment["p7_rejected_by_diversity"] = p7_result.rejected_by_diversity
+        result.receipt_fragment["p7_fail_closed"] = p7_result.fail_closed
+        if p7_result.trace_events:
+            result.receipt_fragment["p7_trace_event_count"] = len(p7_result.trace_events)
+            result.receipt_fragment["p7_trace_events"] = p7_result.trace_events
+    elif p5_diversity_used and p5_result is not None:
         result.receipt_fragment["p5_diversity_selector_used"] = True
         result.receipt_fragment["p5_selection_strategy"] = p5_result.selection_strategy
         result.receipt_fragment["p5_candidate_count"] = p5_result.candidate_count

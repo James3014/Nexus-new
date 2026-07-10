@@ -65,6 +65,7 @@ class DiversitySelectionResult:
     trace_events: list[dict[str, Any]] = field(default_factory=list)
     failure_reasons: list[str] = field(default_factory=list)
     cascade_aware: bool = False
+    diversity_aware: bool = True
 
 
 @dataclass(frozen=True)
@@ -751,4 +752,113 @@ def select_from_cascade(
         failure_reasons=base.failure_reasons,
         trace_events=base.trace_events,
         cascade_aware=True,
+        diversity_aware=base.diversity_aware,
+    )
+
+
+@dataclass(frozen=True)
+class PopularityTrapResult:
+    trapped_candidate_ids: tuple[str, ...]
+    similarity_scores: dict[str, float]
+
+
+def _compute_pairwise_jaccard(texts: list[str]) -> list[list[float]]:
+    token_sets = [frozenset(re.findall(r'\S+', t)) for t in texts]
+    n = len(token_sets)
+    matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            matrix[i][j] = _jaccard_similarity(token_sets[i], token_sets[j])
+    return matrix
+
+
+def _build_score_map(score_breakdown: list[dict[str, Any]]) -> dict[int, float]:
+    """Build index→final_score lookup from score_breakdown (which may be sorted differently)."""
+    out: dict[int, float] = {}
+    for entry in score_breakdown:
+        idx = entry.get("index")
+        if idx is not None:
+            out[idx] = entry.get("final_score", float("-inf"))
+    return out
+
+
+def select_with_diversity(
+    candidates: list[CanonicalPatchCandidate],
+    similarity_threshold: float = 0.85,
+) -> DiversitySelectionResult:
+    base = select_diverse_candidate(candidates)
+
+    if len(candidates) <= 1:
+        return DiversitySelectionResult(
+            selected_candidate_id=base.selected_candidate_id,
+            selected_candidate_hash=base.selected_candidate_hash,
+            selected_index=base.selected_index,
+            selection_strategy="diversity_aware",
+            candidate_count=base.candidate_count,
+            diversity_candidate_count=base.diversity_candidate_count,
+            duplicate_group_count=base.duplicate_group_count,
+            popularity_trap_detected=False,
+            popularity_trap_reason="",
+            score_breakdown=base.score_breakdown,
+            rejected_by_diversity=base.rejected_by_diversity,
+            fail_closed=base.fail_closed,
+            failure_reasons=base.failure_reasons,
+            trace_events=base.trace_events,
+            cascade_aware=base.cascade_aware,
+            diversity_aware=True,
+        )
+
+    raw_texts = [c.raw_output for c in candidates]
+    sim_matrix = _compute_pairwise_jaccard(raw_texts)
+    n = len(candidates)
+
+    # Cluster: group indices where pairwise sim > threshold
+    clusters: list[set[int]] = []
+    assigned: set[int] = set()
+    for i in range(n):
+        if i in assigned:
+            continue
+        cluster = {i}
+        for j in range(i + 1, n):
+            if j in assigned:
+                continue
+            if sim_matrix[i][j] > similarity_threshold:
+                cluster.add(j)
+        for idx in cluster:
+            assigned.add(idx)
+        clusters.append(cluster)
+
+    # Largest cluster determines popularity trap
+    largest = max(clusters, key=len) if clusters else set()
+    majority = len(largest) > n // 2
+
+    trapped_indices = sorted(largest) if majority else []
+    non_trapped = [i for i in range(n) if i not in trapped_indices]
+    trapped_candidate_ids = [candidates[i].raw_output_hash[:16] for i in trapped_indices]
+
+    score_map = _build_score_map(base.score_breakdown)
+
+    if non_trapped and majority:
+        best_idx = max(non_trapped, key=lambda i: score_map.get(i, float("-inf")))
+    else:
+        best_idx = base.selected_index
+
+    cid = candidates[best_idx].raw_output_hash[:16] + f"#{best_idx}"
+    return DiversitySelectionResult(
+        selected_candidate_id=cid,
+        selected_candidate_hash=candidates[best_idx].raw_output_hash,
+        selected_index=best_idx,
+        selection_strategy="diversity_aware",
+        candidate_count=n,
+        diversity_candidate_count=n,
+        duplicate_group_count=base.duplicate_group_count,
+        popularity_trap_detected=majority,
+        popularity_trap_reason="popularity_trap" if majority else "",
+        score_breakdown=base.score_breakdown,
+        rejected_by_diversity=list(trapped_candidate_ids),
+        fail_closed=base.fail_closed,
+        failure_reasons=base.failure_reasons,
+        trace_events=base.trace_events,
+        cascade_aware=base.cascade_aware,
+        diversity_aware=True,
     )
