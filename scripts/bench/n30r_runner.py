@@ -28,8 +28,12 @@ from scripts.bench.n30r_arm_adapters import (
     ArmRunResult,
     ProviderFn,
     run_bare_arm,
-    run_core_arm,
     _read_fixture_source,
+)
+from scripts.bench.n30r_real_core_bridge import (
+    RealCoreBridgeResult,
+    REAL_CORE_ARM_ID,
+    run_real_core_bridge,
 )
 
 
@@ -48,15 +52,15 @@ ARMS = {
         additional_capability="",
         arm_config_sha256=sha256_str("bare_arm_config"),
     ),
-    "N30R_B_7B_CORE": N30RArmSpec(
-        arm_id="N30R_B_7B_CORE",
+    "N30R_B_7B_REAL_CORE": N30RArmSpec(
+        arm_id="N30R_B_7B_REAL_CORE",
         model_provider="ollama",
         model_name="qwen2.5-coder:7b-instruct",
         model_parameters={"param_count": 7_000_000_000},
         nexus_enabled=True,
         core_armor_enabled=True,
         additional_capability="",
-        arm_config_sha256=sha256_str("core_arm_config"),
+        arm_config_sha256=sha256_str("real_core_arm_config"),
     ),
 }
 
@@ -100,13 +104,13 @@ def _materialize_task(task_dict: dict) -> N30RTaskSpec:
 def _build_attempt_receipt(
     task: N30RTaskSpec,
     arm: N30RArmSpec,
-    result: ArmRunResult,
+    result,
     run_id: str,
     seed: int,
     trial_index: int,
 ) -> N30RAttemptReceipt:
-    """Build attempt receipt from run result."""
-    return N30RAttemptReceipt(
+    """Build attempt receipt from ArmRunResult or RealCoreBridgeResult."""
+    base = N30RAttemptReceipt(
         run_id=run_id,
         task_id=task.task_id,
         trial_index=trial_index,
@@ -140,6 +144,27 @@ def _build_attempt_receipt(
         trust_mismatch=False,
         receipt_complete=True,
     )
+    # Add production path fields if present (RealCoreBridgeResult)
+    if hasattr(result, "execution_path_kind"):
+        base.execution_path_kind = result.execution_path_kind
+        base.planner_called = result.planner_called
+        base.planner_version = result.planner_version
+        base.route_truth_source = result.route_truth_source
+        base.signal_snapshot_sha256 = result.signal_snapshot_sha256
+        base.selected_executor = result.selected_executor
+        base.execution_topology = result.execution_topology
+        base.local_model_executor_called = result.local_model_executor_called
+        base.production_local_path_used = result.production_local_path_used
+        base.legacy_adapter_called = result.legacy_adapter_called
+        base.model_call_count = result.model_call_count
+        base.semantic_retry_count = result.semantic_retry_count
+        base.candidate_id = result.candidate_id
+        base.candidate_workspace_id = result.candidate_workspace_id
+        base.production_receipt_sha256 = result.production_receipt_sha256
+    else:
+        # Bare arm defaults
+        base.execution_path_kind = "bare_direct_provider"
+    return base
 
 
 def run_benchmark(
@@ -198,8 +223,8 @@ def run_benchmark(
                     )
                 elif arm_id == "N30R_A_7B_BARE":
                     result = run_bare_arm(task, arm, provider, seed, trial_idx, run_id)
-                elif arm_id == "N30R_B_7B_CORE":
-                    result = run_core_arm(task, arm, provider, seed, trial_idx, run_id)
+                elif arm_id == "N30R_B_7B_REAL_CORE":
+                    result = run_real_core_bridge(task, arm, provider, seed, trial_idx, run_id)
                 else:
                     raise ValueError(f"Unhandled arm: {arm_id}")
 
@@ -237,6 +262,22 @@ def run_benchmark(
                     "candidate_isolated": receipt.candidate_isolated,
                     "trust_mismatch": receipt.trust_mismatch,
                     "receipt_complete": receipt.receipt_complete,
+                    # N30R-R1 production path fields
+                    "execution_path_kind": receipt.execution_path_kind,
+                    "planner_called": receipt.planner_called,
+                    "planner_version": receipt.planner_version,
+                    "route_truth_source": receipt.route_truth_source,
+                    "signal_snapshot_sha256": receipt.signal_snapshot_sha256,
+                    "selected_executor": receipt.selected_executor,
+                    "execution_topology": receipt.execution_topology,
+                    "local_model_executor_called": receipt.local_model_executor_called,
+                    "production_local_path_used": receipt.production_local_path_used,
+                    "legacy_adapter_called": receipt.legacy_adapter_called,
+                    "model_call_count": receipt.model_call_count,
+                    "semantic_retry_count": receipt.semantic_retry_count,
+                    "candidate_id": receipt.candidate_id,
+                    "candidate_workspace_id": receipt.candidate_workspace_id,
+                    "production_receipt_sha256": receipt.production_receipt_sha256,
                 }
                 receipts.append(receipt_dict)
 

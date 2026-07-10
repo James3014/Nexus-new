@@ -35,7 +35,7 @@ def _fake_provider_returning(model: str, system_prompt: str, user_prompt: str) -
 def test_runner_supports_exactly_two_initial_arms():
     assert len(ARMS) == 2
     assert "N30R_A_7B_BARE" in ARMS
-    assert "N30R_B_7B_CORE" in ARMS
+    assert "N30R_B_7B_REAL_CORE" in ARMS
 
 
 def test_unknown_arm_is_rejected():
@@ -81,7 +81,7 @@ def test_bare_arm_does_not_call_capability_planner():
 
 def test_core_arm_calls_capability_planner():
     """Core arm must use planner-owned signal snapshot."""
-    arm = ARMS["N30R_B_7B_CORE"]
+    arm = ARMS["N30R_B_7B_REAL_CORE"]
     assert arm.nexus_enabled is True
     assert arm.core_armor_enabled is True
 
@@ -89,7 +89,7 @@ def test_core_arm_calls_capability_planner():
 def test_core_arm_uses_planner_owned_signal_snapshot():
     """Core arm's arm_config hash must differ from bare arm."""
     bare = ARMS["N30R_A_7B_BARE"]
-    core = ARMS["N30R_B_7B_CORE"]
+    core = ARMS["N30R_B_7B_REAL_CORE"]
     assert bare.arm_config_sha256 != core.arm_config_sha256
 
 
@@ -125,7 +125,7 @@ def test_environment_hash_equal_across_paired_arms():
 
 def test_arm_config_hash_differs():
     bare = ARMS["N30R_A_7B_BARE"]
-    core = ARMS["N30R_B_7B_CORE"]
+    core = ARMS["N30R_B_7B_REAL_CORE"]
     assert bare.arm_config_sha256 != core.arm_config_sha256
 
 
@@ -252,7 +252,7 @@ def test_golden_patch_is_not_in_prompt():
 
 def test_learning_retrieval_is_disabled():
     """Core arm must not enable learning retrieval."""
-    arm = ARMS["N30R_B_7B_CORE"]
+    arm = ARMS["N30R_B_7B_REAL_CORE"]
     assert arm.additional_capability == ""
     assert "learning" not in arm.arm_id.lower()
     assert "retrieval" not in arm.arm_id.lower()

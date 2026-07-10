@@ -71,7 +71,7 @@ class N30RArmSpec:
 
     VALID_ARM_IDS = frozenset({
         "N30R_A_7B_BARE",
-        "N30R_B_7B_CORE",
+        "N30R_B_7B_REAL_CORE",
     })
 
 
@@ -113,6 +113,22 @@ class N30RAttemptReceipt:
     candidate_isolated: bool
     trust_mismatch: bool
     receipt_complete: bool
+    # N30R-R1: production path evidence fields
+    execution_path_kind: str = ""  # "bare_direct_provider" | "nexus_production_localheal_pipeline"
+    planner_called: bool = False
+    planner_version: str = ""
+    route_truth_source: str = ""
+    signal_snapshot_sha256: str = ""
+    selected_executor: str = ""
+    execution_topology: str = ""
+    local_model_executor_called: bool = False
+    production_local_path_used: bool = False
+    legacy_adapter_called: bool = False
+    model_call_count: int = 0
+    semantic_retry_count: int = 0
+    candidate_id: str = ""
+    candidate_workspace_id: str = ""
+    production_receipt_sha256: str = ""
 
     def validate_terminal_invariants(self) -> list[str]:
         """Return list of invariant violations (empty = valid)."""
