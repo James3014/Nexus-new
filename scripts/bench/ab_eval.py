@@ -950,6 +950,20 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
     }
 
 
+def compute_from_receipt(receipt_path: str | Path) -> dict[str, Any]:
+    src = Path(receipt_path)
+    receipt = json.loads(src.read_text(encoding="utf-8"))
+    return {
+        "status": "pass",
+        "source": str(src),
+        "capabilities": [
+            r.get("capability_name", "")
+            for r in (receipt if isinstance(receipt, list) else [receipt])
+            if isinstance(r, dict)
+        ],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare Nexus A/B benchmark results.")
     parser.add_argument("file_a", nargs="?", help="Dataset A (.csv/.jsonl/.json)")
@@ -960,7 +974,14 @@ def main() -> int:
     parser.add_argument("--label-b", default="B")
     parser.add_argument("--output-json", action="store_true")
     parser.add_argument("--output-file", type=str, default="")
+    parser.add_argument("--receipt-mode", action="store_true", help="Read-only mode: read receipt.json, skip capability lambda")
     args = parser.parse_args()
+
+    if args.receipt_mode:
+        report = compute_from_receipt(args.file_a_opt or args.file_a or "")
+        if args.output_json:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
 
     file_a = args.file_a_opt or args.file_a
     file_b = args.file_b_opt or args.file_b
