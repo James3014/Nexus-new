@@ -1,0 +1,93 @@
+{
+  "schema": "n30r_v2_paired_manifest_v1",
+  "experiment_id": "n30r_v2_four_task_bare_core",
+  "purpose": "engineering_pilot",
+  "model_family": "qwen_7b",
+  "trials_per_arm": 1,
+  "base_seed": 4200,
+  "tasks": [
+    {
+      "task_id": "n30r_smoke_syntax",
+      "source_relpath": "tests/fixtures/n30r/smoke/syntax_task.py",
+      "task_statement": "Fix the missing colon in the greet function definition.",
+      "task_statement_sha256": "9cfd8b4257ac55eea8c0f44729f1b79bc8afa3d7158f007a9c8dc509afc674f4",
+      "source_fixture_sha256": "80136f6daca6161a44d4946f8aa496f8dcfaa1e270d881005f905125d9d03044",
+      "verifier_command": ["python3", "-c", "from f import greet; assert greet('world') == 'Hello, world!'"],
+      "verifier_contract_sha256": "fe9378c78f96ba15480c3aa7a3cbe9498ecc1699eed76df01c2813cd2cc554da",
+      "expected_failure_signature": "SyntaxError",
+      "task_seed": 4201,
+      "execution_order": ["N30R_A_7B_BARE", "N30R_B_7B_REAL_CORE"]
+    },
+    {
+      "task_id": "n30r_smoke_anchor",
+      "source_relpath": "tests/fixtures/n30r/smoke/anchor_task.py",
+      "task_statement": "Fix the wrong variable name in the double function.",
+      "task_statement_sha256": "f860f5ba02f146ecd61edb530257372b21e30bf0023bbf1cb6993938b0fe4d7f",
+      "source_fixture_sha256": "80967c4ca671607d617842bb2d74189fcf0bdccb416f3b54e9fc7a829f0b8165",
+      "verifier_command": ["python3", "-c", "from f import double; assert double(5) == 10"],
+      "verifier_contract_sha256": "751b5cef7cd624f6082811926720f2a305b3176fff94b0cd0a8fad719bb86ce9",
+      "expected_failure_signature": "NameError",
+      "task_seed": 4202,
+      "execution_order": ["N30R_B_7B_REAL_CORE", "N30R_A_7B_BARE"]
+    },
+    {
+      "task_id": "n30r_smoke_semantic",
+      "source_relpath": "tests/fixtures/n30r/smoke/semantic_task.py",
+      "task_statement": "Fix the is_even function to correctly identify even numbers.",
+      "task_statement_sha256": "78585b2c275975fef0f258258c487474f484fe33dff1f92557c712eb4c342d8f",
+      "source_fixture_sha256": "34b87f276fe5bace7ceb5a5cf38765fc599e4ecfe4abd6e651c137f6f7368b42",
+      "verifier_command": ["python3", "-c", "from f import is_even; assert is_even(4) is True; assert is_even(3) is False"],
+      "verifier_contract_sha256": "c821bcfacf493a18a11fc9fabd7aa594ce6d17af13fe165ebc8183a3452e1a97",
+      "expected_failure_signature": "AssertionError",
+      "task_seed": 4203,
+      "execution_order": ["N30R_A_7B_BARE", "N30R_B_7B_REAL_CORE"]
+    },
+    {
+      "task_id": "n30r_smoke_multi",
+      "source_relpath": "tests/fixtures/n30r/smoke/multi_assert_task.py",
+      "task_statement": "Fix the two bugs in count_positives: wrong increment value.",
+      "task_statement_sha256": "f4336b414bcb00e6490971883b1f98c54486872db6adfa50a6eba390c49ad8fa",
+      "source_fixture_sha256": "28adf6fabf14dc31e10d052d36351110b1360ab9285cbd430c0ca5858891e045",
+      "verifier_command": ["python3", "-c", "from f import count_positives; assert count_positives([1, -1, 2, 0, 3]) == 3; assert count_positives([]) == 0; assert count_positives([-1, -2]) == 0"],
+      "verifier_contract_sha256": "3045b383c72ba23ad79f09b6c08b219788f378dbed566a94744dcf4fd8261532",
+      "expected_failure_signature": "AssertionError",
+      "task_seed": 4204,
+      "execution_order": ["N30R_B_7B_REAL_CORE", "N30R_A_7B_BARE"]
+    }
+  ],
+  "arms": {
+    "N30R_A_7B_BARE": {
+      "arm_id": "N30R_A_7B_BARE",
+      "model_provider": "ollama",
+      "model_name": "qwen2.5-coder:7b-instruct",
+      "model_parameters": {"param_count": 7000000000},
+      "nexus_enabled": false,
+      "core_armor_enabled": false,
+      "additional_capability": "",
+      "max_model_calls": 1,
+      "semantic_retry_allowed": false,
+      "description": "Bare model: direct provider, no Nexus capabilities"
+    },
+    "N30R_B_7B_REAL_CORE": {
+      "arm_id": "N30R_B_7B_REAL_CORE",
+      "model_provider": "ollama",
+      "model_name": "qwen2.5-coder:7b-instruct",
+      "model_parameters": {"param_count": 7000000000},
+      "nexus_enabled": true,
+      "core_armor_enabled": true,
+      "additional_capability": "",
+      "max_model_calls": 2,
+      "semantic_retry_allowed": true,
+      "max_semantic_retries": 1,
+      "description": "Nexus Full Armor: CapabilityPlanner + LocalModelExecutor + pipeline"
+    }
+  },
+  "claim_boundary": {
+    "v2_live_executed": false,
+    "effectiveness_measured": false,
+    "production_ready": false,
+    "public_claim_allowed": false,
+    "engineering_pilot_only": true,
+    "no_statistical_significance_claim": true
+  }
+}

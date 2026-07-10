@@ -1,0 +1,146 @@
+{
+  "schema": "n30r_v2_paired_acceptance_policy_v1",
+  "version": "1.0",
+  "description": "Fairness and validity rules for V2 paired bare/core evaluation",
+  "fairness_contract": {
+    "same_conditions": [
+      "model_family",
+      "model_name",
+      "model_tag",
+      "task_statement",
+      "source_fixture",
+      "verifier_command",
+      "timeout_policy",
+      "trial_count",
+      "seed_policy",
+      "provider_endpoint",
+      "temperature_top_p_policy"
+    ],
+    "documented_differences": {
+      "bare": {
+        "max_model_calls": 1,
+        "semantic_retry_allowed": false,
+        "nexus_capabilities": "none",
+        "prompt_type": "simple_repair"
+      },
+      "core": {
+        "max_model_calls": 2,
+        "semantic_retry_allowed": true,
+        "max_semantic_retries": 1,
+        "nexus_capabilities": "full_armor",
+        "prompt_type": "assertion_grounded_with_armor_evidence"
+      }
+    },
+    "cost_accounting": "Core extra retry is Armor cost, not hidden"
+  },
+  "pair_validity": {
+    "required_matches": [
+      "task_id",
+      "source_fixture_sha256",
+      "verifier_contract_sha256",
+      "model_actual",
+      "provider_actual"
+    ],
+    "required_flags": [
+      "contract_valid=true",
+      "execution_completed=true"
+    ],
+    "core_additional": [
+      "armor_oracle_status in (FULL_ARMOR_PATH_ACCEPTED, DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING)"
+    ],
+    "live_core_additional": [
+      "armor_oracle_status == FULL_ARMOR_PATH_ACCEPTED"
+    ]
+  },
+  "invalid_row_handling": {
+    "cannot_become_zero": true,
+    "cannot_count_in_denominator": true,
+    "must_count_in_invalid": true,
+    "infra_failure_not_model_failure": true
+  },
+  "terminal_status_rules": {
+    "allowed": [
+      "VERIFIED_SOLVE",
+      "VERIFIED_FAIL",
+      "MODEL_TIMEOUT",
+      "PROVIDER_ERROR",
+      "PROTOCOL_INVALID",
+      "APPLY_INVALID",
+      "VERIFIER_INVALID",
+      "CONTRACT_INVALID",
+      "INFRA_INVALID"
+    ],
+    "solved_rules": [
+      "solved=true only allowed when terminal_status=VERIFIED_SOLVE",
+      "VERIFIED_SOLVE requires verifier_reached=true and verifier_status=pass",
+      "VERIFIED_FAIL requires verifier_reached=true and verifier_status=fail"
+    ],
+    "forbidden_inferences": [
+      "wall_time > threshold => MODEL_TIMEOUT",
+      "has patch => solved",
+      "has verifier field => verifier_reached"
+    ]
+  },
+  "effectiveness_decision": {
+    "statuses": [
+      "V2_NOT_RUN",
+      "V2_INVALID",
+      "V2_VALID_NO_UPLIFT",
+      "V2_DIRECTIONAL_UPLIFT",
+      "V2_DIRECTIONAL_REGRESSION"
+    ],
+    "rules": {
+      "V2_NOT_RUN": "only plan/dry validation, no live results",
+      "V2_INVALID": "valid_pairs < 4 or model identity mismatch or oracle rejected",
+      "V2_VALID_NO_UPLIFT": "4 valid pairs and core_solves == bare_solves",
+      "V2_DIRECTIONAL_UPLIFT": "4 valid pairs and core_solves > bare_solves",
+      "V2_DIRECTIONAL_REGRESSION": "4 valid pairs and core_solves < bare_solves"
+    },
+    "forbidden_claims": [
+      "statistically significant",
+      "proven improvement",
+      "near GPT/Gemini",
+      "production ready"
+    ]
+  },
+  "metrics_required": [
+    "total_tasks",
+    "valid_pairs",
+    "invalid_pairs",
+    "bare_verified_solves",
+    "core_verified_solves",
+    "solve_delta",
+    "bare_model_response_rate",
+    "core_model_response_rate",
+    "bare_protocol_parse_rate",
+    "core_protocol_parse_rate",
+    "bare_candidate_rate",
+    "core_candidate_rate",
+    "bare_apply_success_rate",
+    "core_apply_success_rate",
+    "bare_verifier_reach_rate",
+    "core_verifier_reach_rate",
+    "bare_retry_count",
+    "core_retry_count",
+    "bare_mean_wall_time",
+    "core_mean_wall_time",
+    "bare_total_model_calls",
+    "core_total_model_calls"
+  ],
+  "paired_matrix_fields": [
+    "both_solve",
+    "bare_only_solve",
+    "core_only_solve",
+    "neither_solve"
+  ],
+  "failure_family_categories": [
+    "provider",
+    "timeout",
+    "protocol",
+    "candidate",
+    "apply",
+    "verifier",
+    "contract",
+    "infra"
+  ]
+}
