@@ -1,0 +1,9 @@
+{
+  "ref_id": "v1:1783725855:verifier_contract",
+  "verifier_command": [
+    "python3",
+    "-c",
+    "from f import is_even; assert is_even(4) is True; assert is_even(3) is False"
+  ],
+  "verifier_contract_sha256": "c821bcfacf493a18a11fc9fabd7aa594ce6d17af13fe165ebc8183a3452e1a97"
+}

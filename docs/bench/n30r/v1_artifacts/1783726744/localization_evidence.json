@@ -1,0 +1,9 @@
+{
+  "ref_id": "v1:1783726744:localization",
+  "target_symbol": "is_even",
+  "localization_method": "ast_boundary",
+  "start_line": 1,
+  "end_line": 2,
+  "source_anchor_sha256": "7b982d6542527380067e6e9d97d9872d37b25a71bf16829356a2cdb6d2fa77a3",
+  "source_anchor_present": true
+}

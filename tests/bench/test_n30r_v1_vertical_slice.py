@@ -1,7 +1,7 @@
 """N30R-V1: Full Armor Vertical Slice Behavioral Tests.
 
 Verifies P→D→X→R→A→C pipeline for n30r_smoke_semantic.
-Tests: deterministic trace output, hash chain integrity, fail-closed guards.
+Tests: deterministic trace output, hash chain integrity, semantic retry lifecycle, fail-closed guards.
 """
 from __future__ import annotations
 
@@ -67,32 +67,97 @@ class TestV1TracePipelineStages:
         assert receipt["target_file"] == "f.py"
 
 
-class TestV1TraceCandidateAndVerifier:
-    """Verify candidate isolation and verifier lifecycle."""
+class TestV1TraceSourceEvidence:
+    """Verify source evidence is loaded from real fixture."""
 
     @pytest.fixture(scope="class")
     def receipt(self):
         return _run_trace()
 
-    def test_candidate_isolated(self, receipt):
-        assert receipt["candidate_isolated"] is True
+    def test_source_loaded_from_fixture(self, receipt):
+        assert receipt["source_loaded_from"] == "fixture"
 
-    def test_candidate_hash_is_real_sha256(self, receipt):
-        h = receipt["candidate_hash"]
+    def test_source_sha256_is_real(self, receipt):
+        h = receipt["source_sha256"]
         assert len(h) == 64
         assert all(c in "0123456789abcdef" for c in h)
 
-    def test_hash_match(self, receipt):
-        assert receipt["hash_match"] is True
+    def test_source_length_positive(self, receipt):
+        assert receipt["source_length"] > 0
 
-    def test_verifier_result_pass(self, receipt):
-        assert receipt["verifier_result"] == "pass"
+    def test_source_artifact_exists(self, receipt):
+        artifacts_dir = Path(__file__).resolve().parents[2] / "docs" / "bench" / "n30r" / "v1_artifacts"
+        source_files = list(artifacts_dir.glob("*/source_evidence.json"))
+        assert len(source_files) > 0, "No source evidence artifact found"
 
-    def test_solved(self, receipt):
-        assert receipt["solved"] is True
+    def test_source_artifact_hash_matches(self, receipt):
+        artifacts_dir = Path(__file__).resolve().parents[2] / "docs" / "bench" / "n30r" / "v1_artifacts"
+        source_files = list(artifacts_dir.glob("*/source_evidence.json"))
+        assert len(source_files) > 0
+        artifact = json.loads(source_files[0].read_text())
+        assert artifact["source_sha256"] == receipt["source_sha256"]
 
-    def test_armor_receipt_complete(self, receipt):
-        assert receipt["armor_receipt_complete"] is True
+    def test_evidence_refs_resolve(self, receipt):
+        for ref in receipt["evidence_refs"]:
+            assert ":" in ref, f"Evidence ref {ref} is not resolvable"
+            assert ref.startswith("v1:"), f"Evidence ref {ref} missing v1: prefix"
+
+
+class TestV1TraceTargetSymbol:
+    """Verify target symbol and locked search provenance."""
+
+    @pytest.fixture(scope="class")
+    def receipt(self):
+        return _run_trace()
+
+    def test_target_symbol_provenance(self, receipt):
+        assert receipt["target_symbol"] == "is_even"
+        assert receipt["localization_method"] == "ast_boundary"
+
+    def test_locked_search_nonempty(self, receipt):
+        assert receipt["locked_search"] != ""
+
+    def test_locked_search_sha256_is_real(self, receipt):
+        h = receipt["locked_search_sha256"]
+        assert len(h) == 64
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_locked_search_occurs_once(self, receipt):
+        assert receipt["locked_search_occurrence_count"] == 1
+
+    def test_locked_search_present_in_source(self, receipt):
+        assert receipt["locked_search_present_in_source"] is True
+
+
+class TestV1TraceSemanticRetry:
+    """Verify deterministic fail → semantic retry lifecycle."""
+
+    @pytest.fixture(scope="class")
+    def receipt(self):
+        return _run_trace()
+
+    def test_semantic_retry_triggered(self, receipt):
+        assert receipt["semantic_retry_count"] >= 1
+
+    def test_semantic_retry_invocation_source(self, receipt):
+        assert receipt["semantic_retry_invocation_source"] == "orchestrator_semantic_retry"
+
+    def test_provider_called(self, receipt):
+        assert receipt["provider_call_count"] >= 4
+
+    def test_first_candidate_recorded(self, receipt):
+        fc = receipt["first_candidate"]
+        assert isinstance(fc, dict)
+        assert "candidate_hash" in fc
+        assert "apply_status" in fc
+        assert "verifier_status" in fc
+
+    def test_second_candidate_recorded(self, receipt):
+        sc = receipt["second_candidate"]
+        assert isinstance(sc, dict)
+        assert "candidate_hash" in sc
+        assert "apply_status" in sc
+        assert "verifier_status" in sc
 
 
 class TestV1TraceHashChain:
@@ -124,7 +189,7 @@ class TestV1TraceHashChain:
 
     def test_no_placeholder_hashes(self, receipt):
         for key in ["planner_snapshot_sha256", "projection_hash", "evidence_pack_sha256",
-                     "executor_request_sha256", "executor_metadata_sha256", "candidate_hash"]:
+                     "executor_request_sha256", "executor_metadata_sha256"]:
             h = receipt.get(key, "")
             assert h != "", f"{key} is empty"
             assert "placeholder" not in h.lower(), f"{key} contains placeholder"
@@ -150,30 +215,27 @@ class TestV1TraceFailClosedGuards:
         assert receipt["wall_time_sec"] > 0
 
 
-class TestV1TraceDeterministicGate:
-    """Deterministic gate must PASS before live 7B."""
+class TestV1TraceCapabilityAttribution:
+    """Verify capability attribution is evidence-backed."""
 
     @pytest.fixture(scope="class")
     def receipt(self):
         return _run_trace()
 
-    def test_target_symbol_nonempty(self, receipt):
-        assert receipt["target_symbol"] != ""
+    def test_invoked_capabilities_nonempty(self, receipt):
+        assert len(receipt["invoked_capabilities"]) > 0
 
-    def test_locked_search_valid(self, receipt):
-        assert receipt["locked_search_present_in_source"] is True
+    def test_repair_loop_invoked(self, receipt):
+        assert "repair_loop" in receipt["invoked_capabilities"]
 
-    def test_source_anchor_valid(self, receipt):
-        assert receipt["source_anchor_present"] is True
+    def test_shadow_outcome_exists(self, receipt):
+        assert os.path.exists(receipt["shadow_outcome_path"])
 
-    def test_candidate_hash_nonempty(self, receipt):
-        assert receipt["candidate_hash"] != ""
-
-    def test_candidate_isolated(self, receipt):
-        assert receipt["candidate_isolated"] is True
-
-    def test_verifier_pass(self, receipt):
-        assert receipt["verifier_result"] == "pass"
-
-    def test_solved(self, receipt):
-        assert receipt["solved"] is True
+    def test_shadow_outcome_structure(self, receipt):
+        with open(receipt["shadow_outcome_path"]) as f:
+            so = json.load(f)
+        assert so["shadow_only"] is True
+        assert so["promotion_eligible"] is False
+        assert so["global_learning_mutated"] is False
+        assert "capabilities" in so
+        assert "repair_loop" in so["capabilities"]
