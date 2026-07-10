@@ -1,6 +1,11 @@
 # N30R-R4 Closeout: C1 ExecutionEvidence Retry (uv env)
 
-**Status**: N30R_R4_C1_SMOKE_PASS
+**Status**: INVALID_AS_PRODUCTION_CAPABILITY_TEST
+
+## Superseded by
+N30R-W0 Contract Audit — C1 does not invoke LocalModelExecutor.run(),
+does not execute production localheal_pipeline retry, and contains
+self-asserted production provenance.
 
 ## run ID
 20260710T112500Z (approx)
