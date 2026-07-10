@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from nexus.knowledge.autonomous_memory_curator import (
     AutonomousMemoryCurator,
     Trajectory,
     HarnessUpdate,
+    _parse_automem_response,
 )
 
 
@@ -53,3 +56,38 @@ class TestAutonomousMemoryCurator:
         h = HarnessUpdate(recommendations=[], timestamp=1.0)
         with pytest.raises(Exception):
             h.recommendations = ["x"]
+
+    # === L3-D: real AUTOMEM ===
+
+    def test_real_autonomous_memory_curator_disabled_stub(self):
+        if "NEXUS_AUTOMEM_LLM" in os.environ:
+            del os.environ["NEXUS_AUTOMEM_LLM"]
+        curator = AutonomousMemoryCurator()
+        result = curator.curate([])
+        assert result.recommendations == []
+
+    def test_real_autonomous_memory_curator_calls_llm(self):
+        os.environ["NEXUS_AUTOMEM_LLM"] = "qwen2.5-coder:3b"
+        curator = AutonomousMemoryCurator()
+        traj = [Trajectory("s1", "fix", "pass", "keep")]
+        result = curator.curate(traj)
+        assert isinstance(result, HarnessUpdate)
+        del os.environ["NEXUS_AUTOMEM_LLM"]
+
+    def test_real_autonomous_memory_curator_1000_steps_handling(self):
+        os.environ["NEXUS_AUTOMEM_LLM"] = "qwen2.5-coder:3b"
+        curator = AutonomousMemoryCurator()
+        trajs = [Trajectory(f"s{i}", f"action{i}", f"result{i}", "keep") for i in range(1000)]
+        result = curator.curate(trajs)
+        assert isinstance(result, HarnessUpdate)
+        del os.environ["NEXUS_AUTOMEM_LLM"]
+
+    def test_real_autonomous_memory_curator_recommendations_extraction(self):
+        raw = '{"recommendations": ["fix memory leak", "add retry logic"]}'
+        recs = _parse_automem_response(raw)
+        assert len(recs) == 2
+        assert "fix memory leak" in recs
+
+    def test_real_autonomous_memory_curator_fallback(self):
+        assert _parse_automem_response("") == []
+        assert _parse_automem_response("not json") == []
