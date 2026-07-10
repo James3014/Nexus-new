@@ -1,0 +1,49 @@
+{
+  "schema": "nexus.n30r.smoke_manifest.v1",
+  "tasks": [
+    {
+      "task_id": "n30r_smoke_syntax",
+      "split": "smoke",
+      "source_relpath": "tests/fixtures/n30r/smoke/syntax_task.py",
+      "task_statement": "Fix the missing colon in the greet function definition.",
+      "expected_failure_signature": "SyntaxError",
+      "verifier_command": ["python3", "-c", "from f import greet; assert greet('world') == 'Hello, world!'"],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_path": "tests/fixtures/n30r/smoke/syntax_task.py"
+    },
+    {
+      "task_id": "n30r_smoke_anchor",
+      "split": "smoke",
+      "source_relpath": "tests/fixtures/n30r/smoke/anchor_task.py",
+      "task_statement": "Fix the wrong variable name in the double function.",
+      "expected_failure_signature": "NameError",
+      "verifier_command": ["python3", "-c", "from f import double; assert double(5) == 10"],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_path": "tests/fixtures/n30r/smoke/anchor_task.py"
+    },
+    {
+      "task_id": "n30r_smoke_semantic",
+      "split": "smoke",
+      "source_relpath": "tests/fixtures/n30r/smoke/semantic_task.py",
+      "task_statement": "Fix the is_even function to correctly identify even numbers.",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": ["python3", "-c", "from f import is_even; assert is_even(4) is True; assert is_even(3) is False"],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_path": "tests/fixtures/n30r/smoke/semantic_task.py"
+    },
+    {
+      "task_id": "n30r_smoke_multi",
+      "split": "smoke",
+      "source_relpath": "tests/fixtures/n30r/smoke/multi_assert_task.py",
+      "task_statement": "Fix the two bugs in count_positives: wrong increment value.",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": ["python3", "-c", "from f import count_positives; assert count_positives([1, -1, 2, 0, 3]) == 3; assert count_positives([]) == 0; assert count_positives([-1, -2]) == 0"],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_path": "tests/fixtures/n30r/smoke/multi_assert_task.py"
+    }
+  ]
+}
