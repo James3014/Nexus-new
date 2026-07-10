@@ -103,3 +103,53 @@ class TestRealLocalDiagnosis:
         diag = RealLocalDiagnosis()
         assert diag.PROVIDER_NAME == "OllamaLocalModelProvider"
         del os.environ["NEXUS_OLLAMA_ENABLED"]
+
+    # === L3-A: real 3B advisor ===
+
+    def test_real_3b_advisor_ollama_disabled_stub(self) -> None:
+        if "NEXUS_OLLAMA_ENABLED" in os.environ:
+            del os.environ["NEXUS_OLLAMA_ENABLED"]
+        diag = RealLocalDiagnosis()
+        skeleton = {"task_id": "t1", "p3_task_difficulty": "medium"}
+        anchor = {"target_file": "a.py", "target_symbol": "foo"}
+        receipt = diag.compute_p3_local_diagnosis_runtime(skeleton, anchor)
+        assert receipt.advisor_recommendation == ""
+
+    def test_real_3b_advisor_ollama_enabled_uses_ollama(self) -> None:
+        os.environ["NEXUS_OLLAMA_ENABLED"] = "1"
+        diag = RealLocalDiagnosis()
+        skeleton = {"task_id": "t1", "p3_task_difficulty": "hard"}
+        anchor = {"target_file": "b.py", "target_symbol": "bar"}
+        receipt = diag.compute_p3_local_diagnosis_runtime(skeleton, anchor)
+        assert isinstance(receipt, P3LocalDiagnosisRuntimeReceipt)
+        assert receipt.cloud_call_invoked is True
+        del os.environ["NEXUS_OLLAMA_ENABLED"]
+
+    def test_real_3b_advisor_prompt_construction(self) -> None:
+        from nexus.services.local_heal.p3_local_diagnosis_runtime import _build_diagnosis_prompt
+        skeleton = {
+            "task_id": "t1",
+            "p3_task_difficulty": "hard",
+            "p3_target_file": "src/main.py",
+            "p3_target_symbol": "calculate_total",
+            "p3_line_span": "42-58",
+            "p3_failure_class": "IndexError",
+        }
+        prompt = _build_diagnosis_prompt(skeleton)
+        assert "hard" in prompt
+        assert "src/main.py" in prompt
+        assert "calculate_total" in prompt
+        assert "42-58" in prompt
+        assert "IndexError" in prompt
+
+    def test_real_3b_advisor_json_parsing(self) -> None:
+        from nexus.services.local_heal.p3_local_diagnosis_runtime import _parse_advisor_response
+        raw = '{"advisor_recommendation": "check boundary conditions on line 42"}'
+        result = _parse_advisor_response(raw)
+        assert result == "check boundary conditions on line 42"
+
+    def test_real_3b_advisor_fallback_on_empty_response(self) -> None:
+        from nexus.services.local_heal.p3_local_diagnosis_runtime import _parse_advisor_response
+        assert _parse_advisor_response("") == ""
+        assert _parse_advisor_response("  ") == ""
+        assert _parse_advisor_response("not json") != ""  # fallback truncation

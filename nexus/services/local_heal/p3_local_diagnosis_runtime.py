@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
     LocalModelProviderRequest,
+    OllamaLocalModelProvider,
 )
 from nexus.services.local_heal.p3_local_diagnosis import (
     P3LocalDiagnosis,
@@ -38,6 +40,7 @@ class P3LocalDiagnosisRuntimeReceipt:
     claim_eligible: bool
     public_claim_allowed: bool
     reason: str
+    advisor_recommendation: str = ""
     cloud_call_invoked: bool = True
     runtime_behavior_changed: bool = True
 
@@ -74,7 +77,49 @@ def _compute_p3_local_diagnosis_runtime(
         claim_eligible=base.claim_eligible,
         public_claim_allowed=base.public_claim_allowed,
         reason=base.reason,
+        advisor_recommendation="",
     )
+
+
+DIAGNOSIS_PROMPT_TEMPLATE = """You are a 3B software repair advisor. Analyze the following diagnosis context and provide a repair recommendation.
+
+Task difficulty: {task_difficulty}
+Target file: {target_file}
+Target symbol: {target_symbol}
+Line span: {line_span}
+Failure class: {failure_class}
+
+Respond in JSON format with exactly one field:
+{{"advisor_recommendation": "your concise recommendation here"}}
+"""
+
+
+def _build_diagnosis_prompt(skeleton: dict[str, Any]) -> str:
+    return DIAGNOSIS_PROMPT_TEMPLATE.format(
+        task_difficulty=skeleton.get("p3_task_difficulty", "unknown"),
+        target_file=skeleton.get("p3_target_file", ""),
+        target_symbol=skeleton.get("p3_target_symbol", ""),
+        line_span=skeleton.get("p3_line_span", ""),
+        failure_class=skeleton.get("p3_failure_class", ""),
+    )
+
+
+def _parse_advisor_response(raw_text: str) -> str:
+    if not raw_text:
+        return ""
+    text = raw_text.strip()
+    # Try to extract JSON block
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1:
+        try:
+            parsed = json.loads(text[start:end+1])
+            rec = parsed.get("advisor_recommendation", "")
+            return str(rec).strip() if rec else ""
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Fallback: use raw text truncated
+    return text[:200]
 
 
 class RealLocalDiagnosis:
@@ -90,14 +135,21 @@ class RealLocalDiagnosis:
         if not self.ollama_enabled:
             return _compute_p3_local_diagnosis_runtime(skeleton, anchor)
 
-        provider = InertLocalModelProvider()
-        request = LocalModelProviderRequest(
-            task_id=skeleton.get("task_id", ""),
-            prompt=skeleton.get("p3_failure_summary", ""),
-            evidence_refs=(),
-            model_name=self.MODEL_NAME,
-        )
-        provider.generate(request)
+        try:
+            provider = OllamaLocalModelProvider()
+            prompt = _build_diagnosis_prompt(skeleton)
+            request = LocalModelProviderRequest(
+                task_id=skeleton.get("task_id", ""),
+                prompt=prompt,
+                evidence_refs=(),
+                model_name=self.MODEL_NAME,
+                api_type="generate",
+            )
+            response = provider.generate(request)
+            recommendation = _parse_advisor_response(response.output_text)
+        except Exception:
+            recommendation = ""
+
         base = compute_p3_local_diagnosis(
             request_metadata={"task_id": skeleton.get("task_id", "")},
             p3_skeleton=skeleton,
@@ -125,6 +177,7 @@ class RealLocalDiagnosis:
             claim_eligible=base.claim_eligible,
             public_claim_allowed=base.public_claim_allowed,
             reason=base.reason,
+            advisor_recommendation=recommendation,
             cloud_call_invoked=True,
             runtime_behavior_changed=True,
         )
@@ -134,4 +187,5 @@ def compute_p3_local_diagnosis_runtime(
     skeleton: dict[str, Any],
     anchor: dict[str, Any],
 ) -> P3LocalDiagnosisRuntimeReceipt:
-    return _compute_p3_local_diagnosis_runtime(skeleton, anchor)
+    diag = RealLocalDiagnosis()
+    return diag.compute_p3_local_diagnosis_runtime(skeleton, anchor)
