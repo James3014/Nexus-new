@@ -9,9 +9,9 @@ from nexus.services.local_heal.local_model_capability_wiring import (
 )
 
 
-def test_registry_count_is_34():
+def test_registry_count_is_51():
     wiring = build_local_model_capability_wiring()
-    assert len(wiring) == 34
+    assert len(wiring) == 51
 
 
 def test_all_registry_caps_present():

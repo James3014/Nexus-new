@@ -1,0 +1,95 @@
+{
+  "trace_id": "w1c_capability_projection_trace_w1c_001",
+  "created_at": "2026-07-10T16:00:00Z",
+  "baseline_sha": "72f92400a",
+  "description": "N30R-W1C capability projection closure trace with deterministic mock data",
+
+  "planner_snapshot_sha256": "mock_planner_snapshot_sha256_for_deterministic_trace",
+  "top_level_selected_capabilities_status": "PASS",
+
+  "ssd_selected_capability_count": 8,
+  "ssd_capability_ids": [
+    "harness_preflight_sensor",
+    "repair_loop",
+    "research_route",
+    "delivery_gate",
+    "mempalace_gate",
+    "artifact_gate",
+    "claim_gate",
+    "local_model_executor"
+  ],
+
+  "planner_selected_capabilities": [
+    "harness_preflight_sensor",
+    "repair_loop",
+    "research_route",
+    "delivery_gate",
+    "mempalace_gate",
+    "artifact_gate",
+    "claim_gate",
+    "local_model_executor"
+  ],
+  "executable_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "advisory_capabilities": [],
+  "control_plane_capabilities": [
+    "harness_preflight_sensor",
+    "mempalace_gate",
+    "research_route"
+  ],
+  "unknown_capabilities": [],
+  "dropped_capabilities": [],
+  "dependency_errors": [],
+
+  "projection_valid": true,
+  "projection_sha256": "mock_projection_hash_deterministic",
+
+  "executor_request_selected_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "pipeline_context_selected_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "executor_metadata_selected_capabilities_used": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+
+  "planner_to_projection_accounted": true,
+  "projection_to_executor_match": true,
+  "executor_to_pipeline_match": true,
+  "pipeline_to_receipt_match": true,
+
+  "capability_classification_detail": {
+    "artifact_gate": {"category": "executable", "wiring_status": "gate_executable", "local_model_supported": true},
+    "claim_gate": {"category": "executable", "wiring_status": "gate_executable", "local_model_supported": true},
+    "delivery_gate": {"category": "executable", "wiring_status": "gate_executable", "local_model_supported": true},
+    "local_model_executor": {"category": "executable", "wiring_status": "executable", "local_model_supported": true},
+    "repair_loop": {"category": "executable", "wiring_status": "localheal_executable", "local_model_supported": true},
+    "harness_preflight_sensor": {"category": "control_plane", "wiring_status": "not_in_registry", "local_model_supported": false, "classification_reason": "planner-level governance sensor"},
+    "mempalace_gate": {"category": "control_plane", "wiring_status": "not_in_registry", "local_model_supported": false, "classification_reason": "planner-level governance gate"},
+    "research_route": {"category": "control_plane", "wiring_status": "not_in_registry", "local_model_supported": false, "classification_reason": "planner-level routing diagnostic"}
+  },
+
+  "execution_evidence": {
+    "live_ollama_calls": 0,
+    "mock_provider_used": true,
+    "deterministic": true
+  }
+}

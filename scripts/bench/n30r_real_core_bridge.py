@@ -53,7 +53,10 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
     LocalModelProviderRequest,
 )
-from nexus.services.local_heal.local_model_capability_wiring import project_planner_capabilities_for_local_executor
+from nexus.services.local_heal.local_model_capability_wiring import (
+    project_planner_capabilities_for_local_executor,
+    LocalExecutorCapabilityProjection,
+)
 
 
 REAL_CORE_ARM_ID = "N30R_B_7B_REAL_CORE"
@@ -226,6 +229,15 @@ def run_real_core_bridge(
             seed=seed, trial_index=trial_index,
         )
 
+    projection_hash = hashlib.sha256(
+        json.dumps({
+            "source": projection.source,
+            "executable": list(projection.executable_capabilities),
+            "advisory": list(projection.advisory_capabilities),
+            "control_plane": list(projection.control_plane_capabilities),
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
     executor_request = LocalModelExecutorRequest(
         task_id=task.task_id,
         problem_statement=task.task_statement,
@@ -238,6 +250,15 @@ def run_real_core_bridge(
             "trial_index": trial_index,
             "seed": seed,
             "arm_id": REAL_CORE_ARM_ID,
+            "capability_projection_source": projection.source,
+            "planner_selected_capability_count": projection.planner_selected_count,
+            "executor_selected_capability_count": projection.projected_count,
+            "executable_capability_count": len(projection.executable_capabilities),
+            "advisory_capability_count": len(projection.advisory_capabilities),
+            "control_plane_capability_count": len(projection.control_plane_capabilities),
+            "unknown_capability_count": len(projection.unknown_capabilities),
+            "dropped_capability_count": len(projection.dropped_capabilities),
+            "capability_projection_sha256": projection_hash,
         },
         route_context={
             "signal_snapshot": signal_snapshot,
@@ -283,6 +304,21 @@ def run_real_core_bridge(
         )
 
     meta = executor_response.raw_model_metadata if isinstance(executor_response.raw_model_metadata, dict) else {}
+
+    # Executor postcondition: selected_capabilities_used must match request
+    meta_caps_used = meta.get("selected_capabilities_used")
+    if meta_caps_used is not None:
+        request_caps = tuple(executor_request.selected_capabilities)
+        meta_caps_tuple = tuple(meta_caps_used) if isinstance(meta_caps_used, (list, tuple)) else ()
+        if request_caps != meta_caps_tuple:
+            wall_time = time.time() - start
+            return _fail_closed_result(
+                wall_time, f"executor_capability_projection_mismatch:request={request_caps},metadata={meta_caps_tuple}",
+                signal_snapshot=signal_snapshot, planner_called=True,
+                orig_code=orig_code, task=task, run_id=run_id,
+                seed=seed, trial_index=trial_index,
+                executor_invoked=True,
+            )
 
     pipeline_run_called = bool(meta.get("localheal_pipeline_run_called", False))
     pipeline_actual_execution = bool(meta.get("localheal_pipeline_actual_execution", False))

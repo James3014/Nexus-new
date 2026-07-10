@@ -452,6 +452,34 @@ def classify_selected_capabilities(
 # N30R-W1: Planner SSD → Executor Capability Projection
 # ---------------------------------------------------------------------------
 
+CONTROLLER_PLANE_CAPABILITIES = frozenset({
+    "harness_preflight_sensor",
+    "research_route",
+    "mempalace_gate",
+})
+
+_DEFINITIONS_STANDALONE: dict[str, dict] = {
+    "delivery_gate": {
+        "runtime_module": "nexus.services.local_heal.claim_delivery_gate",
+        "runtime_callable": "validate_context_claim_delivery",
+        "receipt_adapter": "delivery_gate",
+        "local_model_supported": True,
+        "local_model_phase": "A",
+        "status": CapabilityWiringStatus.GATE_EXECUTABLE,
+        "reason": "Gate function exists; candidate for C4 gate execution",
+    },
+    "local_model_executor": {
+        "runtime_module": "nexus.services.local_heal.local_model_executor",
+        "runtime_callable": "LocalModelExecutor.run",
+        "receipt_adapter": "local_model_executor",
+        "local_model_supported": True,
+        "local_model_phase": "R",
+        "status": CapabilityWiringStatus.EXECUTABLE,
+        "reason": "Direct executor invocation via _finalize_with_nexus_row",
+    },
+}
+
+
 @dataclass(frozen=True)
 class LocalExecutorCapabilityProjection:
     """Canonical projection from Planner SSD route map to Executor selected_capabilities."""
@@ -463,9 +491,67 @@ class LocalExecutorCapabilityProjection:
     unknown_capabilities: tuple[str, ...]
     advisory_capabilities: tuple[str, ...]
     executable_capabilities: tuple[str, ...]
+    control_plane_capabilities: tuple[str, ...]
     dependency_errors: tuple[str, ...]
     valid: bool
     failure_reason: str
+
+
+def _classify_single_capability(
+    cap_str: str,
+    wiring_map: dict[str, LocalModelCapabilityWiring],
+) -> tuple[str, str]:
+    """Classify a single capability into its canonical category.
+
+    Returns (category, canonical_name) where category is one of:
+    'executable', 'advisory', 'control_plane', 'unknown'.
+
+    Lookup order:
+      1. wiring_map (registry-based, 34 entries)
+      2. _DEFINITIONS_STANDALONE (non-registry capabilities with local support)
+      3. CONTROLLER_PLANE_CAPABILITIES (known planner-level concepts)
+      4. Unknown
+    """
+    if not cap_str:
+        return "unknown", cap_str
+
+    # 1. Registry-based wiring map
+    wiring = wiring_map.get(cap_str)
+    if wiring is not None:
+        if wiring.local_model_supported:
+            if wiring.status in (CapabilityWiringStatus.LOCALHEAL_EXECUTABLE,
+                                 CapabilityWiringStatus.EXECUTABLE,
+                                 CapabilityWiringStatus.GATE_EXECUTABLE):
+                return "executable", cap_str
+            elif wiring.status in (CapabilityWiringStatus.ADVISORY_EXECUTABLE,
+                                   CapabilityWiringStatus.METADATA_ONLY):
+                return "advisory", cap_str
+            else:
+                return "advisory", cap_str
+        else:
+            return "advisory", cap_str
+
+    # 2. Standalone definitions (non-registry capabilities with local wiring)
+    standalone_def = _DEFINITIONS_STANDALONE.get(cap_str)
+    if standalone_def is not None:
+        if standalone_def.get("local_model_supported", False):
+            status = standalone_def.get("status")
+            if status in (CapabilityWiringStatus.LOCALHEAL_EXECUTABLE,
+                          CapabilityWiringStatus.EXECUTABLE,
+                          CapabilityWiringStatus.GATE_EXECUTABLE):
+                return "executable", cap_str
+            elif status in (CapabilityWiringStatus.ADVISORY_EXECUTABLE,
+                            CapabilityWiringStatus.METADATA_ONLY):
+                return "advisory", cap_str
+            else:
+                return "advisory", cap_str
+        return "advisory", cap_str
+
+    # 3. Known control-plane capabilities
+    if cap_str in CONTROLLER_PLANE_CAPABILITIES:
+        return "control_plane", cap_str
+
+    return "unknown", cap_str
 
 
 def project_planner_capabilities_for_local_executor(
@@ -476,7 +562,21 @@ def project_planner_capabilities_for_local_executor(
     Priority 1: explicit top-level 'selected_capabilities' if present and non-empty.
     Priority 2: ssd_route_map.capability_reasons keys.
     Validates against local model executor wiring registry.
+
+    Classification order per capability:
+      1. Wiring registry lookup (executable / advisory)
+      2. Known control-plane capability set (control_plane)
+      3. Unknown (projection becomes invalid)
     """
+    _empty_proj = lambda src="", fr="": LocalExecutorCapabilityProjection(
+        selected_capabilities=(), source=src,
+        planner_selected_count=0, projected_count=0,
+        dropped_capabilities=(), unknown_capabilities=(),
+        advisory_capabilities=(), executable_capabilities=(),
+        control_plane_capabilities=(),
+        dependency_errors=(), valid=False, failure_reason=fr,
+    )
+
     # Priority 1: explicit top-level
     explicit_caps = signal_snapshot.get("selected_capabilities")
     if explicit_caps and isinstance(explicit_caps, (list, tuple)) and len(explicit_caps) > 0:
@@ -486,40 +586,40 @@ def project_planner_capabilities_for_local_executor(
         # Priority 2: SSD route map
         ssd = signal_snapshot.get("ssd_route_map", {})
         if not isinstance(ssd, dict):
-            return LocalExecutorCapabilityProjection(
-                selected_capabilities=(), source="ssd_missing",
-                planner_selected_count=0, projected_count=0,
-                dropped_capabilities=(), unknown_capabilities=(),
-                advisory_capabilities=(), executable_capabilities=(),
-                dependency_errors=(), valid=False,
-                failure_reason="ssd_route_map_not_dict",
-            )
+            return _empty_proj("ssd_missing", "ssd_route_map_not_dict")
         capability_reasons = ssd.get("capability_reasons", {})
         if not isinstance(capability_reasons, dict):
-            return LocalExecutorCapabilityProjection(
-                selected_capabilities=(), source="ssd_capability_reasons_not_dict",
-                planner_selected_count=0, projected_count=0,
-                dropped_capabilities=(), unknown_capabilities=(),
-                advisory_capabilities=(), executable_capabilities=(),
-                dependency_errors=(), valid=False,
-                failure_reason="ssd_capability_reasons_not_dict",
-            )
+            return _empty_proj("ssd_capability_reasons_not_dict", "ssd_capability_reasons_not_dict")
         planner_caps = list(capability_reasons.keys())
+        if not planner_caps:
+            return _empty_proj("ssd_capability_reasons_empty", "ssd_capability_reasons_empty")
         source = "ssd_route_map_capability_reasons"
 
-        # Validate count consistency
         declared_count = ssd.get("selected_capability_count", 0)
         if declared_count and declared_count != len(planner_caps):
             return LocalExecutorCapabilityProjection(
-                selected_capabilities=tuple(planner_caps), source=source,
+                selected_capabilities=(), source=source,
                 planner_selected_count=declared_count, projected_count=0,
                 dropped_capabilities=(), unknown_capabilities=(),
                 advisory_capabilities=(), executable_capabilities=(),
+                control_plane_capabilities=(),
                 dependency_errors=(), valid=False,
                 failure_reason=f"ssd_selected_count_mismatch:declared={declared_count},actual={len(planner_caps)}",
             )
 
     planner_selected_count = len(planner_caps)
+
+    # Canonical deduplication and ordering: sort alphabetically, deduplicate, reject empty IDs
+    seen: set[str] = set()
+    canonical_caps: list[str] = []
+    for cap in planner_caps:
+        cap_str = str(cap).strip()
+        if not cap_str:
+            continue
+        if cap_str not in seen:
+            seen.add(cap_str)
+            canonical_caps.append(cap_str)
+    canonical_caps.sort()
 
     # Build wiring map for classification
     try:
@@ -527,60 +627,62 @@ def project_planner_capabilities_for_local_executor(
     except Exception:
         wiring_map = {}
 
-    executable = []
-    advisory = []
-    unknown = []
-    dropped = []
-    dependency_errors = []
+    executable: list[str] = []
+    advisory: list[str] = []
+    control_plane: list[str] = []
+    unknown: list[str] = []
 
-    for cap in planner_caps:
-        cap_str = str(cap).strip()
-        if not cap_str:
-            continue
-
-        wiring = wiring_map.get(cap_str)
-        if wiring is None:
-            unknown.append(cap_str)
-            continue
-
-        if wiring.local_model_supported:
-            if wiring.status in (CapabilityWiringStatus.LOCALHEAL_EXECUTABLE,
-                                 CapabilityWiringStatus.EXECUTABLE,
-                                 CapabilityWiringStatus.GATE_EXECUTABLE):
-                executable.append(cap_str)
-            elif wiring.status in (CapabilityWiringStatus.ADVISORY_EXECUTABLE,
-                                   CapabilityWiringStatus.METADATA_ONLY):
-                advisory.append(cap_str)
-            else:
-                advisory.append(cap_str)
-        else:
+    for cap_str in canonical_caps:
+        category, _ = _classify_single_capability(cap_str, wiring_map)
+        if category == "executable":
+            executable.append(cap_str)
+        elif category == "advisory":
             advisory.append(cap_str)
+        elif category == "control_plane":
+            control_plane.append(cap_str)
+        else:
+            unknown.append(cap_str)
 
-    # Validate dependencies if present
+    # Dependency validation: fail-closed on hard dependency errors
     ssd = signal_snapshot.get("ssd_route_map", {})
     deps = ssd.get("capability_dependencies", {}) if isinstance(ssd, dict) else {}
+    dependency_errors: list[str] = []
     if isinstance(deps, dict):
+        cap_set = set(canonical_caps)
         for cap, dep_list in deps.items():
-            if cap not in planner_caps:
+            if cap not in cap_set:
                 continue
             if isinstance(dep_list, (list, tuple)):
                 for dep in dep_list:
-                    if dep not in planner_caps:
+                    if dep not in cap_set:
                         dependency_errors.append(f"{cap}_depends_on_{dep}_not_selected")
 
-    # All planner-selected capabilities go to executor (executor decides binding)
-    projected = tuple(planner_caps)
+    # Fail-closed: unknown capabilities or hard dependency errors invalidate projection
+    valid = True
+    failure_reason = ""
+    if unknown:
+        valid = False
+        failure_reason = f"unknown_capabilities_present:{','.join(sorted(unknown))}"
+    if dependency_errors:
+        valid = False
+        dep_reason = f"dependency_errors_present:{','.join(sorted(dependency_errors))}"
+        failure_reason = f"{failure_reason};{dep_reason}" if failure_reason else dep_reason
+
+    # Executor-receivable subset: executable + advisory only
+    # Control-plane capabilities are NOT passed to executor; they stay in projection provenance
+    executor_selected = tuple(executable + advisory)
 
     return LocalExecutorCapabilityProjection(
-        selected_capabilities=projected,
+        selected_capabilities=executor_selected,
         source=source,
         planner_selected_count=planner_selected_count,
-        projected_count=len(projected),
-        dropped_capabilities=tuple(dropped),
+        projected_count=len(executor_selected),
+        dropped_capabilities=(),
         unknown_capabilities=tuple(unknown),
         advisory_capabilities=tuple(advisory),
         executable_capabilities=tuple(executable),
+        control_plane_capabilities=tuple(control_plane),
         dependency_errors=tuple(dependency_errors),
-        valid=True,
-        failure_reason="",
+        valid=valid,
+        failure_reason=failure_reason,
     )
