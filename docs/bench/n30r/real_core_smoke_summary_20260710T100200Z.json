@@ -1,0 +1,11 @@
+{
+  "total_rows": 8,
+  "bare_solved": 0,
+  "core_solved": 0,
+  "planner_called_core": 4,
+  "local_model_executor_core": 4,
+  "production_path_core": 4,
+  "legacy_adapter": 0,
+  "trust_mismatch": 0,
+  "receipt_complete": 8
+}

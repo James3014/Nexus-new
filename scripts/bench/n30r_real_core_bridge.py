@@ -243,6 +243,8 @@ def run_real_core_bridge(
     )
 
     # Step 5: Call the model via provider (injected for testing)
+    # Set route_truth_source — this is the planner's own assertion
+    signal_snapshot["route_truth_source"] = "CapabilityPlanner"
     try:
         raw_output = provider(model_name, "You are a code repair assistant.", prompt)
         wall_time = time.time() - start
