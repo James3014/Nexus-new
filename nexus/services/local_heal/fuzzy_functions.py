@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -281,3 +283,61 @@ register(
     ),
     _quota_degradation_risk_impl,
 )
+
+
+class PawCompiler:
+    INTERPRETER_MODEL = "Qwen3-0.6B"
+
+    def __init__(self) -> None:
+        self._paw_enabled = os.environ.get("NEXUS_PAW_COMPILE") == "1"
+        self._model = None
+        self._tokenizer = None
+
+    def is_enabled(self) -> bool:
+        return self._paw_enabled
+
+    def compile(self) -> bool:
+        if not self._paw_enabled:
+            return False
+        try:
+            self._load_model()
+            return self._model is not None
+        except Exception:
+            return False
+
+    def _load_model(self) -> None:
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            self._tokenizer = AutoTokenizer.from_pretrained(self.INTERPRETER_MODEL)
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self.INTERPRETER_MODEL,
+                device_map="auto",
+                torch_dtype="auto",
+            )
+        except Exception:
+            self._model = None
+            self._tokenizer = None
+
+    def evaluate(self, name: str, **inputs: Any) -> FuzzyFunctionResult:
+        if not self._paw_enabled or self._model is None:
+            return evaluate(name, **inputs)
+        try:
+            prompt = json.dumps({"function": name, "inputs": inputs})
+            import torch
+            device = next(self._model.parameters()).device
+            inp = self._tokenizer(prompt, return_tensors="pt").to(device)
+            out = self._model.generate(**inp, max_new_tokens=128)
+            raw = self._tokenizer.decode(out[0], skip_special_tokens=True)
+            result = json.loads(raw)
+            return FuzzyFunctionResult(
+                name=name,
+                version="1.0",
+                score=float(result.get("score", 0.0)),
+                label=str(result.get("label", "unknown")),
+                confidence=float(result.get("confidence", 0.0)),
+                reasons=result.get("reasons", ["paw_compiled"]),
+                backend="paw",
+                deterministic=False,
+            )
+        except Exception:
+            return evaluate(name, **inputs)
