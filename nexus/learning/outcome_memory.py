@@ -233,5 +233,46 @@ def _resolve(project_root: Path | None, path: Path) -> Path:
     return (project_root or Path.cwd()) / path
 
 
+def build_episode_from_receipts(
+    *,
+    task_id: str,
+    task_type: str,
+    task_desc: str = "",
+    plan: Any = None,
+    receipts: list[Any] | None = None,
+) -> EpisodeOutcomeRecord:
+    solved = all(
+        getattr(r, "gate_passed", False) for r in (receipts or []) if hasattr(r, "gate_passed")
+    )
+    trust_mismatch = any(
+        not getattr(r, "evidence_alignment", True) for r in (receipts or []) if hasattr(r, "evidence_alignment")
+    )
+    wall_duration_sec = 0.0
+    total_tokens_used = 0
+    for r in (receipts or []):
+        tel = getattr(r, "telemetries", None) or {}
+        wall_duration_sec = max(wall_duration_sec, float(tel.get("wall_time_ms", 0) or 0) / 1000.0)
+        total_tokens_used += int(tel.get("token_usage", 0) or 0)
+    receipt_dicts: list[dict[str, Any]] = []
+    for r in (receipts or []):
+        if hasattr(r, "to_dict") and callable(r.to_dict):
+            receipt_dicts.append(r.to_dict())
+        elif hasattr(r, "__dataclass_fields__"):
+            import dataclasses
+            receipt_dicts.append(dataclasses.asdict(r))
+        else:
+            receipt_dicts.append({"capability_name": getattr(r, "capability_name", str(type(r).__name__))})
+    return EpisodeOutcomeRecord.from_task(
+        task_id=task_id,
+        task_type=task_type,
+        task_desc=task_desc,
+        solved=solved,
+        wall_duration_sec=wall_duration_sec,
+        total_tokens_used=total_tokens_used,
+        trust_mismatch=trust_mismatch,
+        receipts=receipt_dicts,
+    )
+
+
 def _stable_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]

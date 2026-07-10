@@ -318,6 +318,30 @@ class SkillsRouter:
         except Exception as e:
             logger.debug("[OutcomeMemory] learning_closure writeback failed: %s", e)
 
+        # M1: Learning loop write endpoint — sync OutcomeMemoryManager after learning_closure
+        if os.environ.get("NEXUS_LEARNING_LOOP_WRITE_ENABLED", "1") == "1":
+            try:
+                from nexus.learning.outcome_memory import OutcomeMemoryManager, build_episode_from_receipts
+                raw_task_id = context.get("task_id") or ""
+                if not raw_task_id:
+                    if isinstance(plan, dict):
+                        raw_task_id = plan.get("task_id", "")
+                    elif plan:
+                        raw_task_id = getattr(plan, "task_id", "")
+                    else:
+                        raw_task_id = ""
+                ep_task_id = raw_task_id
+                episode = build_episode_from_receipts(
+                    task_id=str(ep_task_id),
+                    task_type=str(phase_key),
+                    task_desc=str(context.get("task_desc", "")),
+                    plan=plan,
+                    receipts=receipts,
+                )
+                OutcomeMemoryManager.save_episode_and_tune_sync(episode, project_root=Path(self.project_root))
+            except Exception as e:
+                logger.debug("[OutcomeMemory] Learning loop write failed: %s", e)
+
         # 5.5: RC-2 抗幻覺閉環 fail-closed：claim_gate / artifact_gate 的 is_claimable 必須為 True
         sealed_receipts = []
         for _cr in receipts:
