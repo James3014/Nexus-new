@@ -1,0 +1,10 @@
+{
+  "total": 32,
+  "bare_solved": 0,
+  "core_solved": 0,
+  "core_infra_invalid": 16,
+  "planner_called": 16,
+  "pipeline_called": 16,
+  "trust_mismatch": 0,
+  "receipt_complete": 32
+}
