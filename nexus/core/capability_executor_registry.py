@@ -124,7 +124,8 @@ def _exec_zero_trust_v2_behavior(plan: CapabilityExecutionPlan, task_desc: str) 
     start = time.monotonic()
     try:
         from nexus.learning.zero_trust_v2_behavior_adapter import build_behavior_runner_adapter
-        inst = build_behavior_runner_adapter()
+        item = {"task_id": plan.task_id, "plan_id": plan.plan_id, "description": task_desc}
+        inst = build_behavior_runner_adapter(item=item)
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("zero_trust_v2_behavior", plan, wall_time_ms=elapsed,
                              outcome={"function_called": True})
@@ -158,8 +159,9 @@ def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
         return _make_receipt("autonomic_router", plan, invoked=False, gate_passed=False,
                              outcome={"error": "AutonomicRouter not importable"})
     try:
+        from nexus.core.state_contracts import NexusState
         inst = cls()
-        state = getattr(inst, "state", None)
+        state = NexusState(task_id=plan.task_id, metadata={"impact_map": {}, "est_tokens": 0, "autonomic_reason": ""})
         result = inst.route(task_desc=task_desc, state=state, forecast=plan.constraints)
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("autonomic_router", plan, wall_time_ms=elapsed,
@@ -303,7 +305,8 @@ def _exec_aos_oracle(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
         return _make_receipt("aos_oracle", plan, invoked=False, gate_passed=False,
                              outcome={"error": "AosService not importable"})
     try:
-        inst = cls()
+        from pathlib import Path
+        inst = cls(repo_root=Path("/tmp"))
         status = inst.get_status()
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("aos_oracle", plan, wall_time_ms=elapsed,
@@ -357,7 +360,7 @@ def _exec_reflex_loop(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
         return _make_receipt("reflex_loop", plan, invoked=False, gate_passed=False,
                              outcome={"error": "ReflexLoop not importable"})
     try:
-        inst = cls()
+        inst = cls(project_root="/tmp")
         result = inst.run_cycle()
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("reflex_loop", plan, wall_time_ms=elapsed,
@@ -560,7 +563,20 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
         return _make_receipt("claim_gate", plan, invoked=False, gate_passed=False,
                              outcome={"error": "validate_context_claim_delivery not importable"})
     try:
-        result = fn({"task_id": plan.task_id})
+        from types import SimpleNamespace
+        ctx = SimpleNamespace()
+        ctx.op = SimpleNamespace(
+            solve_eligible=True,
+            failure_reason="",
+            evaluation_report="verification_report.md",
+            source_hash="abc123",
+            final_patch="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-foo\n+bar",
+            owner_approved=True,
+            candidate_hash_matches_applied=True,
+            candidate_target_file="file.py",
+            route_context={"candidate_hash_matches_applied": True},
+        )
+        result = fn(ctx)
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt("claim_gate", plan, wall_time_ms=elapsed,
                              outcome={"result": str(result)[:200]})
