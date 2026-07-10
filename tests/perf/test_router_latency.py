@@ -37,3 +37,16 @@ def test_router_latency_with_learning_loop_enabled():
     assert avg_enabled < 5000, (
         f"Latency with learning loop enabled too high: {avg_enabled:.2f}ms > 5000ms"
     )
+
+
+def test_router_latency_with_learning_loop_disabled():
+    """N11: Verify baseline router latency without learning loop.
+
+    Standalone test that measures latency when NEXUS_LEARNING_LOOP_WRITE_ENABLED=0.
+    Provides baseline comparison for N10.
+    """
+    avg_disabled = _measure_router_latency_stub(learning_enabled=False, num_tasks=50)
+    assert avg_disabled >= 0, f"Negative latency: {avg_disabled}"
+    assert avg_disabled < 5000, (
+        f"Latency without learning loop too high: {avg_disabled:.2f}ms > 5000ms"
+    )
