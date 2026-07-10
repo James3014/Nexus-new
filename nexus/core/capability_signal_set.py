@@ -18,6 +18,8 @@ class CapabilitySignalSet:
     skills_triggered: List[str]  # Raw skill IDs matching baseline keywords
     tenant_id: str
     metadata: Dict[str, Any] = field(default_factory=dict)
+    codeintel_query_available: bool = False
+    codeintel_evidence: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_context(

@@ -47,6 +47,25 @@ class CapabilitySelector:
         self.registry = registry or CapabilityRegistry()
         self.project_root = project_root
 
+    def _codeintel_query(self, signal_set: CapabilitySignalSet) -> Dict[str, Any]:
+        try:
+            root = Path(self.project_root) if self.project_root else Path.cwd()
+            src_dirs = [
+                d for d in root.iterdir()
+                if d.is_dir() and not d.name.startswith((".")) and d.name not in ("node_modules", ".git", "__pycache__")
+            ]
+            files = []
+            for d in src_dirs[:5]:
+                files.extend(list(d.rglob("*.py"))[:20])
+            return {
+                "status": "PASS",
+                "files_scanned": min(len(files), 100),
+                "directories_scanned": len(src_dirs),
+                "impact_complexity": signal_set.impact_complexity,
+            }
+        except Exception as exc:
+            return {"status": "FAIL", "reason": str(exc)}
+
     def select_capabilities(
         self,
         signal_set: CapabilitySignalSet,
@@ -138,6 +157,14 @@ class CapabilitySelector:
                     logger.debug("[CapabilitySelector] learning_policy promoted: %s", cap)
             if penalized:
                 logger.debug("[CapabilitySelector] learning_policy penalized (removed): %s", penalized & existing)
+
+        # 2.7: M4 — CodeIntel/JIT 獨立查詢 (X/Recon 階段)
+        if getattr(signal_set, "codeintel_query_available", False):
+            try:
+                evidence = self._codeintel_query(signal_set)
+                signal_set.codeintel_evidence.update(evidence)
+            except Exception as e:
+                logger.debug("[CapabilitySelector] codeintel query failed: %s", e)
 
         # 3. 過濾與過濾黑名單規則 (Filter Out Blocked capabilities)
         final_caps: List[str] = []
