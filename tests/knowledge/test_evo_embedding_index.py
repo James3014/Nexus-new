@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from nexus.knowledge.evo_embedding_index import EvoEmbeddingIndex, SearchResult
+import os
+from unittest.mock import patch
+
+from nexus.knowledge.evo_embedding_index import (
+    EvoEmbeddingIndex,
+    RealEvoEmbeddingIndex,
+    SearchResult,
+    _cosine_similarity,
+)
 
 
 class TestEvoEmbeddingIndex:
@@ -48,3 +56,38 @@ class TestEvoEmbeddingIndex:
         import pytest
         with pytest.raises(Exception):
             result.score = 0.9
+
+    # === L3-C: real EvoEmbedding ===
+
+    def test_real_evo_embedding_disabled_uses_jaccard(self):
+        if "NEXUS_EMBEDDING_MODEL" in os.environ:
+            del os.environ["NEXUS_EMBEDDING_MODEL"]
+        idx = RealEvoEmbeddingIndex()
+        idx.add("r1", "fix null pointer bug", 1.0)
+        results = idx.query("null pointer")
+        assert len(results) == 1
+        # Jaccard score should be > 0 for matching token
+        assert results[0].score > 0.0
+
+    def test_real_evo_embedding_fallback_on_error(self):
+        os.environ["NEXUS_EMBEDDING_MODEL"] = "all-MiniLM-L6-v2"
+        idx = RealEvoEmbeddingIndex()
+        # Without mock, model won't load -> fallback to Jaccard
+        idx.add("r1", "some content", 1.0)
+        results = idx.query("some")
+        assert len(results) == 1
+        assert results[0].score > 0.0
+        del os.environ["NEXUS_EMBEDDING_MODEL"]
+
+    def test_cosine_similarity_basic(self):
+        a = [1.0, 0.0, 0.0]
+        b = [1.0, 0.0, 0.0]
+        assert _cosine_similarity(a, b) == 1.0
+
+    def test_cosine_similarity_orthogonal(self):
+        a = [1.0, 0.0]
+        b = [0.0, 1.0]
+        assert _cosine_similarity(a, b) == 0.0
+
+    def test_cosine_similarity_empty(self):
+        assert _cosine_similarity([], []) == 0.0
