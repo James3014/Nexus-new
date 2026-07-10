@@ -1,0 +1,80 @@
+{
+  "trace_id": "w1c2_projection_trace_1783716272",
+  "created_at": "2026-07-10T20:44:32Z",
+  "baseline_sha": "cf19cfe72",
+  "generator_path": "/Users/jameschen/Workspace/nexus-n30r-real-core/scripts/bench/n30r_w1c_projection_trace.py",
+  "generator_sha256": "0a0f7ceb99322024979dd059b676cb8612dbec4a78694f7dec26514146860bcc",
+  "run_command": ".venv/bin/python /Users/jameschen/Workspace/nexus-n30r-real-core/scripts/bench/n30r_w1c_projection_trace.py",
+  "mock_provider": true,
+  "live_ollama_calls": 0,
+  "planner_snapshot_sha256": "59c8e0e733507cdc36b5c6349766ae6b58a78823bad928514125c2a14088d739",
+  "ssd_selected_capability_count": 8,
+  "ssd_capability_ids": [
+    "harness_preflight_sensor",
+    "repair_loop",
+    "research_route",
+    "delivery_gate",
+    "mempalace_gate",
+    "artifact_gate",
+    "claim_gate",
+    "local_model_executor"
+  ],
+  "planner_selected_capabilities": [
+    "harness_preflight_sensor",
+    "repair_loop",
+    "research_route",
+    "delivery_gate",
+    "mempalace_gate",
+    "artifact_gate",
+    "claim_gate",
+    "local_model_executor"
+  ],
+  "executable_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "advisory_capabilities": [],
+  "control_plane_capabilities": [
+    "harness_preflight_sensor",
+    "mempalace_gate",
+    "research_route"
+  ],
+  "unknown_capabilities": [],
+  "dropped_capabilities": [],
+  "dependency_errors": [
+    "harness_preflight_sensor_depends_on_pregate_not_selected"
+  ],
+  "projection_valid": false,
+  "projection_sha256": "d313cace29e68ec40876a6a41507e4b44d9e428ebb6375ec36994810f1deb48f",
+  "executor_request_selected_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "executor_request_sha256": "4d63bc0ddfbe50cbc5ba1e3ff4653b486d0e7dd531559715fc794379be4b77af",
+  "pipeline_context_selected_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "executor_metadata_selected_capabilities_used": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "executor_metadata_sha256": "e6ccd20084b026e4aec96c2da838f2a55a7509c9484f37c186d0cf92a5ab3347",
+  "planner_to_projection_accounted": true,
+  "projection_to_executor_match": true,
+  "executor_to_pipeline_match": true,
+  "pipeline_to_receipt_match": true,
+  "wall_time_sec": 2.714
+}
