@@ -68,3 +68,34 @@ class TestRealLocalCheapVerifier:
         metadata = {"p3_cloud_stub_candidate_generated": True}
         receipt = compute_p3_cheap_verifier_runtime(metadata)
         assert receipt.cheap_verifier_invoked is True
+
+    # === L3-B: real 9B cheap verifier ===
+
+    def test_real_9b_cheap_verifier_ollama_disabled_stub(self) -> None:
+        if "NEXUS_OLLAMA_ENABLED" in os.environ:
+            del os.environ["NEXUS_OLLAMA_ENABLED"]
+        verifier = RealLocalCheapVerifier()
+        metadata = {"p3_cloud_stub_candidate_generated": True}
+        receipt = verifier.compute_p3_cheap_verifier_runtime(metadata)
+        assert receipt.cheap_verifier_result == "runtime_invoked"
+
+    def test_real_9b_cheap_verifier_ollama_enabled(self) -> None:
+        os.environ["NEXUS_OLLAMA_ENABLED"] = "1"
+        verifier = RealLocalCheapVerifier()
+        metadata = {"p3_cloud_stub_candidate_generated": True}
+        receipt = verifier.compute_p3_cheap_verifier_runtime(metadata)
+        assert receipt.cheap_verifier_invoked is True
+        del os.environ["NEXUS_OLLAMA_ENABLED"]
+
+    def test_real_9b_cheap_verifier_confidence_extraction(self) -> None:
+        from nexus.services.local_heal.p3_local_cheap_verifier_runtime import _parse_verifier_response
+        raw = '{"verdict": "pass", "confidence": 0.85, "reason": "looks correct"}'
+        verdict, confidence = _parse_verifier_response(raw)
+        assert verdict == "pass"
+        assert confidence == 0.85
+
+    def test_real_9b_cheap_verifier_fallback_on_error(self) -> None:
+        from nexus.services.local_heal.p3_local_cheap_verifier_runtime import _parse_verifier_response
+        verdict, confidence = _parse_verifier_response("")
+        assert verdict == "fail"
+        assert confidence == 0.0
