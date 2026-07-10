@@ -15748,6 +15748,39 @@ def run_with_nexus(
                 os.environ[key] = previous
 
 
+def _write_daily_hybrid_score_json(
+    *,
+    out_dir: Path,
+    with_rows: list[dict[str, Any]],
+    without_rows: list[dict[str, Any]],
+    local_only_rows: list[dict[str, Any]],
+    cloud_exhausted_rows: list[dict[str, Any]],
+    ts: int,
+) -> Path:
+    def _score(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        eligible = [r for r in rows if bool(r.get("run_eligible", True))]
+        solved = [r for r in eligible if r.get("status") == "SUCCESS"]
+        return {
+            "total": len(rows),
+            "eligible": len(eligible),
+            "solved": len(solved),
+            "score": round(len(solved) / len(eligible), 4) if eligible else 0.0,
+        }
+    data: dict[str, Any] = {
+        "schema": "nexus.daily_hybrid_score.v1",
+        "timestamp": ts,
+        "quadrants": {
+            "with_nexus": _score(with_rows),
+            "bare": _score(without_rows),
+            "local_only_executed": _score(local_only_rows),
+            "cloud_exhausted": _score(cloud_exhausted_rows),
+        },
+    }
+    score_path = out_dir / "daily_hybrid_score.json"
+    score_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return score_path
+
+
 def run_local_only_executed(
     *,
     repo_root: Path,
