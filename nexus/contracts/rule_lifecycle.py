@@ -1,7 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from typing import Any
+
+
+@dataclass(frozen=True)
+class RuleLifecycle:
+    observation: dict[str, Any] = field(default_factory=dict)
+    recommendation: dict[str, Any] = field(default_factory=dict)
+    active: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class RuleLifecycleState(str, Enum):
