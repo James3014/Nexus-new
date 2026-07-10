@@ -15748,6 +15748,127 @@ def run_with_nexus(
                 os.environ[key] = previous
 
 
+def run_local_only_executed(
+    *,
+    repo_root: Path,
+    task: CapabilityTask,
+    target_file: str,
+    test_file: str,
+    timeout_sec: int,
+    force_flow: str | None = None,
+    runner_mode: str = "inprocess",
+    with_model_provider: str = "ollama",
+    tuning_profile: str = "",
+    cli_runner: CliRunner | None = None,
+    history_window: int = 1,
+    history_fail_threshold: int = 9999,
+    enable_autoreason_executor: bool = False,
+    enable_ddtree_executor: bool = False,
+    enable_ultra_review_dry_gate: bool = False,
+    llm_candidate_cap: int = 1,
+    enable_llm_self_heal: bool = False,
+    skip_llm_baseline: bool = False,
+    strict_llm_baseline: bool = False,
+) -> dict[str, Any]:
+    prev_llm = os.environ.get("NEXUS_WITH_LLM_MODE")
+    os.environ["NEXUS_WITH_LLM_MODE"] = "off"
+    prev_provider = os.environ.get("NEXUS_WITH_MODEL_PROVIDER")
+    os.environ["NEXUS_WITH_MODEL_PROVIDER"] = "ollama"
+    try:
+        return run_with_nexus(
+            repo_root=repo_root,
+            task=task,
+            target_file=target_file,
+            test_file=test_file,
+            timeout_sec=timeout_sec,
+            force_flow=force_flow,
+            runner_mode=runner_mode,
+            with_llm_mode="off",
+            with_model_provider=with_model_provider,
+            tuning_profile=tuning_profile,
+            cli_runner=cli_runner,
+            history_window=history_window,
+            history_fail_threshold=history_fail_threshold,
+            enable_autoreason_executor=enable_autoreason_executor,
+            enable_ddtree_executor=enable_ddtree_executor,
+            enable_ultra_review_dry_gate=enable_ultra_review_dry_gate,
+            llm_candidate_cap=llm_candidate_cap,
+            enable_llm_self_heal=enable_llm_self_heal,
+            skip_llm_baseline=skip_llm_baseline,
+            strict_llm_baseline=strict_llm_baseline,
+        )
+    finally:
+        if prev_llm is None:
+            os.environ.pop("NEXUS_WITH_LLM_MODE", None)
+        else:
+            os.environ["NEXUS_WITH_LLM_MODE"] = prev_llm
+        if prev_provider is None:
+            os.environ.pop("NEXUS_WITH_MODEL_PROVIDER", None)
+        else:
+            os.environ["NEXUS_WITH_MODEL_PROVIDER"] = prev_provider
+
+
+def run_cloud_exhausted(
+    *,
+    repo_root: Path,
+    task: CapabilityTask,
+    target_file: str,
+    test_file: str,
+    timeout_sec: int,
+    force_flow: str | None = None,
+    runner_mode: str = "inprocess",
+    with_llm_mode: str = "off",
+    with_model_provider: str = "ollama",
+    tuning_profile: str = "",
+    cli_runner: CliRunner | None = None,
+    history_window: int = 1,
+    history_fail_threshold: int = 9999,
+    enable_autoreason_executor: bool = False,
+    enable_ddtree_executor: bool = False,
+    enable_ultra_review_dry_gate: bool = False,
+    llm_candidate_cap: int = 1,
+    enable_llm_self_heal: bool = False,
+    skip_llm_baseline: bool = False,
+    strict_llm_baseline: bool = False,
+) -> dict[str, Any]:
+    prev_quota = os.environ.get("NEXUS_CLOUD_BUDGET_REMAINING")
+    os.environ["NEXUS_CLOUD_BUDGET_REMAINING"] = "0"
+    prev_llm = os.environ.get("NEXUS_WITH_LLM_MODE")
+    os.environ["NEXUS_WITH_LLM_MODE"] = "off"
+    try:
+        return run_with_nexus(
+            repo_root=repo_root,
+            task=task,
+            target_file=target_file,
+            test_file=test_file,
+            timeout_sec=timeout_sec,
+            force_flow=force_flow,
+            runner_mode=runner_mode,
+            with_llm_mode=with_llm_mode,
+            with_model_provider=with_model_provider,
+            tuning_profile=tuning_profile,
+            cli_runner=cli_runner,
+            history_window=history_window,
+            history_fail_threshold=history_fail_threshold,
+            enable_autoreason_executor=enable_autoreason_executor,
+            enable_ddtree_executor=enable_ddtree_executor,
+            enable_ultra_review_dry_gate=enable_ultra_review_dry_gate,
+            llm_candidate_cap=llm_candidate_cap,
+            enable_llm_self_heal=enable_llm_self_heal,
+            skip_llm_baseline=skip_llm_baseline,
+            strict_llm_baseline=strict_llm_baseline,
+        )
+    finally:
+        if prev_quota is None:
+            os.environ.pop("NEXUS_CLOUD_BUDGET_REMAINING", None)
+        else:
+            os.environ["NEXUS_CLOUD_BUDGET_REMAINING"] = prev_quota
+        if prev_llm is None:
+            os.environ.pop("NEXUS_WITH_LLM_MODE", None)
+        else:
+            os.environ["NEXUS_WITH_LLM_MODE"] = prev_llm
+
+
 def run_without_nexus(
     *,
     repo_root: Path,
@@ -19360,6 +19481,12 @@ def main() -> int:
         help="Comma-separated manifest indices or range to filter tasks (e.g., '0,2,4' or '1-5'). Default: all.",
     )
     parser.add_argument(
+        "--quadrant",
+        choices=["with_nexus", "bare", "local_only_executed", "cloud_exhausted", "all"],
+        default="with_nexus",
+        help="Benchmark quadrant to run. Default: with_nexus. Use 'all' to run all 4 quadrants and produce daily_hybrid_score.json.",
+    )
+    parser.add_argument(
         "--enable-background-offload",
         action="store_true",
         help="Enable background offload of heavy/flaky tasks to avoid blocking the main runner pipeline.",
@@ -19401,6 +19528,23 @@ def main() -> int:
         help="Use persistent worker to eliminate cold start overhead (~10-15s per task).",
     )
     args = parser.parse_args()
+
+    if args.quadrant == "bare":
+        args.without_only = True
+        args.nexus_only = False
+    elif args.quadrant == "local_only_executed":
+        os.environ["NEXUS_WITH_LLM_MODE"] = "off"
+        os.environ["NEXUS_WITH_MODEL_PROVIDER"] = "ollama"
+        args.nexus_only = True
+        args.without_only = False
+    elif args.quadrant == "cloud_exhausted":
+        os.environ["NEXUS_CLOUD_BUDGET_REMAINING"] = "0"
+        os.environ["NEXUS_WITH_LLM_MODE"] = "off"
+        args.nexus_only = True
+        args.without_only = False
+    elif args.quadrant == "all":
+        return _run_all_quadrants(args)
+
     if args.gemini_model:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
     if args.with_model_provider == "gemini" and _truthy_env("USE_LOCAL_OLLAMA"):
@@ -20272,6 +20416,66 @@ def _build_h6_provider_boundary_closure_seal(
         "row_count": len(rows) if rows is not None else 0,
         "ready_for_h7": False,
     }
+
+
+def _run_all_quadrants(args: argparse.Namespace) -> int:
+    """Run all 4 benchmark quadrants sequentially and produce daily_hybrid_score.json."""
+    quadrants = ["with_nexus", "bare", "local_only_executed", "cloud_exhausted"]
+    results: dict[str, dict[str, Any]] = {}
+    script = Path(sys.argv[0]).resolve()
+
+    base_argv = [
+        a for a in sys.argv[1:]
+        if not a.startswith("--quadrant")
+        and a not in ("--nexus-only", "--without-only")
+    ]
+
+    for q in quadrants:
+        cmd = [sys.executable, str(script), f"--quadrant={q}", *base_argv]
+        out_dir = (Path(args.output_dir) if hasattr(args, "output_dir") else Path(".")).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[quadrant:all] launching quadrant={q}", file=sys.stderr, flush=True)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=int(getattr(args, "total_timeout_sec", 3600)) * 4,
+        )
+        if proc.returncode != 0:
+            print(f"[quadrant:all] quadrant={q} FAILED (rc={proc.returncode})", file=sys.stderr)
+            print(proc.stderr, file=sys.stderr)
+            results[q] = {"status": "FAIL", "returncode": proc.returncode}
+            continue
+        for line in proc.stdout.splitlines():
+            try:
+                payload = json.loads(line.strip())
+                if isinstance(payload, dict) and "benchmark_summary" in payload:
+                    results[q] = payload
+                    break
+            except json.JSONDecodeError:
+                continue
+
+    scores: dict[str, float | None] = {}
+    for q in quadrants:
+        summary = results.get(q, {}).get("benchmark_summary", {})
+        if summary and "pass" in summary:
+            total = summary["pass"].get("total", 0)
+            passed = summary["pass"].get("passed", 0)
+            scores[q] = round(passed / total * 100, 1) if total > 0 else None
+        else:
+            scores[q] = None
+
+    daily = {
+        "schema": "nexus.hybrid_daily_score.v1",
+        "date": datetime.now().date().isoformat(),
+        "scores": {k: v for k, v in scores.items()},
+        "raw": {k: results.get(k) for k in quadrants},
+        "generated": datetime.now().isoformat(),
+    }
+    daily_path = Path(args.output_dir).resolve() / "daily_hybrid_score.json"
+    daily_path.write_text(json.dumps(daily, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(daily, indent=2, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
