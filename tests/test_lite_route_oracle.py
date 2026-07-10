@@ -170,6 +170,61 @@ class TestLiteRouteOracle(unittest.TestCase):
         self.assertNotIn("artifact_gate", lite_caps)
         self.assertNotIn("claim_gate", lite_caps)
 
+    def test_weak_model_7b_auto_lite(self):
+        decision = should_use_lite_route(
+            risk_level="NORMAL",
+            impact_complexity=4.0,
+            belief_confidence=0.5,
+            model_size=7_000_000_000,
+        )
+        self.assertTrue(decision.is_lite)
+        self.assertEqual(decision.reason, "auto_lite_weak_model_size_lt_8B")
+        self.assertIn("X", decision.skipped_phases)
+        self.assertIn("D", decision.skipped_phases)
+        self.assertIn("A", decision.skipped_phases)
+
+    def test_strong_model_14b_keeps_heavy_route(self):
+        decision = should_use_lite_route(
+            risk_level="NORMAL",
+            impact_complexity=4.0,
+            belief_confidence=0.5,
+            model_size=14_000_000_000,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route")
+
+    def test_7b_with_low_risk_still_lite(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=2.0,
+            belief_confidence=0.5,
+            model_size=7_000_000_000,
+        )
+        self.assertTrue(decision.is_lite)
+
+    def test_14b_with_low_risk_still_lite(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=2.0,
+            belief_confidence=0.5,
+            model_size=14_000_000_000,
+        )
+        self.assertTrue(decision.is_lite)
+        self.assertNotIn("auto_lite_weak_model_size", decision.reason)
+
+    def test_existing_5_triggers_unchanged(self):
+        d1 = should_use_lite_route(risk_level="LOW", impact_complexity=2.5, belief_confidence=0.9)
+        self.assertTrue(d1.is_lite)
+        self.assertEqual(d1.reason, "auto_lite_low_risk_low_complexity")
+
+        d2 = should_use_lite_route(risk_level="CRITICAL", impact_complexity=1.0, belief_confidence=0.9)
+        self.assertFalse(d2.is_lite)
+
+        d3 = should_use_lite_route(risk_level="HIGH", impact_complexity=4.0, belief_confidence=0.5,
+                                   lane_name="hidden_bugfix_supervised")
+        self.assertTrue(d3.is_lite)
+        self.assertEqual(d3.reason, "lane_policy_gate_only_receipt_lite")
+
 
 if __name__ == "__main__":
     unittest.main()

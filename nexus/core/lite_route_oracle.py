@@ -41,6 +41,7 @@ def should_use_lite_route(
     belief_confidence: float,
     lane_name: Optional[str] = None,
     capability_name: Optional[str] = None,
+    model_size: Optional[int] = None,
     route_cost_controls: Optional[dict] = None,
 ) -> LiteRouteDecision:
     """🛡️ Pure function SSOT for LiteRoute classification decisions."""
@@ -105,6 +106,14 @@ def should_use_lite_route(
         return LiteRouteDecision(
             is_lite=True,
             reason="auto_lite_normal_risk_high_confidence",
+            skipped_phases=["X", "D", "A"],
+        )
+
+    # 6. Weak model auto lite: model_size < 8B means no need for 7-phase over-engineering
+    if model_size is not None and model_size < 8_000_000_000:
+        return LiteRouteDecision(
+            is_lite=True,
+            reason="auto_lite_weak_model_size_lt_8B",
             skipped_phases=["X", "D", "A"],
         )
 
