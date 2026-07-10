@@ -1,0 +1,125 @@
+{
+  "schema": "nexus.n30r.transfer_screen_manifest.v1",
+  "tasks": [
+    {
+      "task_id": "ts_loc_01",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_loc_01.py",
+      "task_statement": "Fix the bug in ts_loc_01",
+      "expected_failure_signature": "ZeroDivisionError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import safe_divide; assert safe_divide(10,2)==5.0; assert safe_divide(10,0)==0"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 0
+    },
+    {
+      "task_id": "ts_loc_02",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_loc_02.py",
+      "task_statement": "Fix the bug in ts_loc_02",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import first_even; assert first_even([1,3,4,5])==4; assert first_even([1,3,5])==None"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 1
+    },
+    {
+      "task_id": "ts_syn_01",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_syn_01.py",
+      "task_statement": "Fix the bug in ts_syn_01",
+      "expected_failure_signature": "SyntaxError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import divide; assert divide(10,2)==5.0"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 2
+    },
+    {
+      "task_id": "ts_syn_02",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_syn_02.py",
+      "task_statement": "Fix the bug in ts_syn_02",
+      "expected_failure_signature": "SyntaxError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import Calculator; assert Calculator().add(2,3)==5"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 3
+    },
+    {
+      "task_id": "ts_sem_01",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_sem_01.py",
+      "task_statement": "Fix the bug in ts_sem_01",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import count_words; assert count_words('hello world')==2; assert count_words('one')==1"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 4
+    },
+    {
+      "task_id": "ts_sem_02",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_sem_02.py",
+      "task_statement": "Fix the bug in ts_sem_02",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import reverse_list; assert reverse_list([1,2,3])==[3,2,1]; assert reverse_list([])==[]"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 5
+    },
+    {
+      "task_id": "ts_mix_01",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_mix_01.py",
+      "task_statement": "Fix the bug in ts_mix_01",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import sum_until_negative; assert sum_until_negative([1,2,3,-1,4])==6; assert sum_until_negative([-1,2])==0"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 6
+    },
+    {
+      "task_id": "ts_mix_02",
+      "split": "transfer_screen",
+      "source_relpath": "tests/fixtures/n30r/ts_mix_02.py",
+      "task_statement": "Fix the bug in ts_mix_02",
+      "expected_failure_signature": "AssertionError",
+      "verifier_command": [
+        "python3",
+        "-c",
+        "from f import all_positive; assert all_positive([1,2,3]) is True; assert all_positive([1,-1,3]) is False"
+      ],
+      "original_verifier_expected": "FAIL",
+      "golden_verifier_expected": "PASS",
+      "fixture_index": 7
+    }
+  ]
+}

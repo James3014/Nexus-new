@@ -1,0 +1,22 @@
+{
+  "schema": "nexus.n30r.transfer_screen_seal.v1",
+  "baseline_commit_sha": "884c37f227e95e52bf2891f737f5532511635f62",
+  "task_count": 8,
+  "task_ids": [
+    "ts_loc_01",
+    "ts_loc_02",
+    "ts_mix_01",
+    "ts_mix_02",
+    "ts_sem_01",
+    "ts_sem_02",
+    "ts_syn_01",
+    "ts_syn_02"
+  ],
+  "manifest_sha256": "ea5e0e0455429f981aa9c860dc4e027adbdba68e02726af6ef63244e312bdae2",
+  "smoke_overlap_count": 0,
+  "n28_overlap_count": 0,
+  "n30a_overlap_count": 0,
+  "eligible_count": 8,
+  "golden_leakage_count": 0,
+  "seal_sha256": "0144755f663b9d6e70f119933bf54c7818cf12dfe9fadb32d5f8adbb82604589"
+}

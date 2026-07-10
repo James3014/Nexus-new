@@ -46,7 +46,7 @@ class N30RTaskSpec:
     golden_verifier_expected: str  # "PASS"
 
     def __post_init__(self) -> None:
-        if self.split not in ("smoke", "heldout"):
+        if self.split not in ("smoke", "heldout", "transfer_screen"):
             raise ValueError(f"Invalid split: {self.split}")
         if self.original_verifier_expected != "FAIL":
             raise ValueError("original_verifier_expected must be FAIL")

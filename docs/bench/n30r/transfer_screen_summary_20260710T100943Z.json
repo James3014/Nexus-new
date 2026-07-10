@@ -1,0 +1,11 @@
+{
+  "total_rows": 32,
+  "bare_solves": 0,
+  "core_solves": 0,
+  "delta": 0,
+  "trust_mismatch": 0,
+  "receipt_complete": 32,
+  "paired_coverage": 100,
+  "planner_called_core": 16,
+  "legacy_adapter": 0
+}
