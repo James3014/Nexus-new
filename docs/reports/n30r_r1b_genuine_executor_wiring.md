@@ -2,6 +2,42 @@
 
 **Status**: N30R_R1B_GENUINE_EXECUTOR_PASS
 
+## environment gate
+PASS
+
+## python executable
+/Users/jameschen/Workspace/nexus-n30r-real-core/.venv/bin/python3
+
+## python version
+3.14.0
+
+## dependency manager
+uv
+
+## lockfile used
+uv.lock (--frozen)
+
+## lancedb version
+0.30.2
+
+## requests version
+2.33.1
+
+## urllib3 version
+2.5.0
+
+## charset-normalizer version
+3.4.7
+
+## LanceDB import errors count
+0
+
+## RequestsDependencyWarning count
+0
+
+## system Python used
+false
+
 ## worktree path
 /Users/jameschen/Workspace/nexus-n30r-real-core
 
