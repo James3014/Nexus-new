@@ -18,9 +18,9 @@ class CapabilityInfo:
 
 
 class CapabilityRegistry:
-    """🏰 Source of Truth for all 34 capabilities in Nexus Autonomic Ecosystem."""
+    """🏰 Source of Truth for all 52 capabilities in Nexus Autonomic Ecosystem."""
 
-    # 34 Canonical Capabilities defined in NEXUS_CAPABILITY_SKILL_MAP.md
+    # 52 Canonical Capabilities (34 original + 18 from v2 report N16-N22)
     _REGISTRY: Dict[str, CapabilityInfo] = {
         "artifact_gate": CapabilityInfo(
             name="artifact_gate",
@@ -293,6 +293,148 @@ class CapabilityRegistry:
             maturity="ACTIVE",
             default_skill="diagnose",
             allowed_heep_modes=["Mode B"],
+        ),
+        # === N16-N22: 18 new capabilities from v2 report ===
+        # S phase (3)
+        "entropy_guard_v2": CapabilityInfo(
+            name="entropy_guard_v2",
+            phases=["S"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+            allowed_heep_modes=["Mode B"],
+        ),
+        "zero_trust_v2_behavior": CapabilityInfo(
+            name="zero_trust_v2_behavior",
+            phases=["S"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="sf-systematic-mempalace-protect-mcp-governance-2e595e69",
+            allowed_heep_modes=["Mode B"],
+        ),
+        "nightshift_runner_service": CapabilityInfo(
+            name="nightshift_runner_service",
+            phases=["S"],
+            cost_weight=0.3,
+            maturity="ACTIVE",
+            default_skill="nexus-goal-closure-executor",
+            allowed_heep_modes=["Mode A"],
+        ),
+        # P phase (3)
+        "predictive_auditor": CapabilityInfo(
+            name="predictive_auditor",
+            phases=["P"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="sf-systematic-forecast_pregate-mobile-security-coder-14647d4e",
+            allowed_heep_modes=["Mode B"],
+        ),
+        "spec_guarded": CapabilityInfo(
+            name="spec_guarded",
+            phases=["P"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="sf-systematic-codeintel-first-principles-thinking-f95019ea",
+            allowed_heep_modes=["Mode B"],
+        ),
+        "decision_formula_engine": CapabilityInfo(
+            name="decision_formula_engine",
+            phases=["P"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="sf-systematic-autoreason-first-principles-thinking-f95019ea",
+            allowed_heep_modes=["Mode B"],
+        ),
+        # X phase (4)
+        "aos_oracle": CapabilityInfo(
+            name="aos_oracle",
+            phases=["X"],
+            cost_weight=0.3,
+            maturity="ACTIVE",
+            default_skill="nexus-root-cause-probe",
+            allowed_heep_modes=["Mode B"],
+        ),
+        "learn_refresh_service": CapabilityInfo(
+            name="learn_refresh_service",
+            phases=["X"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="nexus-capability-upgrade",
+            allowed_heep_modes=["Mode A"],
+        ),
+        "learn_scheduler_service": CapabilityInfo(
+            name="learn_scheduler_service",
+            phases=["X"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="nexus-capability-upgrade",
+            allowed_heep_modes=["Mode A"],
+        ),
+        "reflex_loop": CapabilityInfo(
+            name="reflex_loop",
+            phases=["X"],
+            cost_weight=0.3,
+            maturity="ACTIVE",
+            default_skill="nexus-goal-closure-executor",
+            allowed_heep_modes=["Mode B"],
+        ),
+        # R phase (3)
+        "battle_swarm": CapabilityInfo(
+            name="battle_swarm",
+            phases=["R"],
+            cost_weight=0.6,
+            maturity="ACTIVE",
+            default_skill="nexus-gemini-code-review-orchestrator",
+            allowed_heep_modes=["Mode C"],
+        ),
+        "sandbox_runner": CapabilityInfo(
+            name="sandbox_runner",
+            phases=["R"],
+            cost_weight=0.4,
+            maturity="ACTIVE",
+            default_skill="nexus-acceptance-evidence-gate",
+            allowed_heep_modes=["Mode A"],
+        ),
+        "dual_loop": CapabilityInfo(
+            name="dual_loop",
+            phases=["R"],
+            cost_weight=0.4,
+            maturity="ACTIVE",
+            default_skill="nexus-goal-closure-executor",
+            allowed_heep_modes=["Mode B"],
+        ),
+        # C phase (4)
+        "mfp_gate": CapabilityInfo(
+            name="mfp_gate",
+            phases=["C"],
+            cost_weight=0.2,
+            maturity="ACTIVE",
+            default_skill="sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+            allowed_heep_modes=["Mode B"],
+        ),
+        "promotion_engine": CapabilityInfo(
+            name="promotion_engine",
+            phases=["C"],
+            cost_weight=0.3,
+            maturity="ACTIVE",
+            default_skill="nexus-benchmark-continuous-optimization",
+            allowed_heep_modes=["Mode A"],
+        ),
+        "subagent_outcome_service": CapabilityInfo(
+            name="subagent_outcome_service",
+            phases=["C"],
+            cost_weight=0.3,
+            maturity="ACTIVE",
+            default_skill="nexus-benchmark-public-report",
+            allowed_heep_modes=["Mode A"],
+        ),
+        "attempt_settlement_service": CapabilityInfo(
+            name="attempt_settlement_service",
+            phases=["C"],
+            cost_weight=0.3,
+            maturity="ACTIVE",
+            default_skill="nexus-merge-gate",
+            allowed_heep_modes=["Mode A"],
         ),
     }
 

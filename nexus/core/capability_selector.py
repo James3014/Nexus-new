@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -100,25 +101,41 @@ class CapabilitySelector:
             phases = [p for p in ["S", "P", "X", "D", "R", "A", "C"] if p not in lite_decision.skipped_phases]
         else:
             phases = ["S", "P", "X", "D", "R", "A", "C"]
+            query_lower = signal_set.task_desc.lower()
+
             # S (Scope)
             required_caps.append("mempalace")
+            required_caps.append("zero_trust_v2_behavior")
+            required_caps.append("nightshift_runner_service")
             if signal_set.risk_level in ("HIGH", "CRITICAL"):
                 required_caps.append("policy_capability_gate")
+                required_caps.append("entropy_guard_v2")
 
             # P (Plan)
             required_caps.append("autonomic_router")
+            if signal_set.impact_complexity > 3.0:
+                required_caps.append("predictive_auditor")
+            if signal_set.risk_level in ("HIGH", "CRITICAL"):
+                required_caps.append("spec_guarded")
+            if "formula" in query_lower or "rule" in query_lower:
+                required_caps.append("decision_formula_engine")
 
             # X (Recon)
             required_caps.append("codeintel")
             required_caps.append("lancedb")
-            query_lower = signal_set.task_desc.lower()
             if "research" in query_lower or "source" in query_lower or "citation" in query_lower:
                 required_caps.append("research")
                 required_caps.append("research_and_source_discipline")
+            if signal_set.belief_confidence < 0.5:
+                required_caps.append("aos_oracle")
+            if "refresh" in query_lower or "schedule" in query_lower:
+                required_caps.append("learn_refresh_service")
+                required_caps.append("learn_scheduler_service")
+            if signal_set.belief_confidence > 0.8 and "optimize" in query_lower:
+                required_caps.append("reflex_loop")
 
             # D (Decide)
             required_caps.append("belief")
-            # 🧪 [Round 20] Belief Shift Adaptive Thresholding
             if signal_set.belief_confidence < 0.65 or signal_set.risk_level == "CRITICAL":
                 required_caps.append("autoreason")
 
@@ -133,6 +150,11 @@ class CapabilitySelector:
                 required_caps.append("drone")
             if "long" in query_lower or "overnight" in query_lower:
                 required_caps.append("nightshift")
+            if "battle" in query_lower or "campaign" in query_lower or signal_set.impact_complexity > 4.5:
+                required_caps.append("battle_swarm")
+            if signal_set.risk_level == "CRITICAL":
+                required_caps.append("sandbox_runner")
+            required_caps.append("dual_loop")
 
             # A (Audit)
             required_caps.append("artifact_gate")
@@ -143,6 +165,10 @@ class CapabilitySelector:
             # C (Closure)
             required_caps.append("learning_closure")
             required_caps.append("metabolism_resume")
+            required_caps.append("mfp_gate")
+            required_caps.append("promotion_engine")
+            required_caps.append("subagent_outcome_service")
+            required_caps.append("attempt_settlement_service")
 
         # 2.5: 套用動態學習政策 (RC-1 Learning Closure)
         learning_policy = _load_dynamic_learning_policy_safe(self.project_root)
@@ -167,10 +193,16 @@ class CapabilitySelector:
                 logger.debug("[CapabilitySelector] codeintel query failed: %s", e)
 
         # 3. 過濾與過濾黑名單規則 (Filter Out Blocked capabilities)
+        # + NEXUS_SKIP_* env flag 支援 (N16-N22 M2 驗證用)
         final_caps: List[str] = []
         for cap_name in required_caps:
             info = self.registry.get_capability(cap_name)
             if not info:
+                continue
+            # NEXUS_SKIP_{CAP_NAME}=1 跳過 (M2 關閉測試)
+            skip_env = f"NEXUS_SKIP_{cap_name.upper()}"
+            if os.environ.get(skip_env) == "1":
+                logger.debug("[Selector] Cap %s skipped via %s=1", cap_name, skip_env)
                 continue
             # 檢查是否違反宮殿黑名單規則
             is_forbidden = False
