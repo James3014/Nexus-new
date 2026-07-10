@@ -1,0 +1,36 @@
+{
+  "schema": "n30r_v1_task_evidence_v1",
+  "task_id": "n30r_smoke_semantic",
+  "producer": "n30r_a1_independent_evidence_builder",
+  "synthetic": false,
+  "source": {
+    "repo_relative_path": "tests/fixtures/n30r/smoke/semantic_task.py",
+    "sha256": "34b87f276fe5bace7ceb5a5cf38765fc599e4ecfe4abd6e651c137f6f7368b42",
+    "length": 417,
+    "language": "python"
+  },
+  "localization": {
+    "target_file": "tests/fixtures/n30r/smoke/semantic_task.py",
+    "target_symbol": "is_even",
+    "method": "ast_boundary",
+    "start_line": 1,
+    "end_line": 2,
+    "locked_search": "return n % 2 == 1",
+    "locked_search_sha256": "fc407e42db2a5682206db18b200ac4647a7799f2d61b8a3a2b98357ae9934281",
+    "locked_search_occurrence_count": 1,
+    "source_anchor_sha256": "fc407e42db2a5682206db18b200ac4647a7799f2d61b8a3a2b98357ae9934281"
+  },
+  "verifier": {
+    "command": [
+      "python3",
+      "-c",
+      "from f import is_even; assert is_even(4) is True; assert is_even(3) is False"
+    ],
+    "cwd_mode": "fixture_dir",
+    "contract_sha256": "c821bcfacf493a18a11fc9fabd7aa594ce6d17af13fe165ebc8183a3452e1a97",
+    "pre_fix_exit_code": 1,
+    "pre_fix_expected_failure": true
+  },
+  "evidence_refs": [],
+  "evidence_pack_sha256": "60c9bb07d558a2d763d6a62541b1a7e8f1c1518088c80d76b3749a35bbf324e4"
+}

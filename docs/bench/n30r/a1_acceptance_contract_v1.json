@@ -1,0 +1,230 @@
+{
+  "schema": "n30r_v1_acceptance_contract_v1",
+  "version": "1.0",
+  "description": "Independent validation rule set for N30R full armor trace acceptance",
+  "gates": {
+    "p_gate": {
+      "name": "Planner Gate",
+      "fields": {
+        "planner_snapshot_hash": {"type": "sha256", "required": true, "description": "Planner snapshot must be valid 64-char hex SHA-256"},
+        "capability_projection_hash": {"type": "sha256", "required": true, "description": "Capability projection must be valid 64-char hex SHA-256"},
+        "planner_capability_count": {"type": "int", "required": true, "description": "Number of capabilities selected by planner"},
+        "executor_capabilities": {"type": "list", "required": true, "description": "Capabilities actually executed"},
+        "selected_capabilities_used": {"type": "list", "required": true, "description": "Capabilities used in execution"},
+        "unknown_capability_count": {"type": "int", "required": true, "expected": 0, "description": "Must be 0"},
+        "dependency_errors": {"type": "int", "required": true, "expected": 0, "description": "Must be 0"}
+      },
+      "rules": [
+        {"check": "planner_snapshot_hash matches ^[0-9a-f]{64}$"},
+        {"check": "capability_projection_hash matches ^[0-9a-f]{64}$"},
+        {"check": "executor_capabilities is subset of selected_capabilities_used or equal"},
+        {"check": "unknown_capability_count == 0"},
+        {"check": "dependency_errors == 0"}
+      ]
+    },
+    "d_gate": {
+      "name": "Discovery Gate",
+      "fields": {
+        "repo_root": {"type": "path", "required": true},
+        "target_file": {"type": "string", "required": true, "min_length": 1},
+        "source_hash": {"type": "sha256", "required": true, "recomputable": true},
+        "target_symbol": {"type": "string", "required": true, "min_length": 1},
+        "locked_search": {"type": "string", "required": true, "min_length": 1},
+        "locked_search_in_source": {"type": "bool", "required": true, "description": "locked_search must be exact substring of source"},
+        "locked_search_occurrence_count": {"type": "int", "required": true, "expected": 1},
+        "source_anchor_hash": {"type": "sha256", "required": true},
+        "evidence_refs": {"type": "list", "required": true},
+        "evidence_artifact_hashes": {"type": "list", "required": true, "description": "All evidence artifact hashes must match"},
+        "verifier_contract": {"type": "object", "required": true}
+      },
+      "rules": [
+        {"check": "target_file non-empty"},
+        {"check": "source recomputed hash matches recorded hash"},
+        {"check": "target_symbol non-empty"},
+        {"check": "locked_search is exact substring of source"},
+        {"check": "locked_search_occurrence_count == 1"},
+        {"check": "source_anchor_hash is valid SHA-256"},
+        {"check": "all evidence_refs resolvable"},
+        {"check": "all evidence artifact hashes match"}
+      ]
+    },
+    "x_gate": {
+      "name": "Execution Gate",
+      "fields": {
+        "provider_called": {"type": "bool", "required": true},
+        "model_response_received": {"type": "bool", "required": true},
+        "raw_output_length": {"type": "int", "required": true, "min": 1},
+        "prompt_artifact": {"type": "object", "required": true},
+        "prompt_hash": {"type": "sha256", "required": true, "recomputable": true},
+        "prompt_contains_task": {"type": "bool", "required": true},
+        "prompt_contains_target_file": {"type": "bool", "required": true},
+        "prompt_contains_target_symbol": {"type": "bool", "required": true},
+        "prompt_contains_locked_search": {"type": "bool", "required": true},
+        "prompt_contains_protocol": {"type": "bool", "required": true},
+        "candidate_patch_length": {"type": "int", "required": true, "min": 1},
+        "candidate_hash": {"type": "sha256", "required": true},
+        "candidate_isolation_attempted": {"type": "bool", "required": true, "expected": true},
+        "candidate_output_isolated": {"type": "bool", "required": true, "expected": true},
+        "selected_candidate_hash": {"type": "sha256", "required": true},
+        "apply_status": {"type": "string", "required": true, "accepted": ["pass", "success", "applied"]},
+        "target_hash_before": {"type": "sha256", "required": true},
+        "target_hash_after": {"type": "sha256", "required": true}
+      },
+      "rules": [
+        {"check": "provider_called == true"},
+        {"check": "model_response_received == true when raw_output_length > 0"},
+        {"check": "raw_output_length > 0"},
+        {"check": "prompt contains task_id"},
+        {"check": "prompt contains target_file"},
+        {"check": "prompt contains target_symbol"},
+        {"check": "prompt contains locked_search"},
+        {"check": "prompt contains protocol marker"},
+        {"check": "candidate_hash is valid SHA-256"},
+        {"check": "candidate_isolation_attempted == true"},
+        {"check": "candidate_output_isolated == true"},
+        {"check": "selected_candidate_hash is valid SHA-256"},
+        {"check": "apply_status in accepted values"},
+        {"check": "target_hash_before != target_hash_after"}
+      ],
+      "anti_rules": [
+        {"check": "raw_output_length > 0 but model_response_received == false => REJECT"},
+        {"check": "candidate_isolated == true but candidate_hash empty => REJECT"},
+        {"check": "apply pass but source hash unchanged => REJECT"}
+      ]
+    },
+    "r_gate": {
+      "name": "Retry Gate",
+      "fields": {
+        "verifier_command": {"type": "list", "required": true, "min_length": 1},
+        "verifier_cwd": {"type": "path", "required": true},
+        "verifier_workspace": {"type": "string", "required": true},
+        "apply_workspace": {"type": "string", "required": true},
+        "candidate_workspace": {"type": "string", "required": true},
+        "verifier_exit_code": {"type": "int", "required": true},
+        "verifier_status": {"type": "string", "required": true}
+      },
+      "retry_rules": [
+        {"check": "semantic_retry_count <= 1"},
+        {"check": "semantic_retry_invoked == true when retry occurred"},
+        {"check": "first verifier failure evidence exists"},
+        {"check": "retry prompt contains verifier evidence"},
+        {"check": "retry prompt evidence hash is valid SHA-256"},
+        {"check": "second candidate hash differs from first"},
+        {"check": "second candidate independently isolated"}
+      ],
+      "anti_rules": [
+        {"check": "timeout inferred only from wall_time => REJECT"},
+        {"check": "verifier_workspace != apply_workspace => REJECT"},
+        {"check": "retry without verifier_feedback => REJECT"},
+        {"check": "same candidate hash on retry => REJECT"}
+      ]
+    },
+    "a_gate": {
+      "name": "Attribution Gate",
+      "fields": {
+        "learning_outcome_artifact": {"type": "object", "required": true},
+        "promotion_eligible": {"type": "bool", "required": true, "expected": false},
+        "global_learning_mutated": {"type": "bool", "required": true, "expected": false},
+        "capability_contributions": {"type": "list", "required": true}
+      },
+      "contribution_dimensions": [
+        "selected",
+        "bound",
+        "invoked",
+        "evidence_added",
+        "prompt_delta",
+        "outcome_contributed"
+      ],
+      "rules": [
+        {"check": "learning_outcome is shadow (not global mutation)"},
+        {"check": "promotion_eligible == false"},
+        {"check": "global_learning_mutated == false"},
+        {"check": "each capability contribution has evidence"},
+        {"check": "selected=true does not imply outcome_contributed=true"}
+      ],
+      "anti_rules": [
+        {"check": "global_learning_mutated == true => REJECT"},
+        {"check": "promotion_eligible == true => REJECT"},
+        {"check": "capability contribution without evidence => REJECT"}
+      ]
+    },
+    "c_gate": {
+      "name": "Chain Gate",
+      "fields": {
+        "final_receipt_artifact": {"type": "object", "required": true},
+        "hash_chain": {"type": "list", "required": true}
+      },
+      "hash_chain_required": [
+        "planner_snapshot",
+        "capability_projection",
+        "evidence_pack",
+        "prompt_artifact",
+        "raw_output",
+        "normalized_candidate",
+        "applied_patch",
+        "verifier_receipt",
+        "final_receipt"
+      ],
+      "rules": [
+        {"check": "final receipt artifact exists"},
+        {"check": "all required hash fields are valid 64-char hex SHA-256"},
+        {"check": "all resolvable hashes recomputed"},
+        {"check": "no placeholder hash (mock/placeholder/dummy/example/todo/unknown/none/0000...)"},
+        {"check": "no snapshot hash impersonating execution receipt"},
+        {"check": "hash chain complete (all required nodes present)"}
+      ],
+      "anti_rules": [
+        {"check": "placeholder hash in any field => REJECT"},
+        {"check": "all-zero hash => REJECT"},
+        {"check": "incomplete hash chain => REJECT"},
+        {"check": "snapshot hash as execution receipt => REJECT"}
+      ]
+    },
+    "live_gate": {
+      "name": "Live Gate",
+      "accepted_statuses": [
+        "LIVE_VERTICAL_SLICE_VERIFIED_SOLVE",
+        "LIVE_VERTICAL_SLICE_VERIFIED_FAIL"
+      ],
+      "prerequisites": [
+        "real model response received",
+        "Armor evidence reaches prompt",
+        "candidate lifecycle reached",
+        "verifier reached",
+        "exact failure family present",
+        "final receipt complete"
+      ],
+      "rejected_statuses": [
+        "CONTRACT_INVALID",
+        "INFRA_INVALID"
+      ],
+      "rules": [
+        {"check": "real model response received (not mock)"},
+        {"check": "Armor evidence reaches prompt"},
+        {"check": "candidate lifecycle reached"},
+        {"check": "verifier reached"},
+        {"check": "exact failure family present"},
+        {"check": "final receipt complete"}
+      ],
+      "anti_rules": [
+        {"check": "hand-written solved=true => REJECT"},
+        {"check": "provider called but no candidate lifecycle => REJECT"},
+        {"check": "CONTRACT_INVALID or INFRA_INVALID => REJECT"}
+      ]
+    }
+  },
+  "oracle_status_values": [
+    "FULL_ARMOR_PATH_ACCEPTED",
+    "DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING",
+    "ORACLE_READY_PRODUCER_ARTIFACT_PENDING",
+    "REJECTED_CONTRACT_INVALID",
+    "REJECTED_EVIDENCE_INVALID",
+    "REJECTED_HASH_CHAIN_INVALID"
+  ],
+  "hash_validation": {
+    "real_sha256_pattern": "^[0-9a-f]{64}$",
+    "rejected_patterns": ["mock", "placeholder", "dummy", "example", "todo", "unknown", "none", "0000000000000000000000000000000000000000000000000000000000000000"],
+    "allow_deterministic_provider": true,
+    "reject_fake_execution_evidence": true
+  }
+}
