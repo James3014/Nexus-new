@@ -1,0 +1,39 @@
+{
+  "schema": "nexus.n30r.baseline_manifest.v1",
+  "status": "N30R_BASELINE_INVALIDATION_SEALED",
+  "baseline_commit_sha": "88f9e50fd66aaaefe3002788496b74f76f809588",
+  "historical_runs": {
+    "n28": {
+      "capability_claim_eligible": false,
+      "capacity_claim_eligible": false,
+      "paired_baseline_eligible": false,
+      "reason_codes": [
+        "task_bank_original_verifier_passes",
+        "bare_arm_not_bare",
+        "quadrant_execution_not_isolated"
+      ]
+    },
+    "n30a": {
+      "capability_claim_eligible": false,
+      "capacity_claim_eligible": false,
+      "paired_baseline_eligible": false,
+      "reason_codes": [
+        "task_bank_original_verifier_passes",
+        "quadrant_execution_paths_identical",
+        "model_call_evidence_incomplete",
+        "empty_or_timeout_output_not_fail_closed"
+      ]
+    },
+    "m5": {
+      "paired_baseline_eligible": false,
+      "reason_codes": [
+        "source_prompt_verifier_hashes_incomplete"
+      ]
+    }
+  },
+  "forbidden_conclusions": [
+    "n30a_zero_of_48_is_model_capacity_evidence",
+    "n28_is_strictly_comparable_to_m5",
+    "nexus_has_reached_local_model_ceiling"
+  ]
+}
