@@ -7,10 +7,21 @@ from nexus.services.local_heal.p3_dry_run_invariants import (
     validate_p3_dry_run_receipt,
     p3_dry_run_invariant_to_dict,
 )
+from nexus.services.local_heal.p3_dry_run_schema import REQUIRED_P3_DRY_RUN_RECEIPT_FIELDS
 
 
 def _valid_receipt():
+    """Full valid receipt with all required schema fields."""
     return {
+        "p3_l_receipt_version": "1.0",
+        "p3_l_enabled": True,
+        "p3_l_authority": "shadow_only",
+        "p3_l_runtime_state": "shadow_only",
+        "p3_l_env_guard_present": False,
+        "p3_l_dry_run_only": True,
+        "p3_l_intended_topology": "cloud_with_local_assist",
+        "p3_l_task_difficulty": "medium",
+        "p3_l_provider_request_built": False,
         "p3_l_provider_invoked": False,
         "p3_l_network_invoked": False,
         "p3_l_api_key_used": False,
@@ -22,6 +33,8 @@ def _valid_receipt():
         "p3_l_claim_eligible": False,
         "p3_l_public_claim_allowed": False,
         "p3_l_production_ready": False,
+        "p3_l_blocked_reasons": [],
+        "p3_l_receipt_complete": True,
     }
 
 
@@ -183,13 +196,16 @@ def test_multiple_violations_recorded():
 
 
 # ============================================================
-# P3-L4-14: missing optional fields fail closed only where necessary
+# P3-M1-17: invariant gate now fails on missing fields
 # ============================================================
 
 
-def test_missing_fields_fail_closed():
-    result = validate_p3_dry_run_receipt({})
-    assert result.invariant_passed is True
+def test_invariant_gate_fails_on_missing_fields():
+    receipt = _valid_receipt()
+    del receipt["p3_l_provider_invoked"]
+    result = validate_p3_dry_run_receipt(receipt)
+    assert result.invariant_passed is False
+    assert result.schema_passed is False
 
 
 # ============================================================

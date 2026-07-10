@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from unittest.mock import patch
 
 from nexus.services.local_heal.p3_local_cheap_verifier_runtime import (
     P3CheapVerifierRuntimeReceipt,
+    RealLocalCheapVerifier,
     compute_p3_cheap_verifier_runtime,
 )
 
@@ -39,4 +42,29 @@ def test_compute_p3_cheap_verifier_runtime_no_real_call() -> None:
         })()
         receipt = compute_p3_cheap_verifier_runtime(metadata)
         mock_verifier.assert_called_once()
+        assert receipt.cheap_verifier_invoked is True
+
+
+class TestRealLocalCheapVerifier:
+    def test_ollama_disabled_returns_stub(self) -> None:
+        if "NEXUS_OLLAMA_ENABLED" in os.environ:
+            del os.environ["NEXUS_OLLAMA_ENABLED"]
+        verifier = RealLocalCheapVerifier()
+        metadata = {"p3_cloud_stub_candidate_generated": True}
+        receipt = verifier.compute_p3_cheap_verifier_runtime(metadata)
+        assert isinstance(receipt, P3CheapVerifierRuntimeReceipt)
+
+    def test_ollama_enabled_calls_9b(self) -> None:
+        os.environ["NEXUS_OLLAMA_ENABLED"] = "1"
+        verifier = RealLocalCheapVerifier()
+        assert verifier.ollama_enabled is True
+        assert verifier.MODEL_NAME == "ornith:9b"
+        metadata = {"p3_cloud_stub_candidate_generated": True}
+        receipt = verifier.compute_p3_cheap_verifier_runtime(metadata)
+        assert receipt.cheap_verifier_invoked is True
+        del os.environ["NEXUS_OLLAMA_ENABLED"]
+
+    def test_existing_p1c_still_works(self) -> None:
+        metadata = {"p3_cloud_stub_candidate_generated": True}
+        receipt = compute_p3_cheap_verifier_runtime(metadata)
         assert receipt.cheap_verifier_invoked is True

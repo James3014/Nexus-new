@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from unittest.mock import patch
 
 from nexus.services.local_heal.p3_local_diagnosis_runtime import (
     P3LocalDiagnosisRuntimeReceipt,
+    RealLocalDiagnosis,
     compute_p3_local_diagnosis_runtime,
 )
 
@@ -53,3 +56,50 @@ def test_p3_local_diagnosis_runtime_no_real_model_call() -> None:
         receipt = compute_p3_local_diagnosis_runtime(skeleton, anchor)
         mock_diag.assert_called_once()
         assert receipt.cloud_call_invoked is True
+
+
+class TestRealLocalDiagnosis:
+    def test_ollama_disabled_returns_stub(self) -> None:
+        if "NEXUS_OLLAMA_ENABLED" in os.environ:
+            del os.environ["NEXUS_OLLAMA_ENABLED"]
+        diag = RealLocalDiagnosis()
+        skeleton = {"task_id": "t1", "p3_task_difficulty": "medium"}
+        anchor = {"target_file": "a.py", "target_symbol": "foo"}
+        receipt = diag.compute_p3_local_diagnosis_runtime(skeleton, anchor)
+        assert isinstance(receipt, P3LocalDiagnosisRuntimeReceipt)
+
+    def test_ollama_enabled_calls_3b(self) -> None:
+        os.environ["NEXUS_OLLAMA_ENABLED"] = "1"
+        diag = RealLocalDiagnosis()
+        assert diag.ollama_enabled is True
+        assert diag.MODEL_NAME == "qwen2.5-s2t-advisor:3b"
+        skeleton = {"task_id": "t1", "p3_task_difficulty": "medium"}
+        anchor = {"target_file": "a.py", "target_symbol": "foo"}
+        receipt = diag.compute_p3_local_diagnosis_runtime(skeleton, anchor)
+        assert receipt.cloud_call_invoked is True
+        assert receipt.runtime_behavior_changed is True
+        del os.environ["NEXUS_OLLAMA_ENABLED"]
+
+    def test_no_real_call_without_env(self) -> None:
+        if "NEXUS_OLLAMA_ENABLED" in os.environ:
+            del os.environ["NEXUS_OLLAMA_ENABLED"]
+        with patch(
+            "nexus.services.local_heal.p3_local_diagnosis_runtime.InertLocalModelProvider.generate"
+        ) as mock_generate:
+            diag = RealLocalDiagnosis()
+            diag.compute_p3_local_diagnosis_runtime(
+                {"task_id": "t1"}, {"target_file": "a.py"}
+            )
+            mock_generate.assert_not_called()
+
+    def test_existing_p1b_still_works(self) -> None:
+        skeleton = {"task_id": "t1", "p3_task_difficulty": "medium"}
+        anchor = {"target_file": "a.py", "target_symbol": "foo"}
+        receipt = compute_p3_local_diagnosis_runtime(skeleton, anchor)
+        assert isinstance(receipt, P3LocalDiagnosisRuntimeReceipt)
+
+    def test_3b_provider_name(self) -> None:
+        os.environ["NEXUS_OLLAMA_ENABLED"] = "1"
+        diag = RealLocalDiagnosis()
+        assert diag.PROVIDER_NAME == "OllamaLocalModelProvider"
+        del os.environ["NEXUS_OLLAMA_ENABLED"]
