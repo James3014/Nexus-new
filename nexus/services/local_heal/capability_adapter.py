@@ -126,7 +126,96 @@ class LocalHealCapabilityAdapter:
                 hybrid_route=decision,
                 capability_payload=capability_payload,
             )
-            
+
+        # N31-B: signal_snapshot MUST have planner_version from CapabilityPlanner.plan()
+        VALID_PLANNER_VERSIONS = {"capability_planner_v1", "capability_planner_v2"}
+        planner_version = signal_snapshot.get("planner_version", None)
+
+        if not planner_version:
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.FAIL_CLOSED,
+                local_model_called=False,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                fallback_block_reason="missing_planner_version",
+                metadata={"error": "signal_snapshot missing planner_version"},
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            capability_payload = capability_payload_from_hybrid_route(decision)
+            capability_payload["adapter_invoked"] = False
+            return LocalHealCapabilityResponse(
+                task_id=request.task_id,
+                invoked=False,
+                hybrid_route=decision,
+                capability_payload=capability_payload,
+            )
+
+        if planner_version not in VALID_PLANNER_VERSIONS:
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.FAIL_CLOSED,
+                local_model_called=False,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                fallback_block_reason=f"invalid_planner_version:{planner_version}",
+                metadata={"error": f"Invalid planner_version: {planner_version}"},
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            capability_payload = capability_payload_from_hybrid_route(decision)
+            capability_payload["adapter_invoked"] = False
+            return LocalHealCapabilityResponse(
+                task_id=request.task_id,
+                invoked=False,
+                hybrid_route=decision,
+                capability_payload=capability_payload,
+            )
+
+        # N31-C: anti-tampering — require fields that only CapabilityPlanner.plan() produces
+        REQUIRED_PLANNER_FIELDS = {
+            "pillars_signature",
+            "ssd_route_map",
+            "context_slimming_policy",
+            "harness_relevance_policy",
+            "research_isolation_policy",
+            "selected_executor",
+        }
+        missing_planner_fields = [k for k in REQUIRED_PLANNER_FIELDS if k not in signal_snapshot]
+        if missing_planner_fields:
+            payload = build_hybrid_route_decision(
+                route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+                public_claim_allowed=False,
+                production_ready=False,
+                adapter_output_is_route_truth=False,
+                route_truth_source="CapabilityPlanner",
+                behavior_changed=False,
+                authority=Authority.FAIL_CLOSED,
+                local_model_called=False,
+                verifier_result=VerifierResult.NOT_RUN,
+                evidence_refs=request.evidence_refs,
+                fallback_block_reason=f"incomplete_signal_snapshot:missing={missing_planner_fields}",
+                metadata={"error": f"Incomplete signal_snapshot: missing {missing_planner_fields}"},
+            )
+            decision = hybrid_route_decision_from_payload(payload)
+            capability_payload = capability_payload_from_hybrid_route(decision)
+            capability_payload["adapter_invoked"] = False
+            return LocalHealCapabilityResponse(
+                task_id=request.task_id,
+                invoked=False,
+                hybrid_route=decision,
+                capability_payload=capability_payload,
+            )
+
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
         
