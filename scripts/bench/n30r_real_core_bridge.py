@@ -305,20 +305,39 @@ def run_real_core_bridge(
 
     meta = executor_response.raw_model_metadata if isinstance(executor_response.raw_model_metadata, dict) else {}
 
-    # Executor postcondition: selected_capabilities_used must match request
-    meta_caps_used = meta.get("selected_capabilities_used")
-    if meta_caps_used is not None:
-        request_caps = tuple(executor_request.selected_capabilities)
-        meta_caps_tuple = tuple(meta_caps_used) if isinstance(meta_caps_used, (list, tuple)) else ()
-        if request_caps != meta_caps_tuple:
-            wall_time = time.time() - start
-            return _fail_closed_result(
-                wall_time, f"executor_capability_projection_mismatch:request={request_caps},metadata={meta_caps_tuple}",
-                signal_snapshot=signal_snapshot, planner_called=True,
-                orig_code=orig_code, task=task, run_id=run_id,
-                seed=seed, trial_index=trial_index,
-                executor_invoked=True,
-            )
+    # Executor postcondition: selected_capabilities_used must be present and match request
+    if "selected_capabilities_used" not in meta:
+        wall_time = time.time() - start
+        return _fail_closed_result(
+            wall_time, "executor_capability_metadata_missing",
+            signal_snapshot=signal_snapshot, planner_called=True,
+            orig_code=orig_code, task=task, run_id=run_id,
+            seed=seed, trial_index=trial_index,
+            executor_invoked=True,
+        )
+
+    meta_caps_used = meta["selected_capabilities_used"]
+    if not isinstance(meta_caps_used, (list, tuple)):
+        wall_time = time.time() - start
+        return _fail_closed_result(
+            wall_time, f"executor_capability_metadata_invalid_type:type={type(meta_caps_used).__name__}",
+            signal_snapshot=signal_snapshot, planner_called=True,
+            orig_code=orig_code, task=task, run_id=run_id,
+            seed=seed, trial_index=trial_index,
+            executor_invoked=True,
+        )
+
+    request_caps = tuple(executor_request.selected_capabilities)
+    meta_caps_tuple = tuple(meta_caps_used)
+    if request_caps != meta_caps_tuple:
+        wall_time = time.time() - start
+        return _fail_closed_result(
+            wall_time, f"executor_capability_projection_mismatch:request={request_caps},metadata={meta_caps_tuple}",
+            signal_snapshot=signal_snapshot, planner_called=True,
+            orig_code=orig_code, task=task, run_id=run_id,
+            seed=seed, trial_index=trial_index,
+            executor_invoked=True,
+        )
 
     pipeline_run_called = bool(meta.get("localheal_pipeline_run_called", False))
     pipeline_actual_execution = bool(meta.get("localheal_pipeline_actual_execution", False))

@@ -228,7 +228,7 @@ def test_bridge_rejects_executor_capability_metadata_mismatch():
 def test_bridge_rejects_missing_selected_capabilities_used():
     from scripts.bench.n30r_real_core_bridge import run_real_core_bridge
     source = Path("scripts/bench/n30r_real_core_bridge.py").read_text(encoding="utf-8")
-    assert 'meta_caps_used = meta.get("selected_capabilities_used")' in source
+    assert '"selected_capabilities_used" not in meta' in source
 
 
 # ---------------------------------------------------------------------------
@@ -364,3 +364,129 @@ def test_projection_rejects_capability_reasons_not_dict():
     proj = project_planner_capabilities_for_local_executor({"ssd_route_map": {"capability_reasons": "bad"}})
     assert proj.valid is False
     assert "ssd_capability_reasons_not_dict" in proj.failure_reason
+
+
+# ---------------------------------------------------------------------------
+# 19. Bridge metadata postcondition behavioral tests
+# ---------------------------------------------------------------------------
+
+def _make_mock_response(**overrides):
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutorResponse
+    defaults = dict(
+        invoked=True, local_model_called=True, candidate_patch="patch",
+        candidate_hash="abc", reasoning_summary="",
+        raw_model_metadata={
+            "execution_topology": "localheal_pipeline",
+            "localheal_pipeline_run_called": True,
+            "localheal_pipeline_actual_execution": True,
+            "isolated_verifier_status": "fail",
+            "selected_capabilities_used": ("repair_loop",),
+        },
+        provider="ollama", model_name="m",
+        error="", timeout=False, evidence_refs=(),
+    )
+    defaults.update(overrides)
+    return LocalModelExecutorResponse(**defaults)
+
+
+def _make_bridge_task():
+    import json as _json
+    from scripts.bench.n30r_runner import _materialize_task
+    manifest_path = Path(__file__).resolve().parents[3] / "docs" / "bench" / "n30r" / "smoke_manifest.json"
+    manifest = _json.loads(manifest_path.read_text())
+    return _materialize_task(manifest["tasks"][0])
+
+
+def _make_planner_snapshot():
+    return {
+        "planner_version": "capability_planner_v1",
+        "selected_executor": "local_model",
+        "execution_topology": "localheal_pipeline",
+        "protocol_mode": "anchored_edit",
+        "executor_model": "qwen2.5-coder:7b-instruct",
+        "executor_provider": "ollama",
+        "ssd_route_map": {"capability_reasons": {"repair_loop": ["test"]}},
+        "context_slimming_policy": {},
+        "harness_relevance_policy": {},
+        "research_isolation_policy": {},
+    }
+
+
+def test_bridge_fails_closed_when_selected_capabilities_used_missing():
+    """Missing selected_capabilities_used in metadata → CONTRACT_INVALID."""
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutor
+    from scripts.bench.n30r_real_core_bridge import run_real_core_bridge
+    from scripts.bench.n30r_runner import ARMS
+    task = _make_bridge_task()
+    meta = {
+        "execution_topology": "localheal_pipeline",
+        "localheal_pipeline_run_called": True,
+        "localheal_pipeline_actual_execution": True,
+    }
+    mock_resp = _make_mock_response(raw_model_metadata=meta)
+    with patch.object(LocalModelExecutor, "run", return_value=mock_resp):
+        with patch("scripts.bench.n30r_real_core_bridge.invoke_capability_planner", return_value=_make_planner_snapshot()):
+            result = run_real_core_bridge(task, ARMS["N30R_B_7B_REAL_CORE"], lambda m, s, u: "", 3001, 0, "test")
+    assert result.terminal_status == "CONTRACT_INVALID"
+    assert "executor_capability_metadata_missing" in result.verifier_status
+
+
+def test_bridge_fails_closed_when_selected_capabilities_used_wrong_type():
+    """Wrong type for selected_capabilities_used → CONTRACT_INVALID."""
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutor
+    from scripts.bench.n30r_real_core_bridge import run_real_core_bridge
+    from scripts.bench.n30r_runner import ARMS
+    task = _make_bridge_task()
+    meta = {
+        "execution_topology": "localheal_pipeline",
+        "localheal_pipeline_run_called": True,
+        "localheal_pipeline_actual_execution": True,
+        "selected_capabilities_used": "not_a_tuple",
+    }
+    mock_resp = _make_mock_response(raw_model_metadata=meta)
+    with patch.object(LocalModelExecutor, "run", return_value=mock_resp):
+        with patch("scripts.bench.n30r_real_core_bridge.invoke_capability_planner", return_value=_make_planner_snapshot()):
+            result = run_real_core_bridge(task, ARMS["N30R_B_7B_REAL_CORE"], lambda m, s, u: "", 3001, 0, "test")
+    assert result.terminal_status == "CONTRACT_INVALID"
+    assert "executor_capability_metadata_invalid_type" in result.verifier_status
+
+
+def test_bridge_fails_closed_when_selected_capabilities_used_mismatch():
+    """Mismatched selected_capabilities_used → CONTRACT_INVALID."""
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutor
+    from scripts.bench.n30r_real_core_bridge import run_real_core_bridge
+    from scripts.bench.n30r_runner import ARMS
+    task = _make_bridge_task()
+    meta = {
+        "execution_topology": "localheal_pipeline",
+        "localheal_pipeline_run_called": True,
+        "localheal_pipeline_actual_execution": True,
+        "selected_capabilities_used": ("artifact_gate", "claim_gate"),
+    }
+    mock_resp = _make_mock_response(raw_model_metadata=meta)
+    with patch.object(LocalModelExecutor, "run", return_value=mock_resp):
+        with patch("scripts.bench.n30r_real_core_bridge.invoke_capability_planner", return_value=_make_planner_snapshot()):
+            result = run_real_core_bridge(task, ARMS["N30R_B_7B_REAL_CORE"], lambda m, s, u: "", 3001, 0, "test")
+    assert result.terminal_status == "CONTRACT_INVALID"
+    assert "executor_capability_projection_mismatch" in result.verifier_status
+
+
+def test_bridge_accepts_exact_selected_capabilities_used_match():
+    """Exact match of selected_capabilities_used → passes postcondition."""
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutor
+    from scripts.bench.n30r_real_core_bridge import run_real_core_bridge
+    from scripts.bench.n30r_runner import ARMS
+    task = _make_bridge_task()
+    meta = {
+        "execution_topology": "localheal_pipeline",
+        "localheal_pipeline_run_called": True,
+        "localheal_pipeline_actual_execution": True,
+        "selected_capabilities_used": ("repair_loop",),
+        "isolated_verifier_status": "fail",
+    }
+    mock_resp = _make_mock_response(raw_model_metadata=meta)
+    with patch.object(LocalModelExecutor, "run", return_value=mock_resp):
+        with patch("scripts.bench.n30r_real_core_bridge.invoke_capability_planner", return_value=_make_planner_snapshot()):
+            result = run_real_core_bridge(task, ARMS["N30R_B_7B_REAL_CORE"], lambda m, s, u: "", 3001, 0, "test")
+    assert result.terminal_status != "CONTRACT_INVALID"
+    assert "executor_capability_metadata" not in result.verifier_status
