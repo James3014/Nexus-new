@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -114,4 +114,15 @@ class CapabilitySignalSet:
             tenant_id=tenant_id,
             metadata=dict(context),
         )
+
+
+@dataclass(frozen=True)
+class SkillSignalSet:
+    top_skill_ids: tuple[str, ...] = ()
+    skill_confidence: float = 0.0
+    trust_level: str = ""
+    source: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self) | {"top_skill_ids": list(self.top_skill_ids)}
 
