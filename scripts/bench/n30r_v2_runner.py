@@ -651,6 +651,12 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
         prompt_build_sec = round(float(meta.get("prompt_build_sec", 0.0)), 4)
         provider_wall_sec = round(float(meta.get("provider_elapsed_sec", 0.0)), 4)
 
+        phase_reproduction_sec = round(float(meta.get("phase_reproduction_sec", 0.0)), 4)
+        phase_planning_sec = round(float(meta.get("phase_planning_sec", 0.0)), 4)
+        phase_localization_sec = round(float(meta.get("phase_localization_sec", 0.0)), 4)
+        phase_patch_synthesis_sec = round(float(meta.get("phase_patch_synthesis_sec", 0.0)), 4)
+        phase_verification_sec = round(float(meta.get("phase_verification_sec", 0.0)), 4)
+
         # Extract Ollama native metrics from last provider response
         ollama_metrics: dict = {
             "ollama_total_duration": meta.get("ollama_total_duration", 0),
@@ -724,6 +730,11 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "anchor_localization_sec": anchor_localization_sec,
             "prompt_build_sec": prompt_build_sec,
             "executor_sec": executor_sec,
+            "phase_reproduction_sec": phase_reproduction_sec,
+            "phase_planning_sec": phase_planning_sec,
+            "phase_localization_sec": phase_localization_sec,
+            "phase_patch_synthesis_sec": phase_patch_synthesis_sec,
+            "phase_verification_sec": phase_verification_sec,
             # Prompt size metrics
             "prompt_total_chars": prompt_total_chars,
             "response_chars": response_chars,
