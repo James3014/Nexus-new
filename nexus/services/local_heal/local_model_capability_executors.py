@@ -380,25 +380,29 @@ class LocalHealPipelineCapabilityExecutor:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                             model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "") or _pipeline_model_name
 
+                        # Heuristic phase tag for optional route_context counter + ledger fallback.
+                        # Always bind call_type so missing phase= kwargs cannot NameError.
+                        prompt_lower = prompt.lower()
+                        if "software architect" in prompt_lower or "diagnostic assistant" in prompt_lower or "root cause hypothesis" in prompt_lower:
+                            call_type = "planning"
+                        elif "logical specification" in prompt_lower or "senior engineer. define the exact logical change" in prompt_lower:
+                            call_type = "spec_gen"
+                        elif "selfcorrector" in prompt_lower or "verifier stdout" in prompt_lower or "verifier failed" in prompt_lower:
+                            call_type = "retry"
+                        else:
+                            call_type = "patch"
+
                         ledger = ctx.route_context.get("llm_call_ledger") if isinstance(ctx.route_context, dict) else None
                         if isinstance(ledger, dict):
-                            prompt_lower = prompt.lower()
-                            if "software architect" in prompt_lower or "diagnostic assistant" in prompt_lower or "root cause hypothesis" in prompt_lower:
-                                call_type = "planning"
-                            elif "logical specification" in prompt_lower or "senior engineer. define the exact logical change" in prompt_lower:
-                                call_type = "spec_gen"
-                            elif "selfcorrector" in prompt_lower or "verifier stdout" in prompt_lower or "verifier failed" in prompt_lower:
-                                call_type = "retry"
-                            else:
-                                call_type = "patch"
                             ledger[call_type] = ledger.get(call_type, 0) + 1
                             ledger["total"] = ledger.get("total", 0) + 1
 
                         current_meta = ctx.local_model_metadata or {}
                         attempts = current_meta.get("profile_attempts", [])
                         attempt_id_val = kwargs.get("attempt_id") or (f"attempt-{len(attempts)}" if attempts else "attempt-1")
-                        execution_profile_val = kwargs.get("execution_profile") or (attempts[-1] if attempts else "LITE")
-                        phase_val = kwargs.get("phase") or call_type or ""
+                        last_profile = attempts[-1] if attempts and isinstance(attempts[-1], str) else "LITE"
+                        execution_profile_val = kwargs.get("execution_profile") or last_profile
+                        phase_val = kwargs.get("phase") or call_type
 
                         prov_req = LocalModelProviderRequest(
                             task_id=ctx.task_id,
