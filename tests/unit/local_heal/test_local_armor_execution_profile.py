@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from nexus.services.local_heal.local_armor_execution_profile import resolve_local_armor_profile, build_profile_controls
 
 class TestLocalArmorExecutionProfile(unittest.TestCase):
@@ -68,6 +69,13 @@ class TestLocalArmorExecutionProfile(unittest.TestCase):
         profile = resolve_local_armor_profile({})
         self.assertEqual(profile.profile, "STANDARD")
         self.assertTrue(profile.planning_llm_allowed)
+
+    def test_force_full_is_resolved_by_production_profile_resolver(self):
+        with patch.dict("os.environ", {"NEXUS_FORCE_FULL_ARMOR": "1"}, clear=False):
+            profile = resolve_local_armor_profile({"signal_snapshot": {"routing_tier": "L1_green_lane"}})
+        self.assertEqual(profile.profile, "FULL")
+        self.assertEqual(profile.reason, "env_force_full_armor")
+        self.assertFalse(profile.escalation_allowed)
 
 if __name__ == "__main__":
     unittest.main()

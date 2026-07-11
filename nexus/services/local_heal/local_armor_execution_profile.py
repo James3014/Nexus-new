@@ -44,6 +44,11 @@ def resolve_local_armor_profile(route_context: dict) -> LocalArmorProfile:
     source_anchor_present = bool(locked_search.strip() or (route_context.get("target_file") and route_context.get("target_symbol")))
     verifier_present = bool(verifier_command)
 
+    # Evaluator-only full mode must be resolved here so runtime controls and
+    # receipts observe the same profile decision.
+    if os.environ.get("NEXUS_FORCE_FULL_ARMOR") == "1":
+        return build_profile_controls("FULL", "env_force_full_armor", routing_tier)
+
     # 1. Determine LITE preconditions
     is_routing_tier_lite = routing_tier in ("L0_micro_patch", "L1_green_lane") or "light" in routing_tier_reason.lower() or "green_lane" in routing_tier_reason.lower()
     has_lite_support = (

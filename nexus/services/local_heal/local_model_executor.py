@@ -771,6 +771,41 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
+        from nexus.services.local_heal.local_armor_execution_profile import (
+            build_profile_controls,
+            resolve_local_armor_profile,
+        )
+        profile_route_context = request.route_context if isinstance(request.route_context, dict) else {}
+        initial_profile = resolve_local_armor_profile(profile_route_context)
+        profile_route_context["local_armor_execution_profile"] = initial_profile.profile
+        profile_route_context["local_armor_controls"] = {
+            "profile": initial_profile.profile,
+            "reason": initial_profile.reason,
+            "planning_llm_allowed": initial_profile.planning_llm_allowed,
+            "spec_gen_allowed": initial_profile.spec_gen_allowed,
+            "candidate_cap": initial_profile.candidate_cap,
+            "semantic_retry_cap": initial_profile.semantic_retry_cap,
+            "committee_allowed": initial_profile.committee_allowed,
+            "autoreason_allowed": initial_profile.autoreason_allowed,
+            "ddtree_allowed": initial_profile.ddtree_allowed,
+            "escalation_allowed": initial_profile.escalation_allowed,
+        }
+        profile_attempts = [initial_profile.profile]
+        profile_escalation_reasons: list[str] = []
+
+        def record_profile_state(raw_meta: dict[str, Any]) -> dict[str, Any]:
+            final_profile = str(
+                profile_route_context.get("local_armor_execution_profile", initial_profile.profile)
+                or initial_profile.profile
+            )
+            raw_meta["initial_execution_profile"] = initial_profile.profile
+            raw_meta["final_execution_profile"] = final_profile
+            raw_meta["profile_attempts"] = list(profile_attempts)
+            raw_meta["profile_escalation_count"] = len(profile_escalation_reasons)
+            raw_meta["profile_escalation_reasons"] = list(profile_escalation_reasons)
+            raw_meta["profile_transition_history"] = list(dict.fromkeys(profile_attempts))
+            return raw_meta
+
         # 1. Handle Dry Run
         if request.dry_run:
             from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
@@ -1985,6 +2020,37 @@ class LocalModelExecutor:
             retry_eligible = False
             retry_not_invoked_reason = "none"
 
+            # LITE has no semantic retry budget. A failed verifier may escalate
+            # exactly once to STANDARD, and the transition is receipt-visible.
+            current_profile = str(profile_route_context.get("local_armor_execution_profile", "STANDARD"))
+            controls = profile_route_context.get("local_armor_controls", {}) or {}
+            retry_cap = int(controls.get("semantic_retry_cap", 1) or 0)
+            if retry_cap == 0 and not raw_meta["solved"]:
+                if current_profile == "LITE" and bool(controls.get("escalation_allowed", True)):
+                    escalated = build_profile_controls(
+                        "STANDARD",
+                        "escalated_from_lite_on_verification_failure",
+                        initial_profile.planner_routing_tier,
+                    )
+                    profile_route_context["local_armor_execution_profile"] = escalated.profile
+                    profile_route_context["local_armor_controls"] = {
+                        "profile": escalated.profile,
+                        "reason": escalated.reason,
+                        "planning_llm_allowed": escalated.planning_llm_allowed,
+                        "spec_gen_allowed": escalated.spec_gen_allowed,
+                        "candidate_cap": escalated.candidate_cap,
+                        "semantic_retry_cap": escalated.semantic_retry_cap,
+                        "committee_allowed": escalated.committee_allowed,
+                        "autoreason_allowed": escalated.autoreason_allowed,
+                        "ddtree_allowed": escalated.ddtree_allowed,
+                        "escalation_allowed": escalated.escalation_allowed,
+                    }
+                    profile_attempts.append("STANDARD")
+                    profile_escalation_reasons.append("lite_to_standard_on_verification_failure")
+                    retry_cap = escalated.semantic_retry_cap
+                else:
+                    retry_not_invoked_reason = "lite_profile_no_retry_cap_exhausted"
+
             if raw_meta["solved"]:
                 retry_eligible = False
                 retry_not_invoked_reason = "already_solved"
@@ -2020,6 +2086,7 @@ class LocalModelExecutor:
                 and raw_meta["failure_class"] in ("verification_failed", "semantic_wrong_patch")
                 and candidate_isolated
                 and hash_match
+                and retry_cap > 0
             ):
                 retry_available = True
                 try:
@@ -2593,6 +2660,8 @@ class LocalModelExecutor:
             raw_meta["delegated_retry_provider_response_len"] = delegated_retry_provider_response_len
             raw_meta["delegated_retry_provider_response_type"] = delegated_retry_provider_response_type
             raw_meta["delegated_retry_provider_call_error"] = delegated_retry_provider_call_error
+
+            raw_meta = record_profile_state(raw_meta)
 
             # P2-F: Store hash_match on route_context for orchestrator fallback
             if isinstance(request.route_context, dict):
