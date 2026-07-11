@@ -725,6 +725,18 @@ class LocalHealPipelineCapabilityExecutor:
             semantic_retry_invoked = semantic_retry_count > 0 or same_span_retry
             structured_retry_packet_available = _has_structured_packet(getattr(pipeline_result_ctx, "errors", []) or [])
 
+        phase_durations = {}
+        if pipeline_result_ctx is not None:
+            ledger = getattr(pipeline_result_ctx, "_latency_ledger", None)
+            if ledger is not None:
+                for p in getattr(ledger, "phases", []):
+                    name = p.phase_name
+                    if name.startswith("patch_attempt"):
+                        name = "patch_synthesis"
+                    elif name.startswith("verify_attempt"):
+                        name = "verification"
+                    phase_durations[f"phase_{name}_sec"] = round(p.duration_sec, 4)
+
         return CapabilityExecutionResult(
             name="repair_loop", selected=True, invoked=True,
             gate_passed=actual_execution, outcome_contributed=actual_execution,
@@ -735,6 +747,7 @@ class LocalHealPipelineCapabilityExecutor:
                 "phases_completed": [p for p in ["reproduction", "planning", "localization", "patch_synthesis", "verification"] if {"reproduction": reproduction_reached, "planning": planning_reached, "localization": localization_reached, "patch_synthesis": patch_synthesis_reached, "verification": verification_reached}.get(p)],
                 "phase_failed": phase_reached if pipeline_result_ctx and getattr(pipeline_result_ctx, "failure_reason", "") else "",
                 "phase_failure_reason": getattr(pipeline_result_ctx, "failure_reason", "") if pipeline_result_ctx else "",
+                **phase_durations,
                 "reproduction_reached": reproduction_reached,
                 "planning_reached": planning_reached,
                 "localization_reached": localization_reached,
