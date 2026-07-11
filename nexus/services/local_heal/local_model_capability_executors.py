@@ -365,6 +365,8 @@ class LocalHealPipelineCapabilityExecutor:
                     if _pipeline_model_name in _MODEL_ALIASES:
                         _pipeline_model_name = _MODEL_ALIASES[_pipeline_model_name]
 
+                    _provider_options = _signal_snap.get("provider_options")
+
                     def _provider_generate(system_prompt_or_req, user_prompt=None, **kwargs):
                         nonlocal _last_provider_diag
                         from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
@@ -386,6 +388,7 @@ class LocalHealPipelineCapabilityExecutor:
                             model_name=model_name,
                             timeout_sec=_provider_timeout_sec,
                             api_type=api_type,
+                            options=_provider_options,
                         )
                         prov_resp = real_provider.generate(prov_req)
 
@@ -415,6 +418,8 @@ class LocalHealPipelineCapabilityExecutor:
                                     payload = {"model": model_name, "messages": messages, "stream": False}
                                 else:
                                     payload = {"model": model_name, "prompt": prompt, "stream": False}
+                                if _provider_options:
+                                    payload["options"] = _provider_options
                                 req_data = _json.dumps(payload).encode("utf-8")
                                 req = _urllib_request.Request(ollama_url, data=req_data, headers={"Content-Type": "application/json"})
                                 with _urllib_request.urlopen(req, timeout=_provider_timeout_sec) as resp:
@@ -432,6 +437,15 @@ class LocalHealPipelineCapabilityExecutor:
                                         "output_truncated": False,
                                         "output_len": len(raw_text),
                                         "prompt_len": len(prompt),
+                                        "provider_elapsed_sec": 0.0,
+                                        "ollama_total_duration": resp_json.get("total_duration", 0),
+                                        "ollama_load_duration": resp_json.get("load_duration", 0),
+                                        "ollama_prompt_eval_count": resp_json.get("prompt_eval_count", 0),
+                                        "ollama_prompt_eval_duration": resp_json.get("prompt_eval_duration", 0),
+                                        "ollama_eval_count": resp_json.get("eval_count", 0),
+                                        "ollama_eval_duration": resp_json.get("eval_duration", 0),
+                                        "ollama_done_reason": resp_json.get("done_reason", ""),
+                                        "ollama_metrics_available": True,
                                     }
                                     return raw_text
                             except Exception as e:
@@ -444,6 +458,15 @@ class LocalHealPipelineCapabilityExecutor:
                                     "output_truncated": False,
                                     "output_len": 0,
                                     "prompt_len": len(prompt),
+                                    "provider_elapsed_sec": 0.0,
+                                    "ollama_total_duration": 0,
+                                    "ollama_load_duration": 0,
+                                    "ollama_prompt_eval_count": 0,
+                                    "ollama_prompt_eval_duration": 0,
+                                    "ollama_eval_count": 0,
+                                    "ollama_eval_duration": 0,
+                                    "ollama_done_reason": "",
+                                    "ollama_metrics_available": False,
                                 }
                                 return ""
 
@@ -455,8 +478,17 @@ class LocalHealPipelineCapabilityExecutor:
                             "provider_error": prov_resp.error or "",
                             "timed_out": prov_resp.timed_out,
                             "output_truncated": prov_resp.output_truncated,
-                            "output_len": len(prov_resp.output_text),
+                            "output_len": len(prov_resp.output_text or ""),
                             "prompt_len": len(prompt),
+                            "provider_elapsed_sec": getattr(prov_resp, "elapsed_sec", 0.0),
+                            "ollama_total_duration": getattr(prov_resp, "ollama_total_duration", 0),
+                            "ollama_load_duration": getattr(prov_resp, "ollama_load_duration", 0),
+                            "ollama_prompt_eval_count": getattr(prov_resp, "ollama_prompt_eval_count", 0),
+                            "ollama_prompt_eval_duration": getattr(prov_resp, "ollama_prompt_eval_duration", 0),
+                            "ollama_eval_count": getattr(prov_resp, "ollama_eval_count", 0),
+                            "ollama_eval_duration": getattr(prov_resp, "ollama_eval_duration", 0),
+                            "ollama_done_reason": getattr(prov_resp, "ollama_done_reason", ""),
+                            "ollama_metrics_available": getattr(prov_resp, "ollama_metrics_available", False),
                         }
                         return prov_resp.output_text or ""
                     pipeline = HealPipeline(ollama_generate_fn=_provider_generate)
@@ -708,6 +740,16 @@ class LocalHealPipelineCapabilityExecutor:
                 "localization_reached": localization_reached,
                 "patch_synthesis_reached": patch_synthesis_reached,
                 "verification_reached": verification_reached,
+                # Ollama native metrics and elapsed seconds
+                "provider_elapsed_sec": _last_provider_diag.get("provider_elapsed_sec", 0.0),
+                "ollama_total_duration": _last_provider_diag.get("ollama_total_duration", 0),
+                "ollama_load_duration": _last_provider_diag.get("ollama_load_duration", 0),
+                "ollama_prompt_eval_count": _last_provider_diag.get("ollama_prompt_eval_count", 0),
+                "ollama_prompt_eval_duration": _last_provider_diag.get("ollama_prompt_eval_duration", 0),
+                "ollama_eval_count": _last_provider_diag.get("ollama_eval_count", 0),
+                "ollama_eval_duration": _last_provider_diag.get("ollama_eval_duration", 0),
+                "ollama_done_reason": _last_provider_diag.get("ollama_done_reason", ""),
+                "ollama_metrics_available": _last_provider_diag.get("ollama_metrics_available", False),
                 # C5D: Patch attempt trace
                 "patch_attempt_count": patch_attempt_count,
                 "patch_attempt_errors": patch_attempt_errors,
