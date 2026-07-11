@@ -173,12 +173,16 @@ def test_ollama_local_model_provider_success() -> None:
         mock_response.read.return_value = b'{"response": "suggested patch code"}'
         mock_response.__enter__.return_value = mock_response
 
-        with mock.patch("urllib.request.urlopen", return_value=mock_response):
+        with mock.patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
             resp = provider.generate(req)
             assert resp.provider_invoked is True
             assert resp.model_called is True
-            assert resp.model_name == "qwen2.5-coder:7b"
+            # Canonical alias: short tag resolves to installed instruct tag.
+            assert resp.model_name == "qwen2.5-coder:7b-instruct"
             assert resp.output_text == "suggested patch code"
+            import json as _json
+            payload = _json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+            assert payload["model"] == "qwen2.5-coder:7b-instruct"
 
 
 def test_ollama_provider_passes_options_to_api() -> None:

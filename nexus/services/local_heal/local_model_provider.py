@@ -11,6 +11,8 @@ from typing import Any, Callable
 import urllib.request
 import urllib.error
 
+from nexus.services.local_heal.local_model_name_resolver import resolve_local_model_name
+
 
 @dataclass(frozen=True)
 class LocalModelProviderRequest:
@@ -164,7 +166,7 @@ class LedgerRecord:
     call_id:       str   # uuid4
     task_id:       str
     phase:         str   # planning / spec_gen / patch / retry / judge / proposer / unknown
-    model:         str
+    model:         str   # actual model sent to provider (resolved)
     prompt_hash:   str   # sha256[:16]
     response_hash: str   # sha256[:16]
     duration_sec:  float
@@ -172,6 +174,10 @@ class LedgerRecord:
     error:         str   # empty if ok
     attempt_id:    str = ""
     execution_profile: str = ""
+    requested_model: str = ""
+    resolved_model: str = ""
+    model_resolution_source: str = ""
+    model_alias_applied: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -186,6 +192,10 @@ class LedgerRecord:
             "error":         self.error,
             "attempt_id":    self.attempt_id,
             "execution_profile": self.execution_profile,
+            "requested_model": self.requested_model,
+            "resolved_model": self.resolved_model,
+            "model_resolution_source": self.model_resolution_source,
+            "model_alias_applied": self.model_alias_applied,
         }
 
 
@@ -227,18 +237,20 @@ class RecordingLocalModelProvider(LocalModelProvider):
         finally:
             elapsed = round(time.monotonic() - t0, 4)
             ph = request.phase or "unknown"
+            resolution = resolve_local_model_name(request.model_name)
 
             if exc is not None or resp is None:
                 status_str = "error"
                 error_str = f"exception: {str(exc)}" if exc is not None else "response_is_none"
-                model_str = request.model_name
+                model_str = resolution.resolved_name or request.model_name
                 resp_hash = hashlib.sha256(b"").hexdigest()[:16]
             else:
                 status_str = "ok" if resp.model_called and not resp.error else (
                     "timeout" if resp.timed_out else "error"
                 )
                 error_str = resp.error or ""
-                model_str = resp.model_name or request.model_name
+                # model field = actual provider tag (resolved), not the alias
+                model_str = resp.model_name or resolution.resolved_name or request.model_name
                 resp_hash = hashlib.sha256((resp.output_text or "").encode("utf-8")).hexdigest()[:16]
 
             record = LedgerRecord(
@@ -253,6 +265,10 @@ class RecordingLocalModelProvider(LocalModelProvider):
                 error=error_str,
                 attempt_id=request.attempt_id,
                 execution_profile=request.execution_profile,
+                requested_model=resolution.requested_name,
+                resolved_model=resolution.resolved_name or model_str,
+                model_resolution_source=resolution.resolution_source,
+                model_alias_applied=resolution.alias_applied,
             )
             self.ledger.append(record)
 
@@ -390,8 +406,8 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 effective_timeout_sec=request.timeout_sec,
             )
 
-        model_name = request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
-        if not model_name:
+        requested_model = request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
+        if not requested_model:
             return LocalModelProviderResponse(
                 provider_invoked=True,
                 model_called=False,
@@ -401,6 +417,10 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 requested_timeout_sec=request.timeout_sec,
                 effective_timeout_sec=request.timeout_sec,
             )
+
+        # Single resolution boundary: every Ollama HTTP call uses the canonical tag.
+        resolution = resolve_local_model_name(requested_model)
+        model_name = resolution.resolved_name
 
         if request.api_type == "chat":
             raw_prompt = request.prompt

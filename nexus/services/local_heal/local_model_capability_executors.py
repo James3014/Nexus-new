@@ -360,10 +360,8 @@ class LocalHealPipelineCapabilityExecutor:
                     _pipeline_model_name = _signal_snap.get("executor_model", "")
                     # C6: Read provider_timeout_sec for forwarding to provider requests
                     _provider_timeout_sec: float = float(_signal_snap.get("provider_timeout_sec", 120.0))
-                    # C2: Map model name aliases (qwen2.5-coder:7b -> qwen2.5-coder:7b-instruct)
-                    _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
-                    if _pipeline_model_name in _MODEL_ALIASES:
-                        _pipeline_model_name = _MODEL_ALIASES[_pipeline_model_name]
+                    # Canonical resolution is owned by OllamaLocalModelProvider; keep
+                    # the requested name here so ledger requested_model stays truthful.
 
                     _provider_options = _signal_snap.get("provider_options")
 
@@ -423,6 +421,11 @@ class LocalHealPipelineCapabilityExecutor:
                             try:
                                 import json as _json
                                 import urllib.request as _urllib_request
+                                from nexus.services.local_heal.local_model_name_resolver import (
+                                    resolve_local_model_name as _resolve_local_model_name,
+                                )
+                                # Same canonical boundary as OllamaLocalModelProvider.
+                                model_name = _resolve_local_model_name(model_name).resolved_name
                                 endpoint = "/api/chat" if api_type == "chat" else "/api/generate"
                                 ollama_url = f"http://127.0.0.1:11434{endpoint}"
                                 if api_type == "chat":

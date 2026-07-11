@@ -1154,6 +1154,16 @@ class LocalModelExecutor:
             "autoreason_allowed": initial_profile.autoreason_allowed,
             "ddtree_allowed": initial_profile.ddtree_allowed,
             "escalation_allowed": initial_profile.escalation_allowed,
+            # N30R-V3.2: actual decision inputs for receipt / vertical proof
+            "profile_reason": initial_profile.reason,
+            "decision_inputs": dict(getattr(initial_profile, "decision_inputs", None) or {}),
+            "task_difficulty": (getattr(initial_profile, "decision_inputs", None) or {}).get("task_difficulty", ""),
+            "routing_tier": (getattr(initial_profile, "decision_inputs", None) or {}).get("routing_tier", ""),
+            "risk_score": (getattr(initial_profile, "decision_inputs", None) or {}).get("risk_score", 0),
+            "confidence": (getattr(initial_profile, "decision_inputs", None) or {}).get("confidence", 0.0),
+            "source_anchor_present": (getattr(initial_profile, "decision_inputs", None) or {}).get("source_anchor_present", False),
+            "verifier_present": (getattr(initial_profile, "decision_inputs", None) or {}).get("verifier_present", False),
+            "reasoning_mode": (getattr(initial_profile, "decision_inputs", None) or {}).get("reasoning_mode", ""),
         }
         profile_attempts = [initial_profile.profile]
         profile_escalation_reasons: list[str] = []
@@ -1169,6 +1179,16 @@ class LocalModelExecutor:
             raw_meta["profile_escalation_count"] = len(profile_escalation_reasons)
             raw_meta["profile_escalation_reasons"] = list(profile_escalation_reasons)
             raw_meta["profile_transition_history"] = list(dict.fromkeys(profile_attempts))
+            # N30R-V3.2: surface profile decision inputs for vertical-proof receipts
+            controls = profile_route_context.get("local_armor_controls") or {}
+            if isinstance(controls, dict):
+                raw_meta["local_armor_controls"] = dict(controls)
+                raw_meta["profile_reason"] = str(
+                    controls.get("profile_reason") or controls.get("reason") or ""
+                )
+                di = controls.get("decision_inputs")
+                if isinstance(di, dict):
+                    raw_meta["decision_inputs"] = dict(di)
             return raw_meta
 
         # 1. Handle Dry Run
@@ -1618,9 +1638,7 @@ class LocalModelExecutor:
                                 else:
                                     prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                                     model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
-                                _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
-                                if model_name in _MODEL_ALIASES:
-                                    model_name = _MODEL_ALIASES[model_name]
+                                # Model alias resolution is owned by OllamaLocalModelProvider.
                                 current_attempt_id = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
                                 current_execution_profile = profile_attempts[-1] if profile_attempts else "FULL"
                                 prov_req = LocalModelProviderRequest(
@@ -2520,15 +2538,10 @@ class LocalModelExecutor:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                             model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
 
-                        _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
-                        if model_name in _MODEL_ALIASES:
-                            model_name = _MODEL_ALIASES[model_name]
-
+                        # Prefer planner-owned executor model when closure drifts; alias
+                        # resolution remains at OllamaLocalModelProvider.
                         if _dr_requested_model and model_name != _dr_requested_model:
-                            _dr_resolved = _dr_requested_model
-                            if _dr_resolved in _MODEL_ALIASES:
-                                _dr_resolved = _MODEL_ALIASES[_dr_resolved]
-                            model_name = _dr_resolved
+                            model_name = _dr_requested_model
 
                         delegated_retry_provider_called = True
                         delegated_retry_provider_prompt_len = len(prompt) if prompt else 0
@@ -2663,9 +2676,7 @@ class LocalModelExecutor:
                                     else:
                                         prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                                     _resolved_model = _model_name
-                                    _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
-                                    if _resolved_model in _MODEL_ALIASES:
-                                        _resolved_model = _MODEL_ALIASES[_resolved_model]
+                                    # Alias resolution is owned by OllamaLocalModelProvider.
                                     _opts = options or kwargs.get("options")
                                     prov_req = LocalModelProviderRequest(
                                         task_id=request.task_id,
