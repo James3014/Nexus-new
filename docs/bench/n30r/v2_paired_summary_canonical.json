@@ -1,0 +1,50 @@
+{
+  "experiment_id": "n30r_v2_four_task_bare_core",
+  "run_id": "1783764799",
+  "total_rows": 8,
+  "status": "VALIDATED",
+  "valid_rows": 8,
+  "invalid_rows": 0,
+  "effectiveness": "V2_VALID_NO_UPLIFT",
+  "metrics": {
+    "total_tasks": 4,
+    "valid_pairs": 4,
+    "bare_verified_solves": 4,
+    "core_verified_solves": 4,
+    "solve_delta": 0,
+    "bare_model_response_rate": 1.0,
+    "core_model_response_rate": 1.0,
+    "bare_protocol_parse_rate": 1.0,
+    "core_protocol_parse_rate": 1.0,
+    "bare_candidate_rate": 1.0,
+    "core_candidate_rate": 1.0,
+    "bare_apply_success_rate": 1.0,
+    "core_apply_success_rate": 1.0,
+    "bare_verifier_reach_rate": 1.0,
+    "core_verifier_reach_rate": 1.0,
+    "bare_retry_count": 0,
+    "core_retry_count": 0,
+    "bare_mean_wall_time": 5.6555,
+    "core_mean_wall_time": 20.42325,
+    "bare_total_model_calls": 4,
+    "core_total_model_calls": 4,
+    "model_call_delta": 0,
+    "wall_time_delta": 14.76775,
+    "paired_matrix": {
+      "both_solve": 4,
+      "bare_only_solve": 0,
+      "core_only_solve": 0,
+      "neither_solve": 0
+    },
+    "failure_families": {
+      "infra": 0,
+      "contract": 0,
+      "apply": 0,
+      "candidate": 0,
+      "provider": 0,
+      "verifier": 0,
+      "timeout": 0,
+      "protocol": 0
+    }
+  }
+}
