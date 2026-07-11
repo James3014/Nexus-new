@@ -70,6 +70,16 @@ def validate_local_model_armor_metadata(
         if not metadata.get("source_anchor_missing") and not metadata.get("localization_missing"):
             missing.append("source_anchor_missing_reason_absent")
 
+    # 7. llm_call_ledger completeness
+    ledger = metadata.get("llm_call_ledger")
+    if ledger:
+        if not ledger.get("phase_complete", False) or ledger.get("unknown_call_count", 0) > 0:
+            missing.append("ledger_phase_incomplete")
+        if not ledger.get("attempt_context_complete", False) or ledger.get("missing_attempt_id_count", 0) > 0:
+            missing.append("ledger_attempt_id_incomplete")
+        if not ledger.get("profile_context_complete", False) or ledger.get("missing_execution_profile_count", 0) > 0:
+            missing.append("ledger_profile_incomplete")
+
     return (len(missing) == 0, missing)
 
 
@@ -110,9 +120,9 @@ def validate_capability_causality(
                        "research", "ui_validator", "external_productivity"):
             # External only - expected
             pass
-        elif cap in ("memory",):
-            # Metadata only - expected
-            pass
+        elif cap == "memory":
+            if not metadata.get("memory_retrieval_attempted", False):
+                issues.append("memory_selected_but_not_invoked")
         elif cap == "repair_loop":
             # Path A causality: must have actual execution, not just availability
             actual_exec = metadata.get("localheal_pipeline_actual_execution", False)

@@ -114,7 +114,12 @@ class PatchSynthesisPhase(IPhase):
         # N30R-V2.1-OPT: NEXUS_DISABLE_SPEC_GEN=1 跳過 spec_gen LLM 呼叫，節省 ~5s/task。
         # 當 planning 已提供 repair_strategy 時，spec_gen 是冗餘的第二次推理。
         # 啟用條件：local model latency 優先、plan 已含完整 repair_strategy。
-        _spec_gen_disabled = os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+        controls = (getattr(input_data, "route_context", None) or {}).get("local_armor_controls") or {}
+        spec_gen_allowed = controls.get("spec_gen_allowed", True)
+        _spec_gen_disabled = (
+            os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+            or not spec_gen_allowed
+        )
         repair_spec = getattr(input_data, "repair_specification", "")
         if not repair_spec and patch_decision["model"] != "deterministic" and not _spec_gen_disabled:
             spec_decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="planning", context={"mode": "spec_gen"})
@@ -125,7 +130,8 @@ class PatchSynthesisPhase(IPhase):
                     user_prompt=spec_prompt,
                     model=spec_decision["model"],
                     timeout=spec_decision["timeout_seconds"],
-                    options=spec_decision.get("ollama_options")
+                    options=spec_decision.get("ollama_options"),
+                    phase="spec_gen",
                 )
                 # C15-5H: Record spec_gen telemetry inline in the patch decision dict to avoid
                 # shifting model_decisions[-1] index. Appending a separate decision here would
@@ -189,13 +195,15 @@ class PatchSynthesisPhase(IPhase):
             )
 
         try:
+            primary_phase = "retry" if input_data.attempt > 1 else "patch"
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 model=patch_decision["model"],
                 timeout=patch_decision["timeout_seconds"],
                 options=patch_decision.get("ollama_options"),
-                api_type=patch_decision.get("api_type", "generate")
+                api_type=patch_decision.get("api_type", "generate"),
+                phase=primary_phase,
             )
         except Exception as e:
             reason = classify_model_exception(e)

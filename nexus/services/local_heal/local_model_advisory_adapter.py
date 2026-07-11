@@ -19,6 +19,9 @@ class LocalModelAdvisoryRequest:
     evidence_refs: tuple[str, ...]
     candidate_summary: str = ""
     route_truth_source: str = "CapabilityPlanner"
+    attempt_id: str = ""
+    execution_profile: str = ""
+    phase: str = ""
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,9 @@ class LocalModelAdvisoryAdapter:
             prompt=request.problem_statement,
             evidence_refs=request.evidence_refs,
             model_name="qwen",
+            attempt_id=request.attempt_id,
+            execution_profile=request.execution_profile,
+            phase=request.phase,
         )
         
         prov_resp = provider.generate(prov_req)

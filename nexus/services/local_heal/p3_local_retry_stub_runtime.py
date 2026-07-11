@@ -86,6 +86,9 @@ class RealLocalRetry:
                 prompt=cheap_verifier_metadata.get("p3_candidate_prompt", ""),
                 evidence_refs=(),
                 model_name=model,
+                phase=cheap_verifier_metadata.get("phase", "retry"),
+                attempt_id=cheap_verifier_metadata.get("attempt_id", "attempt-1"),
+                execution_profile=cheap_verifier_metadata.get("execution_profile", "FULL"),
             )
             provider.generate(request)
 

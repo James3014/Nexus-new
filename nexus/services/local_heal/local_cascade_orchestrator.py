@@ -34,6 +34,9 @@ class LocalCascadeRequest:
     target_file: str = ""
     evidence_refs: tuple[str, ...] = ()
     provider_name: str = "InertLocalModelProvider"
+    attempt_id: str = "attempt-1"
+    execution_profile: str = "LITE"
+    phase: str = "patch"
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,9 @@ def run_local_cascade(request: LocalCascadeRequest, *, provider: LocalModelProvi
             prompt=request.problem_statement,
             evidence_refs=request.evidence_refs,
             model_name=model,
+            attempt_id=request.attempt_id,
+            execution_profile=request.execution_profile,
+            phase=request.phase,
         )
         response = provider.generate(provider_request)
         stages_run.append(model)
@@ -114,6 +120,9 @@ def run_local_cascade_with_borda(
             prompt=request.problem_statement,
             evidence_refs=request.evidence_refs,
             model_name=model,
+            attempt_id=request.attempt_id,
+            execution_profile=request.execution_profile,
+            phase=request.phase,
         )
         response = provider.generate(provider_request)
         stages_run.append(model)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import hashlib
 import json
 import os
 import socket
 import time
+import uuid
 from typing import Any, Callable
 import urllib.request
 import urllib.error
@@ -20,6 +22,12 @@ class LocalModelProviderRequest:
     max_output_chars: int = 4000
     options: dict[str, Any] | None = None
     api_type: str = "generate"
+    # N30R-V3 Phase 2: caller-supplied phase for authoritative ledger records.
+    # One of: "planning", "spec_gen", "patch", "retry", "judge", "proposer", ""
+    phase: str = ""
+    # N30R-V3.1: Linkage metrics
+    attempt_id: str = ""
+    execution_profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +113,117 @@ class InjectedLocalModelProvider(LocalModelProvider):
                 elapsed_sec=round(elapsed, 3),
                 effective_timeout_sec=request.timeout_sec,
             )
+
+
+@dataclass
+class LedgerRecord:
+    """N30R-V3 Phase 2: Per-invocation provider call record."""
+    call_id:       str   # uuid4
+    task_id:       str
+    phase:         str   # planning / spec_gen / patch / retry / judge / proposer / unknown
+    model:         str
+    prompt_hash:   str   # sha256[:16]
+    response_hash: str   # sha256[:16]
+    duration_sec:  float
+    status:        str   # ok / error / timeout
+    error:         str   # empty if ok
+    attempt_id:    str = ""
+    execution_profile: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id":       self.call_id,
+            "task_id":       self.task_id,
+            "phase":         self.phase,
+            "model":         self.model,
+            "prompt_hash":   self.prompt_hash,
+            "response_hash": self.response_hash,
+            "duration_sec":  self.duration_sec,
+            "status":        self.status,
+            "error":         self.error,
+            "attempt_id":    self.attempt_id,
+            "execution_profile": self.execution_profile,
+        }
+
+
+class RecordingLocalModelProvider(LocalModelProvider):
+    """N30R-V3 Phase 2: Transparent wrapper that appends a LedgerRecord to
+    ``self.ledger`` for every generate() call.
+    """
+
+    def __init__(self, inner: LocalModelProvider) -> None:
+        self._inner = inner
+        self.ledger: list[LedgerRecord] = []
+
+    def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
+        t0 = time.monotonic()
+        resp = None
+        exc = None
+        try:
+            resp = self._inner.generate(request)
+            return resp
+        except Exception as e:
+            exc = e
+            raise
+        finally:
+            elapsed = round(time.monotonic() - t0, 4)
+            ph = request.phase or "unknown"
+
+            if exc is not None or resp is None:
+                status_str = "error"
+                error_str = f"exception: {str(exc)}" if exc is not None else "response_is_none"
+                model_str = request.model_name
+                resp_hash = hashlib.sha256(b"").hexdigest()[:16]
+            else:
+                status_str = "ok" if resp.model_called and not resp.error else (
+                    "timeout" if resp.timed_out else "error"
+                )
+                error_str = resp.error or ""
+                model_str = resp.model_name or request.model_name
+                resp_hash = hashlib.sha256((resp.output_text or "").encode("utf-8")).hexdigest()[:16]
+
+            record = LedgerRecord(
+                call_id=str(uuid.uuid4()),
+                task_id=request.task_id,
+                phase=ph,
+                model=model_str,
+                prompt_hash=hashlib.sha256(request.prompt.encode("utf-8")).hexdigest()[:16],
+                response_hash=resp_hash,
+                duration_sec=elapsed,
+                status=status_str,
+                error=error_str,
+                attempt_id=request.attempt_id,
+                execution_profile=request.execution_profile,
+            )
+            self.ledger.append(record)
+
+    @property
+    def ledger_summary(self) -> dict[str, Any]:
+        """Aggregated per-phase call counts and total invocations."""
+        by_phase: dict[str, int] = {}
+        unknown_count = 0
+        missing_attempt_id_count = 0
+        missing_execution_profile_count = 0
+        for r in self.ledger:
+            by_phase[r.phase] = by_phase.get(r.phase, 0) + 1
+            if r.phase == "unknown" or not r.phase:
+                unknown_count += 1
+            if not r.attempt_id:
+                missing_attempt_id_count += 1
+            if not r.execution_profile:
+                missing_execution_profile_count += 1
+        return {
+            "total_calls": len(self.ledger),
+            "by_phase": by_phase,
+            "authoritative": True,
+            "source": "recording_provider",
+            "phase_complete": unknown_count == 0,
+            "unknown_call_count": unknown_count,
+            "missing_attempt_id_count": missing_attempt_id_count,
+            "attempt_context_complete": missing_attempt_id_count == 0,
+            "missing_execution_profile_count": missing_execution_profile_count,
+            "profile_context_complete": missing_execution_profile_count == 0,
+        }
 
 
 class OllamaLocalModelProvider(LocalModelProvider):

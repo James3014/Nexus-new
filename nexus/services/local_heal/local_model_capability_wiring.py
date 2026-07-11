@@ -132,8 +132,8 @@ def build_local_model_capability_wiring() -> dict[str, LocalModelCapabilityWirin
             "receipt_adapter": "",
             "local_model_supported": True,
             "local_model_phase": "X",
-            "status": CapabilityWiringStatus.METADATA_ONLY,
-            "reason": "Memory trace exists but passive; not active decision-making",
+            "status": CapabilityWiringStatus.ADVISORY_EXECUTABLE,
+            "reason": "Executor actively retrieves provenance-backed lessons and injects them into prompt context",
         },
         "lancedb": {
             "runtime_module": "",
