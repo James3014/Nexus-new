@@ -560,12 +560,13 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             task_type="swe_bounded_repair",
             route={"task_id": task_id, "task_desc": task_statement,
                    "task_type": "swe_bounded_repair",
-                   "difficulty": "medium", "route_features": {}},
+                   "difficulty": task_dict.get("difficulty", "medium"), "route_features": {}},
             pillars={}, codeintel={}, phase_trace={},
             budget={"max_cost": 20}, skills=[],
         )
         signal_snapshot = plan.signal_snapshot
         signal_snapshot["provider_timeout_sec"] = _SHARED_PROVIDER_TIMEOUT
+        signal_snapshot["difficulty"] = task_dict.get("difficulty", "medium")
         # Inject shared provider options for parity
         signal_snapshot["provider_options"] = _make_provider_options(seed)
     except Exception:
@@ -611,8 +612,9 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_command": list(verifier_cmd),
             "target_symbol": target_symbol,
             "locked_search": locked_search,
-            "difficulty": "medium",
+            "difficulty": task_dict.get("difficulty", "medium"),
             "python_executable": sys.executable,
+            "llm_call_ledger": {},
         },
         model_name="qwen2.5-coder:7b-instruct",
         dry_run=False,
@@ -696,6 +698,17 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             raw_output and candidate_hash
         ) else "DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING"
 
+        profile_selected = meta.get("initial_execution_profile", "unknown")
+        profile_final = meta.get("final_execution_profile", "unknown")
+        escalation_count = int(meta.get("profile_escalation_count", 0) or 0)
+        escalation_reasons = list(meta.get("profile_escalation_reasons", []) or [])
+        ledger = executor_request.route_context.get("llm_call_ledger", {})
+        llm_call_planning = int(ledger.get("planning", 0) or 0)
+        llm_call_spec_gen = int(ledger.get("spec_gen", 0) or 0)
+        llm_call_patch = int(ledger.get("patch", 0) or 0)
+        llm_call_retry = int(ledger.get("retry", 0) or 0)
+        llm_call_total = int(ledger.get("total", 0) or 0)
+
         return {
             "task_id": task_id,
             "arm_id": "N30R_B_7B_REAL_CORE",
@@ -710,7 +723,7 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
             "execution_completed": True,
             "contract_valid": True,
-            "model_call_count": 1 + semantic_retry_count,
+            "model_call_count": max(1 + semantic_retry_count, llm_call_total) if llm_call_total else 1 + semantic_retry_count,
             "model_response_received": bool(raw_output),
             "raw_output_length": len(raw_output),
             "raw_output_sha256": sha256_str(raw_output) if raw_output else "",
@@ -720,6 +733,21 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_reached": verifier_reached,
             "verifier_status": verifier_result or "not_run",
             "semantic_retry_count": semantic_retry_count,
+            "profile_selected": profile_selected,
+            "final_profile": profile_final,
+            "profile_attempts": list(meta.get("profile_attempts", []) or []),
+            "escalation_count": escalation_count,
+            "escalation_reasons": escalation_reasons,
+            "llm_call_planning": llm_call_planning,
+            "llm_call_spec_gen": llm_call_spec_gen,
+            "llm_call_patch": llm_call_patch,
+            "llm_call_retry": llm_call_retry,
+            "llm_call_total": llm_call_total,
+            # N30R-V3 Phase 3: ledger provenance — executor phases do not yet directly
+            # append records; total is derived from semantic_retry_count + route counts.
+            # Mark as non-authoritative until per-invocation call_id records are added.
+            "ledger_authoritative": False,
+            "ledger_source": "semantic_retry_count_heuristic",
             # Fair timing fields
             "wall_time_sec": end_to_end_sec,
             "end_to_end_sec": end_to_end_sec,
