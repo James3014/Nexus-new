@@ -167,7 +167,7 @@ def run_live_trace() -> dict:
             "target_symbol": target_symbol,
             "locked_search": locked_search,
             "difficulty": "medium",
-            "python_executable": "python3",
+            "python_executable": sys.executable,
         },
         model_name="qwen2.5-coder:7b-instruct",
         dry_run=False,

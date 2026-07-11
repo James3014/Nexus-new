@@ -175,6 +175,7 @@ def validate_row(
         "verifier_reached", "verifier_status",
         "semantic_retry_count", "wall_time_sec",
         "terminal_status", "solved",
+        "env_receipt", "env_receipt_sha256",
     ]
     for field in required:
         if field not in row:
@@ -307,11 +308,38 @@ def validate_results(
         else:
             valid_rows += 1
 
+    # Paired fairness gate: Bare/Core environment hash must match
+    env_hashes: dict[str, str] = {}
+    for row in rows:
+        aid = row.get("arm_id", "")
+        eh = row.get("env_receipt_sha256", "")
+        if aid in env_hashes and env_hashes[aid] != eh:
+            all_issues.append({
+                "task_id": "__global__",
+                "arm_id": aid,
+                "issues": [f"environment_hash_mismatch_within_arm:{aid}:{env_hashes[aid]}!={eh}"],
+            })
+            invalid_rows += 1
+        env_hashes[aid] = eh
+
+    bare_env = env_hashes.get("N30R_A_7B_BARE", "")
+    core_env = env_hashes.get("N30R_B_7B_REAL_CORE", "")
+    if bare_env and core_env and bare_env != core_env:
+        all_issues.append({
+            "task_id": "__global__",
+            "arm_id": "__paired__",
+            "issues": [f"environment_hash_mismatch:bare={bare_env}!=core={core_env}"],
+        })
+        invalid_rows += 1
+
     # Compute metrics if all valid
     metrics = {}
     effectiveness = "V2_INVALID"
 
-    if valid_rows == expected_rows and row_count_valid and complete_pairs:
+    if valid_rows == expected_rows and row_count_valid and complete_pairs and not any(
+        i.get("issues") and any("environment_hash" in iss for iss in i.get("issues", []))
+        for i in all_issues
+    ):
         metrics = compute_metrics(rows, task_map)
         effectiveness = classify_effectiveness(metrics, rows, task_map)
 
@@ -507,9 +535,14 @@ def main() -> None:
         return
 
     if args.run:
-        print("RUN_MODE_BLOCKED_UNTIL_V1_MERGE")
-        print("Plan mode and validation mode are ready.")
-        print("Live execution requires V1 production path merge.")
+        from scripts.bench.n30r_v2_runner import run_evaluation
+        result = run_evaluation(manifest, args.jsonl_out, args.summary_out)
+        if args.json_out:
+            os.makedirs(os.path.dirname(args.json_out) or ".", exist_ok=True)
+            with open(args.json_out, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2)
+            print(f"Written: {args.json_out}")
+        print(json.dumps(result, indent=2))
         return
 
     parser.print_help()

@@ -291,7 +291,7 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
             "target_symbol": target_symbol,
             "locked_search": locked_search,
             "difficulty": "medium",
-            "python_executable": "python3",
+            "python_executable": sys.executable,
         },
         model_name=signal_snapshot.get("executor_model", ""),
         dry_run=False, mutation_allowed=True, verifier_allowed=True,

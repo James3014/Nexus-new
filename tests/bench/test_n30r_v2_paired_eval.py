@@ -42,6 +42,28 @@ def _task_map() -> dict[str, dict[str, Any]]:
     return {t["task_id"]: t for t in m["tasks"]}
 
 
+_MOCK_ENV_RECEIPT = {
+    "python_executable": "/fake/venv/bin/python",
+    "python_version": "3.14.0",
+    "sys_prefix": "/fake/venv",
+    "sys_base_prefix": "/fake/base",
+    "virtualenv_active": True,
+    "project_venv_match": True,
+    "project_venv_expected": "/fake/venv/bin/python",
+    "project_venv_resolved": "/fake/venv/bin/python3.14",
+    "lancedb_available": True,
+    "lancedb_version": "0.30.2",
+    "requests_version": "2.33.1",
+    "urllib3_version": "2.5.0",
+    "charset_normalizer_version": "3.4.7",
+    "dependency_warning_count": 0,
+    "environment_valid": True,
+}
+_MOCK_ENV_SHA256 = hashlib.sha256(
+    json.dumps(_MOCK_ENV_RECEIPT, sort_keys=True).encode()
+).hexdigest()
+
+
 def _valid_bare_row(task_id: str, task_map: dict) -> dict[str, Any]:
     t = task_map[task_id]
     return {
@@ -74,6 +96,8 @@ def _valid_bare_row(task_id: str, task_map: dict) -> dict[str, Any]:
         "terminal_status": "VERIFIED_FAIL",
         "solved": False,
         "armor_oracle_status": "NOT_APPLICABLE",
+        "env_receipt": _MOCK_ENV_RECEIPT,
+        "env_receipt_sha256": _MOCK_ENV_SHA256,
     }
 
 
@@ -109,6 +133,8 @@ def _valid_core_row(task_id: str, task_map: dict) -> dict[str, Any]:
         "terminal_status": "VERIFIED_FAIL",
         "solved": False,
         "armor_oracle_status": "FULL_ARMOR_PATH_ACCEPTED",
+        "env_receipt": _MOCK_ENV_RECEIPT,
+        "env_receipt_sha256": _MOCK_ENV_SHA256,
     }
 
 
@@ -388,15 +414,87 @@ class TestMetricsAndEffectiveness:
 # ---------------------------------------------------------------------------
 
 class TestRunMode:
-    def test_run_mode_blocked(self):
-        """Run mode should not execute without V1 merge."""
+    def test_run_mode_plan_only(self):
+        """Run mode with --plan-only does not call provider."""
         import subprocess
         result = subprocess.run(
             [sys.executable, "scripts/bench/n30r_v2_paired_eval.py",
-             "--manifest", MANIFEST_PATH, "--run"],
+             "--manifest", MANIFEST_PATH, "--plan-only"],
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
-        assert "RUN_MODE_BLOCKED_UNTIL_V1_MERGE" in result.stdout
+        assert '"provider_calls": 0' in result.stdout
+        assert '"live_model_calls": 0' in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Environment preflight tests
+# ---------------------------------------------------------------------------
+
+class TestEnvironmentPreflight:
+    def test_check_environment_accepts_venv(self):
+        from scripts.bench.n30r_v2_runner import _check_environment
+        env = _check_environment()
+        assert env["environment_valid"] is True
+        assert env["lancedb_available"] is True
+        assert env["project_venv_match"] is True
+
+    def test_patch_verifier_python3_to_sysexec(self):
+        from scripts.bench.n30r_v2_runner import _patch_verifier_command
+        import sys
+        patched = _patch_verifier_command(("python3", "-c", "print(1)"))
+        assert patched[0] == sys.executable
+        assert patched[1:] == ["-c", "print(1)"]
+
+    def test_patch_verifier_non_python_unchanged(self):
+        from scripts.bench.n30r_v2_runner import _patch_verifier_command
+        unchanged = _patch_verifier_command(("node", "script.js"))
+        assert unchanged == ["node", "script.js"]
+
+    def test_patch_verifier_python_unchanged(self):
+        from scripts.bench.n30r_v2_runner import _patch_verifier_command
+        import sys
+        patched = _patch_verifier_command(("python", "-V"))
+        assert patched[0] == sys.executable
+
+
+# ---------------------------------------------------------------------------
+# Environment receipts in validation
+# ---------------------------------------------------------------------------
+
+class TestEnvironmentReceiptValidation:
+    def test_reject_missing_env_receipt(self):
+        tm = _task_map()
+        row = _valid_bare_row("n30r_smoke_syntax", tm)
+        del row["env_receipt"]
+        del row["env_receipt_sha256"]
+        issues = validate_row(row, tm, _load_manifest())
+        assert any("missing_field:env_receipt" in i for i in issues)
+        assert any("missing_field:env_receipt_sha256" in i for i in issues)
+
+    def test_reject_mismatched_env_hash(self):
+        tm = _task_map()
+        rows = _all_valid_rows(tm)
+        # Change one row's env hash
+        rows[0]["env_receipt_sha256"] = "badhash"
+        val = validate_results(_load_manifest(), _write_jsonl(rows))
+        assert any("environment_hash" in " ".join(i.get("issues", []))
+                   for i in val.get("issues", []) if i.get("issues"))
+
+    def test_reject_cross_arm_env_hash_mismatch(self):
+        tm = _task_map()
+        rows = _all_valid_rows(tm)
+        rows[0]["env_receipt_sha256"] = hashlib.sha256(b"bare_only").hexdigest()
+        val = validate_results(_load_manifest(), _write_jsonl(rows))
+        assert val["status"] == "INVALID"
+
+    def test_accept_matching_env_hash(self):
+        tm = _task_map()
+        rows = _all_valid_rows(tm)
+        val = validate_results(_load_manifest(), _write_jsonl(rows))
+        # Should pass environment checks
+        env_issues = [i for i in val.get("issues", [])
+                      if any("environment_hash" in iss for iss in i.get("issues", []))]
+        assert len(env_issues) == 0
 
 
 # ---------------------------------------------------------------------------
