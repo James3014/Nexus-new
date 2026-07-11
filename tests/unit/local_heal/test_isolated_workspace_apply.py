@@ -115,22 +115,18 @@ def test_isolated_workspace_apply_metadata_diff_but_canonical_matches() -> None:
             lines = []
             raw_lines = diff_text.replace("\r\n", "\n").split("\n")
             for line in raw_lines:
-                line = line.rstrip()
-                if line.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
+                line_rstrip = line.rstrip()
+                if line_rstrip.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
                     continue
-                if line.startswith("@@"):
-                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line)
+                if line_rstrip.startswith("@@"):
+                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line_rstrip)
                     if m:
                         lines.append(m.group(1))
                     continue
-                if line.startswith(("-", "+", " ")):
-                    op = line[0]
-                    code = line[1:].strip()
-                    code = re.sub(r"\s+", " ", code)
-                    if code:
-                        lines.append(f"{op}{code}")
-                    else:
-                        lines.append(op)
+                if line_rstrip.startswith(("-", "+", " ")):
+                    op = line_rstrip[0]
+                    content = line[1:].rstrip()
+                    lines.append(f"{op}{content}")
                     continue
             return "\n".join(lines).strip()
 
@@ -142,15 +138,30 @@ def test_isolated_workspace_apply_metadata_diff_but_canonical_matches() -> None:
             source_root=src_root,
             target_file=test_file,
             unified_diff=diff_no_header,
-            # We pass the canon_hash which will match the canonicalized git diff
             selected_candidate_hash=canon_hash,
             mutation_allowed=True,
         )
 
         receipt = run_isolated_workspace_apply(request)
         assert receipt.patch_apply_status == "applied"
-        # Matches must be True because metadata is ignored canonically
         assert receipt.selected_candidate_hash_matches_applied is True
 
+        # Clean up
         if os.path.exists(receipt.workspace_path):
             shutil.rmtree(receipt.workspace_path)
+
+        # Verification of strict formatting invariants (Commit 2 check)
+        # 1. Indentation mismatch check
+        diff_with_indent = "@@ -1 +1 @@\n-print('hello')\n+  print('world')\n"
+        diff_no_indent = "@@ -1 +1 @@\n-print('hello')\n+print('world')\n"
+        assert canonicalize_diff(diff_with_indent) != canonicalize_diff(diff_no_indent)
+
+        # 2. String literal space mismatch check
+        diff_with_double_space = "@@ -1 +1 @@\n-print('hello')\n+print('world  space')\n"
+        diff_with_single_space = "@@ -1 +1 @@\n-print('hello')\n+print('world space')\n"
+        assert canonicalize_diff(diff_with_double_space) != canonicalize_diff(diff_with_single_space)
+
+        # 3. Newline blank lines check
+        diff_with_blank_line = "@@ -1 +1 @@\n-print('hello')\n+\n+print('world')\n"
+        diff_without_blank_line = "@@ -1 +1 @@\n-print('hello')\n+print('world')\n"
+        assert canonicalize_diff(diff_with_blank_line) != canonicalize_diff(diff_without_blank_line)

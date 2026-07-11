@@ -148,25 +148,31 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
 
         def canonicalize_diff(diff_text: str) -> str:
             lines = []
+            # 1. Normalize line endings (CRLF -> LF)
             raw_lines = diff_text.replace("\r\n", "\n").split("\n")
             for line in raw_lines:
-                line = line.rstrip()
-                if line.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
+                # 2. Strip trailing whitespaces only to ignore minor trailing spaces
+                line_rstrip = line.rstrip()
+
+                # 3. Skip git diff metadata headers
+                if line_rstrip.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
                     continue
-                if line.startswith("@@"):
-                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line)
+
+                # 4. Standardize hunk headers: keep only the unified diff coordinate part, drop function context
+                if line_rstrip.startswith("@@"):
+                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line_rstrip)
                     if m:
                         lines.append(m.group(1))
                     continue
-                if line.startswith(("-", "+", " ")):
-                    op = line[0]
-                    code = line[1:].strip()
-                    code = re.sub(r"\s+", " ", code)
-                    if code:
-                        lines.append(f"{op}{code}")
-                    else:
-                        lines.append(op)
+
+                # 5. For code modifications (+, -, space context), keep the exact indentation and whitespaces
+                if line_rstrip.startswith(("-", "+", " ")):
+                    op = line_rstrip[0]
+                    content = line[1:].rstrip()  # Keep the exact code payload including leading indentation and internal spaces
+                    lines.append(f"{op}{content}")
                     continue
+
+            # 6. Join lines and strip start/end empty lines
             return "\n".join(lines).strip()
 
         canonical_applied = canonicalize_diff(actual_diff)
