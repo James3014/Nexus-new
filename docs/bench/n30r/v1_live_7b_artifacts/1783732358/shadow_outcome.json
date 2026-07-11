@@ -1,0 +1,7 @@
+{
+  "task_id": "n30r_smoke_semantic",
+  "shadow_only": true,
+  "promotion_eligible": false,
+  "global_learning_mutated": false,
+  "capabilities": {}
+}

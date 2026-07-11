@@ -1,0 +1,9 @@
+{
+  "prompt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "prompt_length": 0,
+  "prompt_contains_task": false,
+  "prompt_contains_target_file": false,
+  "prompt_contains_target_symbol": false,
+  "prompt_contains_locked_search": false,
+  "prompt_contains_protocol": false
+}

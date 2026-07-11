@@ -1,0 +1,65 @@
+{
+  "status": "FULL_ARMOR_PATH_ACCEPTED",
+  "accepted": true,
+  "p_gate": {
+    "passed": true,
+    "missing_fields": [],
+    "issues": []
+  },
+  "d_gate": {
+    "passed": true,
+    "missing_fields": [],
+    "issues": [],
+    "hash_mismatches": [],
+    "unresolvable_evidence_refs": []
+  },
+  "x_gate": {
+    "passed": true,
+    "missing_fields": [],
+    "issues": [],
+    "anti_rules_violated": []
+  },
+  "r_gate": {
+    "passed": true,
+    "missing_fields": [],
+    "issues": [],
+    "anti_rules_violated": []
+  },
+  "a_gate": {
+    "passed": true,
+    "missing_fields": [],
+    "issues": [],
+    "anti_rules_violated": []
+  },
+  "c_gate": {
+    "passed": true,
+    "missing_fields": [],
+    "issues": [],
+    "hash_mismatches": [],
+    "placeholders": [],
+    "hash_chain_present": [
+      "planner_snapshot",
+      "capability_projection",
+      "evidence_pack",
+      "raw_output"
+    ]
+  },
+  "live_gate": {
+    "passed": true,
+    "issues": [],
+    "rejected": []
+  },
+  "missing_fields": [],
+  "invalid_fields": [],
+  "hash_mismatches": [],
+  "unresolvable_evidence_refs": [],
+  "placeholders_detected": [],
+  "claim_boundary": {
+    "production_path_implemented_by_a": false,
+    "effectiveness_measured": false,
+    "production_ready": false,
+    "public_claim_allowed": false,
+    "no_live_model_executed": true,
+    "oracle_correctness_tested": true
+  }
+}
