@@ -1,0 +1,31 @@
+{
+  "task": "gate3_syntax_easy",
+  "arms": {
+    "Bare": {
+      "terminal_status": "VERIFIED_FAIL",
+      "solved": false,
+      "elapsed_sec": 14.17,
+      "telemetry_present": true
+    },
+    "Adaptive": {
+      "profile_selected": "STANDARD",
+      "final_profile": "STANDARD",
+      "escalation_count": 0,
+      "llm_call_total": 10,
+      "solved": false,
+      "elapsed_sec": 83.39,
+      "telemetry_present": true
+    },
+    "Forced_Full": {
+      "profile_selected": "FULL",
+      "final_profile": "FULL",
+      "escalation_count": 0,
+      "llm_call_total": 10,
+      "solved": false,
+      "elapsed_sec": 91.53,
+      "telemetry_present": true
+    }
+  },
+  "gate3_pass": true,
+  "version": "v2"
+}

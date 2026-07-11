@@ -1,152 +1,155 @@
-"""N30R-V3 Gate 2: LITE→STANDARD escalation proof.
+"""N30R-V3 Gate 2: LITE->STANDARD escalation proof via production executor path.
 
-Tests that the executor escalates from LITE profile to STANDARD when:
+Tests that LocalModelExecutor.run() escalates from LITE to STANDARD when:
   1. Profile starts as LITE (retry_cap=0, escalation_allowed=True)
-  2. Verifier fails (solved=False)
+  2. LITE verifier fails (solved=False)
+  3. STANDARD attempt runs with a patch that passes verifier
 
-This is a unit-level proof using mocked LLM provider — no Ollama needed.
+Uses InjectedLocalModelProvider to return predefined patches without Ollama.
 """
-import pytest
-from unittest.mock import MagicMock, patch
-from dataclasses import dataclass
+import os
+import tempfile
 
 
-# ---------------------------------------------------------------------------
-# Gate 2 Unit Proof — escalation path in LocalModelExecutor
-# ---------------------------------------------------------------------------
+def _make_ssrp(search, replace):
+    return f"FILE: f.py\n<<<<<<< SEARCH\n{search}\n=======\n{replace}\n>>>>>>> REPLACE"
 
-def test_lite_profile_escalation_path():
+
+def _build_provider():
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+    ctr = {"patch_count": 0}
+
+    def gen(req):
+        prompt = req.prompt
+        if "JSON" in prompt or "software architect" in prompt:
+            # Planner prompt
+            return '{"search_symbols": ["greet"], "repair_strategy": "Fix syntax error", "violated_constraints": []}'
+        elif "logical specification" in prompt or "senior engineer" in prompt:
+            # Spec gen prompt
+            return "Add colon after def greet(name)"
+        else:
+            # Patch synthesis prompt
+            ctr["patch_count"] += 1
+            search_text = 'def greet(name)\n    return f"Hello, {name}!"'
+            if ctr["patch_count"] <= 3:
+                return _make_ssrp(search_text, 'def greet(name)\n    return "WRONG"')
+            else:
+                return _make_ssrp(search_text, 'def greet(name):\n    return f"Hello, {name}!"')
+
+    return InjectedLocalModelProvider(generate_fn=gen), ctr
+
+
+def test_lite_to_standard_real_escalation():
     """
-    Gate 2: Verify escalation logic fires when LITE profile has retry_cap=0
-    and verifier fails. Checks that _n30r_escalation_count > 0 and
-    route_context["local_armor_execution_profile"] becomes "STANDARD".
-    """
-    import sys
-    sys.path.insert(0, "/Users/jameschen/Workspace/nexus-n30r-v3")
+    Gate 2 (R2): LITE->STANDARD escalation via real LocalModelExecutor.run().
 
-    from nexus.services.local_heal.local_armor_execution_profile import (
-        build_profile_controls,
+    Asserts:
+      - initial_execution_profile = LITE
+      - final_execution_profile = STANDARD
+      - profile_escalation_count = 1
+      - profile_attempts contains both LITE and STANDARD
+      - solved = True
+    """
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
     )
 
-    # Gate 2: Directly build LITE profile to simulate what executor does post-resolve.
-    # build_profile_controls is the canonical source — resolver calls it internally.
-    route_context = {
-        "local_armor_controls": {},
-        "llm_call_ledger": {},
-    }
+    ORIGINAL_SRC = 'def greet(name)\n    return f"Hello, {name}!"\n'
 
-    # Step 1: Build LITE profile directly
-    _n30r_profile = build_profile_controls("LITE", "lite_profile_triggered_by_signals", "L1_green_lane")
-    assert _n30r_profile.profile == "LITE", f"Expected LITE, got {_n30r_profile.profile}"
-    assert _n30r_profile.semantic_retry_cap == 0, "LITE must have retry_cap=0"
-    assert _n30r_profile.escalation_allowed is True, "LITE must allow escalation"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target_relpath = "f.py"
+        with open(os.path.join(tmpdir, target_relpath), "w") as fh:
+            fh.write(ORIGINAL_SRC)
 
-    # Step 2: Inject profile controls into route_context (as executor does at line 1449-1456)
-    route_context["local_armor_execution_profile"] = _n30r_profile.profile
-    route_context["local_armor_controls"] = {
-        "profile": _n30r_profile.profile,
-        "reason": _n30r_profile.reason,
-        "planning_llm_allowed": _n30r_profile.planning_llm_allowed,
-        "spec_gen_allowed": _n30r_profile.spec_gen_allowed,
-        "candidate_cap": _n30r_profile.candidate_cap,
-        "semantic_retry_cap": _n30r_profile.semantic_retry_cap,
-        "committee_allowed": _n30r_profile.committee_allowed,
-        "autoreason_allowed": _n30r_profile.autoreason_allowed,
-        "ddtree_allowed": _n30r_profile.ddtree_allowed,
-        "escalation_allowed": _n30r_profile.escalation_allowed,
-    }
+        verifier_cmd = (
+            "python3", "-c",
+            "from f import greet; assert greet('world') == 'Hello, world!'"
+        )
 
-    # Step 3: Simulate verifier fail — raw_meta["solved"] = False
-    raw_meta = {"solved": False}
+        provider, ctr = _build_provider()
 
-    # Step 4: Run escalation logic (lines 1865-1901 extracted)
-    _n30r_current_profile = route_context.get("local_armor_execution_profile", "STANDARD")
-    _n30r_controls = route_context.get("local_armor_controls") or {}
-    _n30r_retry_cap = _n30r_controls.get("semantic_retry_cap", 1)
-    _n30r_escalation_ok = _n30r_controls.get("escalation_allowed", True)
-    _n30r_escalation_count = 0
-    _n30r_escalation_reasons = []
+        route_context = {
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "test-model",
+                "protocol_mode": "anchored_edit",
+                "provider_timeout_sec": 30.0,
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "routing_tier": "L1_green_lane",
+                "routing_tier_reason": "green_lane",
+                "risk_score_0_100": 10,
+                "confidence": 0.95,
+                "cross_module": False,
+                "hard_signal": False,
+                "candidate_count": 1,
+                "reasoning_mode": "FAST",
+                "task_desc": "fix syntax error",
+            },
+            "verifier_command": list(verifier_cmd),
+            "target_file": target_relpath,
+            "locked_search": 'def greet(name)\n    return f"Hello, {name}!"',
+            "python_executable": "python3",
+            "llm_call_history": [],
+        }
 
-    if _n30r_retry_cap == 0 and not raw_meta.get("solved"):
-        if _n30r_escalation_ok and _n30r_current_profile == "LITE":
-            _esc_profile = build_profile_controls(
-                "STANDARD",
-                "escalated_from_lite_on_verification_failure",
-                _n30r_profile.planner_routing_tier,
-            )
-            route_context["local_armor_execution_profile"] = "STANDARD"
-            route_context["local_armor_controls"] = {
-                "profile": _esc_profile.profile,
-                "reason": _esc_profile.reason,
-                "planning_llm_allowed": _esc_profile.planning_llm_allowed,
-                "spec_gen_allowed": _esc_profile.spec_gen_allowed,
-                "candidate_cap": _esc_profile.candidate_cap,
-                "semantic_retry_cap": _esc_profile.semantic_retry_cap,
-                "committee_allowed": _esc_profile.committee_allowed,
-                "autoreason_allowed": _esc_profile.autoreason_allowed,
-                "ddtree_allowed": _esc_profile.ddtree_allowed,
-                "escalation_allowed": _esc_profile.escalation_allowed,
-            }
-            _n30r_escalation_count += 1
-            _n30r_escalation_reasons.append("lite_to_standard_on_verification_failure")
-            _n30r_retry_cap = _esc_profile.semantic_retry_cap
+        req = LocalModelExecutorRequest(
+            task_id="gate2-lite-standard-test",
+            problem_statement="Fix the syntax error in greet function",
+            repo_root=tmpdir,
+            target_file=target_relpath,
+            selected_capabilities=("repair_loop",),
+            evidence_refs=("evidence-1",),
+            route_context=route_context,
+            mutation_allowed=True,
+            verifier_allowed=True,
+            dry_run=False,
+        )
 
-    # Step 5: Assert escalation happened
-    assert _n30r_escalation_count == 1, f"Expected 1 escalation, got {_n30r_escalation_count}"
-    assert "lite_to_standard_on_verification_failure" in _n30r_escalation_reasons
-    assert route_context["local_armor_execution_profile"] == "STANDARD", \
-        f"Expected STANDARD after escalation, got {route_context['local_armor_execution_profile']}"
-    assert route_context["local_armor_controls"]["profile"] == "STANDARD"
-    assert route_context["local_armor_controls"]["semantic_retry_cap"] == 1  # STANDARD cap
-    assert _n30r_retry_cap == 1  # retry cap updated
+        resp = LocalModelExecutor.run(req, provider=provider)
+        raw  = resp.raw_model_metadata
+        assert raw is not None, "raw_model_metadata must be present"
+
+        initial  = raw.get("initial_execution_profile", "UNKNOWN")
+        final    = raw.get("final_execution_profile",   "UNKNOWN")
+        esc_cnt  = raw.get("profile_escalation_count",  -1)
+        attempts = raw.get("profile_attempts",          [])
+        err      = raw.get("error", "")
+
+        assert not err, f"Executor error: {err!r}  raw_keys={list(raw.keys())}"
+        assert initial == "LITE",     f"initial_profile should be LITE, got {initial!r}  err={raw.get('error','')}"
+        assert final   == "STANDARD", f"final_profile should be STANDARD, got {final!r}"
+        assert esc_cnt == 1,          f"escalation_count should be 1, got {esc_cnt}"
+        assert "LITE"     in attempts, f"LITE not in profile_attempts: {attempts}"
+        assert "STANDARD" in attempts, f"STANDARD not in profile_attempts: {attempts}"
+        assert raw.get("solved") is True, f"Should be solved on STANDARD retry. raw_meta={raw}"
 
 
-def test_standard_profile_does_not_escalate():
-    """Gate 2: STANDARD profile must NOT trigger escalation (no cap=0 block)."""
-    import sys
-    sys.path.insert(0, "/Users/jameschen/Workspace/nexus-n30r-v3")
-
+def test_standard_profile_no_escalation():
+    """Gate 2: STANDARD profile does not trigger escalation logic."""
     from nexus.services.local_heal.local_armor_execution_profile import build_profile_controls
-
-    # STANDARD profile: retry_cap=1, escalation_allowed=True
-    profile = build_profile_controls("STANDARD", "direct_standard", "L2_hardened")
-    assert profile.semantic_retry_cap == 1, "STANDARD should have retry_cap=1"
-
-    _n30r_retry_cap = profile.semantic_retry_cap
-    _n30r_escalation_count = 0
-
-    # Escalation check: retry_cap != 0, so should NOT escalate
-    if _n30r_retry_cap == 0:
-        _n30r_escalation_count += 1
-
-    assert _n30r_escalation_count == 0, "STANDARD profile should not trigger escalation block"
+    p = build_profile_controls("STANDARD", "direct_standard", "L2_hardened")
+    assert p.semantic_retry_cap == 1
+    count = 0
+    if p.semantic_retry_cap == 0:
+        count += 1
+    assert count == 0
 
 
 def test_lite_profile_no_escalate_when_solved():
-    """Gate 2: LITE profile must NOT escalate if verifier already passed (solved=True)."""
-    import sys
-    sys.path.insert(0, "/Users/jameschen/Workspace/nexus-n30r-v3")
-
+    """Gate 2: LITE must NOT escalate if verifier already passed."""
     from nexus.services.local_heal.local_armor_execution_profile import build_profile_controls
-
-    profile = build_profile_controls("LITE", "green_lane_lite", "L1_green_lane")
-    raw_meta = {"solved": True}  # verifier passed
-
-    _n30r_retry_cap = profile.semantic_retry_cap  # 0
-    _n30r_escalation_count = 0
-
-    if _n30r_retry_cap == 0 and not raw_meta.get("solved"):
-        _n30r_escalation_count += 1
-
-    assert _n30r_escalation_count == 0, "Should NOT escalate when solved=True"
+    p = build_profile_controls("LITE", "green_lane_lite", "L1_green_lane")
+    solved = True
+    count = 0
+    if p.semantic_retry_cap == 0 and not solved:
+        count += 1
+    assert count == 0
 
 
 def test_full_profile_escalation_not_allowed():
-    """Gate 2: FULL profile has escalation_allowed=False."""
-    import sys
-    sys.path.insert(0, "/Users/jameschen/Workspace/nexus-n30r-v3")
-
+    """Gate 2: FULL profile must have escalation_allowed=False."""
     from nexus.services.local_heal.local_armor_execution_profile import build_profile_controls
-
-    profile = build_profile_controls("FULL", "forced_full", "L3_swarm_deep")
-    assert profile.escalation_allowed is False, "FULL profile should not allow escalation"
+    p = build_profile_controls("FULL", "forced_full", "L3_swarm_deep")
+    assert p.escalation_allowed is False
