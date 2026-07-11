@@ -7354,7 +7354,11 @@ def test_delegated_retry_committee_candidates_have_unique_ids(tmp_path) -> None:
     assert len(candidates) == 2
 
     # Assert provider was called with policy options
-    assert mock_provider.generate.call_count == 6
+    # NEXUS_DISABLE_SPEC_GEN=1 removes 1 spec_gen call per candidate (2 candidates here)
+    import os as _os
+    spec_gen_disabled = _os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+    expected_call_count = 4 if spec_gen_disabled else 6
+    assert mock_provider.generate.call_count == expected_call_count
     for call in mock_provider.generate.call_args_list:
         req_arg = call[0][0]
         assert req_arg.options is not None

@@ -35,7 +35,8 @@ def _run_verifier(source_code: str, verifier_command: tuple[str, ...], tmp_dir: 
 
 def gate_task(task: dict, repetitions: int = 3) -> dict:
     """Run gate checks on a single task."""
-    fixture_path = Path(task["fixture_path"])
+    fixture_key = "fixture_path" if "fixture_path" in task else "source_relpath"
+    fixture_path = Path(task[fixture_key])
     mod = {}
     exec(fixture_path.read_text(), mod)
 

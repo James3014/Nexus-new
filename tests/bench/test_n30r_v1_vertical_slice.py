@@ -451,8 +451,12 @@ class TestV1TraceSemanticRetryLifecycle:
         assert "verifier_status" in sc
 
     def test_provider_call_count_gt_5(self, receipt):
-        assert receipt["provider_call_count"] >= 4, \
-            f"Expected >=4, got {receipt['provider_call_count']}"
+        import os
+        # NEXUS_DISABLE_SPEC_GEN=1 removes one spec_gen LLM call per patch attempt
+        spec_gen_disabled = os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+        min_expected = 3 if spec_gen_disabled else 4
+        assert receipt["provider_call_count"] >= min_expected, \
+            f"Expected >={min_expected}, got {receipt['provider_call_count']}"
 
     def test_semantic_retry_prompts_count_is_one(self, receipt):
         assert receipt["semantic_retry_prompts_count"] == 1, \
@@ -506,12 +510,16 @@ class TestV1TraceSemanticRetryLifecycle:
         assert caps.get("repair_loop", {}).get("retry_effect") in (True, False)
 
     def test_prompt_telemetry_saved(self, receipt):
+        import os
         shadow_path = receipt["shadow_outcome_path"]
         artifacts_dir = Path(shadow_path).parent
         pt_path = artifacts_dir / "prompt_telemetry.json"
         assert pt_path.exists(), "prompt_telemetry.json not found"
         pt = json.loads(pt_path.read_text())
-        assert len(pt) >= 4
+        # NEXUS_DISABLE_SPEC_GEN=1 removes one spec_gen telemetry entry per patch attempt
+        spec_gen_disabled = os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+        min_entries = 3 if spec_gen_disabled else 4
+        assert len(pt) >= min_entries
         assert all("call_index" in t for t in pt)
         assert all("classification" in t for t in pt)
         assert all("prompt_sha256" in t for t in pt)
