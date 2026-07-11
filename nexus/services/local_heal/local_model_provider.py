@@ -72,7 +72,7 @@ class InjectedLocalModelProvider(LocalModelProvider):
             if len(raw_text) > request.max_output_chars:
                 raw_text = raw_text[:request.max_output_chars]
                 truncated = True
-                
+
             return LocalModelProviderResponse(
                 provider_invoked=True,
                 model_called=True,
@@ -100,8 +100,8 @@ class InjectedLocalModelProvider(LocalModelProvider):
 class OllamaLocalModelProvider(LocalModelProvider):
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
         call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
-        provider_name = os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER", "").lower()
-        
+        provider_name = (os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER") or os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER") or "").lower()
+
         if not call_allowed or provider_name != "ollama":
             return LocalModelProviderResponse(
                 provider_invoked=True,
@@ -112,7 +112,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 requested_timeout_sec=request.timeout_sec,
                 effective_timeout_sec=request.timeout_sec,
             )
-            
+
         model_name = request.model_name or os.environ.get("NEXUS_LOCAL_MODEL_NAME", "").strip()
         if not model_name:
             return LocalModelProviderResponse(
@@ -124,7 +124,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 requested_timeout_sec=request.timeout_sec,
                 effective_timeout_sec=request.timeout_sec,
             )
-            
+
         if request.api_type == "chat":
             raw_prompt = request.prompt
             system_content = ""
@@ -157,7 +157,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
             }
         if request.options:
             payload["options"] = request.options
-        
+
         t0 = time.monotonic()
         try:
             req_data = json.dumps(payload).encode("utf-8")
@@ -166,7 +166,7 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 data=req_data,
                 headers={"Content-Type": "application/json"},
             )
-            
+
             with urllib.request.urlopen(req, timeout=request.timeout_sec) as resp:
                 resp_data = resp.read().decode("utf-8")
                 resp_json = json.loads(resp_data)
@@ -175,12 +175,12 @@ class OllamaLocalModelProvider(LocalModelProvider):
                 else:
                     raw_text = resp_json.get("response", "")
                 elapsed = time.monotonic() - t0
-                
+
                 truncated = False
                 if len(raw_text) > request.max_output_chars:
                     raw_text = raw_text[:request.max_output_chars]
                     truncated = True
-                    
+
                 return LocalModelProviderResponse(
                     provider_invoked=True,
                     model_called=True,

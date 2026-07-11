@@ -201,7 +201,7 @@ def test_topology_single_local_model_preserves_behavior() -> None:
 
 def test_topology_local_committee_via_signal_snapshot(monkeypatch) -> None:
     """Env var is NOT used for topology — signal_snapshot in route_context is the source."""
-    
+
     def mock_gen(req: LocalModelProviderRequest) -> str:
         return "some patch"
 
@@ -286,7 +286,7 @@ def test_local_model_executor_committee_topology_uses_committee_provider(monkeyp
             }
         }
     )
-    
+
     provider = InjectedLocalModelProvider(lambda req: "patch")
     resp = LocalModelExecutor.run(req, provider=provider)
     assert resp.raw_model_metadata.get("execution_topology") == "local_committee_only"
@@ -1437,15 +1437,15 @@ def test_finalize_with_nexus_row_still_has_single_executor_seam(monkeypatch):
         pytest.skip("capability_ab_runner.py not found in workspace")
 
     tree = ast.parse(runner_path.read_text(encoding="utf-8"))
-    
+
     finalize_func = None
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "_finalize_with_nexus_row":
             finalize_func = node
             break
-            
+
     assert finalize_func is not None, "Could not find _finalize_with_nexus_row function in runner file"
-    
+
     for node in ast.walk(finalize_func):
         if isinstance(node, ast.Import):
             for name in node.names:
@@ -2794,7 +2794,7 @@ def test_output_excerpt_is_bounded() -> None:
     provider = InjectedLocalModelProvider(lambda _: long_response)
     resp = LocalModelExecutor.run(req, provider=provider)
     meta = resp.raw_model_metadata
-    
+
     assert len(meta.get("output_excerpt_first_500", "")) <= 500
 
 
@@ -2803,7 +2803,7 @@ def test_output_classification_does_not_mark_solved() -> None:
     provider = InjectedLocalModelProvider(lambda _: "Some natural language only")
     resp = LocalModelExecutor.run(req, provider=provider)
     meta = resp.raw_model_metadata
-    
+
     assert meta.get("solved") is not True
 
 
@@ -2937,9 +2937,9 @@ def test_missing_verifier_command_does_not_change_patch_synthesis_control_flow()
 def test_micro_verify_context_fields_remain_unset_during_recovery() -> None:
     req = make_test_request("c8-context-present", execution_topology="localheal_pipeline")
     req.route_context["verifier_command"] = ["python3", "verify.py"]
-    
+
     provider = InjectedLocalModelProvider(lambda _: "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n")
-    
+
     from unittest.mock import patch
     from nexus.services.local_heal.micro_verifier import MicroVerifyResult
     with patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
@@ -2981,9 +2981,9 @@ def test_micro_verify_context_fields_default_false_in_executor_projection() -> N
 def test_micro_verify_context_does_not_mark_solved_without_verifier_pass() -> None:
     req = make_test_request("c8-no-solved", execution_topology="localheal_pipeline")
     req.route_context["verifier_command"] = ["python3", "verify.py"]
-    
+
     provider = InjectedLocalModelProvider(lambda _: "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n")
-    
+
     from unittest.mock import patch
     from nexus.services.local_heal.micro_verifier import MicroVerifyResult
     with patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as mock_v:
@@ -3015,7 +3015,7 @@ def test_non_empty_pipeline_patch_projects_candidate() -> None:
             },
         },
     )
-    
+
     from unittest.mock import patch
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
         from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
@@ -3060,7 +3060,7 @@ def test_non_empty_pipeline_patch_projects_candidate() -> None:
             )
             resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
         meta = resp.raw_model_metadata
-        
+
         assert meta.get("pipeline_result_projected") is True
         assert resp.candidate_patch == "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new"
         assert meta.get("candidate_hash_empty") is False
@@ -3072,7 +3072,7 @@ def test_non_empty_pipeline_patch_projects_candidate() -> None:
 
 def test_empty_pipeline_patch_does_not_project_candidate() -> None:
     req = make_test_request("c9-no-projection", execution_topology="localheal_pipeline")
-    
+
     from unittest.mock import patch
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
         from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
@@ -3088,7 +3088,7 @@ def test_empty_pipeline_patch_does_not_project_candidate() -> None:
         )
         resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
         meta = resp.raw_model_metadata
-        
+
         assert meta.get("pipeline_result_projected") is False
         assert resp.candidate_patch == ""
         assert meta.get("candidate_hash_empty") is True
@@ -3110,7 +3110,7 @@ def test_pipeline_patch_enters_isolation() -> None:
             },
         },
     )
-    
+
     from unittest.mock import patch
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
         from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
@@ -3153,7 +3153,7 @@ def test_pipeline_patch_enters_isolation() -> None:
             )
             resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
         meta = resp.raw_model_metadata
-        
+
         assert meta.get("candidate_isolation_attempted") is True
         assert meta.get("candidate_isolated") is True
 
@@ -3162,7 +3162,7 @@ def test_candidate_hash_empty_blocks_solved() -> None:
     req = make_test_request("c9-hash-empty-blocks", execution_topology="localheal_pipeline")
     resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
     meta = resp.raw_model_metadata
-    
+
     assert meta.get("candidate_hash_empty") is True
     assert meta.get("solved") is not True
 
@@ -3183,7 +3183,7 @@ def test_hash_match_required_for_solved() -> None:
             },
         },
     )
-    
+
     from unittest.mock import patch
     with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec:
         from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
@@ -3226,7 +3226,7 @@ def test_hash_match_required_for_solved() -> None:
             )
             resp = LocalModelExecutor.run(req, provider=InjectedLocalModelProvider(lambda _: ""))
         meta = resp.raw_model_metadata
-        
+
         assert meta.get("hash_match") is False
         assert meta.get("solved") is not True
 
@@ -4188,7 +4188,7 @@ def test_orchestrator_passes_verifier_evidence_to_existing_retry_prompt():
     vfe_available = getattr(ctx.op, "verifier_failure_evidence_available", False)
     sr_ready = getattr(ctx.op, "semantic_retry_evidence_ready", False)
     failure_class = getattr(ctx.op, "failure_class", "")
-    
+
     should_pass = sr_ready and vfe_available and failure_class in ("verification_failed", "semantic_wrong_patch")
     assert should_pass is True
 
@@ -4218,7 +4218,7 @@ def test_orchestrator_does_not_pass_verifier_evidence_when_not_ready():
     vfe_available = getattr(ctx.op, "verifier_failure_evidence_available", False)
     sr_ready = getattr(ctx.op, "semantic_retry_evidence_ready", False)
     failure_class = getattr(ctx.op, "failure_class", "")
-    
+
     should_pass = sr_ready and vfe_available and failure_class in ("verification_failed", "semantic_wrong_patch")
     assert should_pass is False
 
@@ -4248,7 +4248,7 @@ def test_orchestrator_does_not_pass_verifier_evidence_when_unavailable():
     vfe_available = getattr(ctx.op, "verifier_failure_evidence_available", False)
     sr_ready = getattr(ctx.op, "semantic_retry_evidence_ready", False)
     failure_class = getattr(ctx.op, "failure_class", "")
-    
+
     should_pass = sr_ready and vfe_available and failure_class in ("verification_failed", "semantic_wrong_patch")
     assert should_pass is False
 
@@ -5646,7 +5646,7 @@ def test_pipeline_projection_reanchors_to_locked_search_when_current_source_modi
     target_rel = "toy/math_util.py"
     target_path = tmp_path / "toy" / "math_util.py"
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # 原始內容 (original_target_content) 包含 locked_search
     target_path.write_text("def double(x):\n    return x * 2\n", encoding="utf-8")
 
@@ -5717,7 +5717,7 @@ def test_pipeline_projection_reanchors_to_locked_search_when_current_source_modi
                     "model_called": True,
                 },
             )
-        
+
         mock_exec.side_effect = _mock_execute_side_effect
 
         def _check_apply(apply_req):
@@ -6664,12 +6664,12 @@ def test_delegated_retry_patch_error_message_contains_verifier_evidence(tmp_path
 
 def test_c15_5h_dr_localized_files_is_localized_file_not_tuple(tmp_path):
     """C15-5H: Verify that the committee _dr_localized_files uses LocalizedFile objects.
-    
+
     Root cause: _dr_localized_files was list[tuple[str,str]] but PatchSynthesisPhase.run()
     calls loc_file.path which AttributeErrors on tuples. LocalizationPhase skips when
     localized_files is non-empty, so the wrong type was propagated all the way to
     PatchSynthesisPhase, causing conversion_status to stay "none" (model_decisions empty).
-    
+
     Fix: Wrap with LocalizedFile in local_model_executor.py L1780.
     """
     from nexus.services.local_heal.interface import LocalizedFile
@@ -6894,7 +6894,7 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
 
     # Check for expected label markers
     assert any(c.get("candidate_model") == "ornith:9b" and c.get("selected") is True for c in candidates)
-    
+
     # Expose label for the report
     res.raw_model_metadata["C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN"] = True
 
@@ -7238,7 +7238,7 @@ def test_local_committee_candidate_truth_table_contains_hash_sources(monkeypatch
 
     meta = resp.raw_model_metadata
     candidates_info = meta.get("committee_candidates", [])
-    
+
     judge_info = next(c for c in candidates_info if c["role"] == "judge")
     assert judge_info["raw_candidate_hash"] == ""
     assert judge_info["selected_candidate_hash"] == ""
@@ -7347,7 +7347,7 @@ def test_delegated_retry_committee_candidates_have_unique_ids(tmp_path) -> None:
 
     meta = resp.raw_model_metadata
     assert meta.get("delegated_retry_committee_path_used") is True
-    
+
     candidates_json = meta.get("delegated_retry_committee_candidates_json", "[]")
     import json
     candidates = json.loads(candidates_json)
@@ -7796,3 +7796,133 @@ def test_fallback_when_canonical_candidate_absent() -> None:
     assert resp.raw_model_metadata.get("output_understanding_success") is False
     assert resp.raw_model_metadata.get("output_understanding_projection_source") == "raw_output"
 
+
+def test_executor_respects_request_mutation_and_verifier_allowed() -> None:
+    """Verify that LocalModelExecutor respects request.mutation_allowed even if not enabled in signal_snapshot."""
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.local_model_executor import (
+        LocalModelExecutor,
+        LocalModelExecutorRequest,
+    )
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
+
+    mock_apply_receipt = IsolatedApplyReceipt(
+        task_id="t9",
+        workspace_path="/tmp",
+        target_file="foo.py",
+        patch_apply_status="applied",
+        patch_apply_error="",
+        selected_candidate_hash="selectedhash",
+        applied_patch_hash="appliedhash",
+        selected_candidate_hash_matches_applied=True,
+        candidate_output_isolated=True,
+        mutation_allowed=True,
+    )
+    mock_verifier_receipt = IsolatedVerifierReceipt(
+        task_id="t9",
+        verifier_status="pass",
+        exit_code=0,
+        stdout_tail="pass",
+        stderr_tail="",
+        verifier_error="",
+        verifier_allowed=True,
+    )
+
+    diff_text = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+    req = LocalModelExecutorRequest(
+        task_id="t9",
+        problem_statement="fix x",
+        repo_root="/tmp",
+        target_file="foo.py",
+        selected_capabilities=(),
+        evidence_refs=(),
+        route_context={
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "model_call_allowed": True,
+                "executor_model": "test-model",
+                "executor_provider": "ollama",
+                "protocol_mode": "anchored_edit",
+            },
+            "locked_search": "old code",
+        },
+        dry_run=False,
+        mutation_allowed=True,
+        verifier_allowed=True,
+        execution_topology="localheal_pipeline",
+    )
+
+    class FakeProvider:
+        pass
+
+    with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute") as mock_exec, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply", return_value=mock_apply_receipt) as mock_apply, \
+         patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier", return_value=mock_verifier_receipt) as mock_verifier:
+
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop", selected=True, invoked=True,
+            gate_passed=True, outcome_contributed=True,
+            evidence_present=True, failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "model_called": True,
+            }
+        )
+
+        resp = LocalModelExecutor.run(req, provider=FakeProvider())
+
+        mock_apply.assert_called_once()
+        called_args = mock_apply.call_args[0][0]
+        assert called_args.mutation_allowed is True
+        mock_verifier.assert_called_once()
+        assert resp.raw_model_metadata.get("isolated_apply_status") == "applied"
+        assert resp.raw_model_metadata.get("isolated_verifier_status") == "pass"
+
+
+def test_compute_failure_class_excludes_valid_formats_from_parse_failed() -> None:
+    """Verify that compute_failure_class does not treat VALID_SEARCH_REPLACE as parse_failed."""
+    from nexus.services.local_heal.local_model_executor import compute_failure_class
+
+    fc, ur = compute_failure_class(
+        output_len=100,
+        provider_error="",
+        failure_reason="",
+        parse_error_kind="VALID_SEARCH_REPLACE",
+        patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+        verifier_result="fail",
+        solved=False,
+        contains_markdown_fence=False,
+        pipeline_failure_reason="",
+    )
+    assert fc == "verification_failed"
+
+
+def test_compute_failure_class_classifies_real_parse_errors() -> None:
+    """Verify that compute_failure_class correctly classifies real parse errors as parse_failed."""
+    from nexus.services.local_heal.local_model_executor import compute_failure_class
+
+    real_errors = [
+        "NO_BLOCKS_FOUND",
+        "MISSING_FILE_HEADER",
+        "MALFORMED_DELIMITERS",
+        "EMPTY_AFTER_CLEANUP",
+        "REPLACEMENT_SYNTAX_INVALID",
+    ]
+    for err in real_errors:
+        fc, ur = compute_failure_class(
+            output_len=100,
+            provider_error="",
+            failure_reason="",
+            parse_error_kind=err,
+            patch_lifecycle_state="isolation_applied_hash_match_verifier_failed",
+            verifier_result="fail",
+            solved=False,
+            contains_markdown_fence=False,
+            pipeline_failure_reason="",
+        )
+        assert fc == f"parse_failed:{err}"

@@ -22,7 +22,7 @@ class PromptBuilder:
             term in model_name.lower()
             for term in ["7b", "6.7b", "9b", "10b", "13b", "3b", "1.5b"]
         )
-        
+
         # Interleaved mode: add reasoning section for planning + patch in one call
         reasoning_section = ""
         if interleaved:
@@ -81,6 +81,7 @@ class PromptBuilder:
         project_root: Path | None = None,
         max_prompt_tokens: int = 6000,
         repair_specification: str = "",
+        hard_constraints: str = "",
     ) -> str:
         # 1. 自動偵測並注入領域知識 (Knowledge Slicing)
         hardening_context = ""
@@ -90,11 +91,28 @@ class PromptBuilder:
                 hardening_context += ParserHardeningKnowledgeInjector.get_profile_prompt(profile)
 
         strategy = getattr(plan, "repair_strategy", "Apply surgical fix.")
-        
-        # 2. Repair Specification (P0 Priority: Logic intent)
+
+        # 2. Constraints & Hypothesis Sections
+        constraints_section = ""
+        if hard_constraints:
+            constraints_section = (
+                f"\n[VERIFIED CONSTRAINTS — MUST FOLLOW]\n{hard_constraints}\n"
+                f"CRITICAL: These constraints must be strictly followed under all circumstances.\n"
+            )
+
         spec_section = ""
         if repair_specification:
-            spec_section = f"\n[REPAIR SPECIFICATION (MANDATORY)]\n{repair_specification}\n"
+            spec_section = (
+                f"\n[PLANNER HYPOTHESIS — VERIFY AGAINST CODE]\n{repair_specification}\n"
+                f"Note: This hypothesis is advisory. If it conflicts with the problem statement, "
+                f"actual source code, or verifier evidence, prioritize the source code and verifier truth.\n"
+            )
+
+        authority_section = (
+            f"\n[CODE AND VERIFIER TRUTH — HIGHEST FACTUAL AUTHORITY]\n"
+            f"Always prioritize the actual code structure, logical correctness, "
+            f"and verifier feedback over planner suggestions if a mismatch is detected.\n"
+        )
 
         # 3. Retry failure context injection
         retry_section = ""
@@ -188,19 +206,21 @@ class PromptBuilder:
             f"{hardening_context}\n"
             f"[TASK]\n{problem_statement}\n\n"
             f"[REPRODUCTION]\n{repro_evidence}\n\n"
+            f"{constraints_section}"
             f"{spec_section}"
+            f"{authority_section}"
             f"[STRATEGY: {reasoning_mode}]\n{strategy}\n"
             f"{retry_section}"
             f"{failure_memory_section}"
             f"⚠️ Rules: No placeholders. SEARCH matches source exactly. Modify in-place.\n\n"
         )
-        
+
         base_tokens = len(base_prompt) // 3
         available_tokens = max_prompt_tokens - base_tokens
-        
+
         files_section = ""
         choice_set = []
-        
+
         # Simple token budgeting for files
         current_files_tokens = 0
         for loc_file in localized_files:
@@ -208,10 +228,10 @@ class PromptBuilder:
             choice_set.append(path)
             file_header = f"### FILE: {path}\n"
             file_footer = "\n\n"
-            
+
             # If single file is huge, truncate it
             file_tokens = (len(file_header) + len(content) + len(file_footer)) // 3
-            
+
             if current_files_tokens + file_tokens > available_tokens:
                 # Truncate content to fit remaining budget
                 remaining_chars = (available_tokens - current_files_tokens) * 3
@@ -226,7 +246,7 @@ class PromptBuilder:
                 current_files_tokens += file_tokens
 
         choice_str = ", ".join(choice_set)
-        
+
         return (
             f"{base_prompt}"
             f"Allowed files: {choice_str}\n"

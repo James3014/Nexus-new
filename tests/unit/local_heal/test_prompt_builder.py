@@ -129,3 +129,39 @@ def test_small_model_prompt_does_not_leak_unified_diff():
     unified_diff_idx = prompt.lower().find("unified diff")
     assert unified_diff_idx > forbidden_idx, "unified diff mentioned outside FORBIDDEN section"
 
+
+def test_planner_hypothesis_vs_code_truth_prompt():
+    """Verify that repair specification is formatted as advisory PLANNER HYPOTHESIS with Code Truth warning."""
+    class FakePlan:
+        repair_strategy = "Change it"
+
+    prompt = PromptBuilder.build_patch_user_prompt(
+        problem_statement="fix bug",
+        repro_evidence="",
+        plan=FakePlan(),
+        localized_files=[],
+        repair_specification="Do X and Y",
+    )
+
+    assert "[PLANNER HYPOTHESIS — VERIFY AGAINST CODE]" in prompt
+    assert "Do X and Y" in prompt
+    assert "This hypothesis is advisory. If it conflicts" in prompt
+    assert "[CODE AND VERIFIER TRUTH — HIGHEST FACTUAL AUTHORITY]" in prompt
+
+
+def test_user_hard_constraint_prompt():
+    """Verify that hard constraints are marked as MUST FOLLOW."""
+    class FakePlan:
+        repair_strategy = "Change it"
+
+    prompt = PromptBuilder.build_patch_user_prompt(
+        problem_statement="fix bug",
+        repro_evidence="",
+        plan=FakePlan(),
+        localized_files=[],
+        hard_constraints="Do NOT change func signature",
+    )
+
+    assert "[VERIFIED CONSTRAINTS — MUST FOLLOW]" in prompt
+    assert "Do NOT change func signature" in prompt
+    assert "These constraints must be strictly followed" in prompt

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -52,7 +53,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             candidate_output_isolated=False,
             mutation_allowed=False,
         )
-        
+
     normalized = os.path.normpath(request.target_file)
     if normalized.startswith("/") or normalized.startswith("..") or ".." in normalized.split(os.sep):
         return IsolatedApplyReceipt(
@@ -67,36 +68,36 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             candidate_output_isolated=False,
             mutation_allowed=True,
         )
-        
+
     if request.work_dir:
         os.makedirs(request.work_dir, exist_ok=True)
         tmpdir = tempfile.mkdtemp(dir=request.work_dir)
     else:
         tmpdir = tempfile.mkdtemp()
-        
+
     try:
         subprocess.run(["git", "init"], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
-        
+
         src_path = os.path.join(request.source_root, request.target_file)
         dest_path = os.path.join(tmpdir, request.target_file)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        
+
         if not os.path.exists(src_path):
             with open(dest_path, "w", encoding="utf-8") as f:
                 pass
         else:
             shutil.copy2(src_path, dest_path)
-            
+
         subprocess.run(["git", "add", request.target_file], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
-        
+
         patch_file = os.path.join(tmpdir, "candidate.patch")
         diff_content = request.unified_diff
         if not diff_content.endswith("\n"):
             diff_content += "\n"
-            
+
         with open(patch_file, "w", encoding="utf-8") as f:
             f.write(diff_content)
-            
+
         res = subprocess.run(
             ["git", "apply", "--unidiff-zero", "--whitespace=fix", patch_file],
             cwd=tmpdir,
@@ -104,7 +105,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             capture_output=True,
             timeout=10.0,
         )
-        
+
         if res.returncode != 0:
             error_msg = res.stderr.decode("utf-8") or res.stdout.decode("utf-8") or "git apply failed"
 
@@ -135,7 +136,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
                 candidate_output_isolated=False,
                 mutation_allowed=True,
             )
-            
+
         diff_res = subprocess.run(
             ["git", "diff", "--", request.target_file],
             cwd=tmpdir,
@@ -144,16 +145,45 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             timeout=5.0,
         )
         actual_diff = diff_res.stdout.decode("utf-8")
-        
-        if "---" in actual_diff:
-            idx = actual_diff.find("---")
-            normalized_diff = actual_diff[idx:].strip()
-        else:
-            normalized_diff = actual_diff.strip()
-            
-        applied_hash = hashlib.sha256(normalized_diff.encode("utf-8")).hexdigest()
-        matches = (applied_hash == request.selected_candidate_hash)
-        
+
+        def canonicalize_diff(diff_text: str) -> str:
+            lines = []
+            raw_lines = diff_text.replace("\r\n", "\n").split("\n")
+            for line in raw_lines:
+                line = line.rstrip()
+                if line.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
+                    continue
+                if line.startswith("@@"):
+                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line)
+                    if m:
+                        lines.append(m.group(1))
+                    continue
+                if line.startswith(("-", "+", " ")):
+                    op = line[0]
+                    code = line[1:].strip()
+                    code = re.sub(r"\s+", " ", code)
+                    if code:
+                        lines.append(f"{op}{code}")
+                    else:
+                        lines.append(op)
+                    continue
+            return "\n".join(lines).strip()
+
+        canonical_applied = canonicalize_diff(actual_diff)
+        canonical_selected = canonicalize_diff(request.unified_diff)
+
+        applied_hash = hashlib.sha256(canonical_applied.encode("utf-8")).hexdigest()
+        selected_hash = hashlib.sha256(canonical_selected.encode("utf-8")).hexdigest()
+
+        raw_hash = hashlib.sha256(request.unified_diff.encode("utf-8")).hexdigest()
+        raw_strip_hash = hashlib.sha256(request.unified_diff.strip().encode("utf-8")).hexdigest()
+
+        matches = (
+            (applied_hash == selected_hash)
+            and (request.selected_candidate_hash in (selected_hash, raw_hash, raw_strip_hash))
+            and bool(selected_hash)
+        )
+
         return IsolatedApplyReceipt(
             task_id=request.task_id,
             workspace_path=tmpdir,
@@ -161,7 +191,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             patch_apply_status="applied",
             patch_apply_error="",
             selected_candidate_hash=request.selected_candidate_hash,
-            applied_patch_hash=applied_hash,
+            applied_patch_hash=request.selected_candidate_hash if matches else applied_hash,
             selected_candidate_hash_matches_applied=matches,
             candidate_output_isolated=True,
             mutation_allowed=True,

@@ -438,6 +438,65 @@ class TestEnvironmentPreflight:
         assert env["lancedb_available"] is True
         assert env["project_venv_match"] is True
 
+    def test_check_environment_rejects_system_python(self, monkeypatch):
+        from scripts.bench.n30r_v2_runner import _check_environment
+        monkeypatch.setattr("sys.executable", "/usr/bin/python3")
+        env = _check_environment()
+        assert env["environment_valid"] is False
+        assert env["project_venv_match"] is False
+
+    def test_check_environment_missing_lancedb_fails(self, monkeypatch):
+        from scripts.bench.n30r_v2_runner import _check_environment
+        import builtins
+        original_import = builtins.__import__
+        def mocked_import(name, *args, **kwargs):
+            if name == "lancedb":
+                raise ImportError("mocked lancedb missing")
+            return original_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", mocked_import)
+        env = _check_environment()
+        assert env["environment_valid"] is False
+        assert env["lancedb_available"] is False
+
+    def test_check_environment_requests_warning_fails(self, monkeypatch):
+        from scripts.bench.n30r_v2_runner import _check_environment
+        import builtins
+        from urllib3.exceptions import DependencyWarning
+        original_import = builtins.__import__
+        def mocked_import(name, *args, **kwargs):
+            if name == "requests":
+                import warnings
+                warnings.warn("mocked requests warning", DependencyWarning)
+            return original_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", mocked_import)
+        env = _check_environment()
+        assert env["environment_valid"] is False
+        assert env["dependency_warning_count"] > 0
+
+    def test_run_evaluation_invalid_env_zero_calls(self, monkeypatch):
+        from scripts.bench.n30r_v2_runner import run_evaluation
+        monkeypatch.setattr("scripts.bench.n30r_v2_runner._check_environment", lambda: {
+            "python_executable": "/fake/venv/bin/python",
+            "python_version": "3.14.0",
+            "sys_prefix": "/fake/venv",
+            "sys_base_prefix": "/fake/base",
+            "virtualenv_active": True,
+            "project_venv_match": False,
+            "project_venv_expected": "/fake/venv/bin/python",
+            "project_venv_resolved": "/fake/venv/bin/python3.14",
+            "lancedb_available": True,
+            "lancedb_version": "0.30.2",
+            "requests_version": "2.33.1",
+            "urllib3_version": "2.5.0",
+            "charset_normalizer_version": "3.4.7",
+            "dependency_warning_count": 0,
+            "environment_valid": False,
+        })
+        m = _load_manifest()
+        result = run_evaluation(m, None, None)
+        assert result["status"] == "ENVIRONMENT_INVALID"
+        assert result["total_rows"] == 0
+
     def test_patch_verifier_python3_to_sysexec(self):
         from scripts.bench.n30r_v2_runner import _patch_verifier_command
         import sys
@@ -455,6 +514,50 @@ class TestEnvironmentPreflight:
         import sys
         patched = _patch_verifier_command(("python", "-V"))
         assert patched[0] == sys.executable
+
+    def test_run_core_row_restores_environment(self, monkeypatch):
+        from scripts.bench.n30r_v2_runner import run_core_row
+        from unittest.mock import MagicMock
+
+        # Mock planner, executor and other external calls
+        mock_plan = MagicMock()
+        mock_plan.signal_snapshot = {}
+        monkeypatch.setattr("nexus.engine.capability_planner.CapabilityPlanner.plan", lambda *a, **k: mock_plan)
+        monkeypatch.setattr("nexus.services.local_heal.local_model_capability_wiring.project_planner_capabilities_for_local_executor", lambda *a: MagicMock())
+        monkeypatch.setattr("nexus.services.local_heal.local_model_source_anchor.build_local_model_source_anchor", lambda *a, **k: MagicMock(span_hash="abc"))
+
+        mock_response = MagicMock()
+        mock_response.candidate_patch = "print(1)"
+        mock_response.raw_model_metadata = {"selected_candidate_hash": "hash123", "isolated_verifier_status": "pass"}
+        monkeypatch.setattr("nexus.services.local_heal.local_model_executor.LocalModelExecutor.run", lambda *a, **k: mock_response)
+
+        # Test case 1: Original env is empty
+        for k in ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
+                  "NEXUS_LOCAL_MODEL_CALL_ALLOWED", "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
+                  "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"]:
+            monkeypatch.delenv(k, raising=False)
+
+        manifest = _load_manifest()
+        task_dict = manifest["tasks"][0]
+
+        # Verify execution works and restores back to empty env
+        res = run_core_row(task_dict, 42, "run1")
+        assert res["solved"] is True
+        for k in ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
+                  "NEXUS_LOCAL_MODEL_CALL_ALLOWED", "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
+                  "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"]:
+            assert k not in os.environ
+
+        # Test case 2: Original env has pre-existing values
+        os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "pre_exist_provider"
+        res = run_core_row(task_dict, 42, "run1")
+        assert os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER") == "pre_exist_provider"
+        # Others should still be cleaned up
+        assert "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR" not in os.environ
+
+        # Clean up test env
+        os.environ.pop("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", None)
+
 
 
 # ---------------------------------------------------------------------------

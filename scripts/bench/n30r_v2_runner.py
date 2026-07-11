@@ -69,19 +69,33 @@ def _check_environment() -> dict:
         )
         return receipt
 
-    try:
-        import importlib.metadata as _im
-        import lancedb as _l
-        receipt["lancedb_available"] = True
-        receipt["lancedb_version"] = _l.__version__
-        import requests as _r
-        receipt["requests_version"] = _r.__version__
-        import urllib3 as _u
-        receipt["urllib3_version"] = _u.__version__
-        import charset_normalizer as _cn
-        receipt["charset_normalizer_version"] = _cn.__version__
-    except (ImportError, AttributeError, Exception) as e:
-        logger.error("Dependency import failed: %s", e)
+    import warnings
+    warning_count = 0
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        try:
+            import importlib.metadata as _im
+            import lancedb as _l
+            receipt["lancedb_available"] = True
+            receipt["lancedb_version"] = _l.__version__
+            import requests as _r
+            receipt["requests_version"] = _r.__version__
+            import urllib3 as _u
+            receipt["urllib3_version"] = _u.__version__
+            import charset_normalizer as _cn
+            receipt["charset_normalizer_version"] = _cn.__version__
+
+            for warning in w:
+                w_class = warning.category.__name__
+                if "DependencyWarning" in w_class or "RequestsDependencyWarning" in w_class:
+                    warning_count += 1
+        except (ImportError, AttributeError, Exception) as e:
+            logger.error("Dependency import failed: %s", e)
+            return receipt
+
+    receipt["dependency_warning_count"] = warning_count
+    if warning_count > 0:
+        logger.error("Dependency warning detected: %d warnings", warning_count)
         return receipt
 
     receipt["environment_valid"] = True
@@ -388,11 +402,28 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     # Planner
     from nexus.engine.capability_planner import CapabilityPlanner
     planner = CapabilityPlanner()
+
+    # Back up environment variables
+    env_keys = [
+        "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL",
+        "NEXUS_C15_SECONDARY_PROPOSER_MODEL",
+        "NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS",
+    ]
+    backup_env = {k: os.environ[k] for k in env_keys if k in os.environ}
+
+    # Set environment variables
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "localheal_pipeline"
     os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "ollama"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b-instruct"
+    os.environ["NEXUS_C15_SECONDARY_PROPOSER_MODEL"] = "qwen2.5-coder:7b-instruct"
+    os.environ["NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS"] = "qwen2.5-coder:7b-instruct"
+
     try:
         plan = planner.plan(
             task_desc=task_statement,
@@ -404,13 +435,9 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             budget={"max_cost": 20}, skills=[],
         )
         signal_snapshot = plan.signal_snapshot
+        signal_snapshot["provider_timeout_sec"] = 120.0
     except Exception as e:
-        signal_snapshot = {"ssd_route_map": {"capability_reasons": {}}}
-    finally:
-        for key in ("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
-                     "NEXUS_LOCAL_MODEL_CALL_ALLOWED", "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
-                     "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"):
-            os.environ.pop(key, None)
+        signal_snapshot = {"ssd_route_map": {"capability_reasons": {}}, "provider_timeout_sec": 120.0}
 
     projection = project_planner_capabilities_for_local_executor(signal_snapshot)
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
@@ -455,77 +482,86 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     )
 
     provider = OllamaLocalModelProvider()
-    executor_response = LocalModelExecutor.run(
-        executor_request, provider=provider
-    )
 
-    wall_time = time.time() - start
-    meta = (
-        executor_response.raw_model_metadata
-        if isinstance(executor_response.raw_model_metadata, dict)
-        else {}
-    )
+    try:
+        executor_response = LocalModelExecutor.run(
+            executor_request, provider=provider
+        )
 
-    raw_output = executor_response.candidate_patch or ""
-    candidate_hash = meta.get("selected_candidate_hash", "") or meta.get("candidate_hash", "")
-    candidate_isolated = meta.get("candidate_isolated", False)
-    apply_status = meta.get("isolated_apply_status", "")
-    verifier_result = meta.get("isolated_verifier_status", "")
-    semantic_retry_count = meta.get("semantic_retry_count", 0)
-    pipeline_solve = meta.get("pipeline_solve_eligible", False)
+        wall_time = time.time() - start
+        meta = (
+            executor_response.raw_model_metadata
+            if isinstance(executor_response.raw_model_metadata, dict)
+            else {}
+        )
 
-    verifier_reached = bool(verifier_result)
-    if verifier_result == "pass":
-        terminal = "VERIFIED_SOLVE"
-        solved = True
-    elif verifier_reached:
-        terminal = "VERIFIED_FAIL"
-        solved = False
-    elif candidate_hash:
-        terminal = "APPLY_INVALID"
-        solved = False
-    elif raw_output:
-        terminal = "PROTOCOL_INVALID"
-        solved = False
-    else:
-        terminal = "INFRA_INVALID"
-        solved = False
+        raw_output = executor_response.candidate_patch or ""
+        candidate_hash = meta.get("selected_candidate_hash", "") or meta.get("candidate_hash", "")
+        candidate_isolated = meta.get("candidate_isolated", False)
+        apply_status = meta.get("isolated_apply_status", "")
+        verifier_result = meta.get("isolated_verifier_status", "")
+        semantic_retry_count = meta.get("semantic_retry_count", 0)
+        pipeline_solve = meta.get("pipeline_solve_eligible", False)
 
-    armor_oracle_status = "FULL_ARMOR_PATH_ACCEPTED" if (
-        raw_output and candidate_hash
-    ) else "DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING"
+        verifier_reached = bool(verifier_result)
+        if verifier_result == "pass":
+            terminal = "VERIFIED_SOLVE"
+            solved = True
+        elif verifier_reached:
+            terminal = "VERIFIED_FAIL"
+            solved = False
+        elif candidate_hash:
+            terminal = "APPLY_INVALID"
+            solved = False
+        elif raw_output:
+            terminal = "PROTOCOL_INVALID"
+            solved = False
+        else:
+            terminal = "INFRA_INVALID"
+            solved = False
 
-    return {
-        "task_id": task_id,
-        "arm_id": "N30R_B_7B_REAL_CORE",
-        "trial_index": 0,
-        "task_seed": seed,
-        "model_requested": "qwen2.5-coder:7b-instruct",
-        "model_actual": "qwen2.5-coder:7b-instruct",
-        "provider_actual": "ollama",
-        "task_statement_sha256": sha256_str(task_statement),
-        "source_fixture_sha256": task_dict.get("source_fixture_sha256", ""),
-        "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
-        "execution_completed": True,
-        "contract_valid": True,
-        "model_call_count": 1 + semantic_retry_count,
-        "model_response_received": bool(raw_output),
-        "raw_output_length": len(raw_output),
-        "raw_output_sha256": sha256_str(raw_output) if raw_output else "",
-        "candidate_hash": candidate_hash,
-        "candidate_isolated": candidate_isolated,
-        "apply_status": apply_status or "none",
-        "verifier_reached": verifier_reached,
-        "verifier_status": verifier_result or "not_run",
-        "semantic_retry_count": semantic_retry_count,
-        "wall_time_sec": round(wall_time, 3),
-        "timed_out": False,
-        "timeout_stage": "",
-        "protocol_parse_success": bool(raw_output),
-        "terminal_status": terminal,
-        "solved": solved,
-        "armor_oracle_status": armor_oracle_status,
-    }
+        armor_oracle_status = "FULL_ARMOR_PATH_ACCEPTED" if (
+            raw_output and candidate_hash
+        ) else "DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING"
+
+        return {
+            "task_id": task_id,
+            "arm_id": "N30R_B_7B_REAL_CORE",
+            "trial_index": 0,
+            "task_seed": seed,
+            "model_requested": "qwen2.5-coder:7b-instruct",
+            "model_actual": "qwen2.5-coder:7b-instruct",
+            "provider_actual": "ollama",
+            "task_statement_sha256": sha256_str(task_statement),
+            "source_fixture_sha256": task_dict.get("source_fixture_sha256", ""),
+            "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
+            "execution_completed": True,
+            "contract_valid": True,
+            "model_call_count": 1 + semantic_retry_count,
+            "model_response_received": bool(raw_output),
+            "raw_output_length": len(raw_output),
+            "raw_output_sha256": sha256_str(raw_output) if raw_output else "",
+            "candidate_hash": candidate_hash,
+            "candidate_isolated": candidate_isolated,
+            "apply_status": apply_status or "none",
+            "verifier_reached": verifier_reached,
+            "verifier_status": verifier_result or "not_run",
+            "semantic_retry_count": semantic_retry_count,
+            "wall_time_sec": round(wall_time, 3),
+            "timed_out": False,
+            "timeout_stage": "",
+            "protocol_parse_success": bool(raw_output),
+            "terminal_status": terminal,
+            "solved": solved,
+            "armor_oracle_status": armor_oracle_status,
+        }
+    finally:
+        # Restore environment variables
+        for k in env_keys:
+            if k in backup_env:
+                os.environ[k] = backup_env[k]
+            else:
+                os.environ.pop(k, None)
 
 
 def run_evaluation(

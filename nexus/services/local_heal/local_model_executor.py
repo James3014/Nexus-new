@@ -64,7 +64,7 @@ class LocalModelExecutorResponse:
 
 def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
     """Resolve execution topology strictly from planner-owned signal_snapshot.
-    
+
     Resolution order:
     1. request.route_context["signal_snapshot"]["execution_topology"] (planner-owned)
     No fallbacks allowed. Missing or empty => raises ValueError.
@@ -73,18 +73,18 @@ def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
     signal_snapshot = route_ctx.get("signal_snapshot")
     if not isinstance(signal_snapshot, dict):
         raise ValueError("Missing signal_snapshot in route_context")
-    
+
     topology = signal_snapshot.get("execution_topology")
     if not topology:
         raise ValueError("Missing execution_topology in signal_snapshot")
-        
+
     if "protocol_mode" not in signal_snapshot:
         raise ValueError("Missing protocol_mode in signal_snapshot")
-        
+
     if topology not in ("local_committee_only", "local_cascade"):
         if "executor_model" not in signal_snapshot:
             raise ValueError("Missing executor_model in signal_snapshot")
-    
+
     return str(topology)
 
 
@@ -416,36 +416,36 @@ def build_local_model_provider_from_signal_snapshot(
     injected_fn_key: str,
 ) -> LocalModelProvider:
     """Factory to instantiate provider specified strictly by planner contract signal_snapshot.
-    
+
     No route selection or fallback allowed. Missing required fields fails closed.
     """
     signal_snapshot = route_context.get("signal_snapshot", {}) if isinstance(route_context, dict) else {}
     if not isinstance(signal_snapshot, dict):
         return InertLocalModelProvider()
-        
+
     if "model_call_allowed" not in signal_snapshot:
         raise ValueError("Missing model_call_allowed in signal_snapshot")
     call_allowed = bool(signal_snapshot["model_call_allowed"])
-        
+
     if not call_allowed:
         return InertLocalModelProvider()
-        
+
     injected_fn = route_context.get(injected_fn_key)
     if injected_fn is not None:
         return InjectedLocalModelProvider(injected_fn)
-        
+
     provider_type = signal_snapshot.get("executor_provider")
     model_name = signal_snapshot.get("executor_model")
-    
+
     if not provider_type or not model_name:
         raise ValueError("Missing executor_provider or executor_model in signal_snapshot")
-        
+
     provider_type = provider_type.lower()
     model_name = model_name.strip()
-    
+
     if provider_type == "ollama" and model_name:
         return OllamaLocalModelProvider()
-        
+
     return InertLocalModelProvider()
 
 
@@ -462,7 +462,7 @@ def compute_patch_lifecycle_state(
     solved: bool,
 ) -> str:
     """Derive mutually exclusive patch lifecycle state from existing execution results.
-    
+
     Must not trigger execution, invoke provider, invoke verifier, or invoke isolated apply.
     Fails closed on missing data.
     """
@@ -549,7 +549,7 @@ def compute_failure_class(
     pipeline_failure_reason: str,
 ) -> tuple[str, str]:
     """Deterministic failure classifier from existing execution metadata.
-    
+
     Returns (failure_class, unknown_reason).
     Classification only — must not parse/transform model output or change execution.
     """
@@ -561,7 +561,7 @@ def compute_failure_class(
 
     # Priority 2: parse failures that consumed model output
     # Must come before output_len check: a parse error explains why output_len is 0
-    if parse_error_kind and parse_error_kind != "none":
+    if parse_error_kind and parse_error_kind != "none" and parse_error_kind not in ("VALID_SEARCH_REPLACE", "FENCED_SEARCH_REPLACE"):
         return f"parse_failed:{parse_error_kind}", ""
 
     # Priority 3: terminal patch lifecycle states must override earlier pipeline
@@ -622,7 +622,7 @@ def compute_verifier_failure_evidence(
     patch_lifecycle_state: str,
 ) -> dict[str, str | bool]:
     """Capture bounded verifier failure evidence for downstream semantic retry.
-    
+
     Must not change verifier behavior, trigger retry, alter patch content,
     or alter candidate isolation. Evidence capture only.
     """
@@ -716,7 +716,7 @@ class LocalModelExecutor:
     @staticmethod
     def _run_impl(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
         empty_hash = hashlib.sha256(b"").hexdigest()
-        
+
         try:
             execution_topology = _resolve_execution_topology(request)
         except ValueError as e:
@@ -733,7 +733,7 @@ class LocalModelExecutor:
                 timeout=False,
                 evidence_refs=request.evidence_refs,
             )
-        
+
         # 1. Handle Dry Run
         if request.dry_run:
             from nexus.services.local_heal.p3_route_skeleton import compute_p3_route_skeleton, p3_skeleton_to_dict
@@ -846,11 +846,11 @@ class LocalModelExecutor:
         target_file = request.target_file
         target_symbol = request.route_context.get("target_symbol") or ""
         locked_search = request.route_context.get("locked_search") or ""
-        
+
         source_anchor_hash = ""
         source_anchor_present = False
         source_anchor_source = "none"
-        
+
         if locked_search and str(locked_search).strip():
             locked_text = locked_search if isinstance(locked_search, str) else str(locked_search)
             source_anchor_hash = hashlib.sha256(locked_text.encode("utf-8")).hexdigest()
@@ -872,7 +872,7 @@ class LocalModelExecutor:
             except Exception:
                 source_anchor_present = False
                 source_anchor_source = "localizer_failed"
-        
+
         # 6. Failure Feedback Context
         failure_feedback_present = False
         failure_feedback_text = ""
@@ -901,7 +901,7 @@ class LocalModelExecutor:
                 failure_feedback_present = True
             except Exception:
                 failure_feedback_present = False
-        
+
         # C6: Read provider_timeout_sec from signal_snapshot (planner-owned)
         _signal_snap_early = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
         provider_timeout_sec: float = float(_signal_snap_early.get("provider_timeout_sec", 120.0))
@@ -929,7 +929,7 @@ class LocalModelExecutor:
         if execution_topology == "local_committee_only":
             signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
             protocol_mode = signal_snapshot["protocol_mode"]
-            
+
             # Build enhanced problem statement with source anchor + failure feedback
             enhanced_problem = request.problem_statement
             if source_anchor_present:
@@ -974,7 +974,7 @@ class LocalModelExecutor:
 
             from nexus.services.local_heal.local_committee_candidate_provider import LocalCommitteeCandidateProvider
             from nexus.services.local_heal.candidate_decision_adapter import CandidateDecisionAdapter
-            
+
             candidates = LocalCommitteeCandidateProvider.generate_committee_candidates(
                 task_id=request.task_id,
                 problem_statement=enhanced_problem,
@@ -986,7 +986,7 @@ class LocalModelExecutor:
                 protocol_mode=protocol_mode,
                 route_context=request.route_context,
             )
-            
+
             # Update cap_ctx with candidates for this topology
             cap_ctx.candidate_pool = candidates
             cap_ctx.problem_statement = enhanced_problem
@@ -996,10 +996,10 @@ class LocalModelExecutor:
                 selected_capabilities=selected_caps,
                 ctx=cap_ctx,
             )
-            
+
             # Local model is called if at least one candidate wasn't blocked/abstained
             local_model_called = any(not c.abstained for c in candidates)
-            
+
             selected_patch = decision.selected_candidate_patch
 
             # C6AX: A-phase committee audit — audit the winner patch via CommitteeOrchestrator.
@@ -1015,8 +1015,8 @@ class LocalModelExecutor:
             patch_meta = {}
             retry_available = False
             retry_not_invoked_reason = ""
-            mutation_allowed = bool(signal_snapshot.get("mutation_allowed", False))
-            verifier_allowed = bool(signal_snapshot.get("verifier_allowed", False))
+            mutation_allowed = bool(request.mutation_allowed or signal_snapshot.get("mutation_allowed", False))
+            verifier_allowed = bool(request.verifier_allowed or signal_snapshot.get("verifier_allowed", False))
             verifier_command = tuple(request.route_context.get("verifier_command", []) or [])
             candidate_isolation_attempted = False
             candidate_isolated = False
@@ -1204,7 +1204,7 @@ class LocalModelExecutor:
                 hybrid_route = candidate_isolation_to_hybrid_route(isolation_receipt)
 
             provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
-            
+
             # Resolve selected model name or fallback to "committee"
             selected_model = ""
             for c in candidates:
@@ -1213,7 +1213,7 @@ class LocalModelExecutor:
                     break
             if not selected_model:
                 selected_model = "committee"
-                
+
             # Run gate executors for selected gate capabilities
             gate_results: dict[str, CapabilityExecutionResult] = {}
             for gate_name in ("artifact_gate", "claim_gate", "delivery_gate"):
@@ -1238,7 +1238,7 @@ class LocalModelExecutor:
                 is_selected = (decision.selected_candidate_id == c.candidate_id)
                 c_applied_hash = applied_patch_hash if is_selected and isolated_apply_status == "applied" else ""
                 c_hash_match = hash_match if is_selected else False
-                
+
                 # Determine rejection reason
                 c_rejection_reason = ""
                 if is_selected:
@@ -1280,7 +1280,7 @@ class LocalModelExecutor:
             # Calculate counts and retrieve raw hash for provenance tracking
             proposers = [c for c in candidates if c.role != "judge"]
             judges = [c for c in candidates if c.role == "judge"]
-            
+
             raw_cand_hash = ""
             selected_cand_obj = next((c for c in candidates if c.candidate_id == decision.selected_candidate_id), None)
             if selected_cand_obj:
@@ -1464,8 +1464,8 @@ class LocalModelExecutor:
             pipeline_failure_reason = repair_exec.telemetries.get("pipeline_failure_reason", "")
             first_attempt_patch_hash = repair_exec.telemetries.get("first_attempt_patch_hash", "")
             signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
-            mutation_allowed = bool(signal_snapshot.get("mutation_allowed", False))
-            verifier_allowed = bool(signal_snapshot.get("verifier_allowed", False))
+            mutation_allowed = bool(request.mutation_allowed or signal_snapshot.get("mutation_allowed", False))
+            verifier_allowed = bool(request.verifier_allowed or signal_snapshot.get("verifier_allowed", False))
             verifier_command = tuple(request.route_context.get("verifier_command", []) or [])
 
             pipeline_final_patch_len = len(pipeline_final_patch) if pipeline_final_patch else 0
@@ -1896,7 +1896,7 @@ class LocalModelExecutor:
                         else:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                             model_name = getattr(system_prompt_or_req, "model_name", "") or model or kwargs.get("model", "")
-                        
+
                         _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
                         if model_name in _MODEL_ALIASES:
                             model_name = _MODEL_ALIASES[model_name]
@@ -1911,7 +1911,7 @@ class LocalModelExecutor:
                         delegated_retry_provider_prompt_len = len(prompt) if prompt else 0
                         delegated_retry_provider_prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16] if prompt else ""
                         delegated_retry_provider_model_name = model_name or ""
-                        
+
                         try:
                             _opts = options or kwargs.get("options")
                             prov_req = LocalModelProviderRequest(
@@ -2064,7 +2064,7 @@ class LocalModelExecutor:
                             )
                             _cp_heal_ctx.committee_proposer_model = _dr_cand_resolved
                             _cp_result = _cp_pipeline.run(_cp_heal_ctx)
-                             
+
                             # C15-5D: 還原根目錄中的目標檔案內容，防止多個候選模型執行時互相污染 / 產生競態條件。
                             if request.target_file and original_target_path and os.path.exists(original_target_path):
                                 try:
@@ -2072,31 +2072,31 @@ class LocalModelExecutor:
                                         f.write(original_target_content or "")
                                 except Exception:
                                     pass
-                            
+
                             _cp_patch = str(getattr(_cp_result, "pre_verification_final_patch", "") or getattr(_cp_result, "final_patch", "") or "")
-                            
+
                             import hashlib as _hashlib
                             _cp_patch_hash = _hashlib.sha256(_cp_patch.rstrip("\n").encode()).hexdigest() if _cp_patch.strip() else ""
-                            
+
                             _apply_status = "not_attempted"
                             _verifier_result = "fail"
                             _rejection_reason = ""
                             _raw_excerpt = _cp_patch[:300] if _cp_patch else ""
-                            
+
                             # C15-5D: 格式拒絕門——沿用 Nexus SSRP 合約，apply 前先確認格式。
                             # 若委員會模型輸出 unified-diff 而非 SEARCH/REPLACE，直接拒絕不送 apply。
                             _last_patch_decision = next(
-                                (d for d in reversed(getattr(_cp_result, "model_decisions", [])) 
+                                (d for d in reversed(getattr(_cp_result, "model_decisions", []))
                                  if isinstance(d, dict) and d.get("phase") in ("patch", "semantic_retry_patch")),
                                 None
                             )
-                            
+
                             from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 
                             _format_class = "UNKNOWN"
                             if _last_patch_decision:
                                 _format_class = _last_patch_decision.get("output_class", "UNKNOWN")
-                            
+
                             # Fallback if unknown or no decision
                             if _format_class == "UNKNOWN":
                                 _raw_output = ""
@@ -2166,7 +2166,7 @@ class LocalModelExecutor:
                                     _verifier_result = _cp_verify.verifier_status
                                     if _cp_verify.verifier_status != "pass":
                                         _rejection_reason = "verifier_failed"
-                                        
+
                             _cand_data = {
                                 "candidate_id": _cand_id,
                                 "model": _dr_cand_resolved,
@@ -2185,7 +2185,7 @@ class LocalModelExecutor:
                                 "selected": False,
                                 "rejection_reason": _rejection_reason,
                             }
-                            
+
                             if _verifier_result == "pass" and _dr_committee_winner is None:
                                 _cand_data["selected"] = True
                                 _cand_data["rejection_reason"] = ""
@@ -2201,7 +2201,7 @@ class LocalModelExecutor:
                                     _cand_data["rejection_reason"] = "winner_already_selected"
                                 elif _rejection_reason == "":
                                     _cand_data["rejection_reason"] = "not_selected"
-                                    
+
                             _dr_committee_candidates_list.append(_cand_data)
 
                     # C15-5D: Autoreason 接委員會候選評審（Phase D）。
@@ -2267,7 +2267,7 @@ class LocalModelExecutor:
                             raw_meta["delegated_retry_heterogeneous_candidate_count"] = _dr_committee_candidate_count
                             raw_meta["delegated_retry_committee_path_used"] = True
                             raw_meta["delegated_retry_committee_candidates_json"] = _json.dumps(_dr_committee_candidates_list)
-                            
+
                             class DummyResultCtx:
                                 final_patch = ""
                                 failure_reason = "committee_no_winner"
@@ -2577,12 +2577,12 @@ class LocalModelExecutor:
         # 9. Generate Candidate Patch for single_local_model
         signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
         protocol_mode = signal_snapshot["protocol_mode"]
-        
+
         # Build failure feedback context for prompt
         failure_context = ""
         if failure_feedback_present and failure_feedback_text:
             failure_context = f"\n\n{failure_feedback_text}"
-        
+
         if protocol_mode == "anchored_edit":
             explicit_prompt = (
                 f"You are generating a replacement code block to solve a coding task.\n"
@@ -2665,9 +2665,9 @@ class LocalModelExecutor:
             timeout_sec=provider_timeout_sec,
             options=_opts,
         )
-        
+
         prov_resp = provider.generate(prov_req)
-        
+
         candidate_patch = prov_resp.output_text
         patch_meta = {}
 
@@ -2727,9 +2727,9 @@ class LocalModelExecutor:
             _understanding_meta["protocol_parse_failed"] = True
             _understanding_meta["error_kind"] = f"OUTPUT_UNDERSTANDING:{_understanding.failure_reason}"
             _understanding_meta["error_message"] = _understanding.failure_reason
-            
+
         provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
-        
+
         raw_meta = {
             "output_truncated": prov_resp.output_truncated,
             "error": prov_resp.error,
@@ -2988,14 +2988,14 @@ def _normalize_candidate_patch(
     candidate_patch: str,
 ) -> tuple[str, dict]:
     """Normalize candidate_patch to standard unified diff using SolidSearchReplaceProtocol.
-    
+
     Returns:
         (normalized_patch, metadata) where metadata contains protocol_parse_failed if error.
     """
     # Defensive: ensure strings, not bytes
     locked_search = locked_search if isinstance(locked_search, str) else str(locked_search) if locked_search else ""
     candidate_patch = candidate_patch if isinstance(candidate_patch, str) else str(candidate_patch) if candidate_patch else ""
-    
+
     if not candidate_patch.strip():
         return "", {"protocol_parse_failed": True, "error": "empty_patch"}
 
@@ -3009,7 +3009,7 @@ def _normalize_candidate_patch(
         **outer_unwrap_meta,
         **replace_unwrap_meta,
     }
-    
+
     # 1. Already standard unified diff — pass through
     if "--- a/" in candidate_patch and "+++ b/" in candidate_patch and "<<<<<<< REPLACE" not in candidate_patch:
         return candidate_patch, {
@@ -3017,15 +3017,15 @@ def _normalize_candidate_patch(
             "normalized": bool(unwrap_meta.get("normalized", False)),
             **unwrap_meta,
         }
-    
+
     # 2. Use SolidSearchReplaceProtocol to parse REPLACE block
     from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchError
-    
+
     protocol = SolidSearchReplaceProtocol()
     anchor_text = locked_search if locked_search.strip() else None
-    
+
     result = protocol.parse(candidate_patch, anchor_text=anchor_text, protocol_mode="anchored_edit")
-    
+
     # 3. Handle parse error — fail closed
     if isinstance(result, PatchError):
         return "", {
@@ -3034,17 +3034,17 @@ def _normalize_candidate_patch(
             "error_message": result.message,
             **unwrap_meta,
         }
-    
+
     # 4. Got PatchIntent(s) — extract replacement from first intent
     if not result:
         return "", {"protocol_parse_failed": True, "error": "no_intents", **unwrap_meta}
-    
+
     intent = result[0]
     replacement = intent.replace
-    
+
     if not replacement.strip():
         return "", {"protocol_parse_failed": True, "error": "empty_replacement", **unwrap_meta}
-    
+
     # 5. Generate unified diff from locked_search → replacement
     normalized = _build_unified_diff_from_search_and_replacement(
         request,
