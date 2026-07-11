@@ -771,6 +771,7 @@ class LocalHealPipelineCapabilityExecutor:
                 "pipeline_final_patch": pipeline_final_patch,
                 "pipeline_solve_eligible": pipeline_solve_eligible,
                 "pipeline_failure_reason": pipeline_failure_reason,
+                "first_attempt_patch_hash": getattr(pipeline_result_ctx, "_first_attempt_patch_hash", "") if pipeline_result_ctx else "",
                 # C7: Output Classification
                 "output_hash": output_hash,
                 "output_class": output_class,

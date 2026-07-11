@@ -1462,6 +1462,7 @@ class LocalModelExecutor:
             pipeline_final_patch = repair_exec.telemetries.get("pipeline_final_patch", "")
             pipeline_solve_eligible = repair_exec.telemetries.get("pipeline_solve_eligible", False)
             pipeline_failure_reason = repair_exec.telemetries.get("pipeline_failure_reason", "")
+            first_attempt_patch_hash = repair_exec.telemetries.get("first_attempt_patch_hash", "")
             signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
             mutation_allowed = bool(signal_snapshot.get("mutation_allowed", False))
             verifier_allowed = bool(signal_snapshot.get("verifier_allowed", False))
@@ -1650,6 +1651,7 @@ class LocalModelExecutor:
                 "selected_candidate_hash": selected_candidate_hash,
                 "applied_patch_hash": applied_patch_hash,
                 "hash_match": hash_match,
+                "first_attempt_patch_hash": first_attempt_patch_hash,
                 "selected_candidate_hash_matches_applied": hash_match,
                 "isolated_apply_status": isolated_apply_status,
                 "isolated_apply_error": isolated_apply_error,

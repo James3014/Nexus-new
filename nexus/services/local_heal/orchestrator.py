@@ -203,6 +203,9 @@ class HealOrchestrator:
                         ctx.op.last_stderr_tail = getattr(receipt, "stderr_tail", "")
                     ctx.op.last_failure_class = "VERIFIER_FAIL"
                 self._handle_verification_failure(ctx, v_res)
+                if ctx.op.solve_eligible:
+                    ctx.gov.gate_exit = "verification"
+                    break
 
     def _handle_patch_failure(self, ctx: HealContext, res: PhaseResult, ledger: LatencyLedger) -> bool:
         """處理 Patch 生成失敗，判定是否重試。"""
@@ -646,6 +649,9 @@ class HealOrchestrator:
             return False
 
         ctx.op.model_decisions[-1]["status"] = "SUCCESS"
+        # Save first attempt patch hash before overwriting with retry result
+        first_patch = getattr(ctx.op, "final_patch", "")
+        ctx.op._first_attempt_patch_hash = hashlib.sha256(first_patch.encode()).hexdigest() if first_patch else ""
         ctx.op.final_patch = "\n".join(apply_res.applied_diffs).strip()
 
         # 10. Re-run verification
