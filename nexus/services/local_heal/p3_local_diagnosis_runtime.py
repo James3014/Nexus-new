@@ -144,6 +144,9 @@ class RealLocalDiagnosis:
                 evidence_refs=(),
                 model_name=self.MODEL_NAME,
                 api_type="generate",
+                phase=skeleton.get("phase", "planning"),
+                attempt_id=skeleton.get("attempt_id", "attempt-1"),
+                execution_profile=skeleton.get("execution_profile", "FULL"),
             )
             response = provider.generate(request)
             recommendation = _parse_advisor_response(response.output_text)

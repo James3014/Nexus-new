@@ -702,12 +702,17 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
         profile_final = meta.get("final_execution_profile", "unknown")
         escalation_count = int(meta.get("profile_escalation_count", 0) or 0)
         escalation_reasons = list(meta.get("profile_escalation_reasons", []) or [])
-        ledger = executor_request.route_context.get("llm_call_ledger", {})
-        llm_call_planning = int(ledger.get("planning", 0) or 0)
-        llm_call_spec_gen = int(ledger.get("spec_gen", 0) or 0)
-        llm_call_patch = int(ledger.get("patch", 0) or 0)
-        llm_call_retry = int(ledger.get("retry", 0) or 0)
-        llm_call_total = int(ledger.get("total", 0) or 0)
+        ledger = meta.get("llm_call_ledger", {})
+        if not isinstance(ledger, dict):
+            ledger = {}
+        by_phase = ledger.get("by_phase", {})
+        llm_call_planning = int(by_phase.get("planning", 0) or 0)
+        llm_call_spec_gen = int(by_phase.get("spec_gen", 0) or 0)
+        llm_call_patch = int(by_phase.get("patch", 0) or 0)
+        llm_call_retry = int(by_phase.get("retry", 0) or 0)
+        llm_call_judge = int(by_phase.get("judge", 0) or 0)
+        llm_call_proposer = int(by_phase.get("proposer", 0) or 0)
+        llm_call_total = int(ledger.get("total_calls", 0) or 0)
 
         return {
             "task_id": task_id,
@@ -742,12 +747,11 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "llm_call_spec_gen": llm_call_spec_gen,
             "llm_call_patch": llm_call_patch,
             "llm_call_retry": llm_call_retry,
+            "llm_call_judge": llm_call_judge,
+            "llm_call_proposer": llm_call_proposer,
             "llm_call_total": llm_call_total,
-            # N30R-V3 Phase 3: ledger provenance — executor phases do not yet directly
-            # append records; total is derived from semantic_retry_count + route counts.
-            # Mark as non-authoritative until per-invocation call_id records are added.
-            "ledger_authoritative": False,
-            "ledger_source": "semantic_retry_count_heuristic",
+            "ledger_authoritative": bool(ledger.get("authoritative", False)),
+            "ledger_source": str(ledger.get("source", "unknown")),
             # Fair timing fields
             "wall_time_sec": end_to_end_sec,
             "end_to_end_sec": end_to_end_sec,

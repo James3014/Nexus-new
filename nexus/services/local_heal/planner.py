@@ -93,7 +93,8 @@ class Planner:
             user_prompt=prompt,
             model=model_name or "qwen2.5-coder:7b",
             timeout=timeout_seconds,
-            options=options
+            options=options,
+            phase="planning",
         )
 
     def create_plan(

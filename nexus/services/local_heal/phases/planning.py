@@ -134,6 +134,7 @@ class PlanningPhase(IPhase):
                     model=SidecarConfig.SIDECAR_MODEL,
                     timeout=120,
                     options=SidecarConfig.get_sidecar_options(),
+                    phase="planning",
                 )
                 if sidecar_response:
                     ctx._sidecar_contributed = True

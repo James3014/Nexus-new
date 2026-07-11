@@ -130,7 +130,8 @@ class PatchSynthesisPhase(IPhase):
                     user_prompt=spec_prompt,
                     model=spec_decision["model"],
                     timeout=spec_decision["timeout_seconds"],
-                    options=spec_decision.get("ollama_options")
+                    options=spec_decision.get("ollama_options"),
+                    phase="spec_gen",
                 )
                 # C15-5H: Record spec_gen telemetry inline in the patch decision dict to avoid
                 # shifting model_decisions[-1] index. Appending a separate decision here would
@@ -194,13 +195,15 @@ class PatchSynthesisPhase(IPhase):
             )
 
         try:
+            primary_phase = "retry" if input_data.attempt > 1 else "patch"
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 model=patch_decision["model"],
                 timeout=patch_decision["timeout_seconds"],
                 options=patch_decision.get("ollama_options"),
-                api_type=patch_decision.get("api_type", "generate")
+                api_type=patch_decision.get("api_type", "generate"),
+                phase=primary_phase,
             )
         except Exception as e:
             reason = classify_model_exception(e)

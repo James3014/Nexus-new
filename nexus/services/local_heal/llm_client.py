@@ -13,7 +13,8 @@ class ILLMClient(Protocol):
         model: str,
         timeout: int | None = None,
         options: Dict[str, Any] | None = None,
-        api_type: str = "generate"
+        api_type: str = "generate",
+        phase: str = ""
     ) -> str:
         """Execute a text generation call."""
         ...
@@ -34,20 +35,24 @@ class OllamaLLMClient:
         model: str,
         timeout: int | None = None,
         options: Dict[str, Any] | None = None,
-        api_type: str = "generate"
+        api_type: str = "generate",
+        phase: str = ""
     ) -> str:
         import inspect
         try:
             sig = inspect.signature(self.generate_fn)
+            has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
             kwargs = {}
-            if "model" in sig.parameters:
+            if "model" in sig.parameters or has_var_keyword:
                 kwargs["model"] = model
-            if "timeout" in sig.parameters and timeout is not None:
+            if ("timeout" in sig.parameters or has_var_keyword) and timeout is not None:
                 kwargs["timeout"] = timeout
-            if "options" in sig.parameters and options is not None:
+            if ("options" in sig.parameters or has_var_keyword) and options is not None:
                 kwargs["options"] = options
-            if "api_type" in sig.parameters:
+            if "api_type" in sig.parameters or has_var_keyword:
                 kwargs["api_type"] = api_type
+            if "phase" in sig.parameters or has_var_keyword:
+                kwargs["phase"] = phase
             if kwargs:
                 return self.generate_fn(system_prompt, user_prompt, **kwargs)
         except (TypeError, ValueError):

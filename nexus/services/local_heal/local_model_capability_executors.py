@@ -394,7 +394,12 @@ class LocalHealPipelineCapabilityExecutor:
                             ledger[call_type] = ledger.get(call_type, 0) + 1
                             ledger["total"] = ledger.get("total", 0) + 1
 
-                        # C2: Try provider first, fall back to direct Ollama call
+                        current_meta = ctx.local_model_metadata or {}
+                        attempts = current_meta.get("profile_attempts", [])
+                        attempt_id_val = kwargs.get("attempt_id") or (f"attempt-{len(attempts)}" if attempts else "attempt-1")
+                        execution_profile_val = kwargs.get("execution_profile") or (attempts[-1] if attempts else "LITE")
+                        phase_val = kwargs.get("phase") or call_type or ""
+
                         prov_req = LocalModelProviderRequest(
                             task_id=ctx.task_id,
                             prompt=prompt,
@@ -403,6 +408,9 @@ class LocalHealPipelineCapabilityExecutor:
                             timeout_sec=_provider_timeout_sec,
                             api_type=api_type,
                             options=_provider_options,
+                            phase=phase_val,
+                            attempt_id=attempt_id_val,
+                            execution_profile=execution_profile_val,
                         )
                         prov_resp = real_provider.generate(prov_req)
 

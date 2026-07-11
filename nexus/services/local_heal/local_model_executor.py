@@ -13,6 +13,11 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
 )
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
+def _inject_ledger_state(raw_meta: dict[str, Any], provider: Any) -> None:
+    from nexus.services.local_heal.local_model_provider import RecordingLocalModelProvider
+    if isinstance(provider, RecordingLocalModelProvider):
+        raw_meta["llm_call_ledger"] = provider.ledger_summary
+        raw_meta["llm_call_ledger_records"] = [r.to_dict() for r in provider.ledger]
 from nexus.services.local_heal.local_armor_attempt_receipt import build_local_armor_attempt_receipt
 from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
 from nexus.services.local_heal.local_assist_receipts import build_local_assist_telemetry_from_executor_meta
@@ -882,6 +887,11 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
+        # N30R-V3 Phase 2: Wrap active provider in RecordingLocalModelProvider for authoritative ledger
+        from nexus.services.local_heal.local_model_provider import RecordingLocalModelProvider
+        if not isinstance(provider, RecordingLocalModelProvider):
+            provider = RecordingLocalModelProvider(provider)
+
         # 4. Handle Active Memory Retrieval if enabled
         selected_caps = request.selected_capabilities
         lessons = []
@@ -1068,6 +1078,9 @@ class LocalModelExecutor:
         provider_timeout_sec: float = float(_signal_snap_early.get("provider_timeout_sec", 120.0))
 
         # 7. Build capability context (shared across all topologies)
+        cap_ctx_meta = {
+            "profile_attempts": list(profile_attempts),
+        }
         cap_ctx = LocalModelCapabilityContext(
             task_id=request.task_id,
             source_root=request.repo_root,
@@ -1082,7 +1095,7 @@ class LocalModelExecutor:
             verifier_command=tuple(request.route_context.get("verifier_command", []) or []),
             candidate_pool=[],
             route_context=request.route_context,
-            local_model_metadata={},
+            local_model_metadata=cap_ctx_meta,
             provider=provider,
         )
 
@@ -1136,6 +1149,8 @@ class LocalModelExecutor:
             from nexus.services.local_heal.local_committee_candidate_provider import LocalCommitteeCandidateProvider
             from nexus.services.local_heal.candidate_decision_adapter import CandidateDecisionAdapter
 
+            attempt_id_val = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+            execution_profile_val = profile_attempts[-1] if profile_attempts else "FULL"
             candidates = LocalCommitteeCandidateProvider.generate_committee_candidates(
                 task_id=request.task_id,
                 problem_statement=enhanced_problem,
@@ -1146,6 +1161,8 @@ class LocalModelExecutor:
                 provider=provider,
                 protocol_mode=protocol_mode,
                 route_context=request.route_context,
+                attempt_id=attempt_id_val,
+                execution_profile=execution_profile_val,
             )
 
             # Update cap_ctx with candidates for this topology
@@ -1245,7 +1262,8 @@ class LocalModelExecutor:
                                 _MODEL_ALIASES = {"qwen2.5-coder:7b": "qwen2.5-coder:7b-instruct"}
                                 if model_name in _MODEL_ALIASES:
                                     model_name = _MODEL_ALIASES[model_name]
-                                _opts = options or kwargs.get("options")
+                                current_attempt_id = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+                                current_execution_profile = profile_attempts[-1] if profile_attempts else "FULL"
                                 prov_req = LocalModelProviderRequest(
                                     task_id=request.task_id,
                                     prompt=prompt,
@@ -1254,6 +1272,9 @@ class LocalModelExecutor:
                                     timeout_sec=provider_timeout_sec,
                                     options=_opts,
                                     api_type=api_type or "generate",
+                                    phase=kwargs.get("phase", "retry"),
+                                    attempt_id=kwargs.get("attempt_id", current_attempt_id),
+                                    execution_profile=kwargs.get("execution_profile", current_execution_profile),
                                 )
                                 prov_resp = provider.generate(prov_req)
                                 return prov_resp.output_text or ""
@@ -1525,10 +1546,15 @@ class LocalModelExecutor:
                 "mutation_allowed": mutation_allowed,
                 "verifier_allowed": verifier_allowed,
             }
+            cap_ctx.local_model_metadata = raw_meta
             if hybrid_route is not None:
                 raw_meta["hybrid_route"] = hybrid_route.to_dict()
                 raw_meta["route_mode"] = hybrid_route.route_mode.value
                 raw_meta["authority"] = hybrid_route.authority.value
+            # N30R-V3 Phase 1: Populate profile fields in committee path too
+            record_profile_state(raw_meta)
+            raw_meta["committee_candidates_info"] = committee_candidates_info
+            _inject_ledger_state(raw_meta, provider)
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss
@@ -1851,12 +1877,14 @@ class LocalModelExecutor:
                 "mutation_allowed": mutation_allowed,
                 "verifier_allowed": verifier_allowed,
             }
+            cap_ctx.local_model_metadata = raw_meta
             if hybrid_route is not None:
                 raw_meta["hybrid_route"] = hybrid_route.to_dict()
                 raw_meta["route_mode"] = hybrid_route.route_mode.value
                 raw_meta["authority"] = hybrid_route.authority.value
             raw_meta["ddtree_result"] = ddtree_exec.to_receipt_dict()
             raw_meta["autoreason_result"] = autoreason_exec.to_receipt_dict()
+            _inject_ledger_state(raw_meta, provider)
             armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss
@@ -2135,6 +2163,8 @@ class LocalModelExecutor:
 
                         try:
                             _opts = options or kwargs.get("options")
+                            current_attempt_id = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+                            current_execution_profile = profile_attempts[-1] if profile_attempts else "STANDARD"
                             prov_req = LocalModelProviderRequest(
                                 task_id=request.task_id,
                                 prompt=prompt,
@@ -2143,6 +2173,9 @@ class LocalModelExecutor:
                                 timeout_sec=provider_timeout_sec,
                                 options=_opts,
                                 api_type=api_type or "generate",
+                                phase=kwargs.get("phase", "retry"),
+                                attempt_id=kwargs.get("attempt_id", current_attempt_id),
+                                execution_profile=kwargs.get("execution_profile", current_execution_profile),
                             )
                             prov_resp = provider.generate(prov_req)
                             delegated_retry_provider_response_is_none = prov_resp is None
@@ -2244,6 +2277,10 @@ class LocalModelExecutor:
                             _safe_model_slug = _re.sub(r'-+', '-', _safe_model_slug).strip('-')
                             _cand_id = f"{request.task_id}#delegated-retry-{idx:02d}-{_safe_model_slug}"
 
+                            # Explicitly capture current context before closure definition
+                            current_attempt_id = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+                            current_execution_profile = profile_attempts[-1] if profile_attempts else "FULL"
+
                             def _make_committee_provider(_model_name):
                                 def _cp_gen(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                                     from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
@@ -2257,10 +2294,15 @@ class LocalModelExecutor:
                                         _resolved_model = _MODEL_ALIASES[_resolved_model]
                                     _opts = options or kwargs.get("options")
                                     prov_req = LocalModelProviderRequest(
-                                        task_id=request.task_id, prompt=prompt,
+                                        task_id=request.task_id,
+                                        prompt=prompt,
                                         evidence_refs=request.evidence_refs,
-                                        model_name=_resolved_model, timeout_sec=provider_timeout_sec,
+                                        model_name=_resolved_model,
+                                        timeout_sec=provider_timeout_sec,
                                         options=_opts,
+                                        phase=kwargs.get("phase", "retry"), # 這是 retry phase
+                                        attempt_id=kwargs.get("attempt_id", current_attempt_id),
+                                        execution_profile=kwargs.get("execution_profile", current_execution_profile),
                                     )
                                     prov_resp = provider.generate(prov_req)
                                     out = prov_resp.output_text or ""
@@ -2675,6 +2717,7 @@ class LocalModelExecutor:
                 evidence_refs=request.evidence_refs,
             )
 
+            _inject_ledger_state(raw_meta, provider)
             return LocalModelExecutorResponse(
                 invoked=True,
                 local_model_called=True,
@@ -2701,6 +2744,8 @@ class LocalModelExecutor:
                 DEFAULT_CASCADE_MODELS,
             )
 
+            attempt_id_val = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+            execution_profile_val = profile_attempts[-1] if profile_attempts else "LITE"
             cascade_models = tuple(signal_snapshot.get("cascade_models", DEFAULT_CASCADE_MODELS))
             cascade_request = LocalCascadeRequest(
                 task_id=request.task_id,
@@ -2709,6 +2754,9 @@ class LocalModelExecutor:
                 target_file=target_file,
                 evidence_refs=request.evidence_refs,
                 provider_name=provider_name,
+                attempt_id=attempt_id_val,
+                execution_profile=execution_profile_val,
+                phase="patch",
             )
             cascade_receipt = run_local_cascade(cascade_request, provider=provider)
 
@@ -2735,11 +2783,16 @@ class LocalModelExecutor:
                     cascade_stages_run=cascade_receipt.stages_run,
                 )
 
+            attempt_id_val = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+            execution_profile_val = profile_attempts[-1] if profile_attempts else "LITE"
             winner_provider_req = LocalModelProviderRequest(
                 task_id=request.task_id,
                 prompt=request.problem_statement,
                 evidence_refs=request.evidence_refs,
                 model_name=cascade_receipt.winner_model,
+                phase="patch",
+                attempt_id=attempt_id_val,
+                execution_profile=execution_profile_val,
             )
             winner_provider_resp = provider.generate(winner_provider_req)
             candidate_patch = winner_provider_resp.output_text
@@ -2885,6 +2938,8 @@ class LocalModelExecutor:
             )
 
         model_name = signal_snapshot["executor_model"]
+        attempt_id_val = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+        execution_profile_val = profile_attempts[-1] if profile_attempts else "LITE"
         _opts = signal_snapshot.get("ollama_options")
         if not _opts:
             _opts = {"num_ctx": 8192, "num_predict": 512, "temperature": 0.0}
@@ -2895,6 +2950,9 @@ class LocalModelExecutor:
             model_name=model_name,
             timeout_sec=provider_timeout_sec,
             options=_opts,
+            phase="patch",
+            attempt_id=attempt_id_val,
+            execution_profile=execution_profile_val,
         )
 
         prov_resp = provider.generate(prov_req)
@@ -2996,6 +3054,8 @@ class LocalModelExecutor:
             **memory_runtime_meta,
             **_understanding_meta,
         }
+        cap_ctx.local_model_metadata = raw_meta
+        _inject_ledger_state(raw_meta, provider)
         armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
         raw_meta["armor_receipt_complete"] = armor_ok
         raw_meta["armor_receipt_missing_fields"] = armor_miss
@@ -3042,7 +3102,14 @@ class LocalModelExecutor:
                     raw_meta=raw_meta,
                     request=request,
                     signal_snapshot=signal_snapshot,
-                    candidate_producer=_make_default_committee_producer(provider, signal_snapshot, request),
+                    candidate_producer=_make_default_committee_producer(
+                        provider,
+                        signal_snapshot,
+                        request,
+                        attempt_id=f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1",
+                        execution_profile=profile_attempts[-1] if profile_attempts else "LITE",
+                        phase="proposer",
+                    ),
                 )
                 if _p4_result:
                     raw_meta.update(_p4_result)
@@ -3371,6 +3438,9 @@ def _make_default_committee_producer(
     provider: LocalModelProvider | None,
     signal_snapshot: dict,
     request: LocalModelExecutorRequest,
+    attempt_id: str = "attempt-1",
+    execution_profile: str = "LITE",
+    phase: str = "patch",
 ) -> Any | None:
     """Create a default CommitteeCandidateProducer from the existing provider.
 
@@ -3387,6 +3457,9 @@ def _make_default_committee_producer(
             prompt=request.problem_statement,
             evidence_refs=request.evidence_refs,
             model_name=model_name,
+            phase=phase,
+            attempt_id=attempt_id,
+            execution_profile=execution_profile,
         )
         try:
             prov_resp = provider.generate(prov_req)

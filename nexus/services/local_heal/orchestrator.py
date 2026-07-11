@@ -526,6 +526,7 @@ class HealOrchestrator:
                 model=patch_decision["model"],
                 timeout=patch_decision["timeout_seconds"],
                 options=patch_decision.get("ollama_options"),
+                phase="retry",
             )
         except Exception as e:
             reason = classify_model_exception(e)

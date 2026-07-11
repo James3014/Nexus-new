@@ -70,7 +70,8 @@ class ReproductionPhase(IPhase):
                         user_prompt=current_prompt,
                         model=decision["model"],
                         timeout=decision["timeout_seconds"],
-                        options=decision.get("ollama_options")
+                        options=decision.get("ollama_options"),
+                        phase="reproduction"
                     )
                     if not response:
                         continue
