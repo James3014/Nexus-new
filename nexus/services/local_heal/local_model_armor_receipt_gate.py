@@ -110,9 +110,9 @@ def validate_capability_causality(
                        "research", "ui_validator", "external_productivity"):
             # External only - expected
             pass
-        elif cap in ("memory",):
-            # Metadata only - expected
-            pass
+        elif cap == "memory":
+            if not metadata.get("memory_retrieval_attempted", False):
+                issues.append("memory_selected_but_not_invoked")
         elif cap == "repair_loop":
             # Path A causality: must have actual execution, not just availability
             actual_exec = metadata.get("localheal_pipeline_actual_execution", False)

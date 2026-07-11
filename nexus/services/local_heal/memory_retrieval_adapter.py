@@ -34,6 +34,8 @@ class LessonStore(Protocol):
 
 
 class LocalJsonlLessonStore:
+    backend = "local_jsonl"
+
     def __init__(self, path: Path | None = None) -> None:
         root = Path(__file__).resolve().parents[3]
         self.path = path or root / ".nexus/reports/learn/learning_closure.jsonl"
@@ -64,6 +66,7 @@ class FindingsMemoryLessonStore:
         self.project_root = project_root or Path(__file__).resolve().parents[3]
         self.findings_store = findings_store
         self.last_error: str = ""
+        self.backend = "findings_memory"
 
     def _store(self) -> Any:
         if self.findings_store is not None:
@@ -122,6 +125,8 @@ class MemoryRepositoryLessonStore:
         self.project_root = project_root or Path(__file__).resolve().parents[3]
         self.repository = repository
         self.last_error: str = ""
+        self.backend = "lancedb"
+        self.last_metadata: dict[str, Any] = {}
 
     def _repository(self) -> Any:
         if self.repository is not None:
@@ -133,6 +138,13 @@ class MemoryRepositoryLessonStore:
 
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
         self.last_error = ""
+        self.last_metadata = {
+            "backend": self.backend,
+            "query_attempted": True,
+            "query_succeeded": False,
+            "result_count": 0,
+            "error": "",
+        }
         try:
             frame = self._repository().search_fts(
                 "findings_cards",
@@ -142,10 +154,15 @@ class MemoryRepositoryLessonStore:
             )
         except Exception as exc:
             self.last_error = exc.__class__.__name__
+            self.last_metadata["error"] = self.last_error
             return []
         if getattr(frame, "empty", True):
+            self.last_metadata["query_succeeded"] = True
             return []
-        return [dict(row) for row in frame.head(limit).to_dict(orient="records")]
+        rows = [dict(row) for row in frame.head(limit).to_dict(orient="records")]
+        self.last_metadata["query_succeeded"] = True
+        self.last_metadata["result_count"] = len(rows)
+        return rows
 
 
 class NexusCompositeLessonStore:
@@ -164,6 +181,7 @@ class NexusCompositeLessonStore:
         sources: list[str] = []
         source_counts: dict[str, int] = {}
         source_errors: dict[str, str] = {}
+        backend_receipts: list[dict[str, Any]] = []
 
         for store in self.stores:
             source = store.__class__.__name__
@@ -179,11 +197,35 @@ class NexusCompositeLessonStore:
                 sources.append(source)
                 source_counts[source] = len(store_rows)
             rows.extend(store_rows)
+            store_metadata = dict(getattr(store, "last_metadata", {}) or {})
+            backend_receipts.append(
+                {
+                    "store": source,
+                    "backend": str(
+                        store_metadata.get("backend")
+                        or getattr(store, "backend", "")
+                        or source
+                    ),
+                    "query_attempted": bool(
+                        store_metadata.get("query_attempted", True)
+                    ),
+                    "query_succeeded": bool(
+                        store_metadata.get("query_succeeded", not last_error)
+                    ),
+                    "result_count": int(
+                        store_metadata.get("result_count", len(store_rows)) or 0
+                    ),
+                    "error": str(
+                        store_metadata.get("error") or last_error or ""
+                    ),
+                }
+            )
 
         self.last_metadata = {
             "retrieval_sources": sources,
             "source_counts": source_counts,
             "source_errors": source_errors,
+            "retrieval_backend_receipts": backend_receipts,
         }
         return rows[:limit]
 
@@ -211,6 +253,7 @@ class MemoryRetrievalAdapter:
             "source": self.store.__class__.__name__,
             "retrieval_sources": [],
             "source_errors": {},
+            "retrieval_backend_receipts": [],
         }
         if not self.enabled:
             self.last_metadata["status"] = "disabled"
@@ -262,6 +305,9 @@ class MemoryRetrievalAdapter:
             self.last_metadata["retrieval_sources"] = list(store_metadata.get("retrieval_sources") or [])
             self.last_metadata["source_errors"] = dict(store_metadata.get("source_errors") or {})
             self.last_metadata["source_counts"] = dict(store_metadata.get("source_counts") or {})
+            self.last_metadata["retrieval_backend_receipts"] = list(
+                store_metadata.get("retrieval_backend_receipts") or []
+            )
         return lessons
 
     def retrieve_reranked(

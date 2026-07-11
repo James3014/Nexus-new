@@ -118,7 +118,35 @@ def test_memory_repository_lesson_store_is_fail_open():
     store = MemoryRepositoryLessonStore(repository=BrokenRepository())
 
     assert store.query(query_text="anything", limit=3) == []
-    assert store.last_error == "RuntimeError"
+    assert store.last_metadata == {
+        "backend": "lancedb",
+        "query_attempted": True,
+        "query_succeeded": False,
+        "result_count": 0,
+        "error": "RuntimeError",
+    }
+
+
+def test_composite_memory_receipt_distinguishes_lancedb_no_match_from_not_called():
+    class EmptyRepository:
+        def search_fts(self, *args, **kwargs):
+            class EmptyFrame:
+                empty = True
+
+            return EmptyFrame()
+
+    store = MemoryRepositoryLessonStore(repository=EmptyRepository())
+    composite = NexusCompositeLessonStore([store])
+
+    assert composite.query(query_text="missing", limit=3) == []
+    assert composite.last_metadata["retrieval_backend_receipts"] == [{
+        "store": "MemoryRepositoryLessonStore",
+        "backend": "lancedb",
+        "query_attempted": True,
+        "query_succeeded": True,
+        "result_count": 0,
+        "error": "",
+    }]
 
 
 def test_findings_memory_store_uses_token_fallback_for_multiword_queries():

@@ -118,6 +118,6 @@ def test_artifact_claim_not_metadata_only():
     assert len(result["gate_capabilities"]) == 2
 
 
-def test_memory_is_metadata_only():
+def test_memory_is_advisory_executable():
     result = classify_selected_capabilities(["memory"])
-    assert "memory" in result["metadata_only_capabilities"]
+    assert "memory" in result["advisory_capabilities"]

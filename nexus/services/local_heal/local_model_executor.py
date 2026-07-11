@@ -13,6 +13,7 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
 )
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
+from nexus.services.local_heal.local_armor_attempt_receipt import build_local_armor_attempt_receipt
 from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
 from nexus.services.local_heal.local_assist_receipts import build_local_assist_telemetry_from_executor_meta
 from nexus.services.local_heal.candidate_isolation_gate import (
@@ -60,6 +61,42 @@ class LocalModelExecutorResponse:
     timeout: bool
     evidence_refs: tuple[str, ...]
     cascade_stages_run: tuple[str, ...] = ()
+
+
+def _attach_local_armor_attempt_receipt(
+    request: LocalModelExecutorRequest,
+    raw_meta: dict[str, Any],
+    *,
+    local_model_called: bool,
+    provider: str,
+    model_name: str,
+    evidence_refs: tuple[str, ...],
+) -> dict[str, Any]:
+    planner_snapshot = {}
+    if isinstance(request.route_context, dict):
+        signal_snapshot = request.route_context.get("signal_snapshot", {})
+        if isinstance(signal_snapshot, dict):
+            planner_snapshot = dict(signal_snapshot)
+        for key in (
+            "local_armor_execution_profile",
+            "execution_profile",
+            "profile_selected",
+            "routing_tier",
+            "difficulty",
+        ):
+            value = request.route_context.get(key)
+            if value not in (None, "", []):
+                planner_snapshot[key] = value
+    raw_meta["local_armor_attempt_receipt"] = build_local_armor_attempt_receipt(
+        task_id=request.task_id,
+        metadata=raw_meta,
+        local_model_called=local_model_called,
+        evidence_refs=evidence_refs,
+        provider=provider,
+        model_name=model_name,
+        planner_snapshot=planner_snapshot,
+    )
+    return raw_meta
 
 
 def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
@@ -813,9 +850,14 @@ class LocalModelExecutor:
         # 4. Handle Active Memory Retrieval if enabled
         selected_caps = request.selected_capabilities
         lessons = []
+        memory_adapter_metadata: dict[str, Any] = {}
+        memory_trace: dict[str, Any] = {}
+        memory_retrieval_attempted = False
         if "memory" in selected_caps:
+            memory_retrieval_attempted = True
             try:
                 from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+                from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
                 adapter = MemoryRetrievalAdapter(enabled=True)
                 lessons = adapter.retrieve_reranked(
                     query_text=request.problem_statement,
@@ -825,8 +867,53 @@ class LocalModelExecutor:
                     max_chars=800,
                     task_id=request.task_id
                 )
+                adapter.last_metadata["prompt_included"] = bool(lessons)
+                memory_adapter_metadata = dict(adapter.last_metadata)
+                memory_trace = build_memory_trace_from_adapter(
+                    memory_adapter_metadata,
+                    query_text=request.problem_statement,
+                ).to_dict()
             except Exception:
-                pass
+                memory_adapter_metadata = {
+                    "enabled": True,
+                    "status": "retrieval_failed",
+                    "failure_reason": "executor_memory_retrieval_failed",
+                    "no_memory_match": True,
+                    "prompt_included": False,
+                    "selected_ids": [],
+                    "memory_evidence_ids": [],
+                    "retrieval_sources": [],
+                    "source_errors": {"executor": "memory_retrieval_failed"},
+                    "source_counts": {},
+                    "accepted": 0,
+                    "query_text_hash": hashlib.sha256(request.problem_statement.encode("utf-8")).hexdigest()[:16] if request.problem_statement else "",
+                }
+                memory_trace = {
+                    "available": True,
+                    "trace_status": "TRACE_MISSING",
+                    "retrieval_source": "",
+                    "retrieval_sources": [],
+                    "query_text_hash": memory_adapter_metadata["query_text_hash"],
+                    "retrieved_count": 0,
+                    "selected_ids": [],
+                    "memory_evidence_ids": [],
+                    "provenance_count": 0,
+                    "rerank_mode": True,
+                    "anchor_symbol": request.route_context.get("target_symbol") or "",
+                    "anchor_file": request.target_file,
+                    "no_memory_match": True,
+                    "rejected_without_provenance": 0,
+                    "evidence_packet_included": None,
+                    "prompt_included": False,
+                    "verifier_status": "NOT_MEASURED",
+                    "learning_closure_id": "",
+                    "findings_card_id": "",
+                    "influence_status": "NOT_MEASURED",
+                    "source_contract": "MEMORY_RETRIEVAL_ADAPTER",
+                    "internal_only": True,
+                    "shadow_ranking": {},
+                    "primary_selected_id": "",
+                }
 
         memory_context = ""
         if lessons:
@@ -841,6 +928,45 @@ class LocalModelExecutor:
                     content = str(lesson)
                 memory_context += f"Lesson {idx}: {content}\n"
             memory_context += "====================================\n"
+        if memory_retrieval_attempted and memory_adapter_metadata:
+            memory_adapter_metadata["prompt_included"] = bool(memory_context)
+            memory_trace["prompt_included"] = bool(memory_context)
+            memory_trace["retrieved_count"] = int(memory_adapter_metadata.get("accepted", len(lessons)) or 0)
+            memory_trace["selected_ids"] = list(memory_adapter_metadata.get("selected_ids", []) or [])
+            memory_trace["memory_evidence_ids"] = list(memory_adapter_metadata.get("memory_evidence_ids", []) or [])
+
+        memory_runtime_meta = {
+            "memory_retrieval_attempted": memory_retrieval_attempted,
+            "memory_prompt_included": bool(memory_context),
+            "memory_trace_status": str(memory_trace.get("trace_status", "NOT_USED") or "NOT_USED"),
+            "memory_query_text_hash": str(memory_adapter_metadata.get("query_text_hash", "") or ""),
+            "memory_selected_ids": list(memory_adapter_metadata.get("selected_ids", []) or []),
+            "memory_selected_count": len(memory_adapter_metadata.get("selected_ids", []) or []),
+            "memory_retrieved_count": int(memory_adapter_metadata.get("accepted", len(lessons)) or 0),
+            "memory_retrieval_sources": list(memory_adapter_metadata.get("retrieval_sources", []) or []),
+            "memory_source_errors": dict(memory_adapter_metadata.get("source_errors", {}) or {}),
+            "memory_source_counts": dict(memory_adapter_metadata.get("source_counts", {}) or {}),
+            "memory_backend_receipts": list(
+                memory_adapter_metadata.get("retrieval_backend_receipts", []) or []
+            ),
+            "memory_lancedb_query_attempted": any(
+                receipt.get("backend") == "lancedb"
+                and receipt.get("query_attempted")
+                for receipt in memory_adapter_metadata.get(
+                    "retrieval_backend_receipts", []
+                ) or []
+            ),
+            "memory_lancedb_query_succeeded": any(
+                receipt.get("backend") == "lancedb"
+                and receipt.get("query_succeeded")
+                for receipt in memory_adapter_metadata.get(
+                    "retrieval_backend_receipts", []
+                ) or []
+            ),
+            "memory_primary_selected_id": str(memory_adapter_metadata.get("primary_selected_id", "") or ""),
+            "memory_no_match": bool(memory_adapter_metadata.get("no_memory_match", not lessons)),
+            "memory_trace": dict(memory_trace or {}),
+        }
 
         # 5. Source Anchor Context
         target_file = request.target_file
@@ -1263,6 +1389,7 @@ class LocalModelExecutor:
                     "expected_model": c.model,
                     "invoked_model": c.model,
                     "provider_called": True,
+                    "invoked": not bool(getattr(c, "abstained", False)),
                     "candidate_hash": c_hash,
                     "raw_candidate_hash": c_hash,
                     "selected_candidate_hash": selected_hash if is_selected else "",
@@ -1275,6 +1402,19 @@ class LocalModelExecutor:
                     "selected": is_selected,
                     "winner": is_selected,
                     "rejection_reason": c_rejection_reason,
+                    "evidence_present": bool(getattr(c, "evidence_refs", ()) or request.evidence_refs),
+                    "gate_passed": bool(
+                        is_selected
+                        and isolated_apply_status == "applied"
+                        and isolated_verifier_status == "pass"
+                        and c_hash_match
+                    ),
+                    "outcome_contributed": bool(
+                        is_selected
+                        and isolated_apply_status == "applied"
+                        and isolated_verifier_status == "pass"
+                        and c_hash_match
+                    ),
                 })
 
             # Calculate counts and retrieve raw hash for provenance tracking
@@ -1298,11 +1438,14 @@ class LocalModelExecutor:
                 "selected_candidate_id": decision.selected_candidate_id,
                 "selected_by": decision.selected_by,
                 "final_authority": decision.final_authority,
+                **memory_runtime_meta,
                 "selected_capabilities_used": list(selected_caps),
                 "protocol_normalization": patch_meta,
                 "source_anchor_present": source_anchor_present,
                 "source_anchor_source": source_anchor_source,
                 "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+                "source_anchor_missing": not source_anchor_present,
+                "localization_missing": (not source_anchor_present and source_anchor_source == "localizer_failed"),
                 "target_file": target_file,
                 "target_symbol": target_symbol,
                 "locked_search_present": bool(locked_search.strip()),
@@ -1412,6 +1555,14 @@ class LocalModelExecutor:
             # P2-F: Store hash_match on route_context for orchestrator fallback
             if isinstance(request.route_context, dict):
                 request.route_context["candidate_hash_matches_applied"] = hash_match
+            raw_meta = _attach_local_armor_attempt_receipt(
+                request,
+                raw_meta,
+                local_model_called=local_model_called,
+                provider=provider_name,
+                model_name=selected_model,
+                evidence_refs=tuple(decision.decision_evidence_refs or request.evidence_refs),
+            )
 
             return LocalModelExecutorResponse(
                 invoked=True,
@@ -1619,11 +1770,14 @@ class LocalModelExecutor:
                 "source_anchor_present": source_anchor_present,
                 "source_anchor_source": source_anchor_source,
                 "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+                "source_anchor_missing": not source_anchor_present,
+                "localization_missing": (not source_anchor_present and source_anchor_source == "localizer_failed"),
                 "target_file": target_file,
                 "target_symbol": target_symbol,
                 "locked_search_present": bool(locked_search.strip()),
                 "failure_feedback_present": failure_feedback_present,
                 "final_authority": "NexusVerifier",
+                **memory_runtime_meta,
                 "protocol_normalization": patch_meta,
                 "ddtree_invoked": ddtree_exec.invoked,
                 "autoreason_invoked": autoreason_exec.invoked,
@@ -2443,6 +2597,14 @@ class LocalModelExecutor:
             # P2-F: Store hash_match on route_context for orchestrator fallback
             if isinstance(request.route_context, dict):
                 request.route_context["candidate_hash_matches_applied"] = hash_match
+            raw_meta = _attach_local_armor_attempt_receipt(
+                request,
+                raw_meta,
+                local_model_called=True,
+                provider=provider_name,
+                model_name=repair_exec.telemetries.get("patch_synthesis_model_name", ""),
+                evidence_refs=request.evidence_refs,
+            )
 
             return LocalModelExecutorResponse(
                 invoked=True,
@@ -2750,15 +2912,19 @@ class LocalModelExecutor:
             "ollama_metrics_available": getattr(prov_resp, "ollama_metrics_available", False),
             "protocol_mode": protocol_mode,
             "execution_topology": execution_topology,
+            "selected_capabilities_used": list(selected_caps),
             "protocol_normalization": patch_meta,
             "source_anchor_present": source_anchor_present,
             "source_anchor_source": source_anchor_source,
             "source_anchor_hash": source_anchor_hash[:16] if source_anchor_hash else "",
+            "source_anchor_missing": not source_anchor_present,
+            "localization_missing": (not source_anchor_present and source_anchor_source == "localizer_failed"),
             "target_file": target_file,
             "target_symbol": target_symbol,
             "locked_search_present": bool(locked_search.strip()),
             "failure_feedback_present": failure_feedback_present,
             "final_authority": "NexusVerifier",
+            **memory_runtime_meta,
             **_understanding_meta,
         }
         armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)
@@ -2814,6 +2980,14 @@ class LocalModelExecutor:
             else:
                 raw_meta["p3_route_status"] = "shadow_stage5_retry_sufficient"
             raw_meta["assist_stages_activated"] = raw_meta.get("assist_stages_activated", []) + ["stage5_escalation_stub"]
+        raw_meta = _attach_local_armor_attempt_receipt(
+            request,
+            raw_meta,
+            local_model_called=prov_resp.model_called,
+            provider=provider_name,
+            model_name=prov_resp.model_name or prov_req.model_name,
+            evidence_refs=request.evidence_refs,
+        )
 
         return LocalModelExecutorResponse(
             invoked=prov_resp.provider_invoked,
