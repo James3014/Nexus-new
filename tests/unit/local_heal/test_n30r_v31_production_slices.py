@@ -123,8 +123,26 @@ def test_slice_a_lite_success():
     # No escalation — LITE succeeded first time
     esc_cnt = raw.get("profile_escalation_count", -1)
     assert esc_cnt == 0,       f"No escalation expected for LITE success, got {esc_cnt}"
-    # Exactly 1 patch call for LITE (candidate_cap=1)
     assert ctr["calls"] == 1,  f"Expected 1 patch call, got {ctr['calls']}"
+
+    # Verify authoritative provider-call ledger
+    ledger = raw.get("llm_call_ledger", {})
+    assert ledger.get("authoritative") is True, f"Ledger should be authoritative: {ledger}"
+    assert ledger.get("phase_complete") is True, f"Ledger phase taxonomy should be complete: {ledger}"
+    assert ledger.get("unknown_call_count", 0) == 0, f"Expected 0 unknown calls, got: {ledger}"
+    assert ledger.get("attempt_context_complete") is True, f"Attempt complete: {ledger}"
+    assert ledger.get("profile_context_complete") is True, f"Profile complete: {ledger}"
+    by_phase = ledger.get("by_phase", {})
+    assert ledger.get("total_calls", 0) == 1, f"Expected 1 call: {ledger}"
+    assert by_phase.get("patch", 0) == 1, f"Expected 1 patch call, got: {by_phase}"
+    assert by_phase.get("planning", 0) == 0, f"Expected 0 planning calls, got: {by_phase}"
+    assert by_phase.get("spec_gen", 0) == 0, f"Expected 0 spec_gen calls, got: {by_phase}"
+
+    records = raw.get("llm_call_ledger_records", [])
+    assert len(records) == 1
+    assert records[0]["phase"] == "patch"
+    assert records[0]["attempt_id"] == "attempt-1"
+    assert records[0]["execution_profile"] == "LITE"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -182,6 +200,31 @@ def test_slice_b_lite_to_standard_recovery():
     )
     assert ctr["calls"] == 2, f"Expected 2 patch calls (1 LITE + 1 STANDARD), got {ctr['calls']}"
 
+    # Verify authoritative provider-call ledger
+    ledger = raw.get("llm_call_ledger", {})
+    assert ledger.get("authoritative") is True, f"Ledger should be authoritative: {ledger}"
+    assert ledger.get("phase_complete") is True, f"Ledger phase taxonomies should be complete: {ledger}"
+    assert ledger.get("unknown_call_count", 0) == 0, f"Expected 0 unknown calls: {ledger}"
+    assert ledger.get("attempt_context_complete") is True, f"Attempt complete: {ledger}"
+    assert ledger.get("profile_context_complete") is True, f"Profile complete: {ledger}"
+    by_phase = ledger.get("by_phase", {})
+    assert ledger.get("total_calls", 0) == 4, f"Expected 4 total calls, got: {ledger}"
+    assert by_phase.get("patch", 0) == 2, f"Expected 2 patch calls, got: {by_phase}"
+    assert by_phase.get("planning", 0) == 1, f"Expected 1 planning call, got: {by_phase}"
+    assert by_phase.get("spec_gen", 0) == 1, f"Expected 1 spec_gen call, got: {by_phase}"
+
+    records = raw.get("llm_call_ledger_records", [])
+    assert len(records) == 4
+    # 第一筆 LITE patch
+    assert records[0]["phase"] == "patch"
+    assert records[0]["attempt_id"] == "attempt-1"
+    assert records[0]["execution_profile"] == "LITE"
+    # 後面三筆應該是 STANDARD 的 planning, spec_gen, retry (或 patch)
+    for r in records[1:]:
+        assert r["attempt_id"] == "attempt-2"
+        assert r["execution_profile"] == "STANDARD"
+        assert r["phase"] in ("planning", "spec_gen", "retry", "patch")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Slice C: FULL multi-candidate truth
@@ -235,3 +278,17 @@ def test_slice_c_full_profile_resolved():
     assert "LITE" not in attempts and "STANDARD" not in attempts, (
         f"FULL profile should not have LITE/STANDARD in attempts: {attempts}"
     )
+
+    # Verify authoritative provider-call ledger
+    ledger = raw.get("llm_call_ledger", {})
+    assert ledger.get("authoritative") is True, f"Ledger should be authoritative: {ledger}"
+    assert ledger.get("phase_complete") is True, f"Ledger phase taxonomy should be complete: {ledger}"
+    assert ledger.get("attempt_context_complete") is True, f"Attempt complete: {ledger}"
+    assert ledger.get("profile_context_complete") is True, f"Profile complete: {ledger}"
+
+    records = raw.get("llm_call_ledger_records", [])
+    assert len(records) == 3
+    for r in records:
+        assert r["attempt_id"] == "attempt-1"
+        assert r["execution_profile"] == "FULL"
+        assert r["phase"] in ("planning", "spec_gen", "patch")
