@@ -43,10 +43,15 @@ def should_use_lite_route(
     capability_name: Optional[str] = None,
     model_size: Optional[int] = None,
     route_cost_controls: Optional[dict] = None,
+    cross_module: bool = False,
+    hard_signal: bool = False,
+    candidate_count: int = 1,
+    task_desc: str = "",
 ) -> LiteRouteDecision:
     """🛡️ Pure function SSOT for LiteRoute classification decisions."""
     # Convert inputs to standard formats
     risk_upper = str(risk_level).upper()
+    task_desc_lower = str(task_desc or "").lower()
 
     # 1. NEXUS_LIGHT_ROUTE_FORCE env var acts as a hard override
     if os.environ.get("NEXUS_LIGHT_ROUTE_FORCE") == "1":
@@ -81,11 +86,29 @@ def should_use_lite_route(
             skipped_phases=["X", "D", "A"],
         )
 
-    # 4. Check environment variable override (respects risk/complexity constraints)
+    # 4. Check block conditions: LITE mode is unsafe if any of these are True
+    is_blocked = (
+        risk_upper in ("HIGH", "CRITICAL")
+        or impact_complexity > 3.0
+        or cross_module
+        or hard_signal
+        or candidate_count > 1
+        or belief_confidence < 0.85
+        or "recursion" in task_desc_lower
+        or "recursive" in task_desc_lower
+        or "stateful" in task_desc_lower
+    )
+
+    if is_blocked:
+        return LiteRouteDecision(
+            is_lite=False,
+            reason="standard_heavy_route_blocked_lite",
+            skipped_phases=[],
+        )
+
+    # 5. Check environment variable override
     if (
         os.environ.get("NEXUS_LIGHT_ROUTE") == "1"
-        and risk_upper not in ("HIGH", "CRITICAL")
-        and impact_complexity <= 3.0
     ):
         return LiteRouteDecision(
             is_lite=True,
@@ -93,7 +116,7 @@ def should_use_lite_route(
             skipped_phases=["X", "D", "A"],
         )
 
-    # 5. Autonomic lite routing for low-risk, low-complexity tasks
+    # 6. Autonomic lite routing for low-risk, low-complexity tasks
     if risk_upper == "LOW" and impact_complexity <= 3.0:
         return LiteRouteDecision(
             is_lite=True,
@@ -101,7 +124,7 @@ def should_use_lite_route(
             skipped_phases=["X", "D", "A"],
         )
 
-    # 5b. Autonomic lite routing for normal-risk, low-complexity tasks with high belief confidence (excl. default 1.0)
+    # 6b. Autonomic lite routing for normal-risk, low-complexity tasks with high belief confidence (excl. default 1.0)
     if risk_upper == "NORMAL" and impact_complexity <= 3.0 and 0.85 <= belief_confidence < 1.0:
         return LiteRouteDecision(
             is_lite=True,
@@ -109,7 +132,7 @@ def should_use_lite_route(
             skipped_phases=["X", "D", "A"],
         )
 
-    # 6. Weak model auto lite: model_size < 8B means no need for 7-phase over-engineering
+    # 7. Weak model auto lite: model_size < 8B means no need for 7-phase over-engineering
     if model_size is not None and model_size < 8_000_000_000:
         return LiteRouteDecision(
             is_lite=True,
