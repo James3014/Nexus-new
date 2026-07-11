@@ -1,3 +1,4 @@
+import os
 from typing import Any, List, Tuple, Dict
 from pathlib import Path
 from nexus.services.local_heal.interface import IPhase, PhaseResult, PatchSynthesisInput, PatchSynthesisOutput
@@ -110,8 +111,12 @@ class PatchSynthesisPhase(IPhase):
         model_decisions.append({"phase": "patch", **patch_decision})
 
         # 3. [Specification-Centric Repair] 生成修復規格 (若尚未存在)
+        # N30R-V2.1-OPT: NEXUS_DISABLE_SPEC_GEN=1 跳過 spec_gen LLM 呼叫，節省 ~5s/task。
+        # 當 planning 已提供 repair_strategy 時，spec_gen 是冗餘的第二次推理。
+        # 啟用條件：local model latency 優先、plan 已含完整 repair_strategy。
+        _spec_gen_disabled = os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
         repair_spec = getattr(input_data, "repair_specification", "")
-        if not repair_spec and patch_decision["model"] != "deterministic":
+        if not repair_spec and patch_decision["model"] != "deterministic" and not _spec_gen_disabled:
             spec_decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="planning", context={"mode": "spec_gen"})
             spec_prompt = f"Based on the problem and localized code, output a concise logical specification of the fix (Intents only, no code blocks):\n\nProblem: {input_data.problem_statement[:1000]}\nPlan: {input_data.plan.repair_strategy if input_data.plan else ''}"
             try:
@@ -131,6 +136,8 @@ class PatchSynthesisPhase(IPhase):
                 model_decisions[-1]["repair_spec_status"] = "SUCCESS"
             except Exception:
                 repair_spec = "Apply surgical fix as planned."
+        elif _spec_gen_disabled:
+            model_decisions[-1]["repair_spec_status"] = "SKIPPED_NEXUS_DISABLE_SPEC_GEN"
 
 
         # 4. 準備治理化 Prompt — use interleaved mode if planning was LLM-based
@@ -352,7 +359,6 @@ class PatchSynthesisPhase(IPhase):
             )
 
         # S4 Patch Protocol Guard
-        import os
         protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
         if (
             input_data.attempt > 1
