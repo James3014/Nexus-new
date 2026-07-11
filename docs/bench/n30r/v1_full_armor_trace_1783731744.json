@@ -1,0 +1,100 @@
+{
+  "trace_id": "v1_full_armor_1783731744",
+  "created_at": "2026-07-11T01:02:24Z",
+  "baseline_sha": "0675dfed3",
+  "mock_provider": true,
+  "live_ollama_calls": 0,
+  "planner_snapshot_sha256": "d881ec7617e84c4227ddef8df94be0b3d96eef9129de3dc822b8571ce999f580",
+  "planner_capabilities": [
+    "harness_preflight_sensor",
+    "repair_loop",
+    "research_route",
+    "delivery_gate",
+    "mempalace_gate",
+    "artifact_gate",
+    "claim_gate",
+    "local_model_executor"
+  ],
+  "executor_capabilities": [
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+    "local_model_executor",
+    "repair_loop"
+  ],
+  "projection_hash": "d313cace29e68ec40876a6a41507e4b44d9e428ebb6375ec36994810f1deb48f",
+  "source_loaded_from": "fixture",
+  "source_sha256": "810f8dc57fa3502b3f19aa0252769779186957132067876b76cc3f6b8ad520ae",
+  "source_length": 38,
+  "target_symbol": "is_even",
+  "target_file": "f.py",
+  "localization_method": "ast_boundary",
+  "source_anchor_present": true,
+  "locked_search": "def is_even(n):\n    return n % 2 == 1",
+  "locked_search_sha256": "7b982d6542527380067e6e9d97d9872d37b25a71bf16829356a2cdb6d2fa77a3",
+  "locked_search_occurrence_count": 1,
+  "locked_search_present_in_source": true,
+  "evidence_refs": [
+    "v1:1783731744:source",
+    "v1:1783731744:localization",
+    "v1:1783731744:verifier"
+  ],
+  "provider_call_count": 4,
+  "candidate_hash": "5890d34aabed18d6de0655740da45c7a788a9a5512f9a8f025767981268853fb",
+  "first_attempt_patch_hash": "fbafa84a2790602b818d2b8e28f88655c9835c51ac023a43b4125b543063f929",
+  "candidate_isolated": true,
+  "apply_status": "applied",
+  "verifier_result": "pass",
+  "semantic_retry_count": 1,
+  "semantic_retry_invocation_source": "orchestrator_semantic_retry",
+  "prompt_classifications": [
+    "INITIAL_REPAIR",
+    "INITIAL_REPAIR",
+    "INITIAL_REPAIR",
+    "SEMANTIC_RETRY_WITH_VERIFIER_EVIDENCE"
+  ],
+  "semantic_retry_prompts_count": 1,
+  "internal_retry_prompts_count": 0,
+  "initial_prompts_count": 3,
+  "first_candidate": {
+    "candidate_hash": "fbafa84a2790602b818d2b8e28f88655c9835c51ac023a43b4125b543063f929",
+    "workspace": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/n30r-v1-n30r_smoke_semantic-8oio2_vj",
+    "apply_status": "applied",
+    "verifier_status": "fail",
+    "verifier_exit_code": null
+  },
+  "semantic_retry_evidence": {
+    "count": 1,
+    "invocation_source": "orchestrator_semantic_retry",
+    "prompt_classification": "SEMANTIC_RETRY_WITH_VERIFIER_EVIDENCE",
+    "prompt_contains_failure_class": false,
+    "prompt_contains_verifier_evidence": false,
+    "prompt_contains_target_symbol": true,
+    "prompt_contains_locked_search": true,
+    "retry_prompt_sha256": "b1d50e2eb596592e0fe34e7da466fb85765c7b80078a5b34ffd5fd0bda10f1e8"
+  },
+  "second_candidate": {
+    "candidate_hash": "5890d34aabed18d6de0655740da45c7a788a9a5512f9a8f025767981268853fb",
+    "workspace": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/n30r-v1-n30r_smoke_semantic-8oio2_vj",
+    "differs_from_first": true,
+    "isolated": true,
+    "apply_status": "applied",
+    "verifier_status": "pass",
+    "verifier_exit_code": null
+  },
+  "workspace_reset": {
+    "first_candidate_source_sha256_before": "810f8dc57fa3502b3f19aa0252769779186957132067876b76cc3f6b8ad520ae",
+    "canonical_source_sha256": "810f8dc57fa3502b3f19aa0252769779186957132067876b76cc3f6b8ad520ae",
+    "workspace_first_candidate": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/n30r-v1-n30r_smoke_semantic-8oio2_vj",
+    "workspace_semantic_retry": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/n30r-v1-n30r_smoke_semantic-8oio2_vj",
+    "canonical_source_restored": true,
+    "reset_evidence": "same_workspace_used_throughout"
+  },
+  "shadow_outcome_path": "/Users/jameschen/Workspace/nexus-n30r-real-core/docs/bench/n30r/v1_artifacts/1783731744/shadow_outcome.json",
+  "solved": true,
+  "terminal_status": "DETERMINISTIC_RETRY_VERIFIED_SOLVE",
+  "pipeline_solve_eligible": true,
+  "armor_receipt_complete": true,
+  "planner_to_projection_accounted": true,
+  "wall_time_sec": 2.178
+}

@@ -1,0 +1,63 @@
+{
+  "task_id": "n30r_smoke_semantic",
+  "shadow_only": true,
+  "promotion_eligible": false,
+  "global_learning_mutated": false,
+  "capabilities": {
+    "artifact_gate": {
+      "selected": true,
+      "bound": true,
+      "invoked": true,
+      "evidence_added": true,
+      "prompt_effect": true,
+      "verifier_effect": false,
+      "retry_effect": false,
+      "outcome_contributed": false,
+      "evidence_refs": []
+    },
+    "claim_gate": {
+      "selected": true,
+      "bound": true,
+      "invoked": true,
+      "evidence_added": true,
+      "prompt_effect": true,
+      "verifier_effect": false,
+      "retry_effect": false,
+      "outcome_contributed": false,
+      "evidence_refs": []
+    },
+    "delivery_gate": {
+      "selected": true,
+      "bound": true,
+      "invoked": true,
+      "evidence_added": true,
+      "prompt_effect": true,
+      "verifier_effect": false,
+      "retry_effect": false,
+      "outcome_contributed": false,
+      "evidence_refs": []
+    },
+    "local_model_executor": {
+      "selected": true,
+      "bound": true,
+      "invoked": true,
+      "evidence_added": true,
+      "prompt_effect": true,
+      "verifier_effect": true,
+      "retry_effect": true,
+      "outcome_contributed": true,
+      "evidence_refs": []
+    },
+    "repair_loop": {
+      "selected": true,
+      "bound": true,
+      "invoked": true,
+      "evidence_added": true,
+      "prompt_effect": true,
+      "verifier_effect": true,
+      "retry_effect": false,
+      "outcome_contributed": true,
+      "evidence_refs": []
+    }
+  }
+}
