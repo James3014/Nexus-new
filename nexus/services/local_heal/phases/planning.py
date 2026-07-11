@@ -67,8 +67,15 @@ class PlanningPhase(IPhase):
 
         ctx.op.model_decisions.append({"phase": "planning", "model": "qwen2.5-coder:7b"})  # Placeholder decision
 
-        # 3. 呼叫解耦執行 — FAST mode if router says so OR env var set
-        use_fast = reasoning_mode == "FAST" or os.environ.get("NEXUS_FAST_MODE") == "1"
+        # 3. Use deterministic planning when the resolved armor profile disallows
+        # planning LLM calls.
+        controls = ctx.op.route_context.get("local_armor_controls") or {}
+        planning_llm_allowed = controls.get("planning_llm_allowed", True)
+        use_fast = (
+            reasoning_mode == "FAST"
+            or os.environ.get("NEXUS_FAST_MODE") == "1"
+            or not planning_llm_allowed
+        )
         if use_fast:
             det_symbols = DeterministicSymbolExtractor.extract(input_data.problem_statement, input_data.repro_evidence)
             output = PlanningOutput(
@@ -127,6 +134,7 @@ class PlanningPhase(IPhase):
                     model=SidecarConfig.SIDECAR_MODEL,
                     timeout=120,
                     options=SidecarConfig.get_sidecar_options(),
+                    phase="planning",
                 )
                 if sidecar_response:
                     ctx._sidecar_contributed = True

@@ -25,6 +25,8 @@ class LocalCommitteeCandidateProvider:
         provider: LocalModelProvider,
         protocol_mode: str,
         route_context: dict[str, Any] | None = None,
+        attempt_id: str = "attempt-1",
+        execution_profile: str = "FULL",
     ) -> list[CandidateEnvelope]:
         # 1. Define committee members, roles and protocols.
         signal_snapshot = route_context.get("signal_snapshot", {}) if isinstance(route_context, dict) else {}
@@ -151,6 +153,9 @@ class LocalCommitteeCandidateProvider:
                 prompt=prompt,
                 evidence_refs=evidence_refs,
                 model_name=model_name,
+                phase="judge" if role == "judge" else "proposer",
+                attempt_id=attempt_id,
+                execution_profile=execution_profile,
             )
             
             prov_resp = provider.generate(prov_req)

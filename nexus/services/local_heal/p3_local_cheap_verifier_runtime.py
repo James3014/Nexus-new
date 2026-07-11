@@ -121,6 +121,9 @@ class RealLocalCheapVerifier:
                 evidence_refs=(),
                 model_name=self.MODEL_NAME,
                 api_type="generate",
+                phase=cloud_stub_metadata.get("phase", "planning"),
+                attempt_id=cloud_stub_metadata.get("attempt_id", "attempt-1"),
+                execution_profile=cloud_stub_metadata.get("execution_profile", "FULL"),
             )
             response = provider.generate(request)
             verdict, confidence = _parse_verifier_response(response.output_text)

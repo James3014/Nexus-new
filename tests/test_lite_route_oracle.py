@@ -58,11 +58,11 @@ class TestLiteRouteOracle(unittest.TestCase):
 
     @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE": "1"})
     def test_env_override_light_route(self):
-        # 🚀 Environment override NEXUS_LIGHT_ROUTE=1 with acceptable risk/complexity
+        # 🚀 Environment override NEXUS_LIGHT_ROUTE=1 with acceptable risk/complexity and high confidence
         decision = should_use_lite_route(
             risk_level="NORMAL",
             impact_complexity=2.0,
-            belief_confidence=0.5,
+            belief_confidence=0.9,
             lane_name="standard",
             capability_name="codeintel"
         )
@@ -75,7 +75,7 @@ class TestLiteRouteOracle(unittest.TestCase):
         decision = should_use_lite_route(
             risk_level="HIGH",
             impact_complexity=2.0,
-            belief_confidence=0.5,
+            belief_confidence=0.9,
             lane_name="standard",
             capability_name="codeintel"
         )
@@ -114,7 +114,7 @@ class TestLiteRouteOracle(unittest.TestCase):
             capability_name="codeintel"
         )
         self.assertFalse(decision.is_lite)
-        self.assertEqual(decision.reason, "standard_heavy_route")
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
 
     def test_context_sync_capped_preserves_delivery_phase(self):
         decision = should_use_lite_route(
@@ -171,17 +171,15 @@ class TestLiteRouteOracle(unittest.TestCase):
         self.assertNotIn("claim_gate", lite_caps)
 
     def test_weak_model_7b_auto_lite(self):
+        # High complexity (4.0) or low confidence (0.5) blocks auto-lite even for 7B
         decision = should_use_lite_route(
             risk_level="NORMAL",
             impact_complexity=4.0,
             belief_confidence=0.5,
             model_size=7_000_000_000,
         )
-        self.assertTrue(decision.is_lite)
-        self.assertEqual(decision.reason, "auto_lite_weak_model_size_lt_8B")
-        self.assertIn("X", decision.skipped_phases)
-        self.assertIn("D", decision.skipped_phases)
-        self.assertIn("A", decision.skipped_phases)
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
 
     def test_strong_model_14b_keeps_heavy_route(self):
         decision = should_use_lite_route(
@@ -191,26 +189,28 @@ class TestLiteRouteOracle(unittest.TestCase):
             model_size=14_000_000_000,
         )
         self.assertFalse(decision.is_lite)
-        self.assertEqual(decision.reason, "standard_heavy_route")
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
 
     def test_7b_with_low_risk_still_lite(self):
+        # LOW risk + complexity <= 3.0 + high confidence (0.9) triggers LITE
         decision = should_use_lite_route(
             risk_level="LOW",
             impact_complexity=2.0,
-            belief_confidence=0.5,
+            belief_confidence=0.9,
             model_size=7_000_000_000,
         )
         self.assertTrue(decision.is_lite)
+        self.assertEqual(decision.reason, "auto_lite_low_risk_low_complexity")
 
     def test_14b_with_low_risk_still_lite(self):
         decision = should_use_lite_route(
             risk_level="LOW",
             impact_complexity=2.0,
-            belief_confidence=0.5,
+            belief_confidence=0.9,
             model_size=14_000_000_000,
         )
         self.assertTrue(decision.is_lite)
-        self.assertNotIn("auto_lite_weak_model_size", decision.reason)
+        self.assertEqual(decision.reason, "auto_lite_low_risk_low_complexity")
 
     def test_existing_5_triggers_unchanged(self):
         d1 = should_use_lite_route(risk_level="LOW", impact_complexity=2.5, belief_confidence=0.9)
@@ -224,6 +224,55 @@ class TestLiteRouteOracle(unittest.TestCase):
                                    lane_name="hidden_bugfix_supervised")
         self.assertTrue(d3.is_lite)
         self.assertEqual(d3.reason, "lane_policy_gate_only_receipt_lite")
+
+    # Phase 1: 5 user-requested correctness tests
+    def test_phase1_correctness_rules(self):
+        # 1. 7B + NORMAL + complexity 4.0 + confidence 0.5 → NOT LITE
+        d1 = should_use_lite_route(
+            risk_level="NORMAL",
+            impact_complexity=4.0,
+            belief_confidence=0.5,
+            model_size=7_000_000_000,
+        )
+        self.assertFalse(d1.is_lite)
+
+        # 2. 3B + HIGH risk → NOT LITE
+        d2 = should_use_lite_route(
+            risk_level="HIGH",
+            impact_complexity=1.0,
+            belief_confidence=0.9,
+            model_size=3_000_000_000,
+        )
+        self.assertFalse(d2.is_lite)
+
+        # 3. 7B + recursive task → NOT LITE
+        d3 = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.9,
+            model_size=7_000_000_000,
+            task_desc="Fix the recursive bug in the function."
+        )
+        self.assertFalse(d3.is_lite)
+
+        # 4. 7B + LOW risk + complexity <= 3 + verifier + high confidence → LITE
+        # (verifier present is checked during execution profile, but should_use_lite_route checks base criteria)
+        d4 = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=2.0,
+            belief_confidence=0.9,
+            model_size=7_000_000_000,
+        )
+        self.assertTrue(d4.is_lite)
+
+        # 5. 14B + LOW risk + complexity <= 3 → LITE
+        d5 = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=2.0,
+            belief_confidence=0.9,
+            model_size=14_000_000_000,
+        )
+        self.assertTrue(d5.is_lite)
 
 
 if __name__ == "__main__":

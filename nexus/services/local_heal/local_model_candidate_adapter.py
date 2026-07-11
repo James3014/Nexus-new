@@ -19,6 +19,9 @@ class LocalModelCandidateRequest:
     evidence_refs: tuple[str, ...]
     prompt: str
     model_name: str = ""
+    attempt_id: str = ""
+    execution_profile: str = ""
+    phase: str = ""
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,9 @@ class LocalModelCandidateAdapter:
             prompt=request.prompt,
             evidence_refs=request.evidence_refs,
             model_name=request.model_name,
+            attempt_id=request.attempt_id,
+            execution_profile=request.execution_profile,
+            phase=request.phase,
         )
         
         prov_resp = provider.generate(prov_req)
