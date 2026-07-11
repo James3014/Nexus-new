@@ -110,28 +110,63 @@ def _patch_verifier_command(cmd: tuple[str, ...]) -> list[str]:
     return cmd_list
 
 
-def _ollama_provider(model: str, system: str, user: str) -> str:
-    """Direct Ollama provider for bare arm."""
+# Shared provider options used by both Bare and Core arms for parity
+_SHARED_PROVIDER_OPTIONS: dict = {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "num_ctx": 8192,
+    "num_predict": 512,
+    "seed": 0,  # Will be overridden per-call
+}
+_SHARED_PROVIDER_TIMEOUT: float = 120.0
+
+
+def _make_provider_options(seed: int) -> dict:
+    """Return a fresh copy of shared provider options with seed applied."""
+    opts = dict(_SHARED_PROVIDER_OPTIONS)
+    opts["seed"] = seed
+    return opts
+
+
+def _ollama_provider_with_metrics(model: str, system: str, user: str, seed: int) -> tuple[str, dict]:
+    """Direct Ollama provider for bare arm — returns (response_text, ollama_metrics_dict)."""
     import json as _json
+    import urllib.request as _urllib
+    opts = _make_provider_options(seed)
     payload = _json.dumps({
         "model": model,
         "system": system,
         "prompt": user,
         "stream": False,
-        "options": {"temperature": 0.0, "top_p": 1.0},
+        "options": opts,
     })
-    import urllib.request
-    req = urllib.request.Request(
+    req = _urllib.Request(
         "http://localhost:11434/api/generate",
         data=payload.encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with _urllib.urlopen(req, timeout=_SHARED_PROVIDER_TIMEOUT) as resp:
             data = _json.loads(resp.read().decode("utf-8"))
-            return data.get("response", "")
+            metrics = {
+                "ollama_total_duration": data.get("total_duration", 0),
+                "ollama_load_duration": data.get("load_duration", 0),
+                "ollama_prompt_eval_count": data.get("prompt_eval_count", 0),
+                "ollama_prompt_eval_duration": data.get("prompt_eval_duration", 0),
+                "ollama_eval_count": data.get("eval_count", 0),
+                "ollama_eval_duration": data.get("eval_duration", 0),
+                "ollama_done_reason": data.get("done_reason", ""),
+                "ollama_metrics_available": True,
+            }
+            return data.get("response", ""), metrics
     except Exception as e:
         raise RuntimeError(f"Ollama call failed: {e}")
+
+
+def _ollama_provider(model: str, system: str, user: str) -> str:
+    """Legacy bare wrapper — delegates to _ollama_provider_with_metrics, discards metrics."""
+    text, _ = _ollama_provider_with_metrics(model, system, user, seed=0)
+    return text
 
 
 def _materialize_task(task_dict: dict) -> Any:
@@ -230,26 +265,50 @@ def _verify_original_fails(task_dict: dict, work_dir: str) -> bool:
 
 
 def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
-    """Run a single Bare row: direct model → parse → apply → verifier."""
+    """Run a single Bare row: direct model → parse → apply → verifier.
+
+    Timing boundary: monotonic from start of source_read through verifier completion.
+    This matches Core arm's end-to-end boundary for fair comparison.
+    """
+    # === E2E start — includes source read, prompt build, provider call, parse, apply, verifier ===
+    t_e2e_start = time.monotonic()
+
     orig = _read_fixture_original(task_dict["source_relpath"])
     task_statement = task_dict.get("task_statement", "")
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
 
-    prompt = (
+    t_prepare_done = time.monotonic()
+    source_prepare_sec = round(t_prepare_done - t_e2e_start, 4)
+
+    system_prompt = "You are a code repair assistant."
+    user_prompt = (
         f"Fix the following code bug.\n\n"
         f"Task: {task_statement}\n\n"
         f"Source code:\n```\n{orig}\n```\n\n"
         f"Return the fix using SEARCH/REPLACE blocks:\n"
         f"SEARCH:\n<exact code to replace>\nREPLACE:\n<replacement code>\n"
     )
+    prompt_build_sec = round(time.monotonic() - t_prepare_done, 4)
 
-    start = time.time()
+    # Provider options — shared with Core arm
+    provider_opts = _make_provider_options(seed)
+
+    # === Provider call ===
+    t_provider_start = time.monotonic()
+    ollama_metrics: dict = {
+        "ollama_total_duration": 0, "ollama_load_duration": 0,
+        "ollama_prompt_eval_count": 0, "ollama_prompt_eval_duration": 0,
+        "ollama_eval_count": 0, "ollama_eval_duration": 0,
+        "ollama_done_reason": "", "ollama_metrics_available": False,
+    }
     try:
-        raw_output = _ollama_provider("qwen2.5-coder:7b-instruct",
-                                       "You are a code repair assistant.", prompt)
-        wall_time = time.time() - start
+        raw_output, ollama_metrics = _ollama_provider_with_metrics(
+            "qwen2.5-coder:7b-instruct", system_prompt, user_prompt, seed=seed
+        )
     except Exception as e:
-        wall_time = time.time() - start
+        t_provider_end = time.monotonic()
+        provider_wall_sec = round(t_provider_end - t_provider_start, 4)
+        end_to_end_sec = round(t_provider_end - t_e2e_start, 4)
         return {
             "task_id": task_dict["task_id"],
             "arm_id": "N30R_A_7B_BARE",
@@ -258,10 +317,11 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "model_requested": "qwen2.5-coder:7b-instruct",
             "model_actual": "qwen2.5-coder:7b-instruct",
             "provider_actual": "ollama",
+            "provider_options": provider_opts,
             "task_statement_sha256": sha256_str(task_statement),
             "source_fixture_sha256": task_dict.get("source_fixture_sha256", ""),
             "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
-            "execution_completed": True,
+            "execution_completed": False,
             "contract_valid": True,
             "model_call_count": 1,
             "model_response_received": False,
@@ -273,7 +333,21 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_reached": False,
             "verifier_status": "not_run",
             "semantic_retry_count": 0,
-            "wall_time_sec": round(wall_time, 3),
+            "wall_time_sec": end_to_end_sec,
+            "end_to_end_sec": end_to_end_sec,
+            "provider_wall_sec": provider_wall_sec,
+            "non_provider_sec": round(end_to_end_sec - provider_wall_sec, 4),
+            "source_prepare_sec": source_prepare_sec,
+            "prompt_build_sec": prompt_build_sec,
+            "parse_sec": 0.0,
+            "apply_sec": 0.0,
+            "verifier_sec": 0.0,
+            "result_finalize_sec": 0.0,
+            "prompt_system_chars": len(system_prompt),
+            "prompt_user_chars": len(user_prompt),
+            "prompt_total_chars": len(system_prompt) + len(user_prompt),
+            "response_chars": 0,
+            **ollama_metrics,
             "timed_out": True,
             "timeout_stage": "model_call",
             "protocol_parse_success": False,
@@ -282,7 +356,11 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "armor_oracle_status": "NOT_APPLICABLE",
         }
 
+    t_provider_end = time.monotonic()
+    provider_wall_sec = round(t_provider_end - t_provider_start, 4)
+
     if not raw_output or not raw_output.strip():
+        end_to_end_sec = round(t_provider_end - t_e2e_start, 4)
         return {
             "task_id": task_dict["task_id"],
             "arm_id": "N30R_A_7B_BARE",
@@ -291,6 +369,7 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "model_requested": "qwen2.5-coder:7b-instruct",
             "model_actual": "qwen2.5-coder:7b-instruct",
             "provider_actual": "ollama",
+            "provider_options": provider_opts,
             "task_statement_sha256": sha256_str(task_statement),
             "source_fixture_sha256": task_dict.get("source_fixture_sha256", ""),
             "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
@@ -306,7 +385,21 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_reached": False,
             "verifier_status": "not_run",
             "semantic_retry_count": 0,
-            "wall_time_sec": round(wall_time, 3),
+            "wall_time_sec": end_to_end_sec,
+            "end_to_end_sec": end_to_end_sec,
+            "provider_wall_sec": provider_wall_sec,
+            "non_provider_sec": round(end_to_end_sec - provider_wall_sec, 4),
+            "source_prepare_sec": source_prepare_sec,
+            "prompt_build_sec": prompt_build_sec,
+            "parse_sec": 0.0,
+            "apply_sec": 0.0,
+            "verifier_sec": 0.0,
+            "result_finalize_sec": 0.0,
+            "prompt_system_chars": len(system_prompt),
+            "prompt_user_chars": len(user_prompt),
+            "prompt_total_chars": len(system_prompt) + len(user_prompt),
+            "response_chars": 0,
+            **ollama_metrics,
             "timed_out": False,
             "timeout_stage": "",
             "protocol_parse_success": False,
@@ -315,8 +408,11 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "armor_oracle_status": "NOT_APPLICABLE",
         }
 
+    # === Parse ===
+    t_parse_start = time.monotonic()
     blocks, parser_status = _parse_search_replace(raw_output)
     protocol_success = parser_status == "success"
+    parse_sec = round(time.monotonic() - t_parse_start, 4)
 
     candidate_hash = ""
     apply_status = "none"
@@ -324,13 +420,19 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
     verifier_status = "not_run"
     terminal = "PROTOCOL_INVALID"
     solved = False
+    apply_sec = 0.0
+    verifier_sec = 0.0
 
     if blocks:
         with tempfile.TemporaryDirectory() as td:
+            t_apply_start = time.monotonic()
             patched, apply_status = _apply_search_replace(orig, blocks)
             candidate_hash = sha256_str(patched)
+            apply_sec = round(time.monotonic() - t_apply_start, 4)
             if apply_status == "applied":
+                t_verifier_start = time.monotonic()
                 ec, _, _ = _run_verifier(patched, verifier_cmd, td)
+                verifier_sec = round(time.monotonic() - t_verifier_start, 4)
                 verifier_reached = True
                 verifier_status = "pass" if ec == 0 else "fail"
                 terminal = "VERIFIED_SOLVE" if verifier_status == "pass" else "VERIFIED_FAIL"
@@ -340,6 +442,10 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
     else:
         terminal = "PROTOCOL_INVALID"
 
+    t_e2e_end = time.monotonic()
+    end_to_end_sec = round(t_e2e_end - t_e2e_start, 4)
+    result_finalize_sec = round(t_e2e_end - (t_provider_end + parse_sec + apply_sec + verifier_sec), 4)
+
     return {
         "task_id": task_dict["task_id"],
         "arm_id": "N30R_A_7B_BARE",
@@ -348,6 +454,7 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
         "model_requested": "qwen2.5-coder:7b-instruct",
         "model_actual": "qwen2.5-coder:7b-instruct",
         "provider_actual": "ollama",
+        "provider_options": provider_opts,
         "task_statement_sha256": sha256_str(task_statement),
         "source_fixture_sha256": task_dict.get("source_fixture_sha256", ""),
         "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
@@ -363,7 +470,24 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
         "verifier_reached": verifier_reached,
         "verifier_status": verifier_status,
         "semantic_retry_count": 0,
-        "wall_time_sec": round(wall_time, 3),
+        # Fair timing fields
+        "wall_time_sec": end_to_end_sec,
+        "end_to_end_sec": end_to_end_sec,
+        "provider_wall_sec": provider_wall_sec,
+        "non_provider_sec": round(end_to_end_sec - provider_wall_sec, 4),
+        "source_prepare_sec": source_prepare_sec,
+        "prompt_build_sec": prompt_build_sec,
+        "parse_sec": parse_sec,
+        "apply_sec": apply_sec,
+        "verifier_sec": verifier_sec,
+        "result_finalize_sec": max(result_finalize_sec, 0.0),
+        # Prompt size metrics
+        "prompt_system_chars": len(system_prompt),
+        "prompt_user_chars": len(user_prompt),
+        "prompt_total_chars": len(system_prompt) + len(user_prompt),
+        "response_chars": len(raw_output),
+        # Ollama native metrics
+        **ollama_metrics,
         "timed_out": False,
         "timeout_stage": "",
         "protocol_parse_success": protocol_success,
@@ -382,7 +506,9 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
         build_local_model_source_anchor,
     )
 
-    start = time.time()
+    # === E2E start — includes source read through receipt finalization ===
+    t_e2e_start = time.monotonic()
+
     task_id = task_dict.get("task_id", "")
     source_relpath = task_dict.get("source_relpath", "")
     task_statement = task_dict.get("task_statement", "")
@@ -399,7 +525,11 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     with open(os.path.join(workspace, target_relpath), "w") as f:
         f.write(orig)
 
+    t_source_done = time.monotonic()
+    source_prepare_sec = round(t_source_done - t_e2e_start, 4)
+
     # Planner
+    t_planner_start = time.monotonic()
     from nexus.engine.capability_planner import CapabilityPlanner
     planner = CapabilityPlanner()
 
@@ -415,7 +545,7 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     ]
     backup_env = {k: os.environ[k] for k in env_keys if k in os.environ}
 
-    # Set environment variables
+    # Set environment variables — parity with Bare for provider options injected via signal_snapshot
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "localheal_pipeline"
     os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
@@ -435,10 +565,19 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             budget={"max_cost": 20}, skills=[],
         )
         signal_snapshot = plan.signal_snapshot
-        signal_snapshot["provider_timeout_sec"] = 120.0
-    except Exception as e:
-        signal_snapshot = {"ssd_route_map": {"capability_reasons": {}}, "provider_timeout_sec": 120.0}
+        signal_snapshot["provider_timeout_sec"] = _SHARED_PROVIDER_TIMEOUT
+        # Inject shared provider options for parity
+        signal_snapshot["provider_options"] = _make_provider_options(seed)
+    except Exception:
+        signal_snapshot = {
+            "ssd_route_map": {"capability_reasons": {}},
+            "provider_timeout_sec": _SHARED_PROVIDER_TIMEOUT,
+            "provider_options": _make_provider_options(seed),
+        }
 
+    planner_sec = round(time.monotonic() - t_planner_start, 4)
+
+    t_localization_start = time.monotonic()
     projection = project_planner_capabilities_for_local_executor(signal_snapshot)
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
     target_symbol = ""
@@ -455,6 +594,7 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             locked_search = "\n".join(lines[anchor.span_start - 1:anchor.span_end])
     except Exception:
         pass
+    anchor_localization_sec = round(time.monotonic() - t_localization_start, 4)
 
     evidence_refs = (f"v2:{run_id}:source", f"v2:{run_id}:localization")
 
@@ -484,11 +624,16 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     provider = OllamaLocalModelProvider()
 
     try:
+        t_executor_start = time.monotonic()
         executor_response = LocalModelExecutor.run(
             executor_request, provider=provider
         )
+        t_executor_end = time.monotonic()
+        executor_sec = round(t_executor_end - t_executor_start, 4)
 
-        wall_time = time.time() - start
+        t_e2e_end = time.monotonic()
+        end_to_end_sec = round(t_e2e_end - t_e2e_start, 4)
+
         meta = (
             executor_response.raw_model_metadata
             if isinstance(executor_response.raw_model_metadata, dict)
@@ -501,7 +646,28 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
         apply_status = meta.get("isolated_apply_status", "")
         verifier_result = meta.get("isolated_verifier_status", "")
         semantic_retry_count = meta.get("semantic_retry_count", 0)
-        pipeline_solve = meta.get("pipeline_solve_eligible", False)
+
+        # Extract phase timing from metadata if available
+        prompt_build_sec = round(float(meta.get("prompt_build_sec", 0.0)), 4)
+        provider_wall_sec = round(float(meta.get("provider_elapsed_sec", 0.0)), 4)
+
+        # Extract Ollama native metrics from last provider response
+        ollama_metrics: dict = {
+            "ollama_total_duration": meta.get("ollama_total_duration", 0),
+            "ollama_load_duration": meta.get("ollama_load_duration", 0),
+            "ollama_prompt_eval_count": meta.get("ollama_prompt_eval_count", 0),
+            "ollama_prompt_eval_duration": meta.get("ollama_prompt_eval_duration", 0),
+            "ollama_eval_count": meta.get("ollama_eval_count", 0),
+            "ollama_eval_duration": meta.get("ollama_eval_duration", 0),
+            "ollama_done_reason": meta.get("ollama_done_reason", ""),
+            "ollama_metrics_available": meta.get("ollama_metrics_available", False),
+        }
+
+        # Prompt size from meta if available
+        prompt_total_chars = meta.get("prompt_total_chars", 0)
+        response_chars = len(raw_output)
+
+        non_provider_sec = round(end_to_end_sec - provider_wall_sec, 4) if provider_wall_sec > 0 else end_to_end_sec
 
         verifier_reached = bool(verifier_result)
         if verifier_result == "pass":
@@ -532,6 +698,7 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "model_requested": "qwen2.5-coder:7b-instruct",
             "model_actual": "qwen2.5-coder:7b-instruct",
             "provider_actual": "ollama",
+            "provider_options": _make_provider_options(seed),
             "task_statement_sha256": sha256_str(task_statement),
             "source_fixture_sha256": task_dict.get("source_fixture_sha256", ""),
             "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
@@ -547,7 +714,21 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_reached": verifier_reached,
             "verifier_status": verifier_result or "not_run",
             "semantic_retry_count": semantic_retry_count,
-            "wall_time_sec": round(wall_time, 3),
+            # Fair timing fields
+            "wall_time_sec": end_to_end_sec,
+            "end_to_end_sec": end_to_end_sec,
+            "provider_wall_sec": provider_wall_sec,
+            "non_provider_sec": non_provider_sec,
+            "source_prepare_sec": source_prepare_sec,
+            "planner_sec": planner_sec,
+            "anchor_localization_sec": anchor_localization_sec,
+            "prompt_build_sec": prompt_build_sec,
+            "executor_sec": executor_sec,
+            # Prompt size metrics
+            "prompt_total_chars": prompt_total_chars,
+            "response_chars": response_chars,
+            # Ollama native metrics
+            **ollama_metrics,
             "timed_out": False,
             "timeout_stage": "",
             "protocol_parse_success": bool(raw_output),

@@ -2737,6 +2737,17 @@ class LocalModelExecutor:
             "requested_timeout_sec": prov_resp.requested_timeout_sec,
             "effective_timeout_sec": prov_resp.effective_timeout_sec,
             "elapsed_sec": prov_resp.elapsed_sec,
+            # Relay as provider_elapsed_sec for runner phase-timing extraction
+            "provider_elapsed_sec": prov_resp.elapsed_sec,
+            # Relay Ollama native metrics for latency profiling (default 0 for non-Ollama providers)
+            "ollama_total_duration": getattr(prov_resp, "ollama_total_duration", 0),
+            "ollama_load_duration": getattr(prov_resp, "ollama_load_duration", 0),
+            "ollama_prompt_eval_count": getattr(prov_resp, "ollama_prompt_eval_count", 0),
+            "ollama_prompt_eval_duration": getattr(prov_resp, "ollama_prompt_eval_duration", 0),
+            "ollama_eval_count": getattr(prov_resp, "ollama_eval_count", 0),
+            "ollama_eval_duration": getattr(prov_resp, "ollama_eval_duration", 0),
+            "ollama_done_reason": getattr(prov_resp, "ollama_done_reason", ""),
+            "ollama_metrics_available": getattr(prov_resp, "ollama_metrics_available", False),
             "protocol_mode": protocol_mode,
             "execution_topology": execution_topology,
             "protocol_normalization": patch_meta,

@@ -39,6 +39,16 @@ class LocalModelProviderResponse:
     requested_timeout_sec: float = 0.0
     elapsed_sec: float = 0.0
     effective_timeout_sec: float = 0.0
+    # Ollama native metrics
+    ollama_total_duration: int = 0
+    ollama_load_duration: int = 0
+    ollama_prompt_eval_count: int = 0
+    ollama_prompt_eval_duration: int = 0
+    ollama_eval_count: int = 0
+    ollama_eval_duration: int = 0
+    ollama_done_reason: str = ""
+    ollama_metrics_available: bool = False
+
 
 
 class LocalModelProvider:
@@ -181,6 +191,15 @@ class OllamaLocalModelProvider(LocalModelProvider):
                     raw_text = raw_text[:request.max_output_chars]
                     truncated = True
 
+                # Extract Ollama native metrics (nanosecond fields)
+                metrics_available = any(
+                    k in resp_json for k in (
+                        "total_duration", "load_duration",
+                        "prompt_eval_count", "prompt_eval_duration",
+                        "eval_count", "eval_duration",
+                    )
+                )
+
                 return LocalModelProviderResponse(
                     provider_invoked=True,
                     model_called=True,
@@ -190,6 +209,14 @@ class OllamaLocalModelProvider(LocalModelProvider):
                     requested_timeout_sec=request.timeout_sec,
                     elapsed_sec=round(elapsed, 3),
                     effective_timeout_sec=request.timeout_sec,
+                    ollama_total_duration=resp_json.get("total_duration", 0),
+                    ollama_load_duration=resp_json.get("load_duration", 0),
+                    ollama_prompt_eval_count=resp_json.get("prompt_eval_count", 0),
+                    ollama_prompt_eval_duration=resp_json.get("prompt_eval_duration", 0),
+                    ollama_eval_count=resp_json.get("eval_count", 0),
+                    ollama_eval_duration=resp_json.get("eval_duration", 0),
+                    ollama_done_reason=resp_json.get("done_reason", ""),
+                    ollama_metrics_available=metrics_available,
                 )
         except (socket.timeout, TimeoutError) as e:
             elapsed = time.monotonic() - t0
