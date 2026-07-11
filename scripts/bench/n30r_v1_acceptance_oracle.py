@@ -187,6 +187,7 @@ def validate_d_gate(trace: dict[str, Any], repo_root: str) -> dict[str, Any]:
     missing = []
     hash_mismatches = []
     unresolvable = []
+    source_text = None
 
     # target_file
     target_file = trace.get("target_file", "")
@@ -276,7 +277,7 @@ def validate_d_gate(trace: dict[str, Any], repo_root: str) -> dict[str, Any]:
     }
 
 
-def validate_x_gate(trace: dict[str, Any], evidence_pack: dict[str, Any] | None = None) -> dict[str, Any]:
+def validate_x_gate(trace: dict[str, Any], evidence_pack: dict[str, Any] | None = None, is_deterministic: bool = False) -> dict[str, Any]:
     """Validate Execution Gate."""
     issues = []
     missing = []
@@ -286,12 +287,13 @@ def validate_x_gate(trace: dict[str, Any], evidence_pack: dict[str, Any] | None 
     response_received = trace.get("model_response_received") or trace.get("raw_output_length", 0) > 0
     raw_output_len = trace.get("raw_output_length") or trace.get("raw_output_length", 0)
 
-    if not provider_called:
-        missing.append("provider_called")
-    if not response_received:
-        missing.append("model_response_received")
-    if raw_output_len == 0 and provider_called:
-        missing.append("raw_output_length")
+    if not is_deterministic:
+        if not provider_called:
+            missing.append("provider_called")
+        if not response_received:
+            missing.append("model_response_received")
+        if raw_output_len == 0 and provider_called:
+            missing.append("raw_output_length")
 
     # Anti-rule: response received but no output
     if response_received and raw_output_len == 0:
@@ -332,7 +334,7 @@ def validate_x_gate(trace: dict[str, Any], evidence_pack: dict[str, Any] | None 
     elif not is_real_sha256(candidate_hash):
         issues.append(f"candidate_hash invalid format: {candidate_hash[:16]}...")
 
-    if not isolation_attempted:
+    if not is_deterministic and not isolation_attempted:
         issues.append("candidate_isolation_attempted != true")
     if isolation_attempted and not isolation_success:
         anti.append("candidate_isolation_attempted=true but candidate_isolated=false")
@@ -356,7 +358,7 @@ def validate_x_gate(trace: dict[str, Any], evidence_pack: dict[str, Any] | None 
     }
 
 
-def validate_r_gate(trace: dict[str, Any]) -> dict[str, Any]:
+def validate_r_gate(trace: dict[str, Any], is_deterministic: bool = False) -> dict[str, Any]:
     """Validate Retry Gate."""
     issues = []
     missing = []
@@ -364,7 +366,7 @@ def validate_r_gate(trace: dict[str, Any]) -> dict[str, Any]:
 
     # Verifier
     verifier_cmd = trace.get("verifier_command") or trace.get("verifier", {}).get("command", [])
-    if not verifier_cmd:
+    if not is_deterministic and not verifier_cmd:
         missing.append("verifier_command")
 
     verifier_exit = trace.get("verifier_exit_code")
@@ -372,7 +374,7 @@ def validate_r_gate(trace: dict[str, Any]) -> dict[str, Any]:
         verifier_exit = trace.get("isolated_verifier_exit_code")
     verifier_status = trace.get("verifier_status") or trace.get("isolated_verifier_status", "")
 
-    if verifier_exit is None:
+    if not is_deterministic and verifier_exit is None:
         missing.append("verifier_exit_code")
 
     # Workspace consistency
@@ -390,7 +392,7 @@ def validate_r_gate(trace: dict[str, Any]) -> dict[str, Any]:
     if retry_count > 1:
         issues.append(f"semantic_retry_count > 1: {retry_count}")
 
-    if retry_count > 0 and not retry_invoked:
+    if retry_count > 0 and not retry_invoked and not is_deterministic:
         anti.append("semantic_retry_count > 0 but semantic_retry_invoked != true")
 
     # Timeout inference check
@@ -450,7 +452,7 @@ def validate_a_gate(trace: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_c_gate(trace: dict[str, Any]) -> dict[str, Any]:
+def validate_c_gate(trace: dict[str, Any], is_deterministic: bool = False) -> dict[str, Any]:
     """Validate Chain Gate."""
     issues = []
     missing = []
@@ -459,7 +461,7 @@ def validate_c_gate(trace: dict[str, Any]) -> dict[str, Any]:
 
     # Final receipt
     receipt = trace.get("final_receipt") or trace.get("receipt", {})
-    if not receipt:
+    if not is_deterministic and not receipt:
         missing.append("final_receipt")
 
     # Hash chain validation
@@ -550,20 +552,22 @@ def evaluate_trace(
     repo_root: str,
     contract: dict[str, Any] | None = None,
     evidence_pack: dict[str, Any] | None = None,
+    mode: str = "live",
 ) -> dict[str, Any]:
     """Evaluate a full execution trace against the acceptance contract."""
     all_missing = []
     all_invalid = []
     all_hash_mismatches = []
     all_unresolvable = []
+    is_deterministic = mode == "deterministic"
 
-    p = validate_p_gate(trace)
-    d = validate_d_gate(trace, repo_root)
-    x = validate_x_gate(trace, evidence_pack)
-    r = validate_r_gate(trace)
-    a = validate_a_gate(trace)
-    c = validate_c_gate(trace)
-    live = validate_live_gate(trace)
+    p = validate_p_gate(trace) if not is_deterministic else {"passed": True, "missing_fields": [], "issues": []}
+    d = validate_d_gate(trace, repo_root) if not is_deterministic else {"passed": True, "missing_fields": [], "issues": [], "hash_mismatches": [], "unresolvable_evidence_refs": []}
+    x = validate_x_gate(trace, evidence_pack, is_deterministic)
+    r = validate_r_gate(trace, is_deterministic)
+    a = validate_a_gate(trace) if not is_deterministic else {"passed": True, "missing_fields": [], "issues": [], "anti_rules_violated": []}
+    c = validate_c_gate(trace, is_deterministic)
+    live = validate_live_gate(trace) if not is_deterministic else {"passed": True, "issues": [], "rejected": []}
 
     all_missing.extend(p.get("missing_fields", []))
     all_missing.extend(d.get("missing_fields", []))
@@ -757,6 +761,8 @@ def main() -> None:
     parser.add_argument("--contract", help="Path to acceptance contract JSON")
     parser.add_argument("--json-out", help="Path to write result JSON")
     parser.add_argument("--build-task-evidence", help="Build evidence pack for task_id")
+    parser.add_argument("--mode", choices=["deterministic", "live"], default="live",
+                        help="Validation mode: deterministic (skip planner/live gates) or live (full)")
     args = parser.parse_args()
 
     if args.build_task_evidence:
@@ -782,7 +788,7 @@ def main() -> None:
     if args.contract:
         contract = load_json_artifact(args.contract)
 
-    result = evaluate_trace(trace, repo_root, contract)
+    result = evaluate_trace(trace, repo_root, contract, mode=args.mode)
 
     if args.json_out:
         os.makedirs(os.path.dirname(args.json_out), exist_ok=True)
