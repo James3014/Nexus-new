@@ -114,7 +114,12 @@ class PatchSynthesisPhase(IPhase):
         # N30R-V2.1-OPT: NEXUS_DISABLE_SPEC_GEN=1 跳過 spec_gen LLM 呼叫，節省 ~5s/task。
         # 當 planning 已提供 repair_strategy 時，spec_gen 是冗餘的第二次推理。
         # 啟用條件：local model latency 優先、plan 已含完整 repair_strategy。
-        _spec_gen_disabled = os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+        controls = (getattr(input_data, "route_context", None) or {}).get("local_armor_controls") or {}
+        spec_gen_allowed = controls.get("spec_gen_allowed", True)
+        _spec_gen_disabled = (
+            os.environ.get("NEXUS_DISABLE_SPEC_GEN", "0") == "1"
+            or not spec_gen_allowed
+        )
         repair_spec = getattr(input_data, "repair_specification", "")
         if not repair_spec and patch_decision["model"] != "deterministic" and not _spec_gen_disabled:
             spec_decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="planning", context={"mode": "spec_gen"})

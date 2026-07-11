@@ -380,6 +380,20 @@ class LocalHealPipelineCapabilityExecutor:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
                             model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "") or _pipeline_model_name
 
+                        ledger = ctx.route_context.get("llm_call_ledger") if isinstance(ctx.route_context, dict) else None
+                        if isinstance(ledger, dict):
+                            prompt_lower = prompt.lower()
+                            if "software architect" in prompt_lower or "diagnostic assistant" in prompt_lower or "root cause hypothesis" in prompt_lower:
+                                call_type = "planning"
+                            elif "logical specification" in prompt_lower or "senior engineer. define the exact logical change" in prompt_lower:
+                                call_type = "spec_gen"
+                            elif "selfcorrector" in prompt_lower or "verifier stdout" in prompt_lower or "verifier failed" in prompt_lower:
+                                call_type = "retry"
+                            else:
+                                call_type = "patch"
+                            ledger[call_type] = ledger.get(call_type, 0) + 1
+                            ledger["total"] = ledger.get("total", 0) + 1
+
                         # C2: Try provider first, fall back to direct Ollama call
                         prov_req = LocalModelProviderRequest(
                             task_id=ctx.task_id,
@@ -514,6 +528,12 @@ class LocalHealPipelineCapabilityExecutor:
                 if isinstance(route_ctx, dict):
                     python_executable = str(route_ctx.get("python_executable", "") or "")
 
+                # N30R-V3 Phase 3: Read candidate_cap from armor profile controls
+                # LITE → candidate_cap=1 (single attempt), STANDARD → 1, FULL → 3+
+                _armor_controls = route_ctx.get("local_armor_controls", {}) or {}
+                _candidate_cap = int(_armor_controls.get("candidate_cap", 3) or 3)
+                _max_tries = max(1, _candidate_cap)
+
                 heal_ctx = LegacyHealContext(
                     instance_id=ctx.task_id,
                     repo_dir=_Path(ctx.source_root),
@@ -521,7 +541,7 @@ class LocalHealPipelineCapabilityExecutor:
                     repair_specification=str(route_ctx.get("repair_specification", "") or ""),
                     route_context=route_ctx,
                     python_executable=python_executable,
-                    max_tries=3,
+                    max_tries=_max_tries,
                     skip_reproduction=skip_repro,
                     repro_script=repro_script,
                 )
