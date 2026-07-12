@@ -45,14 +45,20 @@ BRIEFING_PATH="${NEXUS_ENFORCED_BRIEFING_PATH:-.nexus/reports/enforced_agent_bri
 if [[ ! -f "$BRIEFING_PATH" ]]; then
   BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh "$BRIEFING_PATH")"
 fi
-NEXUS_PREAMBLE="$(cat "$BRIEFING_PATH")
+NEXUS_PREAMBLE="$(cat "$BRIEFING_PATH")"
 
+DELEGATED_CONTRACT=$(cat <<'EOF'
 Delegated round contract:
 1. Start as NEXUS_BOOTSTRAP_INCOMPLETE until command evidence proves bootstrap and wearing.
 2. Do not use git stash, git clean, git restore, kill, pkill, live provider calls, remote clone, or unrelated file cleanup.
 3. Change only the allowed files named by the task prompt.
 4. Provide modified files, commands executed, key outputs, and residual risks.
-5. If gates fail, report NOT DONE and provide next-round plan."
+5. If gates fail, report NOT DONE and provide next-round plan.
+EOF
+)
+NEXUS_PREAMBLE="${NEXUS_PREAMBLE}
+
+${DELEGATED_CONTRACT}"
 
 MERGED_PROMPT_FILE="$(mktemp /tmp/nexus_gemini_prompt.XXXXXX.md)"
 trap 'rm -f "$MERGED_PROMPT_FILE"' EXIT
@@ -79,14 +85,15 @@ echo "[Gemini+Nexus] dispatch start..."
 # After 1 timeout, we record it and the skill/supervisor should handle fallback
 # Here we just ensure the report is correct and classification is explicit.
 
+set +e
 "$UV_BIN" run scripts/ops/gemini_nexus_invoke.py \
   --prompt-file "$MERGED_PROMPT_FILE" \
   --report-file "$REPORT_FILE" \
   --timeout-sec "$TIMEOUT_SEC" \
   --inactivity-timeout-sec "$INACTIVITY_TIMEOUT_SEC" \
   --max-retries 1
-
 EXIT_CODE=$?
+set -e
 
 if [[ $EXIT_CODE -ne 0 ]]; then
   # Check if it was a timeout to suggest fallback
@@ -96,7 +103,7 @@ if [[ $EXIT_CODE -ne 0 ]]; then
     # We could potentially trigger a local run here, but standard protocol is to report and let Codex decide.
     # To satisfy "auto-fallback to local supervisor mode" requirement in the runner:
     # We will mark the report status as 'infra_blocked' with 'fallback_recommended'
-    python3 - <<'PY'
+    python3 - "$REPORT_FILE" <<'PY'
 import json, sys
 from pathlib import Path
 report_file = Path(sys.argv[1])
@@ -105,7 +112,7 @@ if report_file.exists():
     data["status"] = "infra_blocked"
     data["fallback_recommended"] = True
     report_file.write_text(json.dumps(data, indent=2))
-PY "$REPORT_FILE"
+PY
   fi
   echo "[Gemini+Nexus] dispatch failed. report=$REPORT_FILE"
   exit $EXIT_CODE

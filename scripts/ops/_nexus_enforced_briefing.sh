@@ -118,7 +118,29 @@ Every closeout must include:
 }
 ```
 
-## 10) Active Marker
+## 10) Local Assist Agent Workflow (M1/M2)
+For an audited task, the Online Agent may explicitly request Local Assist:
+1. `advisor` for read-only localization, diagnosis, risk, and evidence compression.
+2. `candidate` for one or more isolated candidates; never formal-workspace mutation.
+3. `verified-subtask` only for a bounded allowed-file task with a deterministic verifier.
+
+Use the real CLI surface and read both returned JSON artifacts before continuing:
+```bash
+nexus local-assist advisor --task-file <TASK.json> --workspace <REPO> --report-file <REPORT.json>
+nexus local-assist candidate --task-file <TASK.json> --workspace <REPO> --target-file <FILE> --verifier-command "<COMMAND>"
+nexus local-assist verified-subtask --task-file <TASK.json> --workspace <REPO> --allowed-file <FILE> --verifier-command "<COMMAND>"
+```
+The response and `execution_receipt.json` must prove `provider=ollama`, a resolved model, provider call count, `runtime_invoked`, and `output_delivered`. A receipt alone does not prove that the Agent consumed the output.
+
+Before closeout, the Agent must submit a machine-readable closeout containing:
+`local_assist_requested`, `local_assist_selected`, `local_assist_invoked`, `local_assist_receipt_paths`, `local_assist_output_delivered`, `local_assist_output_consumed`, `local_candidate_selected`, `local_assist_contribution_claim`, `output_consumption_evidence`, and `final_output`.
+Run:
+```bash
+nexus local-assist closeout --closeout-file <CLOSEOUT.json> --workspace <REPO> --report-file <CLOSEOUT_REPORT.json>
+```
+`local_assist_output_consumed=true` is valid only when the final output and consumption evidence explicitly reference every receipt path or task identity. Local Assist is advisory/candidate support; it is never verifier authority. If Local Assist was not invoked, report it as not invoked and do not infer contribution.
+
+## 11) Active Marker
 Only after the bootstrap and wearing evidence are true may the agent switch to:
 `[NEXUS v26 ACTIVE]`
 

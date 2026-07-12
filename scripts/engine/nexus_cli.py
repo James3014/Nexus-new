@@ -174,7 +174,10 @@ from scripts.engine.commands.learn_actions import (
     verify_learn_source_lifecycle_completion,
     write_learn_precision_benchmark_output,
 )
-from scripts.engine.commands.local_assist_actions import run_local_assist_command
+from scripts.engine.commands.local_assist_actions import (
+    run_local_assist_closeout_command,
+    run_local_assist_command,
+)
 from scripts.engine.commands.multi_agent_actions import (
     close_multi_agent_task,
     create_multi_agent_task,
@@ -363,6 +366,26 @@ def local_assist_verified_subtask(
         allowed_files=allowed_files,
         verifier_command=verifier_command,
     )
+
+
+@local_assist.command(name="closeout")
+@click.option("--closeout-file", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--workspace", type=click.Path(file_okay=False), required=True)
+@click.option("--report-file", type=click.Path(dir_okay=False), default=None)
+def local_assist_closeout(closeout_file: str, workspace: str, report_file: str | None) -> None:
+    """Validate Agent consumption of Local Assist receipts before closeout."""
+    try:
+        result, exit_code = run_local_assist_closeout_command(
+            closeout_file=closeout_file,
+            workspace=workspace,
+            report_file=report_file,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        click.echo(json.dumps({"status": "REJECTED", "error": str(exc)}, ensure_ascii=False))
+        raise click.exceptions.Exit(1)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
 
 
 def _blocked_deprecated(old: str, new: str | None = None):

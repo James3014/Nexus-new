@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 from typing import Any
 
+from nexus.services.local_assist_closeout import run_local_assist_closeout
 from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
 
 
@@ -39,3 +40,17 @@ def run_local_assist_command(
     result["receipt_complete"] = bool(receipt.get("receipt_complete", False))
     result["report_file"] = str(report_file) if report_file else ""
     return result, 0 if response.status == "SUCCEEDED" and result["receipt_complete"] else 1
+
+
+def run_local_assist_closeout_command(
+    *,
+    closeout_file: str | Path,
+    workspace: str | Path,
+    report_file: str | Path | None = None,
+) -> tuple[dict[str, Any], int]:
+    result = run_local_assist_closeout(
+        closeout_file=closeout_file,
+        repo_root=workspace,
+        report_file=report_file,
+    )
+    return result.report, result.exit_code
