@@ -174,6 +174,7 @@ from scripts.engine.commands.learn_actions import (
     verify_learn_source_lifecycle_completion,
     write_learn_precision_benchmark_output,
 )
+from scripts.engine.commands.local_assist_actions import run_local_assist_command
 from scripts.engine.commands.multi_agent_actions import (
     close_multi_agent_task,
     create_multi_agent_task,
@@ -269,6 +270,99 @@ def top_status(ctx, as_json):
 def top_run(ctx, task_id, complexity, output_file, report_file):
     """🚀 [Direct] Execute task with autonomic governance."""
     ctx.invoke(run, task_id=task_id, complexity=complexity, output_file=output_file, report_file=report_file)
+
+
+@nexus.group(name="local-assist")
+def local_assist():
+    """Explicit Nexus Local Assist seam for Online Agents."""
+    pass
+
+
+def _local_assist_cli(
+    *,
+    action: str,
+    task_file: str,
+    workspace: str,
+    report_file: str | None,
+    target_file: str | None = None,
+    allowed_files: tuple[str, ...] = (),
+    verifier_command: str | None = None,
+) -> None:
+    try:
+        result, exit_code = run_local_assist_command(
+            action=action,
+            task_file=task_file,
+            workspace=workspace,
+            report_file=report_file,
+            target_file=target_file,
+            allowed_files=allowed_files,
+            verifier_command=verifier_command,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        click.echo(json.dumps({"status": "FAILED", "error": str(exc)}, ensure_ascii=False))
+        raise click.exceptions.Exit(1)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@local_assist.command(name="advisor")
+@click.option("--task-file", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--workspace", type=click.Path(file_okay=False), required=True)
+@click.option("--report-file", type=click.Path(dir_okay=False), default=None)
+def local_assist_advisor(task_file: str, workspace: str, report_file: str | None) -> None:
+    _local_assist_cli(
+        action="advisor",
+        task_file=task_file,
+        workspace=workspace,
+        report_file=report_file,
+    )
+
+
+@local_assist.command(name="candidate")
+@click.option("--task-file", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--workspace", type=click.Path(file_okay=False), required=True)
+@click.option("--target-file", type=str, required=True)
+@click.option("--verifier-command", type=str, required=True)
+@click.option("--report-file", type=click.Path(dir_okay=False), default=None)
+def local_assist_candidate(
+    task_file: str,
+    workspace: str,
+    target_file: str | None,
+    verifier_command: str | None,
+    report_file: str | None,
+) -> None:
+    _local_assist_cli(
+        action="candidate",
+        task_file=task_file,
+        workspace=workspace,
+        report_file=report_file,
+        target_file=target_file,
+        verifier_command=verifier_command,
+    )
+
+
+@local_assist.command(name="verified-subtask")
+@click.option("--task-file", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--workspace", type=click.Path(file_okay=False), required=True)
+@click.option("--allowed-file", "allowed_files", multiple=True, required=True)
+@click.option("--verifier-command", type=str, required=True)
+@click.option("--report-file", type=click.Path(dir_okay=False), default=None)
+def local_assist_verified_subtask(
+    task_file: str,
+    workspace: str,
+    allowed_files: tuple[str, ...],
+    verifier_command: str,
+    report_file: str | None,
+) -> None:
+    _local_assist_cli(
+        action="verified-subtask",
+        task_file=task_file,
+        workspace=workspace,
+        report_file=report_file,
+        allowed_files=allowed_files,
+        verifier_command=verifier_command,
+    )
 
 
 def _blocked_deprecated(old: str, new: str | None = None):
