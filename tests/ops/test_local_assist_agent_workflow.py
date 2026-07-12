@@ -24,6 +24,7 @@ def test_enforced_briefing_exposes_local_assist_and_closeout_contract(tmp_path: 
         "nexus local-assist candidate",
         "nexus local-assist verified-subtask",
         "nexus local-assist closeout",
+        "nexus local-assist user-relay-validate",
         "local_assist_output_consumed",
         "receipt path or task identity",
     ):

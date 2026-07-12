@@ -177,6 +177,7 @@ from scripts.engine.commands.learn_actions import (
 from scripts.engine.commands.local_assist_actions import (
     run_local_assist_closeout_command,
     run_local_assist_command,
+    run_local_assist_user_relay_command,
 )
 from scripts.engine.commands.multi_agent_actions import (
     close_multi_agent_task,
@@ -378,6 +379,33 @@ def local_assist_closeout(closeout_file: str, workspace: str, report_file: str |
         result, exit_code = run_local_assist_closeout_command(
             closeout_file=closeout_file,
             workspace=workspace,
+            report_file=report_file,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        click.echo(json.dumps({"status": "REJECTED", "error": str(exc)}, ensure_ascii=False))
+        raise click.exceptions.Exit(1)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@local_assist.command(name="user-relay-validate")
+@click.option("--package-file", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--workspace", type=click.Path(file_okay=False), required=True)
+@click.option("--response-file", type=click.Path(exists=True, dir_okay=False), default=None)
+@click.option("--report-file", type=click.Path(dir_okay=False), required=True)
+def local_assist_user_relay_validate(
+    package_file: str,
+    workspace: str,
+    response_file: str | None,
+    report_file: str,
+) -> None:
+    """Validate a user-relayed Agent response without external delivery."""
+    try:
+        result, exit_code = run_local_assist_user_relay_command(
+            package_file=package_file,
+            workspace=workspace,
+            response_file=response_file,
             report_file=report_file,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:

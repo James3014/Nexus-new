@@ -27,6 +27,8 @@ The local package is under `.nexus/reports/local_assist/m2-user-relay-20260713/`
 
 - `context_package.json` records `external_delivery_mode=human_relay`, `delivery_authority=user`, `automated_exfiltration=false`, `local_assist_receipt_present=true`, `agent_output_imported=false`, and `agent_consumed_proven=false`.
 - `relay_prompt.md` is pasteable material for a user-controlled external Agent session.
+- `nexus local-assist user-relay-validate` now validates the package locally and produced `USER_RELAY_REQUIRED` with both existing receipt identities verified.
+- Validator tests cover missing response, valid imported response, missing receipt citation, and machine-report output.
 - Absolute-path and secret scans passed; private-content presence is explicitly classified, so the package cannot be treated as public data.
 - Status remains `USER_RELAY_REQUIRED`; no automated delivery occurred.
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from nexus.services.local_assist_closeout import run_local_assist_closeout
 from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
+from nexus.services.local_assist_user_relay import write_user_relay_report
 
 
 def run_local_assist_command(
@@ -54,3 +55,19 @@ def run_local_assist_closeout_command(
         report_file=report_file,
     )
     return result.report, result.exit_code
+
+
+def run_local_assist_user_relay_command(
+    *,
+    package_file: str | Path,
+    workspace: str | Path,
+    response_file: str | Path | None,
+    report_file: str | Path,
+) -> tuple[dict[str, Any], int]:
+    report = write_user_relay_report(
+        package_file=package_file,
+        repo_root=workspace,
+        response_file=response_file,
+        report_file=report_file,
+    )
+    return report, 0 if report.get("status") != "REJECTED" else 1

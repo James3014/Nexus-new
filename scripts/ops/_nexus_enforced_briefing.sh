@@ -140,6 +140,12 @@ nexus local-assist closeout --closeout-file <CLOSEOUT.json> --workspace <REPO> -
 ```
 `local_assist_output_consumed=true` is valid only when the final output and consumption evidence explicitly reference every receipt path or task identity. Local Assist is advisory/candidate support; it is never verifier authority. If Local Assist was not invoked, report it as not invoked and do not infer contribution.
 
+For real repository context that cannot be automatically delivered, use the human-relay path:
+```bash
+nexus local-assist user-relay-validate --package-file <PACKAGE.json> --workspace <REPO> --report-file <REPORT.json>
+```
+This must remain `USER_RELAY_REQUIRED` until the user imports an external response. Automated exfiltration is forbidden; imported responses must cite every Local Assist receipt identity before `agent_consumed_proven=true` is eligible.
+
 ## 11) Active Marker
 Only after the bootstrap and wearing evidence are true may the agent switch to:
 `[NEXUS v26 ACTIVE]`
