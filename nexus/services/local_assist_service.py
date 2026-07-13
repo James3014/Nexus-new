@@ -627,7 +627,24 @@ def build_planner_snapshot(*, task_statement: str, model: str, topology: str = "
 
 
 def load_request_file(path: str | Path) -> LocalAssistRequest:
+    """Load a canonical request.v1 or translate live_smoke_task.v1 explicitly.
+
+    Foreign schemas other than the live-smoke operator spec still fail closed.
+    """
+    from nexus.services.local_assist_live_smoke import (
+        is_live_smoke_payload,
+        load_local_assist_payload,
+        translate_live_smoke_to_request,
+    )
+
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("request_must_be_object")
+    if is_live_smoke_payload(payload):
+        request = translate_live_smoke_to_request(payload)
+        request.validate()
+        return request
+    # Canonical path only — do not silently accept other foreign schemas.
     request = LocalAssistRequest.from_dict(payload)
     request.validate()
     return request

@@ -1,0 +1,16 @@
+{
+  "task_id": "real-pilot-l03-cross-file",
+  "task_family": "cross_file_dependency_advisory",
+  "task_statement": "Describe the dependency between load_request_file and translate_live_smoke_to_request. Which file owns schema translation? Advisory only.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "nexus/services/local_assist_service.py",
+    "nexus/services/local_assist_live_smoke.py"
+  ],
+  "target_file": "nexus/services/local_assist_service.py",
+  "evidence_refs": ["real_pilot:l03:service", "real_pilot:l03:smoke"],
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "expected_output_contract": "advisory_text_non_empty",
+  "local_model": "qwen2.5-coder:7b-instruct"
+}

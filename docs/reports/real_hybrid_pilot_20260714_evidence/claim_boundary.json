@@ -1,0 +1,22 @@
+{
+  "LOCAL_ONLINE_LIVE_STATUS": "IMPLEMENTED_NOT_LIVE_PROVEN_ONLINE_AUTH_BLOCKED",
+  "LOCAL_ONLY_LIVE_STATUS": "PROVEN",
+  "NEXUS_REAL_HYBRID_PAIRED_PILOT_COMPLETE": true,
+  "PAIRED_PILOT_STATUS": "HARNESS_READY_NOT_LIVE_MEASURED",
+  "VALUE_CLAIM_STATUS": "NOT_CLAIMED",
+  "five_task_live_paired_pipeline_complete": false,
+  "five_task_offline_paired_pipeline_complete": true,
+  "generalized_market_value_proven": false,
+  "git_head": "0cb49f4d0e435980fa3198b405e089fdba56c409",
+  "measurement_provenance_complete": true,
+  "online_auth_blocker": "gemini_cli_IneligibleTierError; no XAI/GROK/OPENAI keys",
+  "production_ready": false,
+  "proven_cost_reduction": false,
+  "proven_quality_improvement": false,
+  "proven_time_savings": false,
+  "proven_token_savings": false,
+  "public_claim_allowed": false,
+  "real_local_online_vertical_proven": false,
+  "real_local_only_advisor_proven": true,
+  "updated_at": "2026-07-13T22:13:34Z"
+}

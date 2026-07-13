@@ -7,12 +7,18 @@ from pathlib import Path
 from nexus.research.local_assist_paired_experiment import (
     ARM_A,
     ARM_B,
+    FIXTURE_MEASURED,
+    LOCALLY_MEASURED,
     UNAVAILABLE,
+    assert_deltas_match_stored,
     compare_arms,
     load_task_defs,
+    local_contribution_truth,
+    recompute_deltas,
     run_paired_task_injected,
     write_experiment_summary,
 )
+import pytest
 from nexus.services.local_assist_service import LocalAssistService
 from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 from nexus.services.unified_runtime import normalize_online_invoker_payload
@@ -85,10 +91,13 @@ def test_paired_arms_share_identity_and_separate_policies(tmp_path: Path) -> Non
     assert comparison["arm_a"]["local_invoked"] is False
     assert comparison["arm_b"]["local_invoked"] is True
     assert comparison["arm_b"]["local_contribution_observed"] is True
-    assert comparison["deltas"]["online_token_delta"]["quality"] == "MEASURED"
+    assert comparison["deltas"]["online_token_delta"]["quality"] == FIXTURE_MEASURED
     assert comparison["deltas"]["online_token_delta"]["value"] == -20
+    assert comparison["deltas"]["end_to_end_latency_delta"]["quality"] == LOCALLY_MEASURED
+    assert comparison["arm_a"]["total_tokens"]["quality"] == FIXTURE_MEASURED
     assert comparison["claim_eligibility"]["token_savings_claim_allowed"] is False
     assert comparison["claim_boundary"]["proven_token_savings"] is False
+    assert_deltas_match_stored(comparison)
 
 
 def test_missing_usage_is_unavailable_not_zero(tmp_path: Path) -> None:
@@ -121,3 +130,69 @@ def test_write_experiment_summary_claim_boundary(tmp_path: Path) -> None:
     data = path.read_text(encoding="utf-8")
     assert "HARNESS_READY_NOT_LIVE_MEASURED" in data
     assert "proven_token_savings" in data
+
+
+def test_local_contribution_requires_full_chain() -> None:
+    assert (
+        local_contribution_truth(
+            local_invoked=True,
+            local_output_delivered=True,
+            local_context_forwarded=True,
+            online_received_context=True,
+            online_output_delivered=True,
+        )
+        is True
+    )
+    assert (
+        local_contribution_truth(
+            local_invoked=True,
+            local_output_delivered=True,
+            local_context_forwarded=True,
+            online_received_context=False,
+            online_output_delivered=True,
+        )
+        is False
+    )
+    # Advisor mode alone is insufficient.
+    assert (
+        local_contribution_truth(
+            local_invoked=False,
+            local_output_delivered=False,
+            local_context_forwarded=False,
+            online_received_context=False,
+            online_output_delivered=True,
+        )
+        is False
+    )
+
+
+def test_recompute_deltas_fail_closed_on_incomplete() -> None:
+    with pytest.raises(ValueError, match="incomplete_arm_data"):
+        recompute_deltas({"total_tokens": {"value": 1, "quality": FIXTURE_MEASURED}}, {})
+
+
+def test_same_revision_arm_enforcement(tmp_path: Path) -> None:
+    from nexus.research.local_assist_paired_experiment import ArmResult, MetricValue
+
+    a = ArmResult(
+        arm=ARM_A,
+        task_id="t",
+        workspace_revision="rev-a",
+        local_assist_policy="disabled",
+        online_provider="fixture",
+        total_tokens=MetricValue(10, FIXTURE_MEASURED),
+        online_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+        end_to_end_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+    )
+    b = ArmResult(
+        arm=ARM_B,
+        task_id="t",
+        workspace_revision="rev-b",
+        local_assist_policy="advisor",
+        online_provider="fixture",
+        total_tokens=MetricValue(8, FIXTURE_MEASURED),
+        online_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+        end_to_end_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+    )
+    with pytest.raises(ValueError, match="arm_workspace_revision_mismatch"):
+        compare_arms(a, b)

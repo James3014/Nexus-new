@@ -1,0 +1,16 @@
+{
+  "task_id": "real-pilot-l04-regression-risk",
+  "task_family": "regression_risk_analysis",
+  "task_statement": "List two regression risks if Gateway._online_physical_allowed re-resolved workspace policy when unbound instead of failing closed. Read-only advisory.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "nexus/services/gateway.py",
+    "nexus/services/online_execution_policy.py"
+  ],
+  "target_file": "nexus/services/gateway.py",
+  "evidence_refs": ["real_pilot:l04:gateway", "real_pilot:l04:policy"],
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "expected_output_contract": "advisory_text_non_empty",
+  "local_model": "qwen2.5-coder:7b-instruct"
+}

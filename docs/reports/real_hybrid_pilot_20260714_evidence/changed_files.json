@@ -1,0 +1,9 @@
+{
+  "note": "campaign-only paths staged for commits; unrelated dirty tree preserved",
+  "tracked_diff_names": [
+    "nexus/research/local_assist_paired_experiment.py",
+    "nexus/services/local_assist_service.py",
+    "scripts/engine/commands/local_assist_actions.py",
+    "tests/research/test_local_assist_paired_experiment.py"
+  ]
+}

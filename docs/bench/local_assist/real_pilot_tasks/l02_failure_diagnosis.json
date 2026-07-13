@@ -1,0 +1,16 @@
+{
+  "task_id": "real-pilot-l02-failure-diagnosis",
+  "task_family": "bounded_failure_diagnosis",
+  "task_statement": "Diagnose why a LocalAssistRequest with schema nexus.local_assist.live_smoke_task.v1 would fail validate() if loaded via from_dict without translation. Do not propose file patches.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "docs/bench/local_assist/gate2_live_smoke_task.json",
+    "nexus/services/local_assist_live_smoke.py"
+  ],
+  "target_file": "nexus/services/local_assist_live_smoke.py",
+  "evidence_refs": ["real_pilot:l02:schema", "real_pilot:l02:translator"],
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "expected_output_contract": "advisory_text_non_empty",
+  "local_model": "qwen2.5-coder:7b-instruct"
+}

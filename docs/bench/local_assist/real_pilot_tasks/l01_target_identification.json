@@ -1,0 +1,12 @@
+{
+  "task_id": "real-pilot-l01-target-id",
+  "task_family": "target_file_identification",
+  "task_statement": "Identify the single bounded file that defines the Local Assist live-smoke operator fixture schema and name one risk if allowed_files were empty.",
+  "workspace_revision": "HEAD",
+  "allowed_files": ["docs/bench/local_assist/gate2_live_smoke_task.json"],
+  "evidence_refs": ["real_pilot:l01:fixture", "real_pilot:l01:allowed_files"],
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "expected_output_contract": "advisory_text_non_empty",
+  "local_model": "qwen2.5-coder:7b-instruct"
+}

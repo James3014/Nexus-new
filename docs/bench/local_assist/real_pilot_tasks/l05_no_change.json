@@ -1,0 +1,16 @@
+{
+  "task_id": "real-pilot-l05-no-change",
+  "task_family": "already_fixed_or_no_change",
+  "task_statement": "Given REQUEST_SCHEMA is already nexus.local_assist.request.v1 and live-smoke uses an explicit translator, classify whether further schema changes are required for the smoke fixture path. Prefer no-change if already correct.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "nexus/services/local_assist_live_smoke.py",
+    "docs/bench/local_assist/gate2_live_smoke_task.json"
+  ],
+  "target_file": "nexus/services/local_assist_live_smoke.py",
+  "evidence_refs": ["real_pilot:l05:translator", "real_pilot:l05:fixture"],
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "expected_output_contract": "advisory_text_non_empty",
+  "local_model": "qwen2.5-coder:7b-instruct"
+}

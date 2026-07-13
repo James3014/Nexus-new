@@ -7,6 +7,10 @@ import shlex
 from typing import Any
 
 from nexus.services.local_assist_closeout import run_local_assist_closeout
+from nexus.services.local_assist_live_smoke import (
+    is_live_smoke_payload,
+    translate_live_smoke_to_request,
+)
 from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
 from nexus.services.local_assist_universal_interface import (
     build_universal_agent_interface,
@@ -26,14 +30,21 @@ def run_local_assist_command(
     verifier_command: str | None = None,
 ) -> tuple[dict[str, Any], int]:
     payload = json.loads(Path(task_file).read_text(encoding="utf-8"))
-    request = LocalAssistRequest.from_dict(payload)
+    root = str(Path(workspace).expanduser())
+    if is_live_smoke_payload(payload):
+        # Explicit operator-spec → product request translation (not silent from_dict).
+        if action != "advisor":
+            raise ValueError("live_smoke_action_must_be_advisor")
+        request = translate_live_smoke_to_request(payload, workspace_root=root, action=action)
+    else:
+        request = LocalAssistRequest.from_dict(payload)
     command = request.verifier_command
     if verifier_command is not None:
         command = tuple(shlex.split(verifier_command))
     request = replace(
         request,
         action=action,
-        workspace_root=str(Path(workspace).expanduser()),
+        workspace_root=root,
         target_file=target_file if target_file is not None else request.target_file,
         allowed_files=allowed_files or request.allowed_files,
         verifier_command=command,

@@ -1,0 +1,19 @@
+{
+  "schema": "nexus.measurement_integrity.v1",
+  "provenance_enum": [
+    "FIXTURE_MEASURED",
+    "PROVIDER_REPORTED",
+    "LOCALLY_MEASURED",
+    "ESTIMATED",
+    "UNAVAILABLE",
+    "NOT_APPLICABLE"
+  ],
+  "delta_recompute_checked_rows": 5,
+  "delta_recompute_all_match": true,
+  "local_contribution_rule": "local_invoked && local_output_delivered && local_context_forwarded && online_received_context && online_output_delivered",
+  "injected_not_real_provider": true,
+  "claim_boundary": {
+    "proven_token_savings": false,
+    "public_claim_allowed": false
+  }
+}
