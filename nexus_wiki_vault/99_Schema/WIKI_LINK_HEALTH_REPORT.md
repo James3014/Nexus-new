@@ -6,7 +6,8 @@ lifecycle: current
 authority: operational
 owner: nexus-core
 verified_at: '2026-07-13'
-verified_against_commit: 957cd19c744d168ff050667b611adca5fb20d56f
+content_verified_against_commit: a2ae57ab96a9ddb0243858f4f2c1776709511af5
+document_updated_in_commit: fecda71e417c453a7ea2ae0229478784921c362a
 ---
 
 # Wiki Link Health Report
@@ -115,6 +116,18 @@ No false positives were found in the canonical pages (none of the new pages cont
 | `nexus/engine/committee_orchestrator.py` | MISSING | No such file; committee is at `nexus/services/local_heal/committee_orchestrator.py` |
 | `nexus/services/cloud_agent_adapter.py` | MISSING | No such file; adapter is at `nexus/services/cloud_agent_cli_adapter.py` |
 | `nexus/core/candidate_isolation.py` | MISSING | No such file; isolation is at `nexus/services/local_heal/isolated_local_solve_loop.py` |
+
+### Path count summary
+
+| Metric | Count |
+|--------|-------|
+| Documented path rows (EXISTS) | 17 |
+| Documented path rows (MISSING legacy) | 10 |
+| Total documented path rows | 27 |
+| Verified caller relationships | 12 |
+| Unresolved authority collisions | 3 |
+
+Physical file existence has been checked for all 27 documented paths. Caller and authority relationships remain only partially verified: 12 verified caller relationships across 16 mapped components. Three authority collisions remain unresolved and require architecture decisions.
 
 ### Unresolved authority collisions
 

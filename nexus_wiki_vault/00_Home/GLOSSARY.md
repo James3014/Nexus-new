@@ -6,7 +6,8 @@ lifecycle: current
 authority: normative
 owner: nexus-core
 verified_at: '2026-07-13'
-verified_against_commit: 957cd19c744d168ff050667b611adca5fb20d56f
+content_verified_against_commit: a2ae57ab96a9ddb0243858f4f2c1776709511af5
+document_updated_in_commit: fecda71e417c453a7ea2ae0229478784921c362a
 source_of_truth: repository evidence and current runtime reports
 confidence: high
 ---
