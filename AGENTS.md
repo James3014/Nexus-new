@@ -5,12 +5,27 @@
 ## 🎯 Semantic Completion Criteria
 - **Behavioral Integrity**: The requested functionality is verified through empirical testing.
 - **Structural Soundness**: Changes adhere to the local codebase conventions and architectural patterns.
-- **Documentation Alignment**: Supporting documentation and tests are updated to reflect the new state.
+- **Documentation Alignment**: Update an existing authoritative document only when the task changes a durable contract, operator procedure, or public interface. Documentation alignment does not by itself authorize creating a new report.
 
 ## 📊 Evidence Reporting Format
-- **Change Log**: List of modified files and high-level summary of changes.
-- **Verification Evidence**: Specific commands executed and their key outputs (e.g., test results, status checks).
-- **Residual Debt**: Any known issues or follow-up tasks explicitly stated.
+- **Default surface**: Report evidence in the final agent response, commit message, pull-request description, or an existing structured receipt. Do not create a Markdown/JSON report file merely to satisfy evidence reporting.
+- **Change Log**: List modified files and summarize the behavioral change.
+- **Verification Evidence**: List the exact commands executed and their key outputs (e.g., test results, status checks).
+- **Residual Debt**: State known issues and follow-up work explicitly.
+
+## 🧾 Persistent Artifact Admission Policy
+- **Default is no new persistent document**: A task does not create a file under `docs/reports/`, `docs/plans/`, `docs/arch/`, `docs/testing/`, the Wiki, or an ADR directory unless an admission condition below is met.
+- **Admission conditions**: A new persistent artifact is allowed only when at least one is true:
+  1. The user or task specification explicitly requires that exact artifact.
+  2. Runtime, CI, release, or another machine consumer requires the artifact.
+  3. The artifact defines a durable contract, ADR, runbook, operator entrypoint, or current SSOT that has no existing authoritative home.
+  4. The task is a dedicated audit, inventory, indexing, migration, or closure task whose primary deliverable is the artifact.
+  5. Cross-session handoff requires persistence and no existing task/receipt store can represent it.
+- **Prefer updating authority**: Update the current authoritative document instead of creating `v2`, `final`, `updated`, `corrected`, `closeout`, or parallel summaries. Historical versions belong in an explicit archive only when the task authorizes archival work.
+- **No self-authorizing reports**: Requirements in this file to provide evidence, retrieve lessons, align documentation, or close a task are not permission to create a report file.
+- **No recursive evidence artifacts**: Do not create a report solely to document creation of another report, inventory, receipt, or closeout artifact.
+- **Required metadata**: Any admitted persistent document must identify its purpose, authority (`current`, `reference`, or `historical`), owner, status, and the evidence/commit it describes. Claims such as `COMPLETE`, `SEALED`, `PRODUCTION READY`, or `PUBLIC CLAIM ALLOWED` require the corresponding physical gate evidence.
+- **Task-card enforcement**: If a task requests a new artifact, its allowed path and filename must appear in the task's Allowed files. Otherwise return evidence in the final response only.
 
 ## 🛡️ Agent Capability Boundaries
 - **allowed_paths**: Project root, scripts/ops/, nexus_wiki_vault/, docs/
@@ -18,8 +33,11 @@
 - **max_files_touched**: 10 (Strict Limit for single task)
 
 ## 🔄 Failure-to-Lesson Writeback
-- Every failure encountered during the task MUST be analyzed for a "lesson".
-- These lessons MUST be written back to the corresponding "Learning Closure Matrix" or ADR before task finalization.
+- Analyze failures during the task, but persist a lesson only when the failure is novel, repeatable, and has a concrete prevention rule or verification contract that will benefit future tasks.
+- Do not persist routine command typos, shell quoting mistakes, transient tool failures, one-off environment noise, user-corrected misunderstandings, or failures already covered by an existing lesson.
+- Prefer appending one concise entry to the existing Learning Closure Matrix or structured learning ledger. Do not create a new report for a lesson.
+- Create or update an ADR only for a durable cross-module architectural decision with alternatives and consequences; an implementation failure alone is not an ADR.
+- When no persistent writeback qualifies, state `no durable lesson writeback required` in the final response.
 
 ## 🔎 Pre-Task Lesson Retrieval
 - Before non-trivial tasks, agents MUST perform targeted retrieval, not full-corpus reading.
