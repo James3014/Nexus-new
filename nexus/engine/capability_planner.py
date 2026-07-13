@@ -19,6 +19,7 @@ from nexus.engine.planner.skill_mount_evidence import (
 )
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
+from nexus.engine.local_assist_recommendation import build_local_assist_recommendation
 from nexus.research.isolation_policy import decide_research_isolation
 
 PENDING_EXECUTOR_CAPABILITIES: set[str] = set()
@@ -836,6 +837,12 @@ class CapabilityPlanner:
         )
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
+        signal_snapshot["route_truth_source"] = "CapabilityPlanner"
+        signal_snapshot["local_assist_recommendation"] = build_local_assist_recommendation(
+            task_desc=task_desc,
+            task_type=task_type,
+            planner_snapshot=signal_snapshot,
+        )
         signal_snapshot["research_isolation_policy"] = {
             "level": research_isolation.level.value,
             "goal_visibility": research_isolation.goal_visibility.value,
