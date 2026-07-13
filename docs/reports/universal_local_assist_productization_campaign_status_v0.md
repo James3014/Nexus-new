@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-`M4-A_PROVIDER_NEUTRAL_CLOUD_AGENT_CONTRACT`
+`M5-A_OUTCOME_CONTRIBUTION_CONTRACT`
 
 ## Completed milestones
 
@@ -14,10 +14,13 @@
 - `PLANNER_AUTOMATIC_CANDIDATE_CANARY_PROVEN` — `bce01fd0b`
 - `PLANNER_AUTOMATIC_VERIFIED_SUBTASK_CANARY_PROVEN` — `cfa1693cc`
 - `PLANNER_DRIVEN_LOCAL_ASSIST_PROVEN` — `111eab2e0`
+- `CLOUD_AGENT_PROVIDER_CONTRACT_PROVEN` — `b33e706d7`
+- `CLOUD_LOCAL_STAGE_CHAIN_CONTRACT_PROVEN` — `e715b60cf` (deterministic injected contract only; real provider not proven)
+- `CLOUD_LOCAL_QUOTA_DEGRADATION_PROVEN` — `fa963c4af`
 
 ## Current commit
 
-`111eab2e0` — `feat(local-assist): prove planner-driven bounded dispatch`
+`fa963c4af` — `feat(cloud-assist): add quota-aware degradation policy`
 
 ## Evidence
 
@@ -29,6 +32,8 @@
 - Candidate canary tests → `4 passed`; candidate isolation, source revision, verifier precondition, formal mutation guard, candidate hash match, and Agent adoption receipt are enforced; formal workspace remains unchanged.
 - Verified-subtask canary tests → `4 passed`; isolated apply, deterministic verifier pass/fail, rollback reference, Agent review, and terminal verifier failure are enforced; fallback remains disabled.
 - Bounded dispatch tests → `6 passed`; skip/advisor/candidate/verified-subtask dispatch share recommendation receipt, task identity, workspace revision, and Agent authority; no formal workspace mutation.
+- Cloud/local stage-chain tests → `5 passed`; stages 1–5, explicit shadow skips, visible local fallback, provider usage/latency, lineage, and no-fake-success failure behavior are covered. Injected provider evidence remains test-only; no real cloud claim.
+- Quota policy tests → `5 passed`; HEALTHY, CONSTRAINED, EXHAUSTED, UNKNOWN, and no-local fail-closed paths preserve reason chains and prohibit silent provider switching.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -40,7 +45,8 @@
 ## Current blockers
 
 - Existing dirty-tree regression failures in `test_capability_routing_contracts.py`; not caused by the M3-A files and intentionally left untouched.
+- No already-authorized real cloud provider is available in this environment; provider-neutral injected fallback proves the contract only. `real_cloud_proven=false` remains enforced.
 
 ## Next automatic action
 
-Implement M4-A provider-neutral cloud Agent contract: define request/response/adapter boundaries, preserve candidate isolation and route authority, and keep fake providers out of real-cloud claims.
+Implement M5-A contribution contract: require traceable causal evidence for adoption, localization, verification, rejection, or retry; never infer contribution from receipt existence or consumption alone.
