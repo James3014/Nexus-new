@@ -1,9 +1,53 @@
+---
+title: Nexus v9 Capability Specification Matrix
+type: capability-matrix-snapshot
+status: frozen
+lifecycle: historical_validation_snapshot
+authority: historical_evidence
+snapshot_version: v9
+validation_scope: original_v9_commands_and_artifacts
+current_state_source: ../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+authority_manifest: DOC_AUTHORITY_MANIFEST.yaml
+confidence: medium
+---
+
 # 🧬 16_CAPABILITY_SPEC_MATRIX: Nexus v9 能力規格矩陣 (可執行校準版)
+
+> [!warning] Historical capability validation snapshot
+>
+> Every `PASSED` value in this document is bounded to the original Nexus v9
+> validation commands, artifacts, environment, and observation date.
+>
+> These values do not establish current runtime invocation, current route
+> availability, present provider behavior, current production readiness, or
+> current capability causality.
+>
+> `docs/EXEC_LIVE_STATUS.md` is now a frozen historical status source and
+> cannot be used as present capability evidence.
 
 ## 0. 矩陣定義 (Matrix Metadata)
 - **版本**: v9.0.0-Stable
 - **目標**: 確保 Nexus 在自主循環中具備「自我觀測」與「精準校準」的能力，杜絕幻覺與過度執行。
 - **校準入口**: `uv run scripts/engine/nexus_cli.py nexus:calibrate`
+
+## Validation scope
+
+The table below preserves historical v9 results. Interpret:
+
+```text
+PASSED = passed within the original documented v9 validation scope
+```
+
+Do not interpret:
+
+```text
+PASSED = currently active, currently invoked, production-ready, or verified
+against the present runtime
+```
+
+Do not change individual `PASSED` cells.
+Do not rerun commands.
+Do not replace old commands with current guesses.
 
 ---
 

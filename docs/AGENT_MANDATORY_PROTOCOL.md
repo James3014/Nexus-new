@@ -1,6 +1,35 @@
+---
+title: AGENT 強制執行規約 v2.9
+type: agent-protocol-snapshot
+status: review_required
+lifecycle: legacy
+authority: non_normative
+snapshot_version: v2.9
+current_state_source: ../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+authority_manifest: DOC_AUTHORITY_MANIFEST.yaml
+confidence: medium
+---
+
 # AGENT 強制執行規約 v2.9
 
-[NEXUS v26 BOOTSTRAP-CANDIDATE]
+> [!warning] Legacy Agent protocol snapshot
+>
+> This v2.9 protocol is not the complete current normative Agent policy.
+>
+> Evidence discipline, receipt requirements, completion gates, and
+> anti-hallucination rules may still be useful within their original scope,
+> but references to Nexus v26, mandatory runtime activation, provider
+> behavior, bootstrap state, or execution topology require current physical
+> verification.
+>
+> Do not use this document alone to claim that an Agent is currently
+> "wearing Nexus," that a route is active, or that a capability is available.
+>
+> Current Agent protocol authority has not been resolved to a single canonical file.
+> For current state, see:
+> [`../nexus_wiki_vault/00_Home/CURRENT_STATE.md`](../nexus_wiki_vault/00_Home/CURRENT_STATE.md)
+
+[NEXUS v26 HISTORICAL SNAPSHOT]
 
 ## 0) 目的
 本規約強制 Gemini CLI / Antigravity / Codex / 其他 Agent 以「穿 Nexus」模式工作，但禁止在證據不足時直接宣稱 ACTIVE。

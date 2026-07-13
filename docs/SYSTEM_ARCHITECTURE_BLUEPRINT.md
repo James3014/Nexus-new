@@ -5,8 +5,14 @@ date: 2026-03-17
 domain: Architecture/Design
 level: Verified
 priority: Critical
-status: Active
+status: frozen
+lifecycle: historical_architecture_snapshot
+authority: historical_reference
 era: ERA-C
+snapshot_version: v9
+superseded_for_current_architecture_by: ../nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+current_state_source: ../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+authority_manifest: DOC_AUTHORITY_MANIFEST.yaml
 tags:
 - Nexus
 - Architecture
@@ -18,9 +24,25 @@ type: specification
 prescription_drill: Architecture Integrity Audit
 safe_stage: Protected Spec
 scenario_diagnosis: Defining the industrial-grade orchestration logic and phase-based lifecycle for Nexus v9.
+confidence: high
 ---
 
 # 🛡️ Nexus System Architecture & Lifecycle Blueprint (v9)
+
+> [!warning] Historical architecture snapshot
+>
+> This document describes the Nexus v9 architecture and is preserved for
+> historical reconstruction only.
+>
+> It is not the current Nexus architecture SSoT and must not be used to infer
+> present runtime wiring, readiness, route authority, provider behavior,
+> capability status, or production state.
+>
+> Current operational state:
+> [`../nexus_wiki_vault/00_Home/CURRENT_STATE.md`](../nexus_wiki_vault/00_Home/CURRENT_STATE.md)
+>
+> Newer architecture reference:
+> [`../nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md`](../nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md)
 
 > [!abstract] 核心意圖
 > 本文件定義 Nexus 系統的工業級架構與生命週期規範。v9 正式化 DX/XD 變體、quick/direct/full/conversation 模式與 X 階段 provider fallback，確保複雜任務的原子化執行、知識回灌與自動化治理。
@@ -298,5 +320,5 @@ Long-term Learning & Benchmark Systems
 ---
 %% 
 由 Muse-Core Lvl 15 總體架構師於 2026-03-17 完成 Nexus v9 終極藍圖寫入。
-本文件為系統開發與執行的唯一事實來源 (SSoT)。
+本文件曾作為 Nexus v9 時期的系統開發與執行事實來源；其權威範圍已凍結於該歷史版本。
 %%

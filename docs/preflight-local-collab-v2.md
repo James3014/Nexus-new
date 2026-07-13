@@ -1,4 +1,25 @@
-# [NEXUS v26 ACTIVE] Preflight Before Local Collaboration Roadmap v2
+---
+title: Preflight Before Local Collaboration Roadmap v2
+type: roadmap-snapshot
+status: frozen
+lifecycle: historical_plan
+authority: non_normative
+snapshot_version: v2
+current_state_source: ../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+authority_manifest: DOC_AUTHORITY_MANIFEST.yaml
+confidence: medium
+---
+
+# [NEXUS v26 HISTORICAL] Preflight Before Local Collaboration Roadmap v2
+
+> [!warning] Historical roadmap
+>
+> This roadmap records a Nexus v26 collaboration-preflight design.
+> It is not evidence that the listed components, gates, routes, rollback
+> mechanisms, or collaboration flow are active in the current runtime.
+>
+> Preserve the checklist as historical planning material.
+> Revalidate every referenced component before using it in a current task.
 
 **Status**: In Progress
 **Date**: 2026-06-15
