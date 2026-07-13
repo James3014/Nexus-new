@@ -6,11 +6,11 @@
 - No files are moved, deleted, staged, or archived by this artifact.
 
 ## Summary
-- Reports scanned: `2049`
+- Reports scanned: `2081`
 - Active Zero Trust V2 reports excluded: `49`
-- Retention class counts: `{'archive_candidate': 26, 'bounded_handoff': 8, 'experiment_evidence': 20, 'generated_evidence': 19, 'historical_preserved': 670, 'keep_current_entrypoint': 26, 'keep_human_entrypoint': 13, 'keep_review': 71, 'supporting_asset': 11, 'unknown_hold': 1185}`
-- Topic counts: `{'ENGINEERING_HYGIENE': 12, 'HEEP': 37, 'LEGACY': 4, 'OPTIMIZATION': 9, 'PUBLIC_CLAIM': 16, 'SF': 649, 'UNKNOWN_HOLD': 1322}`
-- Report area counts: `{'archive': 670, 'asset': 11, 'experiment': 20, 'generated': 19, 'handoff': 8, 'root': 1321}`
+- Retention class counts: `{'archive_candidate': 26, 'bounded_handoff': 8, 'experiment_evidence': 20, 'generated_evidence': 19, 'historical_preserved': 670, 'keep_current_entrypoint': 26, 'keep_human_entrypoint': 13, 'keep_review': 71, 'supporting_asset': 11, 'unknown_hold': 1217}`
+- Topic counts: `{'ENGINEERING_HYGIENE': 12, 'HEEP': 37, 'LEGACY': 4, 'OPTIMIZATION': 9, 'PUBLIC_CLAIM': 16, 'SF': 649, 'UNKNOWN_HOLD': 1354}`
+- Report area counts: `{'archive': 670, 'asset': 11, 'experiment': 20, 'generated': 19, 'handoff': 8, 'root': 1326, 'unknown': 27}`
 
 ## Keep Rules
 - Keep current decision, runtime apply, post-apply smoke, and human-readable summary/index files at `docs/reports` root.
@@ -129,7 +129,7 @@
 - `docs/reports/M4_verdict_red_20260619.md` (3927 bytes)
 - `docs/reports/NEXUS_ANTIGRAVITY_CLOSURE_LEDGER_2026-05-22.json` (29626 bytes)
 - `docs/reports/NEXUS_ANTIGRAVITY_FULL_PREREQUISITE_CLOSEOUT_2026-05-22.json` (2910 bytes)
-- ... plus `1145` more unknown rows in the JSON inventory.
+- ... plus `1177` more unknown rows in the JSON inventory.
 
 ## Execution Gates
 - Do not move Zero Trust V2 files while that agent is active.
