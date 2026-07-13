@@ -109,6 +109,18 @@ duplicate_authority_candidates:
     authority: historical_reference
     current_runtime_authority: false
 
+  - paths:
+      - docs/2026-03-17_Nexus_重構PR任務包_超細版.md
+      - docs/archive/ERA-A/2026-03-17_Nexus_重構PR任務包_超細版.md
+    original_hash_relation: identical
+    current_relation: canonical_with_redirect
+    status: resolved
+    canonical_path: docs/archive/ERA-A/2026-03-17_Nexus_重構PR任務包_超細版.md
+    redirect_path: docs/2026-03-17_Nexus_重構PR任務包_超細版.md
+    canonical_role: historical_pr_task_pack
+    authority: historical_reference
+    current_runtime_authority: false
+
 provisional_worktree_evidence:
   rule: >
     Files that are modified or untracked may be inspected as provisional
