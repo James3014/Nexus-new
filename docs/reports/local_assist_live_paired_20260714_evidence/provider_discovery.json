@@ -1,9 +1,121 @@
 {
   "schema": "nexus.online_provider_discovery.v1",
+  "discovery_order": [
+    "grok",
+    "agy",
+    "codex",
+    "openai",
+    "gemini"
+  ],
+  "results": [
+    {
+      "provider": "grok",
+      "status": "READY",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": true,
+      "executable_path": "/Users/jameschen/.grok/bin/grok",
+      "raw_snippet": "\nNEXUS_PROBE_OK\n",
+      "authorization_source": "cli_task_policy",
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authentication_result": "ok",
+      "minimal_probe_result": "output_delivered",
+      "error_category": null,
+      "command": [
+        "/Users/jameschen/.grok/bin/grok"
+      ],
+      "decision_reason": "online_execution_authorized",
+      "latency_ms": 13999
+    },
+    {
+      "provider": "agy",
+      "status": "READY",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": true,
+      "executable_path": "/Users/jameschen/.local/bin/agy",
+      "raw_snippet": "\n{\n  \"status\": \"APPROVED\",\n  \"summary\": \"NEXUS_PROBE_OK\u3002\u5df2\u8b80\u53d6 auto-skill \u898f\u683c\uff0c\u4e26\u78ba\u8a8d Git \u72c0\u614b\u3002\u76ee\u524d main \u5206\u652f\u6709\u672a\u66ab\u5b58\u53ca\u672a\u8ffd\u8e64\u4e4b\u8b8a\u66f4\uff0c\u8acb\u554f\u60a8\u662f\u5426\u9700\u8981\u9032\u884c Git \u63d0\u4ea4\uff1f\",\n  \"violations\": [],\n  \"rejection_contract\": {\n    \"rejection_class\": \"style_contract_violation\",\n    \"minimal_counterexample\": \"\u7121\",\n    \"repair_constraint\": \"\u7121\",\n    \"forbidden_repeat_signature\": \"\u7121\"\n  }\n}\n",
+      "authorization_source": "cli_task_policy",
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authentication_result": "ok",
+      "minimal_probe_result": "output_delivered",
+      "error_category": null,
+      "command": [
+        "/Users/jameschen/.local/bin/agy"
+      ],
+      "decision_reason": "online_execution_authorized",
+      "latency_ms": 88877
+    },
+    {
+      "provider": "codex",
+      "status": "PROVIDER_ERROR",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": false,
+      "executable_path": "/Users/jameschen/.npm-global/bin/codex",
+      "raw_snippet": "provider_subprocess_failed\nprovider_subprocess_failed",
+      "authorization_source": "cli_task_policy",
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authentication_result": "failed",
+      "minimal_probe_result": "failed",
+      "error_category": "PROVIDER_ERROR",
+      "command": [
+        "/Users/jameschen/.npm-global/bin/codex"
+      ],
+      "decision_reason": "online_execution_authorized",
+      "latency_ms": 3570
+    },
+    {
+      "provider": "openai",
+      "status": "PROVIDER_ERROR",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": false,
+      "executable_path": "/Users/jameschen/.npm-global/bin/openai",
+      "raw_snippet": "\nUsage: openai <subcommand>\n\nSubcommands:\n  migrate  Run migrations to update to the latest major SDK version\n\n",
+      "authorization_source": "cli_task_policy",
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authentication_result": "failed",
+      "minimal_probe_result": "failed",
+      "error_category": "PROVIDER_ERROR",
+      "command": [
+        "/Users/jameschen/.npm-global/bin/openai"
+      ],
+      "decision_reason": "online_execution_authorized",
+      "latency_ms": 55
+    },
+    {
+      "provider": "gemini",
+      "status": "READY",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": true,
+      "executable_path": "/Users/jameschen/.npm-global/bin/gemini",
+      "raw_snippet": "\nNEXUS_PROBE_OK\n",
+      "authorization_source": "cli_task_policy",
+      "transport": "gateway_compatibility",
+      "selection_source": "explicit_request",
+      "authentication_result": "ok",
+      "minimal_probe_result": "output_delivered",
+      "error_category": null,
+      "command": [
+        "/Users/jameschen/.npm-global/bin/gemini"
+      ],
+      "decision_reason": "online_execution_authorized",
+      "latency_ms": 14502
+    }
+  ],
+  "selected_provider": "grok",
+  "timestamp": "2026-07-13T23:25:19Z",
   "workspace_policy": {
     "default_online_policy": "deny",
     "approved_online_providers": [
       "gemini",
+      "agy",
       "grok",
       "codex",
       "openai"
@@ -14,90 +126,5 @@
     "policy_path": "/Users/jameschen/Workspace/nexus/.nexus/online_execution_policy.json",
     "policy_present": true
   },
-  "discovery_order": [
-    "gemini",
-    "grok",
-    "codex",
-    "openai"
-  ],
-  "results": [
-    {
-      "provider": "gemini",
-      "command": [
-        "/Users/jameschen/.npm-global/bin/gemini"
-      ],
-      "transport": "gateway_compatibility",
-      "selection_source": "explicit_request",
-      "authorization_source": "cli_task_policy",
-      "authentication_result": "failed",
-      "minimal_probe_result": "failed",
-      "error_category": "UNSUPPORTED_CLIENT",
-      "status": "UNSUPPORTED_CLIENT",
-      "executable_path": "/Users/jameschen/.npm-global/bin/gemini",
-      "preflight_status": "ONLINE_READY",
-      "physical_invocation_allowed": true,
-      "output_delivered": false,
-      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chu",
-      "latency_ms": 19750
-    },
-    {
-      "provider": "grok",
-      "command": [
-        "/Users/jameschen/.grok/bin/grok"
-      ],
-      "transport": "registered_cli",
-      "selection_source": "explicit_request",
-      "authorization_source": "cli_task_policy",
-      "authentication_result": "failed",
-      "minimal_probe_result": "failed",
-      "error_category": "UNAUTHENTICATED",
-      "status": "UNAUTHENTICATED",
-      "executable_path": "/Users/jameschen/.grok/bin/grok",
-      "preflight_status": "ONLINE_READY",
-      "physical_invocation_allowed": true,
-      "output_delivered": false,
-      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: _GaxiosError: Resource has been exhausted (e.g. check quota).\n    at Gaxios._request (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:20961:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async _OAuth2Client.requestAsync (file://",
-      "latency_ms": 14680
-    },
-    {
-      "provider": "codex",
-      "command": [
-        "/Users/jameschen/.npm-global/bin/codex"
-      ],
-      "transport": "registered_cli",
-      "selection_source": "explicit_request",
-      "authorization_source": "cli_task_policy",
-      "authentication_result": "failed",
-      "minimal_probe_result": "failed",
-      "error_category": "UNAUTHENTICATED",
-      "status": "UNAUTHENTICATED",
-      "executable_path": "/Users/jameschen/.npm-global/bin/codex",
-      "preflight_status": "ONLINE_READY",
-      "physical_invocation_allowed": true,
-      "output_delivered": false,
-      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: _GaxiosError: Resource has been exhausted (e.g. check quota).\n    at Gaxios._request (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:20961:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async _OAuth2Client.requestAsync (file://",
-      "latency_ms": 14784
-    },
-    {
-      "provider": "openai",
-      "command": [
-        "/Users/jameschen/.npm-global/bin/openai"
-      ],
-      "transport": "registered_cli",
-      "selection_source": "explicit_request",
-      "authorization_source": "cli_task_policy",
-      "authentication_result": "failed",
-      "minimal_probe_result": "failed",
-      "error_category": "UNAUTHENTICATED",
-      "status": "UNAUTHENTICATED",
-      "executable_path": "/Users/jameschen/.npm-global/bin/openai",
-      "preflight_status": "ONLINE_READY",
-      "physical_invocation_allowed": true,
-      "output_delivered": false,
-      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: _GaxiosError: Resource has been exhausted (e.g. check quota).\n    at Gaxios._request (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:20961:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async _OAuth2Client.requestAsync (file://",
-      "latency_ms": 14048
-    }
-  ],
-  "selected_provider": null,
-  "timestamp": "2026-07-13T23:12:50Z"
+  "probe_method": "gateway_ask_structured_with_bound_decision_and_provider_cli"
 }

@@ -31,24 +31,35 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "binary_env": "NEXUS_GEMINI_BIN",
         "command_env": "NEXUS_GEMINI_COMMAND",
         "binary_name": "gemini",
+        "print_flag": "-p",
+    },
+    "agy": {
+        "transport": "subprocess",
+        "binary_env": "NEXUS_AGY_BIN",
+        "command_env": "NEXUS_AGY_COMMAND",
+        "binary_name": "agy",
+        "print_flag": "-p",
     },
     "grok": {
         "transport": "subprocess",
         "binary_env": "NEXUS_GROK_BIN",
         "command_env": "NEXUS_GROK_COMMAND",
         "binary_name": "grok",
+        "print_flag": "-p",
     },
     "codex": {
         "transport": "subprocess",
         "binary_env": "NEXUS_CODEX_BIN",
         "command_env": "NEXUS_CODEX_COMMAND",
         "binary_name": "codex",
+        "print_flag": "exec",
     },
     "openai": {
         "transport": "subprocess",
         "binary_env": "NEXUS_OPENAI_BIN",
         "command_env": "NEXUS_OPENAI_COMMAND",
         "binary_name": "openai",
+        "print_flag": "",
     },
 }
 
@@ -598,10 +609,22 @@ def build_subprocess_online_invoker(
                 )
                 capability_context_forwarded = True
         stdin = f"{prompt}\n\n[PAYLOAD]\n{payload}" if payload else prompt
+        # Print-mode CLIs (grok/agy/gemini/codex) take prompt as argv when the
+        # resolved command is bare binary only. Explicit multi-arg commands
+        # (tests, NEXUS_*_COMMAND) keep stdin prompt delivery.
+        meta = ONLINE_CLI_SPEC_REGISTRY.get(spec.provider, {})
+        print_flag = str(meta.get("print_flag") or "").strip()
+        argv = list(spec.command)
+        if print_flag and len(argv) == 1:
+            # e.g. grok -p "<prompt>", agy -p "<prompt>", codex exec "<prompt>"
+            argv = [argv[0], print_flag, stdin]
+            stdin_input = None
+        else:
+            stdin_input = stdin
         try:
             result = runner(
-                list(spec.command),
-                input=stdin,
+                argv,
+                input=stdin_input,
                 capture_output=True,
                 text=True,
                 timeout=spec.timeout_sec,

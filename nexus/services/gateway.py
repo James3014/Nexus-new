@@ -6,6 +6,7 @@ import json
 import logging
 import fcntl
 import re
+import shutil
 import tempfile
 import os
 import sys
@@ -705,6 +706,66 @@ class BattlesuitGateway:
         # alone — callers must bind via guard_physical_online / bind_online_execution_decision.
         return False
 
+    def _ask_via_registered_print_cli(
+        self,
+        *,
+        content: str,
+        sys_msg: str,
+        provider: str,
+        timeout_sec: int,
+        gateway_telemetry: dict[str, Any],
+    ) -> tuple[dict[str, Any], str]:
+        """Invoke a registered print-mode Online CLI (grok/agy/codex) with bound authorization."""
+        from nexus.services.unified_runtime import build_registered_online_invoker
+
+        invoker = build_registered_online_invoker(provider, timeout_sec=float(timeout_sec))
+        prompt = f"{sys_msg}\n\n{content}" if sys_msg else content
+        context = {
+            "task_id": str(os.getenv("NEXUS_TASK_ID") or "gateway-print"),
+            "online_prompt": prompt,
+            "online_payload": "",
+            "online_execution_decision": (
+                self._online_execution_decision.to_dict()
+                if hasattr(self._online_execution_decision, "to_dict")
+                else getattr(self, "_online_execution_decision", None)
+            ),
+            "injected_transport": False,
+        }
+        # Ensure decision is a dict for decision_from_context
+        if context["online_execution_decision"] is not None and not isinstance(
+            context["online_execution_decision"], Mapping
+        ):
+            d = self._online_execution_decision
+            if d is not None and hasattr(d, "to_dict"):
+                context["online_execution_decision"] = d.to_dict()
+            elif isinstance(d, Mapping):
+                context["online_execution_decision"] = dict(d)
+        payload = invoker(context)
+        raw = str(payload.get("raw_response") or payload.get("response") or "")
+        if not payload.get("output_delivered"):
+            err = {
+                "status": "FAILED",
+                "error": payload.get("error") or "online_non_delivery",
+                "error_category": str(payload.get("error") or "provider_error"),
+                "provider": provider,
+                "provider_call_count": int(payload.get("provider_call_count") or 0),
+                "invoked": bool(payload.get("invoked")),
+                "usage": payload.get("usage") or {},
+                **gateway_telemetry,
+            }
+            return err, raw or str(payload.get("error") or "online_non_delivery")
+        ok = {
+            "status": "APPROVED",
+            "provider": provider,
+            "provider_call_count": int(payload.get("provider_call_count") or 1),
+            "invoked": True,
+            "output_delivered": True,
+            "usage": payload.get("usage") or {},
+            "raw_response": raw,
+            **gateway_telemetry,
+        }
+        return ok, raw
+
     def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
         """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""
         import time
@@ -819,6 +880,27 @@ class BattlesuitGateway:
                 content=content,
                 model_name=model_name,
                 sys_msg=sys_msg,
+                timeout_sec=dynamic_timeout,
+                gateway_telemetry=gateway_telemetry,
+            )
+
+        # Multi-provider Online path: grok/agy/codex use registered print-mode CLIs.
+        # Do NOT route every Online provider through the Gemini binary (discovery bug).
+        provider_key = str(self.oauth_provider or "").strip().lower()
+        if provider_key in {"grok", "agy", "codex", "openai"}:
+            return self._ask_via_registered_print_cli(
+                content=content,
+                sys_msg=sys_msg,
+                provider=provider_key,
+                timeout_sec=dynamic_timeout,
+                gateway_telemetry=gateway_telemetry,
+            )
+        # Prefer Antigravity (agy) when available — Gemini Code Assist individual tier is blocked.
+        if provider_key in {"gemini", "auto", ""} and shutil.which("agy") and os.getenv("NEXUS_PREFER_AGY", "1") == "1":
+            return self._ask_via_registered_print_cli(
+                content=content,
+                sys_msg=sys_msg,
+                provider="agy",
                 timeout_sec=dynamic_timeout,
                 gateway_telemetry=gateway_telemetry,
             )

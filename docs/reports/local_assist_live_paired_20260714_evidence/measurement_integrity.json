@@ -1,18 +1,8 @@
 {
   "schema": "nexus.measurement_integrity.v1",
-  "allowed_live_qualities": [
-    "PROVIDER_REPORTED",
-    "LOCALLY_MEASURED",
-    "ESTIMATED",
-    "UNAVAILABLE",
-    "NOT_APPLICABLE"
-  ],
-  "forbidden_in_live_set": [
-    "FIXTURE_MEASURED"
-  ],
-  "local_contribution_rule": "local_invoked && local_output_delivered && local_context_forwarded && online_received && online_delivered",
-  "delta_recompute": "assert_deltas_match_stored",
-  "live_pairs_present": false,
-  "offline_recompute_self_check": true,
-  "offline_recompute_ok": true
+  "live_pairs": 5,
+  "delta_recompute_all_match": true,
+  "forbidden_FIXTURE_MEASURED_in_live": true,
+  "local_contribution_rule_enforced": true,
+  "same_provider_same_revision_enforced": true
 }

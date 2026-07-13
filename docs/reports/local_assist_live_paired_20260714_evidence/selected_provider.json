@@ -1,5 +1,24 @@
 {
-  "selected": null,
-  "ready": false,
-  "reason": "no_provider_ready"
+  "selected": {
+    "provider": "grok",
+    "status": "READY",
+    "preflight_status": "ONLINE_READY",
+    "physical_invocation_allowed": true,
+    "output_delivered": true,
+    "executable_path": "/Users/jameschen/.grok/bin/grok",
+    "raw_snippet": "\nNEXUS_PROBE_OK\n",
+    "authorization_source": "cli_task_policy",
+    "transport": "registered_cli",
+    "selection_source": "explicit_request",
+    "authentication_result": "ok",
+    "minimal_probe_result": "output_delivered",
+    "error_category": null,
+    "command": [
+      "/Users/jameschen/.grok/bin/grok"
+    ],
+    "decision_reason": "online_execution_authorized",
+    "latency_ms": 13999
+  },
+  "ready": true,
+  "reason": "first READY with output_delivered"
 }

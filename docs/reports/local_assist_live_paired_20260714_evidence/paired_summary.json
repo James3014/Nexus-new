@@ -1,12 +1,15 @@
 {
   "schema": "nexus.live_paired_summary.v1",
-  "task_count": 0,
-  "live_pairs_completed": 0,
-  "status": "NOT_RUN_PROVIDER_AUTH_BLOCKED",
+  "task_count": 5,
+  "live_pairs_completed": 5,
+  "status": "COMPLETE",
   "fixture_rows": 0,
+  "online_provider": "grok",
+  "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
   "claim_boundary": {
-    "five_task_live_measurement_pipeline_complete": false,
+    "five_task_live_measurement_pipeline_complete": true,
     "proven_token_savings": false,
     "public_claim_allowed": false
-  }
+  },
+  "FIXTURE_MEASURED_in_live_set": false
 }

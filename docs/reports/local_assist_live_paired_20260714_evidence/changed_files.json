@@ -1,10 +1,14 @@
 {
   "policy": "campaign_only",
-  "expected_paths": [
-    "scripts/ops/unified_runtime_scenarios.py",
-    "nexus/services/unified_runtime.py",
+  "paths": [
     "nexus/services/gateway.py",
+    "nexus/services/unified_runtime.py",
+    "nexus/services/online_execution_policy.py",
+    "scripts/ops/unified_runtime_scenarios.py",
+    "tests/ops/test_unified_runtime_scenarios.py",
+    "tests/services/test_unified_runtime.py",
     "docs/reports/local_assist_live_paired_20260714.md",
-    "docs/reports/local_assist_live_paired_20260714_evidence/"
+    "docs/reports/local_assist_live_paired_20260714_evidence/",
+    "docs/bench/local_assist/live_paired_tasks/"
   ]
 }

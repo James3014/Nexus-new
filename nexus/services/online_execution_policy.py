@@ -33,7 +33,7 @@ ONLINE_CONTEXT_TRANSFER_DENIED = "ONLINE_CONTEXT_TRANSFER_DENIED"
 ONLINE_BUDGET_EXCEEDED = "ONLINE_BUDGET_EXCEEDED"
 ONLINE_CONFIGURATION_INVALID = "ONLINE_CONFIGURATION_INVALID"
 
-DEFAULT_APPROVED_PROVIDERS = ("gemini", "grok", "codex", "openai")
+DEFAULT_APPROVED_PROVIDERS = ("gemini", "agy", "grok", "codex", "openai")
 WORKSPACE_POLICY_RELATIVE = Path(".nexus") / "online_execution_policy.json"
 ENV_OVERRIDE = "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED"
 
@@ -364,37 +364,50 @@ def resolve_online_execution_decision(
             claim_boundary=claim,
         )
 
-    # Credential absence is not authorization — surface unauthenticated when
-    # a named cloud provider has no credential-bearing env signal. Binary
-    # presence alone is never treated as authorization.
-    if provider in {"gemini", "grok", "codex", "openai"}:
+    # Credential absence is not authorization. API-key providers need env
+    # credentials for require. CLI-session providers (grok/agy/codex/gemini)
+    # authenticate via local OAuth/login sessions — binary presence is required
+    # but API env keys are optional; unusable sessions fail at probe/runtime.
+    # Binary presence alone is never treated as product authorization.
+    CLI_SESSION_PROVIDERS = frozenset({"gemini", "grok", "codex", "agy", "openai"})
+    if provider in {"gemini", "grok", "codex", "openai", "agy"}:
         cred_keys = {
             "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "NEXUS_GEMINI_API_KEY"),
+            "agy": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "NEXUS_GEMINI_API_KEY"),
             "grok": ("XAI_API_KEY", "GROK_API_KEY", "NEXUS_GROK_API_KEY"),
             "codex": ("OPENAI_API_KEY", "CODEX_API_KEY", "NEXUS_CODEX_API_KEY"),
             "openai": ("OPENAI_API_KEY", "NEXUS_OPENAI_API_KEY"),
         }.get(provider, ())
         has_cred = any(str(env.get(k, "") or "").strip() for k in cred_keys)
-        # Env emergency override still allows physical path for operator-driven
-        # CLI sessions that use local OAuth login without API keys; mark
-        # unauthenticated only when require demands Online completion certainty
-        # and no credential/env override is present.
+        import shutil as _shutil
+
+        binary_name = {
+            "gemini": "gemini",
+            "agy": "agy",
+            "grok": "grok",
+            "codex": "codex",
+            "openai": "openai",
+        }.get(provider, provider)
+        binary_present = bool(_shutil.which(binary_name))
+        # API-key-only path (openai without CLI session): require env key on require.
+        # CLI-session providers: allow require when binary exists; runtime probe proves auth.
         if policy == "require" and not has_cred and source != "operator_environment_override":
-            return OnlineExecutionDecision(
-                online_policy=policy,
-                online_execution_requested=True,
-                online_execution_authorized=False,
-                online_authorization_source=source,
-                approved_online_providers=approved,
-                preflight_status=ONLINE_PROVIDER_UNAUTHENTICATED,
-                reason=f"provider_credentials_missing:{provider}",
-                allow_external_context_transfer=transfer_ok,
-                maximum_provider_calls=max_calls,
-                maximum_retry_count=max_retries,
-                requested_provider=provider,
-                physical_invocation_allowed=False,
-                claim_boundary=claim,
-            )
+            if provider not in CLI_SESSION_PROVIDERS or not binary_present:
+                return OnlineExecutionDecision(
+                    online_policy=policy,
+                    online_execution_requested=True,
+                    online_execution_authorized=False,
+                    online_authorization_source=source,
+                    approved_online_providers=approved,
+                    preflight_status=ONLINE_PROVIDER_UNAUTHENTICATED,
+                    reason=f"provider_credentials_missing:{provider}",
+                    allow_external_context_transfer=transfer_ok,
+                    maximum_provider_calls=max_calls,
+                    maximum_retry_count=max_retries,
+                    requested_provider=provider,
+                    physical_invocation_allowed=False,
+                    claim_boundary=claim,
+                )
 
     return OnlineExecutionDecision(
         online_policy=policy,

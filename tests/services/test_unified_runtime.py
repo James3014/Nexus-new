@@ -1019,7 +1019,7 @@ def test_extract_online_stage_payload_is_canonical() -> None:
 
 
 def test_provider_neutral_cli_registry_is_explicit_and_non_invoking() -> None:
-    assert set(ONLINE_CLI_SPEC_REGISTRY) == {"gemini", "grok", "codex", "openai"}
+    assert set(ONLINE_CLI_SPEC_REGISTRY) == {"gemini", "agy", "grok", "codex", "openai"}
     assert all(
         item["transport"] == "subprocess" and item["binary_env"] and item["binary_name"]
         for item in ONLINE_CLI_SPEC_REGISTRY.values()

@@ -1,6 +1,9 @@
 {
+  "command": "pytest tests/ops/test_unified_runtime_scenarios.py tests/engine/test_canonical_task_seam.py tests/engine/test_cli_work_path_audit.py tests/test_cli_output_contract.py tests/test_cli_content_rewrite.py tests/services/test_unified_runtime.py tests/services/test_local_assist_service.py tests/services/test_local_assist_bounded_dispatch.py tests/services/test_cloud_agent_cli_adapter.py tests/services/test_cloud_agent_contract.py tests/services/test_cloud_local_stage_chain.py tests/research/test_sprint_service.py tests/research/test_day_shift_optimizer.py tests/app/test_nightshift_runner_service.py tests/services/test_canonical_local_assist_policy.py tests/engine/test_cli_local_assist_advisor_gate2.py tests/services/test_online_execution_policy.py tests/research/test_local_assist_paired_experiment.py tests/services/test_local_assist_live_smoke.py tests/services/test_online_auth_non_delivery.py -q",
   "collected": 219,
   "passed": 219,
-  "log": "focused_regression.log",
-  "head": "b106534a257c1138a2c4f8706a3999bbc63ea311"
+  "failed": 0,
+  "head": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
+  "log": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/grok-goal-a77d6b4a1ef9/implementer/focused_regression.log",
+  "recorded_at": "2026-07-13T23:35:59Z"
 }

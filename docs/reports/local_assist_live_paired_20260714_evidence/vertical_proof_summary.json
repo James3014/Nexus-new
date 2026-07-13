@@ -1,0 +1,48 @@
+{
+  "product_entry": "nexus run",
+  "runtime_seam": "Gateway.ask_unified+UnifiedRuntime",
+  "online_policy": "require",
+  "selected_provider": "grok",
+  "task_id": "live-vertical-5fef46a9",
+  "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
+  "planner_invoked": true,
+  "local": {
+    "invoked": true,
+    "output_delivered": true,
+    "provider_call_count": 1,
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b-instruct"
+  },
+  "online_preflight": {
+    "status": "ONLINE_READY",
+    "online_policy": "require",
+    "online_execution_requested": true,
+    "online_execution_authorized": true,
+    "online_authorization_source": "cli_task_policy",
+    "approved_online_providers": [
+      "gemini",
+      "agy",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "reason": "online_execution_authorized",
+    "physical_invocation_allowed": true
+  },
+  "online": {
+    "invoked": true,
+    "output_delivered": true,
+    "provider_call_count": 1,
+    "provider": "grok",
+    "status": "SUCCEEDED",
+    "gate_passed": true
+  },
+  "local_context_forwarded": true,
+  "verifier_gate_passed": true,
+  "receipt_complete": true,
+  "terminal_status": "SUCCEEDED",
+  "formal_workspace_mutated": false,
+  "elapsed_ms": 42754,
+  "git_head": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
+  "REAL_LOCAL_ONLINE_VERTICAL_PROVEN": true
+}

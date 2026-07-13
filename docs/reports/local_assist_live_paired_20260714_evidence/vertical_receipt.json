@@ -1,7 +1,545 @@
 {
-  "status": "NOT_RUN_PROVIDER_AUTH_BLOCKED",
-  "product_entry": "nexus run",
-  "online_policy": "require",
-  "reason": "no_ready_online_provider",
-  "REAL_LOCAL_ONLINE_VERTICAL_PROVEN": false
+  "schema": "nexus.unified_runtime.receipt.v1",
+  "task_id": "live-vertical-5fef46a9",
+  "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
+  "task_statement_hash": "1c8ea6537cfd880b3e08d4ea4fb9f3a9671d961a04abed810ece8f58911678eb",
+  "context_trace": {
+    "task_id": "live-vertical-5fef46a9",
+    "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
+    "task_statement_hash": "1c8ea6537cfd880b3e08d4ea4fb9f3a9671d961a04abed810ece8f58911678eb",
+    "online_prompt_hash": "36103d0db54f4283b5d5d4bd94a90cc2cfe6a303e58a6045749baf8d55def468",
+    "online_payload_hash": "84ae0e973f5acf924081318fd9803f7db0fec61c59fb180cd00d45194e672042",
+    "capability_results_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "selected_capabilities": [
+      "harness_preflight_sensor",
+      "research_route",
+      "delivery_gate",
+      "mempalace_gate",
+      "artifact_gate",
+      "claim_gate",
+      "local_model_executor"
+    ],
+    "capability_context_compressed": false,
+    "online_received_context": {
+      "local_context_forwarded": true,
+      "capability_context_forwarded": false,
+      "compressed_context_applied": false
+    }
+  },
+  "planner": {
+    "name": "planner",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "runtime:planner_invoked"
+    ],
+    "reason": "",
+    "selected_capabilities": [
+      "harness_preflight_sensor",
+      "research_route",
+      "delivery_gate",
+      "mempalace_gate",
+      "artifact_gate",
+      "claim_gate",
+      "local_model_executor"
+    ],
+    "plan_schema": "nexus_capability_plan_v1",
+    "plan_hash": "125113b14ed7ced230b4194c77ece214448aa551b1eed4fc296333b9c0e96f33"
+  },
+  "capabilities": [
+    {
+      "name": "harness_preflight_sensor",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "research_route",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "delivery_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "mempalace_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "artifact_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "claim_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "local_model_executor",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "Local",
+      "stage": "local",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "vertical:live-vertical-5fef46a9:req"
+      ],
+      "task_id": "live-vertical-5fef46a9",
+      "status": "INVOKED",
+      "reason": ""
+    }
+  ],
+  "delegation": {
+    "planner": "Nexus",
+    "local_assist": "Local",
+    "online_provider": "Online",
+    "verifier": "Hybrid",
+    "learning": "Hybrid"
+  },
+  "local": {
+    "name": "local",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "vertical:live-vertical-5fef46a9:req"
+    ],
+    "reason": "",
+    "planner_snapshot_hash": "44bd00abcab1802f8e3e682c76130693d19a4254721bf05c47fe4a3a0516e4c6",
+    "task_id": "live-vertical-5fef46a9",
+    "response_task_id": "live-vertical-5fef46a9",
+    "task_identity_shared": true,
+    "response": {
+      "schema": "nexus.local_assist.response.v1",
+      "status": "SUCCEEDED",
+      "task_id": "live-vertical-5fef46a9",
+      "parent_task_id": "live-vertical-5fef46a9",
+      "action": "advisor",
+      "planner_decision": {
+        "source": "CapabilityPlanner",
+        "validated": true,
+        "automatic_dispatch": false,
+        "selected_action": "advisor"
+      },
+      "planner_selected": true,
+      "local_model_invoked": true,
+      "output_delivered": true,
+      "provider": "ollama",
+      "resolved_models": [
+        "qwen2.5-coder:7b-instruct"
+      ],
+      "local_outputs": {
+        "diagnosis": "### Diagnosis:\n\n**Live-Smoke Mutation Policy**: Confirmed to be `isolation_only`.\n**Allowed Files**: Bounded within the specified directory structure.\n\n### Evidence References:\n- **vertical:live-vertical-5fef46a9:req**\n\n### Risk Findings:\nNo immediate high-risk findings identified. The mutation policy is set to `isolation_only`, which limits changes to isolated components, reducing potential impact on other parts of the system.\n\n### Confidence:\nHigh (90%).\n\n### Next Action:\nNo immediate action required. Ensure that any future changes adhere strictly to the `isolation_only` policy and do not exceed the allowed files as specified. Regularly review and audit the mutation policy and allowed files to maintain security and compliance.",
+        "recommended_next_action": "Online Agent must independently decide and record consumption.",
+        "provider_error": ""
+      },
+      "candidate_summary": {
+        "candidate_count": 0,
+        "candidate_hashes": [],
+        "isolation_status": "not_run",
+        "selected_candidate_hash": "",
+        "selected": false
+      },
+      "verifier_summary": {
+        "verifier_reached": false,
+        "verifier_status": "not_run",
+        "verifier_command": []
+      },
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/live-vertical-5fef46a9/execution_receipt.json",
+      "evidence_refs": [
+        "vertical:live-vertical-5fef46a9:req"
+      ],
+      "fallback_reason": "",
+      "claim_boundary": {
+        "registry_known": true,
+        "planner_selected": true,
+        "runtime_invoked": true,
+        "output_delivered": true,
+        "agent_consumed": false,
+        "outcome_contributed": false,
+        "value_measured": false
+      },
+      "agent_consumed": false,
+      "outcome_contributed": false,
+      "value_measured": false
+    }
+  },
+  "capability_results": {},
+  "online": {
+    "name": "online",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "online:grok:live-vertical-5fef46a9:subprocess",
+      "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+    ],
+    "reason": "",
+    "task_id": "live-vertical-5fef46a9",
+    "response_task_id": "live-vertical-5fef46a9",
+    "task_identity_shared": true,
+    "response": {
+      "provider": "grok",
+      "task_id": "live-vertical-5fef46a9",
+      "invoked": true,
+      "output_delivered": true,
+      "gate_passed": true,
+      "provider_call_count": 1,
+      "response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
+      "raw_response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
+      "usage": {},
+      "error": "",
+      "evidence_refs": [
+        "online:grok:live-vertical-5fef46a9:subprocess",
+        "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+      ],
+      "execution_role": "online",
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "returncode": 0,
+      "stderr": ""
+    }
+  },
+  "online_preflight": {
+    "status": "ONLINE_READY",
+    "online_policy": "require",
+    "online_execution_requested": true,
+    "online_execution_authorized": true,
+    "online_authorization_source": "cli_task_policy",
+    "approved_online_providers": [
+      "gemini",
+      "agy",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "reason": "online_execution_authorized",
+    "physical_invocation_allowed": true
+  },
+  "verifier": {
+    "name": "verifier",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "v:live-vertical-5fef46a9"
+    ],
+    "reason": "",
+    "task_id": "live-vertical-5fef46a9",
+    "response_task_id": "live-vertical-5fef46a9",
+    "task_identity_shared": true,
+    "response": {
+      "task_id": "live-vertical-5fef46a9",
+      "status": "pass",
+      "gate_passed": true,
+      "invoked": true,
+      "evidence_refs": [
+        "v:live-vertical-5fef46a9"
+      ]
+    }
+  },
+  "learning": {
+    "name": "learning",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": true,
+    "evidence_refs": [
+      "learning:live-vertical-5fef46a9"
+    ],
+    "reason": "",
+    "task_id": "live-vertical-5fef46a9",
+    "response_task_id": "live-vertical-5fef46a9",
+    "task_identity_shared": true,
+    "response": {
+      "task_id": "live-vertical-5fef46a9",
+      "status": "recorded",
+      "invoked": true,
+      "gate_passed": true,
+      "evidence_refs": [
+        "learning:live-vertical-5fef46a9"
+      ],
+      "outcome_contributed": true,
+      "value_measured": false
+    }
+  },
+  "stages": [
+    {
+      "name": "planner",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "runtime:planner_invoked"
+      ],
+      "reason": "",
+      "selected_capabilities": [
+        "harness_preflight_sensor",
+        "research_route",
+        "delivery_gate",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate",
+        "local_model_executor"
+      ],
+      "plan_schema": "nexus_capability_plan_v1",
+      "plan_hash": "125113b14ed7ced230b4194c77ece214448aa551b1eed4fc296333b9c0e96f33"
+    },
+    {
+      "name": "local",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "vertical:live-vertical-5fef46a9:req"
+      ],
+      "reason": "",
+      "planner_snapshot_hash": "44bd00abcab1802f8e3e682c76130693d19a4254721bf05c47fe4a3a0516e4c6",
+      "task_id": "live-vertical-5fef46a9",
+      "response_task_id": "live-vertical-5fef46a9",
+      "task_identity_shared": true,
+      "response": {
+        "schema": "nexus.local_assist.response.v1",
+        "status": "SUCCEEDED",
+        "task_id": "live-vertical-5fef46a9",
+        "parent_task_id": "live-vertical-5fef46a9",
+        "action": "advisor",
+        "planner_decision": {
+          "source": "CapabilityPlanner",
+          "validated": true,
+          "automatic_dispatch": false,
+          "selected_action": "advisor"
+        },
+        "planner_selected": true,
+        "local_model_invoked": true,
+        "output_delivered": true,
+        "provider": "ollama",
+        "resolved_models": [
+          "qwen2.5-coder:7b-instruct"
+        ],
+        "local_outputs": {
+          "diagnosis": "### Diagnosis:\n\n**Live-Smoke Mutation Policy**: Confirmed to be `isolation_only`.\n**Allowed Files**: Bounded within the specified directory structure.\n\n### Evidence References:\n- **vertical:live-vertical-5fef46a9:req**\n\n### Risk Findings:\nNo immediate high-risk findings identified. The mutation policy is set to `isolation_only`, which limits changes to isolated components, reducing potential impact on other parts of the system.\n\n### Confidence:\nHigh (90%).\n\n### Next Action:\nNo immediate action required. Ensure that any future changes adhere strictly to the `isolation_only` policy and do not exceed the allowed files as specified. Regularly review and audit the mutation policy and allowed files to maintain security and compliance.",
+          "recommended_next_action": "Online Agent must independently decide and record consumption.",
+          "provider_error": ""
+        },
+        "candidate_summary": {
+          "candidate_count": 0,
+          "candidate_hashes": [],
+          "isolation_status": "not_run",
+          "selected_candidate_hash": "",
+          "selected": false
+        },
+        "verifier_summary": {
+          "verifier_reached": false,
+          "verifier_status": "not_run",
+          "verifier_command": []
+        },
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/live-vertical-5fef46a9/execution_receipt.json",
+        "evidence_refs": [
+          "vertical:live-vertical-5fef46a9:req"
+        ],
+        "fallback_reason": "",
+        "claim_boundary": {
+          "registry_known": true,
+          "planner_selected": true,
+          "runtime_invoked": true,
+          "output_delivered": true,
+          "agent_consumed": false,
+          "outcome_contributed": false,
+          "value_measured": false
+        },
+        "agent_consumed": false,
+        "outcome_contributed": false,
+        "value_measured": false
+      }
+    },
+    {
+      "name": "online",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "online:grok:live-vertical-5fef46a9:subprocess",
+        "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+      ],
+      "reason": "",
+      "task_id": "live-vertical-5fef46a9",
+      "response_task_id": "live-vertical-5fef46a9",
+      "task_identity_shared": true,
+      "response": {
+        "provider": "grok",
+        "task_id": "live-vertical-5fef46a9",
+        "invoked": true,
+        "output_delivered": true,
+        "gate_passed": true,
+        "provider_call_count": 1,
+        "response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
+        "raw_response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
+        "usage": {},
+        "error": "",
+        "evidence_refs": [
+          "online:grok:live-vertical-5fef46a9:subprocess",
+          "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+        ],
+        "execution_role": "online",
+        "transport": "registered_cli",
+        "selection_source": "explicit_request",
+        "returncode": 0,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "verifier",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "v:live-vertical-5fef46a9"
+      ],
+      "reason": "",
+      "task_id": "live-vertical-5fef46a9",
+      "response_task_id": "live-vertical-5fef46a9",
+      "task_identity_shared": true,
+      "response": {
+        "task_id": "live-vertical-5fef46a9",
+        "status": "pass",
+        "gate_passed": true,
+        "invoked": true,
+        "evidence_refs": [
+          "v:live-vertical-5fef46a9"
+        ]
+      }
+    },
+    {
+      "name": "learning",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": true,
+      "evidence_refs": [
+        "learning:live-vertical-5fef46a9"
+      ],
+      "reason": "",
+      "task_id": "live-vertical-5fef46a9",
+      "response_task_id": "live-vertical-5fef46a9",
+      "task_identity_shared": true,
+      "response": {
+        "task_id": "live-vertical-5fef46a9",
+        "status": "recorded",
+        "invoked": true,
+        "gate_passed": true,
+        "evidence_refs": [
+          "learning:live-vertical-5fef46a9"
+        ],
+        "outcome_contributed": true,
+        "value_measured": false
+      }
+    }
+  ],
+  "evidence_refs": [
+    "learning:live-vertical-5fef46a9",
+    "online:grok:live-vertical-5fef46a9:local_context_forwarded",
+    "online:grok:live-vertical-5fef46a9:subprocess",
+    "runtime:planner_invoked",
+    "v:live-vertical-5fef46a9",
+    "vertical:live-vertical-5fef46a9",
+    "vertical:live-vertical-5fef46a9:req"
+  ],
+  "receipt_complete": true,
+  "terminal_status": "SUCCEEDED",
+  "claim_boundary": {
+    "task_identity_shared": true,
+    "planner_shared": true,
+    "local_online_continuation": true,
+    "receipt_complete": true,
+    "outcome_contributed": true,
+    "value_measured": false,
+    "public_claim_allowed": false
+  },
+  "receipt_path": ".nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/vertical_receipt.json"
 }

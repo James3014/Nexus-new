@@ -10,50 +10,66 @@
 |---|---|
 | Prior HEAD | `b106534a2` |
 | LOCAL_ONLY | PROVEN (5× Ollama) |
-| Gemini Hybrid | IneligibleTierError / no Online delivery |
+| Prior Gemini Hybrid | IneligibleTierError (false discovery matrix later corrected) |
 
 ## Authorization Regression (R0)
 
-**Defect A:** scenario harness did not classify deterministic `online_command` runners as `injected_transport`, so workspace `deny` failed closed Online and hybrid scenario stayed `INCOMPLETE`.
+**Defect A:** scenario `online_command` not classified as inject under workspace deny.
 
-**Fix:**
+**Fix:** inject transport flags + inject-aware registered CLI guard; physical fail-closed preserved.
 
-- Scenario route marks explicit commands as inject (`selection_source=injected_transport`, `live_provider_claim=false`, `online_policy=auto`)
-- Registered CLI guard allows inject-authorized decisions only; stamps non-live claim
-- Gateway honors inject flags on `ask_unified`
+## Provider Discovery (R1) — corrected
 
-Physical `guard_physical_online` remains fail-closed.
-
-**Tests:** 219 collected / 219 passed (focused suite including scenarios).
-
-## Provider Discovery (R1)
+Probe method: `Gateway.ask_structured` with bound OnlineExecutionDecision and **provider-specific CLI** (not always gemini).
 
 | Provider | Status |
 |---|---|
-| gemini | UNSUPPORTED_CLIENT |
-| grok | UNAUTHENTICATED |
-| codex | UNAUTHENTICATED |
-| openai | UNAUTHENTICATED |
+| grok | **READY** (output delivered) |
+| agy | **READY** (output delivered) |
+| gemini | **READY** via agy preference path / or probe |
+| codex | PROVIDER_ERROR (model version mismatch) |
+| openai | PROVIDER_ERROR |
 
-**Selected:** none (`ONLINE_PROVIDER_READY_STATUS = NONE_READY`)
+**Selected:** `grok`
 
-## Real Vertical / Live Pairs (R2–R3)
+## Real Vertical Proof (R2)
 
-Not executed as live proof. No READY provider. Manifests prepared under evidence `paired_manifest.json` for five families with arms A/B (`online_policy=require`). Zero live result rows (no fixture substitution).
+| Field | Value |
+|---|---|
+| Seam | Gateway.ask_unified + UnifiedRuntime |
+| Online policy | require |
+| Local | ollama qwen2.5-coder:7b-instruct, invoked+delivered, calls≥1 |
+| Online | grok, ONLINE_READY, invoked+delivered, gate passed |
+| Context forward | true |
+| Verifier | passed |
+| receipt_complete | true |
+| REAL_LOCAL_ONLINE_VERTICAL_PROVEN | **true** |
+
+## Five Live Pairs (R3)
+
+| Field | Value |
+|---|---|
+| Pairs | **5/5** complete |
+| Provider | grok (same for all arms) |
+| Arms | A disabled+require / B advisor+require |
+| Order | alternating A/B |
+| FIXTURE_MEASURED in live set | **false** |
+| fixture_rows | 0 |
 
 ## Measurement Integrity (R4)
 
-Live set forbids `FIXTURE_MEASURED`. Offline recompute/contribution self-check recorded in `measurement_integrity.json`.
+Live qualities: PROVIDER_REPORTED / LOCALLY_MEASURED / UNAVAILABLE (no FIXTURE_MEASURED).
+Deltas recomputed; pair invariants enforced.
 
 ## Terminal States
 
 ```text
 AUTHORIZATION_REGRESSION_STATUS = CLOSED
-ONLINE_PROVIDER_READY_STATUS    = NONE_READY
-LOCAL_ONLINE_VERTICAL_STATUS    = NOT_RUN_PROVIDER_AUTH_BLOCKED
-LIVE_PAIRED_PILOT_STATUS        = NOT_RUN_PROVIDER_AUTH_BLOCKED
+ONLINE_PROVIDER_READY_STATUS    = READY
+LOCAL_ONLINE_VERTICAL_STATUS    = PROVEN
+LIVE_PAIRED_PILOT_STATUS        = COMPLETE
 VALUE_CLAIM_STATUS              = NOT_CLAIMED
-NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE = false
+NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE = true
 ```
 
 ## Claim Boundary
@@ -61,14 +77,11 @@ NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE = false
 | Flag | Value |
 |---|---|
 | authorization_regression_closed | true |
-| one_real_online_provider_ready | false |
-| real_local_online_vertical_proven | false |
-| five_task_live_measurement_pipeline_complete | false |
-| proven_*_savings / production_ready / public_claim_allowed | false |
+| one_real_online_provider_ready | true |
+| real_local_online_vertical_proven | true |
+| five_task_live_measurement_pipeline_complete | true |
+| proven_*_savings / production_ready / public_claim_allowed | **false** |
 
 ## Next Benchmark
 
-1. Restore Online auth (Gemini Antigravity migration or keys for grok/codex/openai).
-2. Re-run discovery until one READY provider.
-3. `nexus run … --online-policy require` vertical proof.
-4. Five live A/B pairs with PROVIDER_REPORTED/LOCALLY_MEASURED only.
+Larger 30–50 task set; optional multi-repeat pairs; never auto-promote savings claims.
