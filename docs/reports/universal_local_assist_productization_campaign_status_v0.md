@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-`M3-E_CANDIDATE_CANARY_AUTOMATION`
+`M3-F_VERIFIED_SUBTASK_CANARY_AUTOMATION`
 
 ## Completed milestones
 
@@ -11,10 +11,11 @@
 - `PLANNER_LOCAL_ASSIST_RECOMMENDATION_SHADOW_PROVEN` — `53bc1d39d`
 - `PLANNER_LOCAL_ASSIST_RECOMMENDATION_CALIBRATED` — `8b5280f89`
 - `PLANNER_AUTOMATIC_ADVISOR_CANARY_PROVEN` — `8b198c94a`
+- `PLANNER_AUTOMATIC_CANDIDATE_CANARY_PROVEN` — `bce01fd0b`
 
 ## Current commit
 
-`8b198c94a` — `feat(local-assist): enable bounded advisor canary`
+`bce01fd0b` — `feat(local-assist): enable isolated candidate canary`
 
 ## Evidence
 
@@ -23,6 +24,7 @@
 - Shadow dataset → `12` tasks, `3` per action (`skip`, `advisor`, `candidate`, `verified-subtask`); coverage `1.0`; exact agreement `1.0`; unsafe recommendation rate `0.0`; Local Assist invocations `0`.
 - Calibration → `CALIBRATED`; unsafe recommendation rate `0.0`; false-positive rate `0.0`; exact agreement `1.0`; unexplained disagreements `0`; route authority unchanged; automatic dispatch disabled.
 - Advisor canary tests → `8 passed`; provider unavailable, malformed output, timeout, incomplete receipt, mismatched task identity, stale revision, absent recommendation, high risk, and formal mutation all fail closed; successful canary is read-only advisor only.
+- Candidate canary tests → `4 passed`; candidate isolation, source revision, verifier precondition, formal mutation guard, candidate hash match, and Agent adoption receipt are enforced; formal workspace remains unchanged.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -37,4 +39,4 @@
 
 ## Next automatic action
 
-Implement M3-E candidate canary: generate isolated candidates only after advisor canary proof, preserve Agent adoption authority, and reject stale or unverified candidates.
+Implement M3-F verified-subtask canary: run isolated candidate plus deterministic verifier, preserve rollback evidence and Agent review authority, and keep verifier failures terminal failures.
