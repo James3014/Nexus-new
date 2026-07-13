@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-`M3-G_BOUNDED_AUTOMATIC_DISPATCH`
+`M4-A_PROVIDER_NEUTRAL_CLOUD_AGENT_CONTRACT`
 
 ## Completed milestones
 
@@ -13,10 +13,11 @@
 - `PLANNER_AUTOMATIC_ADVISOR_CANARY_PROVEN` — `8b198c94a`
 - `PLANNER_AUTOMATIC_CANDIDATE_CANARY_PROVEN` — `bce01fd0b`
 - `PLANNER_AUTOMATIC_VERIFIED_SUBTASK_CANARY_PROVEN` — `cfa1693cc`
+- `PLANNER_DRIVEN_LOCAL_ASSIST_PROVEN` — `111eab2e0`
 
 ## Current commit
 
-`cfa1693cc` — `feat(local-assist): enable verified-subtask canary`
+`111eab2e0` — `feat(local-assist): prove planner-driven bounded dispatch`
 
 ## Evidence
 
@@ -27,6 +28,7 @@
 - Advisor canary tests → `8 passed`; provider unavailable, malformed output, timeout, incomplete receipt, mismatched task identity, stale revision, absent recommendation, high risk, and formal mutation all fail closed; successful canary is read-only advisor only.
 - Candidate canary tests → `4 passed`; candidate isolation, source revision, verifier precondition, formal mutation guard, candidate hash match, and Agent adoption receipt are enforced; formal workspace remains unchanged.
 - Verified-subtask canary tests → `4 passed`; isolated apply, deterministic verifier pass/fail, rollback reference, Agent review, and terminal verifier failure are enforced; fallback remains disabled.
+- Bounded dispatch tests → `6 passed`; skip/advisor/candidate/verified-subtask dispatch share recommendation receipt, task identity, workspace revision, and Agent authority; no formal workspace mutation.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -41,4 +43,4 @@
 
 ## Next automatic action
 
-Implement M3-G bounded automatic dispatch: compose the calibrated recommendation with the three canaries, require one task lineage and recommendation receipt, and retain Agent authority for formal mutation and closeout.
+Implement M4-A provider-neutral cloud Agent contract: define request/response/adapter boundaries, preserve candidate isolation and route authority, and keep fake providers out of real-cloud claims.
