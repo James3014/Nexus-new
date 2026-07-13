@@ -180,6 +180,10 @@ from scripts.engine.commands.local_assist_actions import (
     run_local_assist_interface_command,
     run_local_assist_user_relay_command,
 )
+from nexus.services.canonical_local_assist_policy import (
+    build_canonical_policy_receipt,
+    write_canonical_policy_receipt,
+)
 from scripts.engine.commands.multi_agent_actions import (
     close_multi_agent_task,
     create_multi_agent_task,
@@ -271,10 +275,18 @@ def top_status(ctx, as_json):
 @click.option("--complexity", default="medium")
 @click.option("--output-file")
 @click.option("--report-file")
+@click.option("--local-assist-policy", type=click.Choice(["planner", "explicit", "disabled"]), default="disabled", show_default=True)
 @click.pass_context
-def top_run(ctx, task_id, complexity, output_file, report_file):
+def top_run(ctx, task_id, complexity, output_file, report_file, local_assist_policy):
     """🚀 [Direct] Execute task with autonomic governance."""
-    ctx.invoke(run, task_id=task_id, complexity=complexity, output_file=output_file, report_file=report_file)
+    ctx.invoke(
+        run,
+        task_id=task_id,
+        complexity=complexity,
+        output_file=output_file,
+        report_file=report_file,
+        local_assist_policy=local_assist_policy,
+    )
 
 
 @nexus.group(name="local-assist")
@@ -967,8 +979,34 @@ def delivery_receipt(receipt_path, as_json):
 @click.option("--complexity", type=float, default=0.0)
 @click.option("--output-file", type=click.Path(path_type=Path), help="Explicit output path for the task result.")
 @click.option("--report-file", type=click.Path(path_type=Path), default=".nexus/reports/run/run_report.json")
-def run(task_id, complexity, output_file, report_file):
+@click.option("--local-assist-policy", type=click.Choice(["planner", "explicit", "disabled"]), default="disabled", show_default=True)
+def run(task_id, complexity, output_file, report_file, local_assist_policy):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
+    if local_assist_policy != "disabled":
+        try:
+            revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            risk_score = 20 if float(complexity or 0.0) <= 1.0 else 50 if float(complexity or 0.0) <= 3.0 else 80
+            policy_task = {
+                "task_id": str(task_id),
+                "workspace_revision": revision,
+                "task_statement": str(task_id),
+                "task_type": "task",
+                "route": {"route_features": {"risk_score": risk_score, "adjusted_root_cause_confidence": 0.8}},
+            }
+            policy_receipt = build_canonical_policy_receipt(policy=local_assist_policy, task=policy_task)
+            safe_task_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(task_id))[:120] or "task"
+            policy_path = REPO_ROOT / ".nexus" / "reports" / "local_assist" / "canonical" / f"{safe_task_id}.json"
+            write_canonical_policy_receipt(policy_path, policy_receipt)
+            click.echo(json.dumps(policy_receipt, indent=2, ensure_ascii=False))
+            click.echo(f"Local Assist policy receipt: {policy_path}")
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise click.ClickException(f"local_assist_policy_failed_closed: {exc}") from exc
     click.secho(f"🛡️ [NEXUS v24.9.5] Initiating Master Loop for: {task_id}", fg="cyan", bold=True)
 
     if _task_requests_output_file(task_id) and not output_file:
@@ -2631,9 +2669,12 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
     name="run",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
+@click.option("--local-assist-policy", type=click.Choice(["planner", "explicit", "disabled"]), default=None)
 @click.pass_context
-def compat_run(ctx: click.Context):
+def compat_run(ctx: click.Context, local_assist_policy: str | None):
     """Compatibility alias for `nexus run`."""
+    if local_assist_policy is not None:
+        ctx.args.extend(["--local-assist-policy", local_assist_policy])
     _forward_to_nested_nexus(ctx, "run")
 
 

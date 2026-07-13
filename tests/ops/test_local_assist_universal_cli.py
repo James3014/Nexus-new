@@ -32,3 +32,12 @@ def test_local_assist_interface_cli_emits_machine_readable_json(tmp_path) -> Non
     assert payload["schema"] == "nexus.local_assist.agent_interface.v1"
     assert payload["task_identity"]["task_id"] == "m6-a-cli-001"
     assert payload["provider_neutral"] is True
+
+
+def test_canonical_run_exposes_backward_compatible_policy_switch() -> None:
+    result = CliRunner().invoke(nexus, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--local-assist-policy" in result.output
+    assert "planner" in result.output
+    assert "explicit" in result.output
+    assert "disabled" in result.output
