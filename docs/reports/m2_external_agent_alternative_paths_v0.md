@@ -33,8 +33,8 @@ The local package is under `.nexus/reports/local_assist/m2-user-relay-20260713/`
 - `nexus local-assist user-relay-validate` produced `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY`, `agent_output_imported=true`, `agent_consumed_proven=true`, `modified_files=[]`, `outcome_contributed=false`, and `value_measured=false`.
 - Validator tests cover missing response, valid imported response, pending-import normalization, missing receipt citation, contribution-claim rejection, and machine-report output.
 - Absolute-path and secret scans passed; private-content presence is explicitly classified, so the package cannot be treated as public data.
-- The response was supplied by the current user-authorized ChatGPT relay session, not represented as Gemini/agy. No automated repository delivery occurred.
+- The response was supplied by the current user-authorized ChatGPT relay session; this is an allowed Agent identity under the revised any-Agent smoke rule. No automated repository delivery occurred.
 
 ## Claim Boundary
 
-Track A proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_ON_PUBLIC_FIXTURE`. Track B proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY` for this bounded user-authorized response. Neither status proves `outcome_contributed`, `value_measured`, Gemini/agy identity, M4 cloud integration, or broad M2 productization.
+Track A proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_ON_PUBLIC_FIXTURE`. Track B proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY` for this bounded user-authorized response under the revised any-Agent rule. The current artifact does not independently prove every step of the six-step advisor → selection → candidate/verified-subtask → final-work sequence, `outcome_contributed`, `value_measured`, M4 cloud integration, or broad M2 productization.
