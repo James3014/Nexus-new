@@ -1,0 +1,541 @@
+{
+  "schema": "nexus.unified_runtime.receipt.v1",
+  "task_id": "vertical-hybrid-080baafb",
+  "workspace_revision": "080baafbd6de5c9cba44e0b4200b133ae7b3b20a",
+  "task_statement_hash": "4e9bd1b0e2418960b41908966868daf805d8871694ba62d05c591f2eadc30679",
+  "context_trace": {
+    "task_id": "vertical-hybrid-080baafb",
+    "workspace_revision": "080baafbd6de5c9cba44e0b4200b133ae7b3b20a",
+    "task_statement_hash": "4e9bd1b0e2418960b41908966868daf805d8871694ba62d05c591f2eadc30679",
+    "online_prompt_hash": "bb316555fdc0c1f718560f325b7361c1cf596fef99ce7f5fe8dedd097de0ded4",
+    "online_payload_hash": "c832d8f2d0829e8986f942178655c4260c79a7822bc42aa1db4f638ec62351af",
+    "capability_results_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "selected_capabilities": [
+      "harness_preflight_sensor",
+      "research_route",
+      "delivery_gate",
+      "mempalace_gate",
+      "artifact_gate",
+      "claim_gate",
+      "local_model_executor"
+    ],
+    "capability_context_compressed": false,
+    "online_received_context": {
+      "local_context_forwarded": true,
+      "capability_context_forwarded": false,
+      "compressed_context_applied": false
+    }
+  },
+  "planner": {
+    "name": "planner",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "runtime:planner_invoked"
+    ],
+    "reason": "",
+    "selected_capabilities": [
+      "harness_preflight_sensor",
+      "research_route",
+      "delivery_gate",
+      "mempalace_gate",
+      "artifact_gate",
+      "claim_gate",
+      "local_model_executor"
+    ],
+    "plan_schema": "nexus_capability_plan_v1",
+    "plan_hash": "b6a790d8c07fd74b1e2bb512920873afd6b7645d51acf8026edc7208e582a3df"
+  },
+  "capabilities": [
+    {
+      "name": "harness_preflight_sensor",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "research_route",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "delivery_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "mempalace_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "artifact_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "claim_gate",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "local_model_executor",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "Local",
+      "stage": "local",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "vertical:vertical-hybrid-080baafb:req",
+        "vertical:allowed_files"
+      ],
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "INVOKED",
+      "reason": ""
+    }
+  ],
+  "delegation": {
+    "planner": "Nexus",
+    "local_assist": "Local",
+    "online_provider": "Online",
+    "verifier": "Hybrid",
+    "learning": "Hybrid"
+  },
+  "local": {
+    "name": "local",
+    "status": "SUCCEEDED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": true,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "vertical:vertical-hybrid-080baafb:req",
+      "vertical:allowed_files"
+    ],
+    "reason": "",
+    "planner_snapshot_hash": "ae7691d1bb63dbc74bf40e983cd46d30cda71c8a9007f09b2168c8584c878f1d",
+    "task_id": "vertical-hybrid-080baafb",
+    "response_task_id": "vertical-hybrid-080baafb",
+    "task_identity_shared": true,
+    "response": {
+      "schema": "nexus.local_assist.response.v1",
+      "status": "SUCCEEDED",
+      "task_id": "vertical-hybrid-080baafb",
+      "parent_task_id": "vertical-hybrid-080baafb",
+      "action": "advisor",
+      "planner_decision": {
+        "source": "CapabilityPlanner",
+        "validated": true,
+        "automatic_dispatch": false,
+        "selected_action": "advisor"
+      },
+      "planner_selected": true,
+      "local_model_invoked": true,
+      "output_delivered": true,
+      "provider": "ollama",
+      "resolved_models": [
+        "qwen2.5-coder:7b-instruct"
+      ],
+      "local_outputs": {
+        "diagnosis": "**Diagnosis:**  \nThe mutation policy for the live-smoke task is set to `isolated_only`, which means that no patches are allowed.\n\n**Allowed Files:**  \n- `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n**Evidence Refs:**  \n- vertical:vertical-hybrid-080baafb:req\n- vertical:allowed_files\n\n**Risk Findings:**  \nThere is no risk associated with this configuration as it strictly adheres to the `isolated_only` policy.\n\n**Confidence:**  \n100%\n\n**Next Action:**  \nNo further action is required at this time. The live-smoke mutation policy is correctly configured and meets the requirements.",
+        "recommended_next_action": "Online Agent must independently decide and record consumption.",
+        "provider_error": ""
+      },
+      "candidate_summary": {
+        "candidate_count": 0,
+        "candidate_hashes": [],
+        "isolation_status": "not_run",
+        "selected_candidate_hash": "",
+        "selected": false
+      },
+      "verifier_summary": {
+        "verifier_reached": false,
+        "verifier_status": "not_run",
+        "verifier_command": []
+      },
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/vertical-hybrid-080baafb/execution_receipt.json",
+      "evidence_refs": [
+        "vertical:vertical-hybrid-080baafb:req",
+        "vertical:allowed_files"
+      ],
+      "fallback_reason": "",
+      "claim_boundary": {
+        "registry_known": true,
+        "planner_selected": true,
+        "runtime_invoked": true,
+        "output_delivered": true,
+        "agent_consumed": false,
+        "outcome_contributed": false,
+        "value_measured": false
+      },
+      "agent_consumed": false,
+      "outcome_contributed": false,
+      "value_measured": false
+    }
+  },
+  "capability_results": {},
+  "online": {
+    "name": "online",
+    "status": "FAILED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": false,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "online:vertical-hybrid-080baafb:gateway",
+      "online:vertical-hybrid-080baafb:local_context_forwarded"
+    ],
+    "reason": "",
+    "task_id": "vertical-hybrid-080baafb",
+    "response_task_id": "vertical-hybrid-080baafb",
+    "task_identity_shared": true,
+    "response": {
+      "provider": "gemini",
+      "task_id": "vertical-hybrid-080baafb",
+      "invoked": true,
+      "output_delivered": false,
+      "gate_passed": false,
+      "provider_call_count": 1,
+      "response": {
+        "status": "FAIL",
+        "summary": "Gateway Exhausted: Warning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {\n  ineligibleTiers: [\n    {\n      reasonCode: 'UNSUPPORTED_CLIENT',\n      reasonMessage: 'This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google',\n      tierId: 'free-tier',\n      tierName: 'Gemini Code Assist for individuals'\n    }\n  ]\n}\nSkill conflict detected: \"healthcheck\" from \"/Users/jameschen/.agents/skills/healthcheck/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/healthcheck/SKILL.md\".\nSkill conflict detected: \"gemini-bridge\" from \"/Users/jameschen/.agents/skills/gemini-bridge/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/gemini-bridge/SKILL.md\".\nSkill conflict detected: \"felo-cli\" from \"/Users/jameschen/.agents/skills/felo-cli/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/felo-cli/SKILL.md\".\nSkill conflict detected: \"clarify\" from \"/Users/jameschen/.agents/skills/clarify/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/clarify/SKILL.md\".\nSkill conflict detected: \"brainstorming\" from \"/Users/jameschen/.agents/skills/brainstorming/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brainstorming/SKILL.md\".\nSkill conflict detected: \"brain-skill-router\" from \"/Users/jameschen/.agents/skills/brain-skill-router/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brain-skill-router/SKILL.md\".\nSkill conflict detected: \"autoresearch\" from \"/Users/jameschen/.agents/skills/autoresearch/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/autoresearch/SKILL.md\".\nSkill conflict detected: \"audit\" from \"/Users/jameschen/.agents/skills/audit/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/audit/SKILL.md\".\nSkill conflict detected: \"as-test-driven-development\" from \"/Users/jameschen/.agents/skills/as-test-driven-development/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/as-test-driven-development/SKILL.md\".\nSkill conflict detected: \"nexus-yang-ding-yi-eternal-v5\" from \"/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\".\nAn unexpected critical error occurred:IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n",
+        "violations": [],
+        "tokens_used": 0,
+        "error_category": "gateway_error",
+        "has_infra_invalid": true,
+        "infra_invalid_reason": "gateway_gateway_error",
+        "gateway_prompt_chars": 688,
+        "gateway_payload_chars": 891,
+        "gateway_total_chars": 1579,
+        "gateway_timeout_sec": 120,
+        "provider_path": "gemini",
+        "gateway_invocation_build_sec": 0.0002
+      },
+      "raw_response": "Warning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {\n  ineligibleTiers: [\n    {\n      reasonCode: 'UNSUPPORTED_CLIENT',\n      reasonMessage: 'This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google',\n      tierId: 'free-tier',\n      tierName: 'Gemini Code Assist for individuals'\n    }\n  ]\n}\nSkill conflict detected: \"healthcheck\" from \"/Users/jameschen/.agents/skills/healthcheck/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/healthcheck/SKILL.md\".\nSkill conflict detected: \"gemini-bridge\" from \"/Users/jameschen/.agents/skills/gemini-bridge/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/gemini-bridge/SKILL.md\".\nSkill conflict detected: \"felo-cli\" from \"/Users/jameschen/.agents/skills/felo-cli/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/felo-cli/SKILL.md\".\nSkill conflict detected: \"clarify\" from \"/Users/jameschen/.agents/skills/clarify/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/clarify/SKILL.md\".\nSkill conflict detected: \"brainstorming\" from \"/Users/jameschen/.agents/skills/brainstorming/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brainstorming/SKILL.md\".\nSkill conflict detected: \"brain-skill-router\" from \"/Users/jameschen/.agents/skills/brain-skill-router/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brain-skill-router/SKILL.md\".\nSkill conflict detected: \"autoresearch\" from \"/Users/jameschen/.agents/skills/autoresearch/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/autoresearch/SKILL.md\".\nSkill conflict detected: \"audit\" from \"/Users/jameschen/.agents/skills/audit/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/audit/SKILL.md\".\nSkill conflict detected: \"as-test-driven-development\" from \"/Users/jameschen/.agents/skills/as-test-driven-development/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/as-test-driven-development/SKILL.md\".\nSkill conflict detected: \"nexus-yang-ding-yi-eternal-v5\" from \"/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\".\nAn unexpected critical error occurred:IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n",
+      "usage": {},
+      "error": "online_non_delivery_detected",
+      "evidence_refs": [
+        "online:vertical-hybrid-080baafb:gateway",
+        "online:vertical-hybrid-080baafb:local_context_forwarded"
+      ],
+      "execution_role": "online",
+      "transport": "gateway_compatibility",
+      "selection_source": "cli_task_policy"
+    }
+  },
+  "online_preflight": {
+    "status": "ONLINE_READY",
+    "online_policy": "auto",
+    "online_execution_requested": true,
+    "online_execution_authorized": true,
+    "online_authorization_source": "cli_task_policy",
+    "approved_online_providers": [
+      "gemini",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "reason": "online_execution_authorized",
+    "physical_invocation_allowed": true
+  },
+  "verifier": {
+    "name": "verifier",
+    "status": "FAILED",
+    "invoked": true,
+    "evidence_present": true,
+    "gate_passed": false,
+    "outcome_contributed": false,
+    "evidence_refs": [
+      "v:vertical-hybrid-080baafb"
+    ],
+    "reason": "",
+    "task_id": "vertical-hybrid-080baafb",
+    "response_task_id": "vertical-hybrid-080baafb",
+    "task_identity_shared": true,
+    "response": {
+      "task_id": "vertical-hybrid-080baafb",
+      "status": "fail",
+      "gate_passed": false,
+      "invoked": true,
+      "evidence_refs": [
+        "v:vertical-hybrid-080baafb"
+      ]
+    }
+  },
+  "learning": {
+    "name": "learning",
+    "status": "NOT_RUN",
+    "invoked": false,
+    "evidence_present": false,
+    "gate_passed": false,
+    "outcome_contributed": false,
+    "evidence_refs": [],
+    "reason": "learning_callback_not_supplied"
+  },
+  "stages": [
+    {
+      "name": "planner",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "runtime:planner_invoked"
+      ],
+      "reason": "",
+      "selected_capabilities": [
+        "harness_preflight_sensor",
+        "research_route",
+        "delivery_gate",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate",
+        "local_model_executor"
+      ],
+      "plan_schema": "nexus_capability_plan_v1",
+      "plan_hash": "b6a790d8c07fd74b1e2bb512920873afd6b7645d51acf8026edc7208e582a3df"
+    },
+    {
+      "name": "local",
+      "status": "SUCCEEDED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": true,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "vertical:vertical-hybrid-080baafb:req",
+        "vertical:allowed_files"
+      ],
+      "reason": "",
+      "planner_snapshot_hash": "ae7691d1bb63dbc74bf40e983cd46d30cda71c8a9007f09b2168c8584c878f1d",
+      "task_id": "vertical-hybrid-080baafb",
+      "response_task_id": "vertical-hybrid-080baafb",
+      "task_identity_shared": true,
+      "response": {
+        "schema": "nexus.local_assist.response.v1",
+        "status": "SUCCEEDED",
+        "task_id": "vertical-hybrid-080baafb",
+        "parent_task_id": "vertical-hybrid-080baafb",
+        "action": "advisor",
+        "planner_decision": {
+          "source": "CapabilityPlanner",
+          "validated": true,
+          "automatic_dispatch": false,
+          "selected_action": "advisor"
+        },
+        "planner_selected": true,
+        "local_model_invoked": true,
+        "output_delivered": true,
+        "provider": "ollama",
+        "resolved_models": [
+          "qwen2.5-coder:7b-instruct"
+        ],
+        "local_outputs": {
+          "diagnosis": "**Diagnosis:**  \nThe mutation policy for the live-smoke task is set to `isolated_only`, which means that no patches are allowed.\n\n**Allowed Files:**  \n- `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n**Evidence Refs:**  \n- vertical:vertical-hybrid-080baafb:req\n- vertical:allowed_files\n\n**Risk Findings:**  \nThere is no risk associated with this configuration as it strictly adheres to the `isolated_only` policy.\n\n**Confidence:**  \n100%\n\n**Next Action:**  \nNo further action is required at this time. The live-smoke mutation policy is correctly configured and meets the requirements.",
+          "recommended_next_action": "Online Agent must independently decide and record consumption.",
+          "provider_error": ""
+        },
+        "candidate_summary": {
+          "candidate_count": 0,
+          "candidate_hashes": [],
+          "isolation_status": "not_run",
+          "selected_candidate_hash": "",
+          "selected": false
+        },
+        "verifier_summary": {
+          "verifier_reached": false,
+          "verifier_status": "not_run",
+          "verifier_command": []
+        },
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/vertical-hybrid-080baafb/execution_receipt.json",
+        "evidence_refs": [
+          "vertical:vertical-hybrid-080baafb:req",
+          "vertical:allowed_files"
+        ],
+        "fallback_reason": "",
+        "claim_boundary": {
+          "registry_known": true,
+          "planner_selected": true,
+          "runtime_invoked": true,
+          "output_delivered": true,
+          "agent_consumed": false,
+          "outcome_contributed": false,
+          "value_measured": false
+        },
+        "agent_consumed": false,
+        "outcome_contributed": false,
+        "value_measured": false
+      }
+    },
+    {
+      "name": "online",
+      "status": "FAILED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "online:vertical-hybrid-080baafb:gateway",
+        "online:vertical-hybrid-080baafb:local_context_forwarded"
+      ],
+      "reason": "",
+      "task_id": "vertical-hybrid-080baafb",
+      "response_task_id": "vertical-hybrid-080baafb",
+      "task_identity_shared": true,
+      "response": {
+        "provider": "gemini",
+        "task_id": "vertical-hybrid-080baafb",
+        "invoked": true,
+        "output_delivered": false,
+        "gate_passed": false,
+        "provider_call_count": 1,
+        "response": {
+          "status": "FAIL",
+          "summary": "Gateway Exhausted: Warning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {\n  ineligibleTiers: [\n    {\n      reasonCode: 'UNSUPPORTED_CLIENT',\n      reasonMessage: 'This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google',\n      tierId: 'free-tier',\n      tierName: 'Gemini Code Assist for individuals'\n    }\n  ]\n}\nSkill conflict detected: \"healthcheck\" from \"/Users/jameschen/.agents/skills/healthcheck/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/healthcheck/SKILL.md\".\nSkill conflict detected: \"gemini-bridge\" from \"/Users/jameschen/.agents/skills/gemini-bridge/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/gemini-bridge/SKILL.md\".\nSkill conflict detected: \"felo-cli\" from \"/Users/jameschen/.agents/skills/felo-cli/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/felo-cli/SKILL.md\".\nSkill conflict detected: \"clarify\" from \"/Users/jameschen/.agents/skills/clarify/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/clarify/SKILL.md\".\nSkill conflict detected: \"brainstorming\" from \"/Users/jameschen/.agents/skills/brainstorming/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brainstorming/SKILL.md\".\nSkill conflict detected: \"brain-skill-router\" from \"/Users/jameschen/.agents/skills/brain-skill-router/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brain-skill-router/SKILL.md\".\nSkill conflict detected: \"autoresearch\" from \"/Users/jameschen/.agents/skills/autoresearch/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/autoresearch/SKILL.md\".\nSkill conflict detected: \"audit\" from \"/Users/jameschen/.agents/skills/audit/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/audit/SKILL.md\".\nSkill conflict detected: \"as-test-driven-development\" from \"/Users/jameschen/.agents/skills/as-test-driven-development/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/as-test-driven-development/SKILL.md\".\nSkill conflict detected: \"nexus-yang-ding-yi-eternal-v5\" from \"/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\".\nAn unexpected critical error occurred:IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n",
+          "violations": [],
+          "tokens_used": 0,
+          "error_category": "gateway_error",
+          "has_infra_invalid": true,
+          "infra_invalid_reason": "gateway_gateway_error",
+          "gateway_prompt_chars": 688,
+          "gateway_payload_chars": 891,
+          "gateway_total_chars": 1579,
+          "gateway_timeout_sec": 120,
+          "provider_path": "gemini",
+          "gateway_invocation_build_sec": 0.0002
+        },
+        "raw_response": "Warning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {\n  ineligibleTiers: [\n    {\n      reasonCode: 'UNSUPPORTED_CLIENT',\n      reasonMessage: 'This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google',\n      tierId: 'free-tier',\n      tierName: 'Gemini Code Assist for individuals'\n    }\n  ]\n}\nSkill conflict detected: \"healthcheck\" from \"/Users/jameschen/.agents/skills/healthcheck/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/healthcheck/SKILL.md\".\nSkill conflict detected: \"gemini-bridge\" from \"/Users/jameschen/.agents/skills/gemini-bridge/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/gemini-bridge/SKILL.md\".\nSkill conflict detected: \"felo-cli\" from \"/Users/jameschen/.agents/skills/felo-cli/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/felo-cli/SKILL.md\".\nSkill conflict detected: \"clarify\" from \"/Users/jameschen/.agents/skills/clarify/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/clarify/SKILL.md\".\nSkill conflict detected: \"brainstorming\" from \"/Users/jameschen/.agents/skills/brainstorming/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brainstorming/SKILL.md\".\nSkill conflict detected: \"brain-skill-router\" from \"/Users/jameschen/.agents/skills/brain-skill-router/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/brain-skill-router/SKILL.md\".\nSkill conflict detected: \"autoresearch\" from \"/Users/jameschen/.agents/skills/autoresearch/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/autoresearch/SKILL.md\".\nSkill conflict detected: \"audit\" from \"/Users/jameschen/.agents/skills/audit/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/audit/SKILL.md\".\nSkill conflict detected: \"as-test-driven-development\" from \"/Users/jameschen/.agents/skills/as-test-driven-development/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.gemini/skills/as-test-driven-development/SKILL.md\".\nSkill conflict detected: \"nexus-yang-ding-yi-eternal-v5\" from \"/Users/jameschen/Workspace/nexus/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\" is overriding the same skill from \"/Users/jameschen/.agents/skills/yang-ding-yi-nexus-eternal/SKILL.md\".\nAn unexpected critical error occurred:IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307713:11)\n    at _doSetupUser (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:307702:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n",
+        "usage": {},
+        "error": "online_non_delivery_detected",
+        "evidence_refs": [
+          "online:vertical-hybrid-080baafb:gateway",
+          "online:vertical-hybrid-080baafb:local_context_forwarded"
+        ],
+        "execution_role": "online",
+        "transport": "gateway_compatibility",
+        "selection_source": "cli_task_policy"
+      }
+    },
+    {
+      "name": "verifier",
+      "status": "FAILED",
+      "invoked": true,
+      "evidence_present": true,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [
+        "v:vertical-hybrid-080baafb"
+      ],
+      "reason": "",
+      "task_id": "vertical-hybrid-080baafb",
+      "response_task_id": "vertical-hybrid-080baafb",
+      "task_identity_shared": true,
+      "response": {
+        "task_id": "vertical-hybrid-080baafb",
+        "status": "fail",
+        "gate_passed": false,
+        "invoked": true,
+        "evidence_refs": [
+          "v:vertical-hybrid-080baafb"
+        ]
+      }
+    },
+    {
+      "name": "learning",
+      "status": "NOT_RUN",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "reason": "learning_callback_not_supplied"
+    }
+  ],
+  "evidence_refs": [
+    "online:vertical-hybrid-080baafb:gateway",
+    "online:vertical-hybrid-080baafb:local_context_forwarded",
+    "runtime:planner_invoked",
+    "v:vertical-hybrid-080baafb",
+    "vertical:allowed_files",
+    "vertical:vertical-hybrid-080baafb",
+    "vertical:vertical-hybrid-080baafb:req"
+  ],
+  "receipt_complete": false,
+  "terminal_status": "INCOMPLETE",
+  "claim_boundary": {
+    "task_identity_shared": true,
+    "planner_shared": true,
+    "local_online_continuation": true,
+    "receipt_complete": false,
+    "outcome_contributed": false,
+    "value_measured": false,
+    "public_claim_allowed": false
+  },
+  "receipt_path": ".nexus/reports/local_assist_real_pilot/real_hybrid_pilot_20260713T2204Z/vertical_ur_receipt.json"
+}

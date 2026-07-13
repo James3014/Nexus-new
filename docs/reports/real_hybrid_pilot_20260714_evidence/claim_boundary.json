@@ -11,7 +11,7 @@
   "five_task_live_paired_pipeline_complete": false,
   "five_task_offline_paired_pipeline_complete": true,
   "generalized_market_value_proven": false,
-  "git_head": "f43ef5b5e82e2ad67f1151167476da0f23cbfcca",
+  "git_head": "f10000b55e21d5e642e89af907825341afce37f3",
   "measurement_provenance_complete": true,
   "online_auth_blocker": "gemini_cli_IneligibleTierError; no XAI/GROK/OPENAI keys",
   "production_ready": false,
@@ -22,5 +22,6 @@
   "public_claim_allowed": false,
   "real_local_online_vertical_proven": false,
   "real_local_only_advisor_proven": true,
-  "updated_at": "2026-07-13T22:21:41Z"
+  "updated_at": "2026-07-13T22:27:33Z",
+  "vertical_stages_consistent": true
 }
