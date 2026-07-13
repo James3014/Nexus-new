@@ -88,14 +88,26 @@ duplicate_authority_candidates:
   - paths:
       - docs/2026-03-19_Nexus_Next_Goals_Spec.md
       - docs/spec/2026-03-19_Nexus_Next_Goals_Spec.md
-    hash_relation: identical
-    status: unresolved
+    original_hash_relation: identical
+    current_relation: canonical_with_redirect
+    status: resolved
+    canonical_path: docs/spec/2026-03-19_Nexus_Next_Goals_Spec.md
+    redirect_path: docs/2026-03-19_Nexus_Next_Goals_Spec.md
+    canonical_role: historical_specification
+    authority: historical_reference
+    current_runtime_authority: false
 
   - paths:
       - docs/nexus_trinity_evolution_spec.md
       - docs/spec/nexus_trinity_evolution_spec.md
-    hash_relation: identical
-    status: unresolved
+    original_hash_relation: identical
+    current_relation: canonical_with_redirect
+    status: resolved
+    canonical_path: docs/spec/nexus_trinity_evolution_spec.md
+    redirect_path: docs/nexus_trinity_evolution_spec.md
+    canonical_role: historical_specification
+    authority: historical_reference
+    current_runtime_authority: false
 
 provisional_worktree_evidence:
   rule: >
