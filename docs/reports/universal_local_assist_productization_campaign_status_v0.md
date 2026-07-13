@@ -2,20 +2,23 @@
 
 ## Current milestone
 
-`M3-B_SHADOW_RECOMMENDATION_RUNTIME`
+`M3-C_RECOMMENDATION_POLICY_CALIBRATION`
 
 ## Completed milestones
 
 - `M2_STATUS_CONVERGED_AND_SEALED` — `cdad37e9c`
 - `PLANNER_LOCAL_ASSIST_RECOMMENDATION_CONTRACT_PROVEN` — `dca1c56f4`
+- `PLANNER_LOCAL_ASSIST_RECOMMENDATION_SHADOW_PROVEN` — `53bc1d39d`
 
 ## Current commit
 
-`dca1c56f4` — `feat(local-assist): add planner recommendation contract`
+`53bc1d39d` — `feat(local-assist): record shadow recommendation decisions`
 
 ## Evidence
 
 - `tests/engine/test_local_assist_recommendation.py` → `9 passed in 0.18s`.
+- `tests/engine/test_local_assist_shadow_runtime.py` → `3 passed in 0.17s`.
+- Shadow dataset → `12` tasks, `3` per action (`skip`, `advisor`, `candidate`, `verified-subtask`); coverage `1.0`; exact agreement `1.0`; unsafe recommendation rate `0.0`; Local Assist invocations `0`.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -30,4 +33,4 @@
 
 ## Next automatic action
 
-Implement M3-B shadow runtime: record planner recommendation, independent Agent choice, match/override fields, assist result, and shared task lineage without automatic Local Assist invocation.
+Implement M3-C calibration: evaluate shadow metrics against the policy thresholds, preserve calibration evidence separately from route authority, and refine only if thresholds fail.
