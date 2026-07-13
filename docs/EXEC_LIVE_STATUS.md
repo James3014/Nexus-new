@@ -1,4 +1,27 @@
+---
+title: Nexus Historical Execution Status
+type: status-snapshot
+status: frozen
+lifecycle: historical_snapshot
+authority: historical_evidence
+last_observed_task_at: '2026-04-17'
+phase_metrics_observed_at: '2026-03-30'
+current_status_source: ../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+confidence: high
+---
+
 # EXEC LIVE STATUS
+
+> [!warning] Not a live status source
+>
+> This file has not recorded a live task since 2026-04-17.
+> Its phase metrics are from 2026-03-30.
+>
+> Do not use this page to infer the current Nexus runtime, blockers,
+> readiness, phase health, or production status.
+>
+> Current operational state:
+> [`../nexus_wiki_vault/00_Home/CURRENT_STATE.md`](../nexus_wiki_vault/00_Home/CURRENT_STATE.md)
 
 Last Update: 2026-04-17 23:30:47
 

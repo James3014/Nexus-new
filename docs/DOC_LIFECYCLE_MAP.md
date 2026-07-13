@@ -1,4 +1,24 @@
+---
+title: Nexus Historical ERA-A/B/C Lifecycle Map
+type: lifecycle-map
+status: frozen
+lifecycle: historical_snapshot
+authority: historical_classification
+scope_end: '2026-03-31'
+superseded_for_current_authority_by: DOC_AUTHORITY_MANIFEST.yaml
+confidence: high
+---
+
 # Nexus 文件生命週期地圖（Doc Lifecycle Map）
+
+> [!warning] Historical lifecycle model
+>
+> ERA-A, ERA-B, and ERA-C classify the March 2026 documentation set only.
+> They do not classify April-July 2026 reports, N30R artifacts,
+> Local Assist evidence, Runtime Truth evidence, or the current Wiki layer.
+>
+> For present document authority, use
+> [`DOC_AUTHORITY_MANIFEST.yaml`](DOC_AUTHORITY_MANIFEST.yaml).
 
 > [!important]
 > **Status**: `ACTIVE` / `ERA-C`
@@ -39,3 +59,27 @@
 2. 若 agent 回報引用 `REFERENCE`，必須補一段「與 ACTIVE 對齊」說明。
 3. `ARCHIVE` 僅可用於追溯，不能作為當輪實作與驗收依據。
 4. 每次 `INDEX.md` 變更時，需同步檢查本文件分級是否仍正確。
+
+## Post-ERA-C boundary
+
+Documents created after 2026-03-31 are not automatically `ACTIVE`.
+
+Until explicitly classified in `DOC_AUTHORITY_MANIFEST.yaml`, they must be
+treated according to their repository and evidence state:
+
+| State | Meaning |
+|---|---|
+| `TRACKED_REVIEWED` | Committed and manually reviewed, but authority still depends on the manifest |
+| `TRACKED_UNCLASSIFIED` | Committed but not authority-classified |
+| `PROVISIONAL_WORKTREE_EVIDENCE` | Modified or untracked worktree evidence; not durable canonical authority |
+| `GENERATED_ARTIFACT` | Machine output governed by a run manifest, receipt, or retention policy |
+| `HISTORICAL` | Preserved only for audit, reconstruction, or prior-state analysis |
+
+A filename containing `current`, `live`, `final`, `seal`, `complete`,
+`ready`, `PASS`, or `STRICT` does not establish authority.
+
+Benchmark evidence does not establish product runtime evidence.
+
+Untracked or modified worktree documents may support investigation, but
+must not be promoted to canonical authority until committed, reviewed,
+and explicitly classified.

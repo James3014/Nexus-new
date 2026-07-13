@@ -1,0 +1,103 @@
+schema: nexus.docs.authority.v1
+effective_at: '2026-07-13'
+baseline_commit: 28d701b235bce64a59b7623b273debabc5232340
+
+purpose: >
+  Define authority boundaries between the Nexus Wiki, curated engineering
+  documentation, reports, generated artifacts, and historical snapshots.
+  This manifest does not certify every document under docs/.
+
+authority_layers:
+  current_operational_state:
+    path: nexus_wiki_vault/00_Home/CURRENT_STATE.md
+    authority: operational
+    lifecycle: current
+
+  claim_taxonomy:
+    path: nexus_wiki_vault/01_System/CLAIM_TAXONOMY.md
+    authority: normative
+    lifecycle: current
+    metadata_status: needs_followup
+    note: >
+      Content is used as the current claim taxonomy, but its verification
+      metadata requires a separate Wiki correction task.
+
+  wiki_authority_manifest:
+    path: nexus_wiki_vault/99_Schema/WIKI_AUTHORITY_MANIFEST.yaml
+    authority: normative
+    lifecycle: current
+
+  docs_index:
+    path: docs/INDEX.md
+    authority: historical_navigation
+    lifecycle: historical_snapshot
+
+  historical_execution_status:
+    path: docs/EXEC_LIVE_STATUS.md
+    authority: historical_evidence
+    lifecycle: historical_snapshot
+
+  historical_lifecycle_map:
+    path: docs/DOC_LIFECYCLE_MAP.md
+    authority: historical_classification
+    lifecycle: historical_snapshot
+
+  legacy_governance:
+    path: docs/INDEX_GOVERNANCE.md
+    authority: non_normative
+    lifecycle: legacy
+
+default_rules:
+  - A filename does not establish authority.
+  - Untracked or modified worktree documents cannot be canonical.
+  - Reports are evidence candidates, not current-state authority by default.
+  - Generated JSON or JSONL requires a run manifest or receipt.
+  - Historical documents may be preserved without remaining operational.
+  - Benchmark evidence does not establish product runtime evidence.
+  - Duplicate files remain unresolved until a dedicated reference audit.
+
+unclassified_collections:
+  reports:
+    path: docs/reports/
+    status: evidence_lake_pending_manifest
+    default_authority: none
+
+  bench:
+    path: docs/bench/
+    status: generated_benchmark_artifacts_pending_policy
+    default_authority: none
+
+  benchmark:
+    path: docs/benchmark/
+    status: methodology_and_curated_analysis_pending_review
+    default_authority: none
+
+duplicate_authority_candidates:
+  - paths:
+      - docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+      - docs/spec/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+    hash_relation: identical
+    status: unresolved
+
+  - paths:
+      - docs/16_CAPABILITY_SPEC_MATRIX.md
+      - docs/spec/16_CAPABILITY_SPEC_MATRIX.md
+    hash_relation: identical
+    status: unresolved
+
+  - paths:
+      - docs/2026-03-19_Nexus_Next_Goals_Spec.md
+      - docs/spec/2026-03-19_Nexus_Next_Goals_Spec.md
+    hash_relation: identical
+    status: unresolved
+
+  - paths:
+      - docs/nexus_trinity_evolution_spec.md
+      - docs/spec/nexus_trinity_evolution_spec.md
+    hash_relation: identical
+    status: unresolved
+
+provisional_worktree_evidence:
+  rule: >
+    Files that are modified or untracked may be inspected as provisional
+    evidence but cannot be referenced as durable canonical authority.

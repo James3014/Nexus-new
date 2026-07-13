@@ -1,4 +1,31 @@
+---
+title: Nexus Historical Engineering Index
+type: navigation
+status: frozen
+lifecycle: historical_snapshot
+authority: historical_navigation
+snapshot_period: 2026-03_to_2026-04
+superseded_for_current_state_by: ../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+authority_manifest: DOC_AUTHORITY_MANIFEST.yaml
+confidence: high
+---
+
 # Nexus Docs Index
+
+> [!warning] Historical engineering index
+>
+> This document is a frozen engineering snapshot from the March-April 2026
+> Phase Health era. It is no longer the Nexus current-state SSoT.
+>
+> Canonical current operational state:
+> [`../nexus_wiki_vault/00_Home/CURRENT_STATE.md`](../nexus_wiki_vault/00_Home/CURRENT_STATE.md)
+>
+> Canonical document authority:
+> [`DOC_AUTHORITY_MANIFEST.yaml`](DOC_AUTHORITY_MANIFEST.yaml)
+>
+> Statements below such as "current mainline", "no serious blockers",
+> "PASS / STRICT", or "live status" must be interpreted only within their
+> original March-April 2026 historical scope.
 
 ### Current (正在做)
 - **主線任務**：建立 `P->X->D->R->A->C` 階段健康自治（可監測、可自癒、可自優化）。

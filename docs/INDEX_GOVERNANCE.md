@@ -1,4 +1,26 @@
+---
+title: Nexus Legacy Governance Rules
+type: governance-snapshot
+status: review_required
+lifecycle: legacy
+authority: non_normative
+snapshot_period: 2026-03_to_2026-04
+superseded_for_document_authority_by: DOC_AUTHORITY_MANIFEST.yaml
+confidence: medium
+---
+
 # Nexus Governance & Rules
+
+> [!warning] Legacy governance snapshot
+>
+> This document reflects the March-April 2026 execution model.
+> References to Gemini CLI sub-agents, Nexus-only execution,
+> AUTO-EXECUTE, voice notification, PASS baseline, or related operating
+> assumptions have not been reconciled with the current multi-provider
+> architecture.
+>
+> Do not treat this file as current normative policy.
+> Preserve it for historical review only.
 
 ## Token 口徑（唯一判定規則）
 1. 每輪 benchmark 必須記錄 `total_raw_tokens`。
