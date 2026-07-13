@@ -151,8 +151,20 @@ Gateway `ask_unified` uses the binding:
 
 ### Focused gate evidence
 
+Transcript path (implementer SCRATCH):
+
 ```text
-145 passed
+focused_gate.log
+three_failures_before_after.log
+baseline_git.txt
+contract_static.txt
+changed_files.txt
+```
+
+Latest Phase 6 + NightShift focused run:
+
+```text
+151 passed, 1 warning
   tests/engine/test_canonical_task_seam.py
   tests/engine/test_cli_work_path_audit.py
   tests/test_cli_output_contract.py
@@ -165,9 +177,20 @@ Gateway `ask_unified` uses the binding:
   tests/services/test_cloud_local_stage_chain.py
   tests/research/test_sprint_service.py
   tests/research/test_day_shift_optimizer.py
+  tests/app/test_nightshift_runner_service.py
 ```
 
 Three previously failing integration cases are green.
+
+Online invoker payload contract fields (always present):
+
+```text
+provider, task_id, invoked, output_delivered, gate_passed,
+provider_call_count, response, raw_response, usage, error, evidence_refs
++ transport, selection_source, execution_role (binding metadata)
+```
+
+Injected structured transport stamps `provider=injected` (not oauth_provider/ollama).
 
 ### Claim boundary (unchanged)
 

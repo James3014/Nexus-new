@@ -341,7 +341,8 @@ def resolve_online_transport_binding(
     if structured_transport_injected:
         return OnlineTransportBinding(
             execution_role="online",
-            provider=requested or "injected",
+            # Injected transport identity is not the local auto-detect default.
+            provider="injected",
             transport=TRANSPORT_STRUCTURED_CALLABLE,
             selection_source=SELECTION_INJECTED_TRANSPORT,
             use_gateway_structured=True,
@@ -413,6 +414,56 @@ def extract_online_stage_payload(
     domain = invoker_payload.get("response", "")
     raw = str(invoker_payload.get("raw_response", "") or "")
     return domain, raw, dict(invoker_payload)
+
+
+def normalize_online_invoker_payload(
+    *,
+    provider: str,
+    task_id: str,
+    invoked: bool,
+    output_delivered: bool,
+    gate_passed: bool,
+    provider_call_count: int,
+    response: Any = "",
+    raw_response: str = "",
+    usage: Mapping[str, Any] | None = None,
+    error: str = "",
+    evidence_refs: list[str] | None = None,
+    transport: str = "",
+    selection_source: str = "",
+    execution_role: str = "online",
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Stable Online invoker payload contract for all transports.
+
+    Required fields:
+      provider, task_id, invoked, output_delivered, gate_passed,
+      provider_call_count, response, raw_response, usage, error, evidence_refs
+
+    Optional binding metadata:
+      execution_role, transport, selection_source
+    """
+    payload: dict[str, Any] = {
+        "provider": str(provider or ""),
+        "task_id": str(task_id or ""),
+        "invoked": bool(invoked),
+        "output_delivered": bool(output_delivered),
+        "gate_passed": bool(gate_passed),
+        "provider_call_count": int(provider_call_count or 0),
+        "response": response,
+        "raw_response": str(raw_response or ""),
+        "usage": dict(usage) if isinstance(usage, Mapping) else {},
+        "error": str(error or ""),
+        "evidence_refs": [str(ref) for ref in (evidence_refs or [])],
+        "execution_role": str(execution_role or "online"),
+        "transport": str(transport or ""),
+        "selection_source": str(selection_source or ""),
+    }
+    if isinstance(extra, Mapping):
+        for key, value in extra.items():
+            if key not in payload:
+                payload[str(key)] = value
+    return payload
 
 
 def resolve_registered_online_cli_spec(
@@ -511,51 +562,64 @@ def build_subprocess_online_invoker(
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            return {
-                "provider": spec.provider,
-                "task_id": task_id,
-                "invoked": True,
-                "output_delivered": False,
-                "gate_passed": False,
-                "provider_call_count": 1,
-                "returncode": None,
-                "stderr": str(exc),
-                "evidence_refs": [f"online:{spec.provider}:{task_id}:timeout"],
-                "error": "provider_timeout",
-            }
+            return normalize_online_invoker_payload(
+                provider=spec.provider,
+                task_id=task_id,
+                invoked=True,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=1,
+                response="",
+                raw_response="",
+                usage={},
+                error="provider_timeout",
+                evidence_refs=[f"online:{spec.provider}:{task_id}:timeout"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"returncode": None, "stderr": str(exc)},
+            )
         except OSError as exc:
-            return {
-                "provider": spec.provider,
-                "task_id": task_id,
-                "invoked": False,
-                "output_delivered": False,
-                "gate_passed": False,
-                "provider_call_count": 0,
-                "returncode": None,
-                "stderr": str(exc),
-                "evidence_refs": [f"online:{spec.provider}:{task_id}:not_invoked"],
-                "error": "provider_not_invoked",
-            }
+            return normalize_online_invoker_payload(
+                provider=spec.provider,
+                task_id=task_id,
+                invoked=False,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=0,
+                response="",
+                raw_response="",
+                usage={},
+                error="provider_not_invoked",
+                evidence_refs=[f"online:{spec.provider}:{task_id}:not_invoked"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"returncode": None, "stderr": str(exc)},
+            )
         stdout = str(getattr(result, "stdout", "") or "")
         stderr = str(getattr(result, "stderr", "") or "")
         returncode = int(getattr(result, "returncode", 1))
-        return {
-            "provider": spec.provider,
-            "task_id": task_id,
-            "invoked": True,
-            "output_delivered": bool(stdout.strip()),
-            "gate_passed": returncode == 0 and bool(stdout.strip()),
-            "provider_call_count": 1,
-            "returncode": returncode,
-            "response": stdout,
-            "stderr": stderr,
-                "evidence_refs": (
-                    [f"online:{spec.provider}:{task_id}:subprocess"]
-                    + ([f"online:{spec.provider}:{task_id}:local_context_forwarded"] if local_context_forwarded else [])
-                    + ([f"online:{spec.provider}:{task_id}:capability_context_forwarded"] if capability_context_forwarded else [])
-                    + ([f"online:{spec.provider}:{task_id}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
-                ),
-            }
+        delivered = bool(stdout.strip())
+        return normalize_online_invoker_payload(
+            provider=spec.provider,
+            task_id=task_id,
+            invoked=True,
+            output_delivered=delivered,
+            gate_passed=returncode == 0 and delivered,
+            provider_call_count=1,
+            response=stdout,
+            raw_response=stdout,
+            usage={},
+            error="" if returncode == 0 and delivered else "provider_subprocess_failed",
+            evidence_refs=(
+                [f"online:{spec.provider}:{task_id}:subprocess"]
+                + ([f"online:{spec.provider}:{task_id}:local_context_forwarded"] if local_context_forwarded else [])
+                + ([f"online:{spec.provider}:{task_id}:capability_context_forwarded"] if capability_context_forwarded else [])
+                + ([f"online:{spec.provider}:{task_id}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
+            ),
+            transport=TRANSPORT_REGISTERED_CLI,
+            selection_source=SELECTION_EXPLICIT_REQUEST,
+            extra={"returncode": returncode, "stderr": stderr},
+        )
 
     return invoke
 
@@ -595,16 +659,21 @@ def build_registered_online_invoker(
         def guarded_invoke(context: Mapping[str, Any]) -> dict[str, Any]:
             task_id = str(context.get("task_id", ""))
             if os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED") != "1":
-                return {
-                    "provider": spec.provider,
-                    "task_id": task_id,
-                    "invoked": False,
-                    "output_delivered": False,
-                    "gate_passed": False,
-                    "provider_call_count": 0,
-                    "error": "external_authorization_required",
-                    "evidence_refs": [f"online:{spec.provider}:{task_id}:authorization_required"],
-                }
+                return normalize_online_invoker_payload(
+                    provider=spec.provider,
+                    task_id=task_id,
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    raw_response="",
+                    usage={},
+                    error="external_authorization_required",
+                    evidence_refs=[f"online:{spec.provider}:{task_id}:authorization_required"],
+                    transport=TRANSPORT_REGISTERED_CLI,
+                    selection_source=SELECTION_EXPLICIT_REQUEST,
+                )
             return invoker(context)
 
         return guarded_invoke
@@ -965,6 +1034,8 @@ def build_structured_online_invoker(
     model_name: str | None = None,
     output_schema: Mapping[str, Any] | None = None,
     provider: str = "gateway",
+    transport: str = TRANSPORT_STRUCTURED_CALLABLE,
+    selection_source: str = SELECTION_EXPLICIT_REQUEST,
 ) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
     """Adapt a compatibility structured transport into the canonical seam.
 
@@ -987,17 +1058,29 @@ def build_structured_online_invoker(
         response = structured if isinstance(structured, Mapping) else str(raw or structured or "")
         delivered = bool(response)
         task_id = str(context.get("task_id", ""))
-        return {
-            "provider": provider,
-            "task_id": task_id,
-            "invoked": True,
-            "output_delivered": delivered,
-            "gate_passed": delivered,
-            "provider_call_count": 1,
-            "response": response,
-            "raw_response": str(raw or ""),
-            "evidence_refs": [f"online:{provider}:{task_id}:structured_transport"],
-        }
+        usage: dict[str, Any] = {}
+        if isinstance(structured, Mapping):
+            maybe_usage = structured.get("usage")
+            if isinstance(maybe_usage, Mapping):
+                usage = dict(maybe_usage)
+            for key in ("tokens_used", "token_capture_status", "gateway_token_source"):
+                if key in structured and key not in usage:
+                    usage[key] = structured.get(key)
+        return normalize_online_invoker_payload(
+            provider=provider,
+            task_id=task_id,
+            invoked=True,
+            output_delivered=delivered,
+            gate_passed=delivered,
+            provider_call_count=1 if delivered else 0,
+            response=response,
+            raw_response=str(raw or ""),
+            usage=usage,
+            error="" if delivered else "structured_transport_empty_response",
+            evidence_refs=[f"online:{provider}:{task_id}:structured_transport"],
+            transport=transport,
+            selection_source=selection_source,
+        )
 
     return invoke
 

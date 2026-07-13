@@ -403,21 +403,58 @@ class BattlesuitGateway:
         lineage must use this method; absent stage callbacks remain incomplete
         in the unified receipt rather than being inferred as success.
         """
-        from nexus.services.unified_runtime import UnifiedRuntime, _capability_evidence_summary
+        from nexus.services.unified_runtime import (
+            UnifiedRuntime,
+            _capability_evidence_summary,
+            build_registered_online_invoker,
+            normalize_online_invoker_payload,
+            resolve_online_transport_binding,
+        )
+
+        route = getattr(request, "route", {})
+        requested_provider = (
+            str(route.get("provider", "") or "").strip().lower()
+            if isinstance(route, Mapping)
+            else ""
+        )
+        gateway_provider = str(self.oauth_provider or "").strip().lower()
+        bound_transport = getattr(self.ask_structured, "__func__", None)
+        structured_injected = bound_transport is not self.__class__.ask_structured
+        binding = resolve_online_transport_binding(
+            has_explicit_invoker=online_invoker is not None,
+            structured_transport_injected=structured_injected,
+            route_provider=requested_provider,
+            gateway_provider=gateway_provider,
+        )
 
         def gateway_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
-            bound_transport = getattr(self.ask_structured, "__func__", None)
-            if bound_transport is self.__class__.ask_structured and os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED") != "1":
-                return {
-                    "invoked": False,
-                    "task_id": str(context.get("task_id", "")),
-                    "output_delivered": False,
-                    "gate_passed": False,
-                    "provider_call_count": 0,
-                    "provider": self.oauth_provider,
-                    "error": "external_authorization_required",
-                    "evidence_refs": [f"gateway:{context.get('task_id')}:authorization_required"],
-                }
+            task_id = str(context.get("task_id", ""))
+            # Provider/transport identity comes from the resolved binding, not
+            # from raw oauth_provider auto-detect (which may be local-only).
+            provider_identity = binding.provider if binding.provider not in {"", "gateway"} else (
+                "injected" if structured_injected else (gateway_provider or "gateway")
+            )
+            if binding.selection_source == "injected_transport":
+                provider_identity = "injected"
+            if (
+                bound_transport is self.__class__.ask_structured
+                and os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED") != "1"
+            ):
+                return normalize_online_invoker_payload(
+                    provider=provider_identity,
+                    task_id=task_id,
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    raw_response="",
+                    usage={},
+                    error="external_authorization_required",
+                    evidence_refs=[f"gateway:{task_id}:authorization_required"],
+                    transport=binding.transport or "gateway_compatibility",
+                    selection_source=binding.selection_source or "compatibility_default",
+                )
             local_stage = context.get("local", {}) if isinstance(context, dict) else {}
             local_response = local_stage.get("response", {}) if isinstance(local_stage, dict) else {}
             local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, dict) else {}
@@ -455,51 +492,46 @@ class BattlesuitGateway:
             )
             result_mapping = result if isinstance(result, dict) else {}
             route_error = str(raw_text or "").strip().lower() in {"gemini_missing", "error", "failed"}
-            delivered = bool(raw_text or result_mapping)
-            return {
-                "invoked": bool(delivered and not route_error),
-                "task_id": str(context.get("task_id", "")),
-                "output_delivered": delivered and not route_error,
-                "gate_passed": bool(delivered and not route_error),
-                "provider_call_count": 1 if delivered and not route_error else 0,
-                "provider": self.oauth_provider,
-                "response": result_mapping or raw_text,
-                "raw_response": raw_text,
-                "evidence_refs": (
-                    [f"gateway:{context.get('task_id')}:provider_call"]
-                    + ([f"gateway:{context.get('task_id')}:local_context_forwarded"] if local_outputs else [])
-                    + ([f"gateway:{context.get('task_id')}:capability_context_forwarded"] if capability_context_forwarded else [])
-                    + ([f"gateway:{context.get('task_id')}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
-                    if delivered and not route_error
-                    else []
-                ),
-            }
+            delivered = bool(raw_text or result_mapping) and not route_error
+            usage: dict[str, Any] = {}
+            if result_mapping:
+                maybe_usage = result_mapping.get("usage")
+                if isinstance(maybe_usage, Mapping):
+                    usage = dict(maybe_usage)
+                for key in ("tokens_used", "token_capture_status", "gateway_token_source"):
+                    if key in result_mapping and key not in usage:
+                        usage[key] = result_mapping.get(key)
+            error = ""
+            if route_error:
+                error = "gateway_transport_error"
+            elif not delivered:
+                error = "gateway_empty_response"
+            refs = (
+                [f"gateway:{task_id}:provider_call"]
+                + ([f"gateway:{task_id}:local_context_forwarded"] if local_outputs else [])
+                + ([f"gateway:{task_id}:capability_context_forwarded"] if capability_context_forwarded else [])
+                + ([f"gateway:{task_id}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
+                if delivered
+                else []
+            )
+            return normalize_online_invoker_payload(
+                provider=provider_identity,
+                task_id=task_id,
+                invoked=bool(delivered),
+                output_delivered=bool(delivered),
+                gate_passed=bool(delivered),
+                provider_call_count=1 if delivered else 0,
+                response=result_mapping or raw_text,
+                raw_response=str(raw_text or ""),
+                usage=usage,
+                error=error,
+                evidence_refs=refs,
+                transport=binding.transport or "gateway_compatibility",
+                selection_source=binding.selection_source or "compatibility_default",
+            )
 
         runtime_online_invoker = online_invoker
         if runtime_online_invoker is None:
-            route = getattr(request, "route", {})
-            requested_provider = (
-                str(route.get("provider", "") or "").strip().lower()
-                if isinstance(route, Mapping)
-                else ""
-            )
-            gateway_provider = str(self.oauth_provider or "").strip().lower()
-            from nexus.services.unified_runtime import (
-                build_registered_online_invoker,
-                resolve_online_transport_binding,
-            )
-
-            # Injected / bound structured transport (tests and fixtures) must
-            # outrank Gateway auto-detected local providers such as Ollama.
-            bound_transport = getattr(self.ask_structured, "__func__", None)
-            structured_injected = bound_transport is not self.__class__.ask_structured
-            binding = resolve_online_transport_binding(
-                has_explicit_invoker=False,
-                structured_transport_injected=structured_injected,
-                route_provider=requested_provider,
-                gateway_provider=gateway_provider,
-            )
-
             if binding.use_registered_cli:
                 command = None
                 if isinstance(route, Mapping):
@@ -522,23 +554,26 @@ class BattlesuitGateway:
                         *,
                         _reason: str = resolution_error,
                         _provider: str = binding.provider,
+                        _selection: str = binding.selection_source,
                     ) -> dict[str, Any]:
-                        return {
-                            "provider": _provider,
-                            "task_id": str(_context.get("task_id", "")),
-                            "invoked": False,
-                            "output_delivered": False,
-                            "gate_passed": False,
-                            "provider_call_count": 0,
-                            "error": "provider_adapter_resolution_failed",
-                            "reason": _reason,
-                            "execution_role": "online",
-                            "transport": "registered_cli",
-                            "selection_source": binding.selection_source,
-                            "evidence_refs": [
+                        return normalize_online_invoker_payload(
+                            provider=_provider,
+                            task_id=str(_context.get("task_id", "")),
+                            invoked=False,
+                            output_delivered=False,
+                            gate_passed=False,
+                            provider_call_count=0,
+                            response="",
+                            raw_response="",
+                            usage={},
+                            error="provider_adapter_resolution_failed",
+                            evidence_refs=[
                                 f"gateway:{_context.get('task_id')}:provider_adapter_resolution_failed"
                             ],
-                        }
+                            transport="registered_cli",
+                            selection_source=_selection,
+                            extra={"reason": _reason},
+                        )
 
                     runtime_online_invoker = unresolved_provider_cli
             elif binding.resolution_error:
@@ -549,22 +584,24 @@ class BattlesuitGateway:
                     _provider: str = binding.provider,
                     _selection: str = binding.selection_source,
                 ) -> dict[str, Any]:
-                    return {
-                        "provider": _provider,
-                        "task_id": str(_context.get("task_id", "")),
-                        "invoked": False,
-                        "output_delivered": False,
-                        "gate_passed": False,
-                        "provider_call_count": 0,
-                        "error": "provider_adapter_resolution_failed",
-                        "reason": _reason,
-                        "execution_role": "online",
-                        "transport": "unresolved",
-                        "selection_source": _selection,
-                        "evidence_refs": [
+                    return normalize_online_invoker_payload(
+                        provider=_provider,
+                        task_id=str(_context.get("task_id", "")),
+                        invoked=False,
+                        output_delivered=False,
+                        gate_passed=False,
+                        provider_call_count=0,
+                        response="",
+                        raw_response="",
+                        usage={},
+                        error="provider_adapter_resolution_failed",
+                        evidence_refs=[
                             f"gateway:{_context.get('task_id')}:provider_adapter_resolution_failed"
                         ],
-                    }
+                        transport="unresolved",
+                        selection_source=_selection,
+                        extra={"reason": _reason},
+                    )
 
                 runtime_online_invoker = unresolved_provider
             else:

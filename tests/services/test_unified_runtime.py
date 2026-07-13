@@ -899,6 +899,8 @@ def test_resolve_online_transport_binding_precedence() -> None:
     )
     assert injected.transport == "structured_callable"
     assert injected.selection_source == "injected_transport"
+    assert injected.provider == "injected"
+    assert injected.provider != "ollama"
     assert injected.use_gateway_structured is True
 
     local_default = resolve_online_transport_binding(
@@ -949,6 +951,27 @@ def test_gateway_injected_structured_transport_outranks_local_ollama(
     assert raw == "raw-ok"
     assert payload["invoked"] is True
     assert payload["output_delivered"] is True
+    # Binding identity, not oauth_provider auto-detect.
+    assert payload["provider"] == "injected"
+    assert payload["transport"] == "structured_callable"
+    assert payload["selection_source"] == "injected_transport"
+    assert payload["provider"] != "ollama"
+    for required in (
+        "provider",
+        "task_id",
+        "invoked",
+        "output_delivered",
+        "gate_passed",
+        "provider_call_count",
+        "response",
+        "raw_response",
+        "usage",
+        "error",
+        "evidence_refs",
+    ):
+        assert required in payload
+    assert payload["error"] == ""
+    assert isinstance(payload["usage"], dict)
 
 
 def test_extract_online_stage_payload_is_canonical() -> None:
