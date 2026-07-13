@@ -5,7 +5,13 @@ date: 2026-03-17
 domain: Architecture/Design
 level: Verified
 priority: Critical
-status: Active
+status: preserved
+lifecycle: historical_engineering_spec
+authority: engineering_reference
+current_runtime_authority: false
+current_operational_state: ../../nexus_wiki_vault/00_Home/CURRENT_STATE.md
+current_architecture: ../../nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+authority_manifest: ../DOC_AUTHORITY_MANIFEST.yaml
 era: ERA-C
 tags:
 - Nexus
@@ -21,6 +27,12 @@ scenario_diagnosis: Defining the industrial-grade orchestration logic and phase-
 ---
 
 # 🛡️ Nexus System Architecture & Lifecycle Blueprint (v9)
+
+> [!warning] Engineering reference only
+>
+> This document preserves the historical engineering specification.
+> It is not the current runtime architecture.
+> The operational architecture is maintained by the Wiki.
 
 > [!abstract] 核心意圖
 > 本文件定義 Nexus 系統的工業級架構與生命週期規範。v9 正式化 DX/XD 變體、quick/direct/full/conversation 模式與 X 階段 provider fallback，確保複雜任務的原子化執行、知識回灌與自動化治理。

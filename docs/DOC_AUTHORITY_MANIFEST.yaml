@@ -76,14 +76,26 @@ duplicate_authority_candidates:
   - paths:
       - docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md
       - docs/spec/SYSTEM_ARCHITECTURE_BLUEPRINT.md
-    hash_relation: identical
-    status: unresolved
+    original_hash_relation: content_diverged_by_authority_boundary
+    current_relation: parallel_roles
+    status: resolved
+    root_role: historical_navigation
+    spec_role: engineering_reference
+    wiki_role: current_runtime_authority
+    authority: historical_reference
+    current_runtime_authority: false
 
   - paths:
       - docs/16_CAPABILITY_SPEC_MATRIX.md
       - docs/spec/16_CAPABILITY_SPEC_MATRIX.md
-    hash_relation: identical
-    status: unresolved
+    original_hash_relation: content_diverged_by_authority_boundary
+    current_relation: parallel_roles
+    status: resolved
+    root_role: historical_validation_snapshot
+    spec_role: engineering_reference
+    wiki_role: current_runtime_authority
+    authority: historical_reference
+    current_runtime_authority: false
 
   - paths:
       - docs/2026-03-19_Nexus_Next_Goals_Spec.md

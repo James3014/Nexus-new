@@ -1,4 +1,19 @@
+---
+title: Nexus v9 Capability Specification Matrix
+type: engineering_specification
+status: preserved
+lifecycle: historical_validation_spec
+authority: engineering_reference
+current_runtime_authority: false
+authority_manifest: ../DOC_AUTHORITY_MANIFEST.yaml
+---
+
 # 🧬 16_CAPABILITY_SPEC_MATRIX: Nexus v9 能力規格矩陣 (可執行校準版)
+
+> [!warning] Engineering capability specification
+>
+> Historical validation reference only.
+> Current capability understanding is maintained by the Wiki.
 
 ## 0. 矩陣定義 (Matrix Metadata)
 - **版本**: v9.0.0-Stable
