@@ -96,9 +96,20 @@ class PolicyManifest:
         self.root_human_entrypoint_keywords = root_human_entrypoint_keywords
 
 
-def _load_policy_manifest(manifest_path: Path | None) -> PolicyManifest:
+def _load_policy_manifest(
+    manifest_path: Path | None,
+    *,
+    allow_default_policy_fallback: bool = False,
+) -> PolicyManifest:
     path = manifest_path or DEFAULT_POLICY_MANIFEST
     if not path.exists():
+        if not allow_default_policy_fallback and manifest_path is None:
+            raise FileNotFoundError(
+                f"Policy manifest required but not found: {path}. "
+                "Set --policy-manifest or provide the manifest file."
+            )
+        if not allow_default_policy_fallback and manifest_path is not None:
+            raise FileNotFoundError(f"Policy manifest not found: {path}")
         return PolicyManifest(
             active_workstream_patterns=ACTIVE_WORKSTREAM_PATTERNS,
             current_keep_files=CURRENT_KEEP_FILES,
@@ -108,17 +119,28 @@ def _load_policy_manifest(manifest_path: Path | None) -> PolicyManifest:
     payload = _read_json(path)
     if payload.get("schema") != "nexus.report_retention_policy_manifest.v1":
         raise ValueError(f"Invalid policy manifest schema: {payload.get('schema')}")
-    patterns = tuple(payload.get("active_workstream_patterns", ACTIVE_WORKSTREAM_PATTERNS))
-    keep = set(payload.get("current_keep_files", CURRENT_KEEP_FILES))
-    hints = tuple(payload.get("raw_hints", RAW_HINTS))
-    keywords = payload.get("root_retention_keywords", {}).get(
-        "human_entrypoint", ["SUMMARY", "INDEX", "PLAN", "CURRENT_STATE", "FINALIZATION"]
-    )
+    if payload.get("version") != "v1":
+        raise ValueError(f"Invalid policy manifest version: {payload.get('version')}")
+    patterns = payload.get("active_workstream_patterns")
+    if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+        raise ValueError("active_workstream_patterns must be a list of strings")
+    keep = payload.get("current_keep_files")
+    if not isinstance(keep, list) or not all(isinstance(f, str) for f in keep):
+        raise ValueError("current_keep_files must be a list of strings")
+    hints = payload.get("raw_hints")
+    if not isinstance(hints, list) or not all(isinstance(h, str) for h in hints):
+        raise ValueError("raw_hints must be a list of strings")
+    root_kw = payload.get("root_retention_keywords")
+    if not isinstance(root_kw, dict):
+        raise ValueError("root_retention_keywords must be an object")
+    human_kw = root_kw.get("human_entrypoint")
+    if not isinstance(human_kw, list) or not all(isinstance(k, str) for k in human_kw):
+        raise ValueError("root_retention_keywords.human_entrypoint must be a list of strings")
     return PolicyManifest(
-        active_workstream_patterns=patterns,
-        current_keep_files=keep,
-        raw_hints=hints,
-        root_human_entrypoint_keywords=keywords,
+        active_workstream_patterns=tuple(patterns),
+        current_keep_files=set(keep),
+        raw_hints=tuple(hints),
+        root_human_entrypoint_keywords=human_kw,
     )
 
 
@@ -227,8 +249,12 @@ def build_inventory(
     reports_dir: Path = DEFAULT_REPORTS_DIR,
     area_manifest_path: Path | None = None,
     policy_manifest_path: Path | None = None,
+    allow_default_policy_fallback: bool = False,
 ) -> dict[str, Any]:
-    policy = _load_policy_manifest(policy_manifest_path)
+    policy = _load_policy_manifest(
+        policy_manifest_path,
+        allow_default_policy_fallback=allow_default_policy_fallback,
+    )
     keep_refs = _manifest_keep_refs(reports_dir)
     dir_map = _load_area_manifest(area_manifest_path, reports_dir)
     rows: list[dict[str, Any]] = []
@@ -363,11 +389,13 @@ def write_inventory(
     dry_run: bool = False,
     area_manifest_path: Path | None = None,
     policy_manifest_path: Path | None = None,
+    allow_default_policy_fallback: bool = False,
 ) -> dict[str, Any]:
     inventory = build_inventory(
         reports_dir=reports_dir,
         area_manifest_path=area_manifest_path,
         policy_manifest_path=policy_manifest_path,
+        allow_default_policy_fallback=allow_default_policy_fallback,
     )
     if not dry_run:
         _write_json(json_output, inventory)
@@ -390,6 +418,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=Path(""))
     parser.add_argument("--area-manifest", type=Path, default=None)
     parser.add_argument("--policy-manifest", type=Path, default=None)
+    parser.add_argument("--allow-policy-fallback", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -403,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         area_manifest_path=args.area_manifest,
         policy_manifest_path=args.policy_manifest,
+        allow_default_policy_fallback=args.allow_policy_fallback,
     )
     print(json.dumps(summary, sort_keys=True, ensure_ascii=False))
     return 0 if summary["status"] == "PASS" else 1
