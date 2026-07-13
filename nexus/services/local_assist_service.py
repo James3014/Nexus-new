@@ -600,7 +600,13 @@ class LocalAssistService:
             report_path.relative_to(root)
         except ValueError as exc:
             raise ValueError("report_file_outside_workspace") from exc
-        receipt_path = report_path.with_name("execution_receipt.json")
+        # Per-task receipt path: never clobber a shared execution_receipt.json when
+        # multiple tasks write into the same report directory.
+        if report_path.name == "response.json":
+            # Default layout: .nexus/reports/local_assist/<task_id>/response.json
+            receipt_path = report_path.with_name("execution_receipt.json")
+        else:
+            receipt_path = report_path.parent / f"{request.task_id}.execution_receipt.json"
         return receipt_path, report_path
 
 

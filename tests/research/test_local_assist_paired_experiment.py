@@ -10,6 +10,7 @@ from nexus.research.local_assist_paired_experiment import (
     FIXTURE_MEASURED,
     LOCALLY_MEASURED,
     UNAVAILABLE,
+    assert_arm_receipt_complete,
     assert_deltas_match_stored,
     compare_arms,
     load_task_defs,
@@ -196,3 +197,82 @@ def test_same_revision_arm_enforcement(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="arm_workspace_revision_mismatch"):
         compare_arms(a, b)
+
+
+def test_same_provider_arm_enforcement() -> None:
+    from nexus.research.local_assist_paired_experiment import ArmResult, MetricValue
+
+    a = ArmResult(
+        arm=ARM_A,
+        task_id="t",
+        workspace_revision="rev-1",
+        local_assist_policy="disabled",
+        online_provider="gemini",
+        total_tokens=MetricValue(10, FIXTURE_MEASURED),
+        online_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+        end_to_end_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+        online_invoked=False,
+    )
+    b = ArmResult(
+        arm=ARM_B,
+        task_id="t",
+        workspace_revision="rev-1",
+        local_assist_policy="advisor",
+        online_provider="codex",
+        total_tokens=MetricValue(8, FIXTURE_MEASURED),
+        online_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+        end_to_end_latency_ms=MetricValue(1, LOCALLY_MEASURED),
+        online_invoked=False,
+    )
+    with pytest.raises(ValueError, match="arm_online_provider_mismatch"):
+        compare_arms(a, b)
+
+
+def test_incomplete_receipt_rejected() -> None:
+    from nexus.research.local_assist_paired_experiment import ArmResult, MetricValue
+
+    incomplete = ArmResult(
+        arm=ARM_A,
+        task_id="t",
+        workspace_revision="rev-1",
+        local_assist_policy="disabled",
+        online_provider="fixture",
+        online_invoked=True,
+        total_tokens=MetricValue(10, FIXTURE_MEASURED),
+        end_to_end_latency_ms=MetricValue(5, LOCALLY_MEASURED),
+        receipt={},  # missing online receipt payload
+        receipt_path="",
+    )
+    with pytest.raises(ValueError, match="incomplete_receipt"):
+        assert_arm_receipt_complete(incomplete)
+
+
+def test_online_auth_error_is_not_delivery() -> None:
+    from nexus.services.unified_runtime import (
+        normalize_online_invoker_payload,
+        online_payload_indicates_non_delivery,
+    )
+
+    raw = (
+        "Error authenticating: IneligibleTierError: This client is no longer "
+        "supported for Gemini Code Assist for individuals."
+    )
+    payload = normalize_online_invoker_payload(
+        provider="gemini",
+        task_id="t-auth",
+        invoked=True,
+        output_delivered=True,  # caller may mis-mark; normalize must fail closed
+        gate_passed=True,
+        provider_call_count=1,
+        response={"status": "FAIL", "error": "IneligibleTierError"},
+        raw_response=raw,
+        usage={},
+        error="",
+        evidence_refs=["online:t-auth:gateway"],
+        transport="gateway_compatibility",
+        selection_source="cli_task_policy",
+    )
+    assert online_payload_indicates_non_delivery(payload) is True
+    assert payload["output_delivered"] is False
+    assert payload["gate_passed"] is False
+    assert payload["error"]

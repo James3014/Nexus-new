@@ -416,6 +416,46 @@ def extract_online_stage_payload(
     return domain, raw, dict(invoker_payload)
 
 
+_ONLINE_NON_DELIVERY_MARKERS = (
+    "online_execution_not_authorized",
+    "IneligibleTierError",
+    "Error authenticating",
+    "authentication failed",
+    "UNAUTHENTICATED",
+    "HTTP Error 401",
+    "HTTP Error 403",
+    "HTTP Error 404",
+    "HTTP Error 429",
+    "provider_not_configured",
+)
+
+
+def online_payload_indicates_non_delivery(payload: Mapping[str, Any] | None) -> bool:
+    """True when Online response is auth/error theater, not a delivered provider result.
+
+    Auth failures often return non-empty stdout/stderr; they must never be classified
+    as ``output_delivered=true`` / stage SUCCEEDED.
+    """
+    if not isinstance(payload, Mapping):
+        return True
+    err = str(payload.get("error") or "")
+    raw = str(payload.get("raw_response") or "")
+    status = str(payload.get("status") or "")
+    resp = payload.get("response")
+    if isinstance(resp, Mapping):
+        err = err or str(resp.get("error") or "")
+        status = status or str(resp.get("status") or "")
+        nested_raw = resp.get("raw_response")
+        if nested_raw:
+            raw = raw or str(nested_raw)
+    blob = "\n".join([err, raw, status])
+    if any(marker in blob for marker in _ONLINE_NON_DELIVERY_MARKERS):
+        return True
+    if status.upper() in {"FAIL", "FAILED", "ERROR"}:
+        return True
+    return False
+
+
 def normalize_online_invoker_payload(
     *,
     provider: str,
@@ -463,6 +503,12 @@ def normalize_online_invoker_payload(
         for key, value in extra.items():
             if key not in payload:
                 payload[str(key)] = value
+    # Fail closed: auth/error body is never a successful Online delivery.
+    if online_payload_indicates_non_delivery(payload):
+        payload["output_delivered"] = False
+        payload["gate_passed"] = False
+        if not payload["error"]:
+            payload["error"] = "online_non_delivery_detected"
     return payload
 
 
@@ -1613,14 +1659,22 @@ class UnifiedRuntime:
         response_task_id = str(payload.get("task_id", "") or "")
         task_identity_valid = not response_task_id or response_task_id == str(context.get("task_id", ""))
         invoked = bool(payload.get("invoked", False))
-        delivered = bool(payload.get("output_delivered", payload.get("response")))
+        delivered = bool(payload.get("output_delivered", False))
+        # Auth/error stdout is not delivery (e.g. IneligibleTierError from provider CLI).
+        if online_payload_indicates_non_delivery(payload):
+            delivered = False
+            payload = dict(payload)
+            payload["output_delivered"] = False
+            payload["gate_passed"] = False
+            if not payload.get("error"):
+                payload["error"] = "online_non_delivery_detected"
         refs = [str(ref) for ref in payload.get("evidence_refs", []) or []]
         return _stage(
             "online",
             status="SUCCEEDED" if task_identity_valid and invoked and delivered else "FAILED",
             invoked=invoked,
-            evidence_present=bool(refs or payload.get("provider_call_count", 0)),
-            gate_passed=task_identity_valid and bool(payload.get("gate_passed", False)),
+            evidence_present=bool(refs or payload.get("provider_call_count", 0) or payload.get("error")),
+            gate_passed=task_identity_valid and delivered and bool(payload.get("gate_passed", False)),
             outcome_contributed=bool(payload.get("outcome_contributed", False)),
             evidence_refs=refs,
             task_id=str(context.get("task_id", "")),

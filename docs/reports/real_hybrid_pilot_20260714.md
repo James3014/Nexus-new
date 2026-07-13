@@ -91,7 +91,8 @@ LOCAL_ONLY_LIVE_STATUS = PROVEN
 LOCAL_ONLINE_LIVE_STATUS = IMPLEMENTED_NOT_LIVE_PROVEN_ONLINE_AUTH_BLOCKED
 PAIRED_PILOT_STATUS = HARNESS_READY_NOT_LIVE_MEASURED
 VALUE_CLAIM_STATUS = NOT_CLAIMED
-NEXUS_REAL_HYBRID_PAIRED_PILOT_COMPLETE = true  # offline+local criteria; live Online separate
+NEXUS_REAL_HYBRID_PAIRED_PILOT_COMPLETE = false
+  # false until live Local+Online vertical and live five-task paired criteria are met
 ```
 
 ## Next Benchmark

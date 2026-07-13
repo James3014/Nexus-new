@@ -175,6 +175,36 @@ def assert_deltas_match_stored(row: Mapping[str, Any]) -> None:
             raise ValueError(f"delta_mismatch:{key}")
 
 
+def assert_arm_receipt_complete(arm: Mapping[str, Any] | ArmResult) -> None:
+    """Reject incomplete arm receipts (fail-closed for pilot integrity)."""
+    data = arm.to_dict() if isinstance(arm, ArmResult) else dict(arm or {})
+    required = (
+        "task_id",
+        "workspace_revision",
+        "local_assist_policy",
+        "total_tokens",
+        "end_to_end_latency_ms",
+    )
+    for key in required:
+        if key not in data or data.get(key) in (None, ""):
+            raise ValueError(f"incomplete_receipt:{key}")
+    # Online-invoked arms must retain receipt payload or path for replay.
+    if bool(data.get("online_invoked")):
+        if not data.get("receipt") and not data.get("receipt_path"):
+            raise ValueError("incomplete_receipt:missing_online_receipt")
+    tokens = data.get("total_tokens")
+    if isinstance(tokens, Mapping) and tokens.get("quality") not in {
+        FIXTURE_MEASURED,
+        PROVIDER_REPORTED,
+        LOCALLY_MEASURED,
+        ESTIMATED,
+        UNAVAILABLE,
+        NOT_APPLICABLE,
+        MEASURED,
+    }:
+        raise ValueError("incomplete_receipt:token_quality")
+
+
 def local_contribution_truth(
     *,
     local_invoked: bool,
@@ -378,6 +408,8 @@ def compare_arms(arm_a: ArmResult, arm_b: ArmResult) -> dict[str, Any]:
     # When both arms report a provider identity, they must match.
     if arm_a.online_provider and arm_b.online_provider and arm_a.online_provider != arm_b.online_provider:
         raise ValueError("arm_online_provider_mismatch")
+    assert_arm_receipt_complete(arm_a)
+    assert_arm_receipt_complete(arm_b)
 
     claim_eligible = (
         arm_a.total_tokens.quality in {PROVIDER_REPORTED, FIXTURE_MEASURED}

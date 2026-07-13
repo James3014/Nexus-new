@@ -87,8 +87,10 @@ def to_request(task: dict[str, Any], repo: Path, model: str) -> LocalAssistReque
 def run_one(task: dict[str, Any], repo: Path, model: str, report_dir: Path) -> dict[str, Any]:
     req = to_request(task, repo, model)
     req.validate()
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_file = report_dir / f"{req.task_id}.response.json"
+    # Per-task subdirectory so execution_receipt.json never overwrites siblings.
+    task_report_dir = report_dir / req.task_id
+    task_report_dir.mkdir(parents=True, exist_ok=True)
+    report_file = task_report_dir / "response.json"
     t0 = time.perf_counter()
     # Real Ollama path — no InjectedLocalModelProvider.
     service = LocalAssistService()
@@ -100,6 +102,11 @@ def run_one(task: dict[str, Any], repo: Path, model: str, report_dir: Path) -> d
     usage = receipt.get("usage") if isinstance(receipt.get("usage"), dict) else {}
     input_tokens = usage.get("input_tokens") if usage else None
     output_tokens = usage.get("output_tokens") if usage else None
+    # Ledger is source of truth for call count (not stage summary defaults).
+    call_count = int(receipt.get("provider_call_count") or 0)
+    if call_count < 1 and response.local_model_invoked:
+        ledger = receipt.get("provider_call_ledger") or []
+        call_count = len(ledger) if isinstance(ledger, list) and ledger else 1
     # Prefer ledger/provider fields; missing → UNAVAILABLE not zero.
     row = {
         "task_id": req.task_id,
@@ -107,10 +114,11 @@ def run_one(task: dict[str, Any], repo: Path, model: str, report_dir: Path) -> d
         "workspace_revision": req.workspace_revision,
         "provider": response.provider,
         "model": (response.resolved_models[0] if response.resolved_models else ""),
-        "provider_call_count": int(receipt.get("provider_call_count") or 0),
+        "provider_call_count": call_count,
         "local": {
             "invoked": bool(response.local_model_invoked),
             "output_delivered": bool(response.output_delivered),
+            "provider_call_count": call_count,
         },
         "latency_ms": {"value": latency_ms, "quality": "LOCALLY_MEASURED"},
         "input_tokens": {

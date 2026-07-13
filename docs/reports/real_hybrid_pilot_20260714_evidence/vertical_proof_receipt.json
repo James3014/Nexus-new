@@ -1,16 +1,18 @@
 {
-  "product_entry": "nexus run",
+  "product_entry": "unified_runtime_canonical_seam",
+  "product_entry_note": "nexus run CLI was attempted (composition short-circuit, empty unified_runtime_receipt_path). Vertical Local+Online attempt used UnifiedRuntime+LocalAssistService+BattlesuitGateway, not a full pipeline UR-linked nexus run path.",
+  "cli_nexus_run_attempted": true,
+  "cli_composition_short_circuit": true,
+  "runtime_seam": "UnifiedRuntime+LocalAssistService+BattlesuitGateway",
   "planner_invoked": true,
   "task_id": "vertical-hybrid-0cb49f4d",
   "workspace_revision": "0cb49f4d0e435980fa3198b405e089fdba56c409",
   "local": {
     "invoked": true,
     "output_delivered": true,
-    "provider_call_count": 0,
+    "provider_call_count": 1,
     "provider": "ollama",
-    "model": "qwen2.5-coder:7b-instruct",
-    "status": "SUCCEEDED",
-    "reason": ""
+    "model": "qwen2.5-coder:7b-instruct"
   },
   "online_preflight": {
     "status": "ONLINE_READY",
@@ -31,48 +33,21 @@
     "invoked": true,
     "output_delivered": false,
     "provider_call_count": 1,
-    "error": "gemini_cli_IneligibleTierError_requires_human_migration",
+    "error": "gemini_cli_IneligibleTierError",
     "provider": "gemini",
-    "raw_snippet": "Warning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chun",
-    "auth_status": "UNAUTHENTICATED_OR_INELIGIBLE"
+    "auth_status": "ONLINE_PROVIDER_UNAUTHENTICATED",
+    "post_invoke_status": "ONLINE_PROVIDER_UNAUTHENTICATED"
   },
-  "local_context_forwarded": true,
-  "verifier": {
-    "name": "verifier",
-    "status": "SUCCEEDED",
-    "invoked": true,
-    "evidence_present": true,
-    "gate_passed": true,
-    "outcome_contributed": false,
-    "evidence_refs": [
-      "v:vertical-hybrid-0cb49f4d"
-    ],
-    "reason": "",
-    "task_id": "vertical-hybrid-0cb49f4d",
-    "response_task_id": "vertical-hybrid-0cb49f4d",
-    "task_identity_shared": true,
-    "response": {
-      "task_id": "vertical-hybrid-0cb49f4d",
-      "status": "pass",
-      "gate_passed": true,
-      "invoked": true,
-      "evidence_refs": [
-        "v:vertical-hybrid-0cb49f4d"
-      ]
-    }
-  },
+  "local_context_forwarded": false,
+  "verifier_gate_passed": false,
   "formal_workspace_mutated": false,
-  "receipt_path": ".nexus/reports/local_assist_real_pilot/real_hybrid_pilot_20260713T2204Z/vertical_ur_receipt.json",
-  "elapsed_ms": 39092,
-  "git_head": "0cb49f4d0e435980fa3198b405e089fdba56c409",
-  "cli_nexus_run_log": "p0c_vertical_nexus_run.log",
-  "cli_composition_short_circuit": true,
-  "runtime_seam": "UnifiedRuntime+LocalAssistService+BattlesuitGateway",
-  "post_invoke_status": "ONLINE_PROVIDER_UNAUTHENTICATED",
   "local_online_vertical_status": "PARTIAL_LOCAL_OK_ONLINE_AUTH_BLOCKED",
   "claim_boundary": {
     "real_local_online_vertical_proven": false,
     "public_claim_allowed": false,
-    "reason": "online_provider_auth_blocked_after_preflight_ready"
-  }
+    "reason": "online_provider_auth_blocked_after_preflight_ready; product_entry not full nexus-run UR path"
+  },
+  "git_head": "f43ef5b5e82e2ad67f1151167476da0f23cbfcca",
+  "updated_at": "2026-07-13T22:21:41Z",
+  "local_contribution_observed": false
 }
