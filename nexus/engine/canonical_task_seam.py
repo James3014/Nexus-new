@@ -67,11 +67,26 @@ def build_legacy_cli_service(project_root: Path):
     return LegacyTaskServiceAdapter(build_command_service(project_root))
 
 
-def execute_single_task_via_service(task_text: str, project_root: Path) -> bool:
+def execute_single_task_via_service(
+    task_text: str,
+    project_root: Path,
+    execution_context: dict | None = None,
+) -> bool:
+    """Run one CLI task through CommandService with optional task-level context.
+
+    ``execution_context`` is the sole task-scoped carrier for Local Assist mode
+    and identity fields. Environment variables must not replace this context.
+    """
     TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
 
     service = build_command_service(project_root)
-    request = TaskRequest(task=task_text, delivery_mode="standard")
+    context = dict(execution_context or {})
+    request = TaskRequest(
+        task=task_text,
+        delivery_mode="standard",
+        execution_context=context or None,
+        task_id=str(context.get("task_id") or "") or None,
+    )
     if infer_task_kind(task_text) == "feature":
         return bool(service.execute_feature(request))
     return bool(service.execute_bug(request))

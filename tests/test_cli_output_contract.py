@@ -70,9 +70,10 @@ def test_run_uses_canonical_single_task_executor(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "REPO_ROOT", tmp_path)
     called = {}
 
-    def _fake_execute(task_text, project_root):
+    def _fake_execute(task_text, project_root, execution_context=None):
         called["task_text"] = task_text
         called["project_root"] = project_root
+        called["execution_context"] = execution_context or {}
         return True
 
     monkeypatch.setattr(cli_mod, "execute_single_task_via_service", _fake_execute)
@@ -81,6 +82,9 @@ def test_run_uses_canonical_single_task_executor(monkeypatch, tmp_path):
     assert res.exit_code == 0, res.output
     assert called["task_text"] == "fix canonical seam"
     assert called["project_root"] == tmp_path
+    # Gate 2: task-level Local Assist policy is always threaded (default disabled).
+    assert called["execution_context"].get("local_assist_mode") == "disabled"
+    assert "workspace_revision" in called["execution_context"]
 
 
 def test_run_fails_closed_when_canonical_executor_returns_false(monkeypatch, tmp_path):

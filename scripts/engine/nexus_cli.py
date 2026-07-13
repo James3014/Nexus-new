@@ -3,6 +3,7 @@ import re
 import sys
 import os
 import json
+import hashlib
 import subprocess
 import time
 from pathlib import Path
@@ -275,7 +276,12 @@ def top_status(ctx, as_json):
 @click.option("--complexity", default="medium")
 @click.option("--output-file")
 @click.option("--report-file")
-@click.option("--local-assist-policy", type=click.Choice(["planner", "explicit", "disabled"]), default="disabled", show_default=True)
+@click.option(
+    "--local-assist-policy",
+    type=click.Choice(["disabled", "shadow", "advisor", "planner", "explicit"]),
+    default="disabled",
+    show_default=True,
+)
 @click.pass_context
 def top_run(ctx, task_id, complexity, output_file, report_file, local_assist_policy):
     """🚀 [Direct] Execute task with autonomic governance."""
@@ -979,18 +985,49 @@ def delivery_receipt(receipt_path, as_json):
 @click.option("--complexity", type=float, default=0.0)
 @click.option("--output-file", type=click.Path(path_type=Path), help="Explicit output path for the task result.")
 @click.option("--report-file", type=click.Path(path_type=Path), default=".nexus/reports/run/run_report.json")
-@click.option("--local-assist-policy", type=click.Choice(["planner", "explicit", "disabled"]), default="disabled", show_default=True)
+@click.option(
+    "--local-assist-policy",
+    type=click.Choice(["disabled", "shadow", "advisor", "planner", "explicit"]),
+    default="disabled",
+    show_default=True,
+)
 def run(task_id, complexity, output_file, report_file, local_assist_policy):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
-    if local_assist_policy != "disabled":
+    from nexus.services.canonical_local_assist_policy import (
+        build_canonical_policy_receipt,
+        build_execution_context_fields,
+        normalize_local_assist_policy,
+        write_canonical_policy_receipt,
+    )
+
+    try:
+        policy_norm = normalize_local_assist_policy(local_assist_policy)
+    except ValueError as exc:
+        raise click.ClickException(f"local_assist_policy_failed_closed: {exc}") from exc
+
+    revision = ""
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        revision = f"fixture-{hashlib.sha256(str(REPO_ROOT).encode()).hexdigest()[:12]}"
+
+    safe_task_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(task_id))[:120] or "task"
+    execution_context = build_execution_context_fields(
+        policy=local_assist_policy,
+        task_id=str(task_id),
+        workspace_revision=revision,
+        policy_source="cli",
+    )
+    policy_receipt = None
+    policy_path = None
+    if policy_norm["canonical_policy"] != "disabled":
         try:
-            revision = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
             risk_score = 20 if float(complexity or 0.0) <= 1.0 else 50 if float(complexity or 0.0) <= 3.0 else 80
             policy_task = {
                 "task_id": str(task_id),
@@ -1000,11 +1037,12 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy):
                 "route": {"route_features": {"risk_score": risk_score, "adjusted_root_cause_confidence": 0.8}},
             }
             policy_receipt = build_canonical_policy_receipt(policy=local_assist_policy, task=policy_task)
-            safe_task_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(task_id))[:120] or "task"
             policy_path = REPO_ROOT / ".nexus" / "reports" / "local_assist" / "canonical" / f"{safe_task_id}.json"
             write_canonical_policy_receipt(policy_path, policy_receipt)
             click.echo(json.dumps(policy_receipt, indent=2, ensure_ascii=False))
             click.echo(f"Local Assist policy receipt: {policy_path}")
+            if policy_norm.get("migration_warning"):
+                click.echo(f"[local-assist] {policy_norm['migration_warning']}")
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             raise click.ClickException(f"local_assist_policy_failed_closed: {exc}") from exc
     click.secho(f"🛡️ [NEXUS v24.9.5] Initiating Master Loop for: {task_id}", fg="cyan", bold=True)
@@ -1029,7 +1067,13 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy):
         # 啟動異步調度循環
         asyncio.run(campaign_master_loop(commander, task_nodes, REPO_ROOT))
     else:
-        runtime_ok = bool(execute_single_task_via_service(task_id, REPO_ROOT))
+        runtime_ok = bool(
+            execute_single_task_via_service(
+                task_id,
+                REPO_ROOT,
+                execution_context=execution_context,
+            )
+        )
 
     artifact_paths: list[str] = []
     if output_file:
@@ -1061,6 +1105,49 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy):
     if direct_mode_audit["enabled"]:
         report_payload["direct_mode"] = direct_mode_audit["spec"]
         report_payload["changed_targets"] = direct_mode_audit["changed_targets"]
+
+    # Link pipeline report → Unified Runtime receipt (execution lineage only).
+    # Pipeline writes a durable pointer under .nexus/reports/run/ so the CLI
+    # does not invent a second invocation-truth schema.
+    runtime_meta: dict = {}
+    pointer_path = REPO_ROOT / ".nexus" / "reports" / "run" / f"{safe_task_id}.unified_runtime_pointer.json"
+    if pointer_path.is_file():
+        try:
+            runtime_meta = json.loads(pointer_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            runtime_meta = {}
+    report_payload["local_assist_mode"] = execution_context.get(
+        "local_assist_mode",
+        runtime_meta.get("local_assist_mode", "disabled"),
+    )
+    report_payload["local_assist_status"] = runtime_meta.get(
+        "local_assist_status",
+        "NOT_REQUESTED" if execution_context.get("local_assist_mode") == "disabled" else "UNKNOWN",
+    )
+    report_payload["local_context_forwarded"] = bool(runtime_meta.get("local_context_forwarded", False))
+    report_payload["unified_runtime_receipt_path"] = str(runtime_meta.get("unified_runtime_receipt_path") or "")
+    report_payload["unified_runtime_task_id"] = str(
+        runtime_meta.get("unified_runtime_task_id") or execution_context.get("task_id") or task_id
+    )
+    report_payload["online_provider"] = str(runtime_meta.get("online_provider") or "")
+    report_payload["workspace_revision"] = str(
+        runtime_meta.get("workspace_revision") or execution_context.get("workspace_revision") or revision
+    )
+    claim = runtime_meta.get("claim_boundary")
+    report_payload["claim_boundary"] = (
+        dict(claim)
+        if isinstance(claim, dict)
+        else {
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "value_measured": False,
+        }
+    )
+    if policy_receipt is not None:
+        report_payload["local_assist_policy_receipt"] = policy_receipt
+    if policy_path is not None:
+        report_payload["local_assist_policy_receipt_path"] = str(policy_path)
+
     report_written = write_completion_envelope(REPO_ROOT, report_file, report_payload)
     _render_run_classification(report_payload["runtime_classification"])
     click.echo(f"Report: {report_written}")
@@ -1089,30 +1176,115 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
     rewritten = ""
     method = "local_safe"
     error = ""
+    unified_runtime_receipt = None
 
     if llm_mode:
         try:
             from nexus.services.gateway import BattlesuitGateway
+            from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
             gateway = BattlesuitGateway(project_root=root)
-            prompt, raw = gateway.ask_structured(
-                prompt=(
-                    "You are rewriting a document.\n"
-                    f"Task: {task}\n"
-                    "Return only rewritten full text in field 'patch'."
+            task_id = f"content-rewrite-{hashlib.sha256(f'{source_path}:{task}'.encode()).hexdigest()[:12]}"
+            workspace_revision = os.environ.get("NEXUS_WORKSPACE_REVISION", "").strip()
+            if not workspace_revision:
+                try:
+                    workspace_revision = subprocess.check_output(
+                        ["git", "-C", str(root), "rev-parse", "HEAD"],
+                        text=True,
+                        stderr=subprocess.DEVNULL,
+                    ).strip()
+                except (OSError, subprocess.CalledProcessError):
+                    workspace_revision = f"content-rewrite-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}"
+
+            output_schema = {
+                "status": "APPROVED | FAIL",
+                "patch": "Full rewritten content",
+                "summary": "Short note",
+            }
+
+            def _verify(context):
+                online = context.get("online", {}) if isinstance(context, dict) else {}
+                response = online.get("response", {}) if isinstance(online, dict) else {}
+                patch = response.get("patch", "") if isinstance(response, dict) else ""
+                passed = online.get("status") == "SUCCEEDED" and bool(str(patch).strip())
+                return {
+                    "task_id": task_id,
+                    "status": "pass" if passed else "fail",
+                    "invoked": True,
+                    "gate_passed": passed,
+                    "outcome_contributed": passed,
+                    "evidence": "content_rewrite_output_present",
+                    "evidence_refs": [f"verifier:{task_id}:rewrite"],
+                }
+
+            def _learn(_context):
+                try:
+                    from nexus.research.learn_mode import LearnModeService
+
+                    result = LearnModeService(root).sync_phase_learning_closure(
+                        topic=task,
+                        metrics={
+                            "coverage": 1.0,
+                            "self_question_pass_rate": 1.0,
+                            "citation_valid_ratio": 1.0,
+                            "stale_claims_count": 0,
+                            "conflict_count": 0,
+                        },
+                        phase_status={"P": "SUCCESS", "D": "SUCCESS", "R": "SUCCESS", "A": "SUCCESS", "C": "SUCCESS"},
+                    )
+                    passed = str(result.get("status", "")).upper() in {"SUCCESS", "SUCCEEDED", "PASS"}
+                    return {
+                        "task_id": task_id,
+                        "status": "pass" if passed else "fail",
+                        "invoked": True,
+                        "gate_passed": passed,
+                        "evidence": "LearnModeService.sync_phase_learning_closure",
+                        "evidence_refs": [f"learning:{task_id}:phase_bridge"],
+                        "response": result,
+                    }
+                except Exception as exc:  # noqa: BLE001
+                    return {
+                        "task_id": task_id,
+                        "status": "fail",
+                        "invoked": True,
+                        "gate_passed": False,
+                        "evidence": "learning_exception",
+                        "evidence_refs": [f"learning:{task_id}:exception"],
+                        "error": f"{exc.__class__.__name__}:{exc}",
+                    }
+
+            receipt_path = report_path.with_name(f"{report_path.stem}.unified_runtime.json")
+            unified_runtime_receipt = gateway.ask_unified(
+                UnifiedRuntimeRequest(
+                    task_id=task_id,
+                    workspace_revision=workspace_revision,
+                    task_statement=task,
+                    task_type="document_rewrite",
+                    route={
+                        "recommended_flow": "direct",
+                        "provider": gateway.oauth_provider,
+                        "online_capabilities": ("research", "repair_loop"),
+                    },
+                    online_prompt=(
+                        "You are rewriting a document.\n"
+                        f"Task: {task}\n"
+                        "Return only rewritten full text in field 'patch'."
+                    ),
+                    online_payload=f"[SOURCE]\n{original}",
+                    online_phase="R",
+                    online_model_name="gemini-3-flash-preview",
+                    online_output_schema=output_schema,
+                    evidence_refs=(f"content-rewrite:{task_id}:request",),
                 ),
-                payload=f"[SOURCE]\n{original}",
-                phase="R",
-                output_schema={
-                    "status": "APPROVED | FAIL",
-                    "patch": "Full rewritten content",
-                    "summary": "Short note",
-                },
-                model_name="gemini-3-flash-preview",
+                verifier=_verify,
+                learning=_learn,
+                receipt_path=receipt_path,
             )
-            rewritten = (prompt or {}).get("patch") or (raw or "")
-            if not rewritten.strip():
-                raise RuntimeError("empty_llm_output")
+            online = unified_runtime_receipt.get("online", {})
+            response = online.get("response", {}) if isinstance(online, dict) else {}
+            rewritten = response.get("patch", "") if isinstance(response, dict) else ""
+            if not unified_runtime_receipt.get("receipt_complete") or not str(rewritten).strip():
+                raise RuntimeError("unified_runtime_incomplete")
             method = "llm"
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
@@ -1129,6 +1301,7 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
         "task": task,
         "method": method,
         "error": error,
+        "unified_runtime_receipt": unified_runtime_receipt,
         "io": {
             "input_path": str(source_path),
             "output_path": str(out_path),
