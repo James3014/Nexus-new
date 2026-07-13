@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import sys
 import subprocess
+import sys
 import time
 import warnings
-from datetime import datetime
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,9 +19,17 @@ from nexus.engine.learning_policy_loader import route_cost_controls_from_env
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.candidate_pool_policy import decide_candidate_pool_policy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
-from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
+from nexus.research.local_sprint_mutator import (
+    generate_local_companion_edits,
+)
 from nexus.research.swarm_broker import SwarmBroker
-from .runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
+
+from .runtime.runtime_resilience import (
+    RetryParams,
+    classify_infra_block,
+    compute_time_budget,
+    get_retry_delay,
+)
 
 
 def _truncate_redundant_tests(test_source: str, task_desc: str) -> str:
@@ -174,6 +183,7 @@ class SprintResult:
     error_codes: list[str] = field(default_factory=list)
     rejection_summary: dict[str, int] = field(default_factory=dict)
     learning_trace: dict[str, Any] = field(default_factory=dict)
+    unified_runtime_receipts: list[dict[str, Any]] = field(default_factory=list)
     candidates: list[CandidateEval] = field(default_factory=list)
     pytest_cmd: list[str] = field(default_factory=list)
     promotable: bool = False
@@ -188,11 +198,141 @@ class SprintResult:
 class LLMCandidateGenerator:
     source = "llm"
 
-    def __init__(self, project_root: Path, safe_mode: bool):
+    def __init__(self, project_root: Path, safe_mode: bool, target_file: str = ""):
         from nexus.services.gateway import BattlesuitGateway
-        self.gateway = BattlesuitGateway(project_root=project_root)
+        self.project_root = Path(project_root).resolve()
+        self.gateway = BattlesuitGateway(project_root=self.project_root)
         self.safe_mode = safe_mode
+        self.target_file = str(target_file or "").strip()
+        self.local_service = None
+        if os.environ.get("NEXUS_ONLINE_LOCAL_ASSIST", "").strip().lower() in {"1", "true", "yes"}:
+            from nexus.services.local_assist_service import LocalAssistService
+
+            self.local_service = LocalAssistService()
         self.model_chain = self._model_chain()
+        self.last_unified_runtime_receipt: dict[str, Any] = {}
+
+    def _workspace_revision(self) -> str:
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(self.project_root),
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return ""
+
+    def _ask_unified_candidate(
+        self,
+        *,
+        prompt: str,
+        payload: str,
+        task: str,
+        seed: int,
+        attempt: int,
+        model: str,
+    ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        from nexus.services.unified_runtime import UnifiedRuntimeRequest
+
+        output_schema = {
+            "status": "APPROVED | FAIL",
+            "operation": "replace | append | full_patch",
+            "target_snippet": "Exact existing text to replace",
+            "replacement": "New text",
+            "patch": "Optional full target file content fallback",
+        }
+        ask_unified = getattr(self.gateway, "ask_unified", None)
+        revision = self._workspace_revision()
+        if not revision:
+            revision = f"fixture-{hashlib.sha256(str(self.project_root).encode()).hexdigest()[:12]}"
+
+        task_id = (
+            f"sprint-{hashlib.sha256(task.encode('utf-8')).hexdigest()[:12]}"
+            f"-s{seed}-a{attempt}"
+        )
+        local_request = None
+        if self.local_service is not None and self.target_file and not Path(self.target_file).is_absolute():
+            from nexus.services.local_assist_service import LocalAssistRequest, REQUEST_SCHEMA
+
+            local_request = LocalAssistRequest(
+                schema=REQUEST_SCHEMA,
+                task_id=task_id,
+                parent_task_id=task_id,
+                workspace_root=str(self.project_root),
+                workspace_revision=revision,
+                task_statement=task,
+                action="advisor",
+                allowed_files=(self.target_file,),
+                target_file=self.target_file,
+                target_symbol="",
+                evidence_refs=(f"sprint:{task_id}:local_request",),
+            )
+
+        from nexus.services.unified_runtime import build_online_route, extract_online_stage_payload
+
+        def response_contract(context: dict[str, Any]) -> dict[str, Any]:
+            online = context.get("online", {})
+            provider_response, _raw, _payload = extract_online_stage_payload(
+                online if isinstance(online, dict) else {}
+            )
+            delivered = bool(provider_response)
+            return {
+                "task_id": task_id,
+                "status": "pass" if delivered else "fail",
+                "evidence": "online_candidate_payload_present" if delivered else "online_candidate_payload_missing",
+                "evidence_refs": [f"verifier:{task_id}:candidate_response"],
+            }
+
+        gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
+        request = UnifiedRuntimeRequest(
+            task_id=task_id,
+            workspace_revision=revision,
+            task_statement=task,
+            task_type="repair",
+            route=build_online_route(
+                recommended_flow="hybrid" if local_request is not None else "direct",
+                gateway_provider=gateway_provider,
+                local_enabled=local_request is not None,
+            ),
+            online_prompt=prompt,
+            online_payload=payload,
+            online_phase="R",
+            online_model_name=model,
+            online_output_schema=output_schema,
+            local_enabled=local_request is not None,
+            local_request=local_request,
+            evidence_refs=(f"sprint:{task_id}:request",),
+        )
+        receipt_path = self.project_root / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
+        if callable(ask_unified):
+            receipt = ask_unified(
+                request,
+                local_service=self.local_service if local_request is not None else None,
+                verifier=response_contract,
+                receipt_path=receipt_path,
+            )
+        else:
+            from nexus.services.unified_runtime import UnifiedRuntime, build_structured_online_invoker
+
+            receipt = UnifiedRuntime(local_service=self.local_service if local_request is not None else None).run(
+                request,
+                online_invoker=build_structured_online_invoker(
+                    self.gateway.ask_structured,
+                    phase="R",
+                    model_name=model,
+                    output_schema=output_schema,
+                    provider="fixture_gateway",
+                ),
+                verifier=response_contract,
+                receipt_path=receipt_path,
+            )
+        self.last_unified_runtime_receipt = dict(receipt)
+        online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), dict) else {}
+        provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
+        if isinstance(provider_response, dict):
+            return dict(provider_response), raw_response, receipt
+        return {"status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL", "patch": str(provider_response or "")}, raw_response, receipt
 
     def _model_chain(self) -> list[str]:
         override = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME", "") or "").strip()
@@ -221,18 +361,13 @@ class LLMCandidateGenerator:
         for idx, model in enumerate(self.model_chain):
             try:
                 model_calls += 1
-                out, raw = self.gateway.ask_structured(
+                out, raw, unified_receipt = self._ask_unified_candidate(
                     prompt=prompt_text,
                     payload="Return one small edit. Prefer operation=replace with exact target_snippet and replacement.",
-                    phase="R",
-                    output_schema={
-                        "status": "APPROVED | FAIL",
-                        "operation": "replace | append | full_patch",
-                        "target_snippet": "Exact existing text to replace",
-                        "replacement": "New text",
-                        "patch": "Optional full target file content fallback",
-                    },
-                    model_name=model,
+                    task=task,
+                    seed=seed,
+                    attempt=idx + 1,
+                    model=model,
                 )
                 status = str(out.get("status", "")).upper() if isinstance(out, dict) else ""
                 code, edit_error = _candidate_code_from_llm_output(source_code, out if isinstance(out, dict) else {})
@@ -266,6 +401,9 @@ class LLMCandidateGenerator:
                     "model_name": model,
                     "model_patch_generated": False,
                     "llm_edit_protocol": str(out.get("operation") or "legacy_patch") if isinstance(out, dict) else "invalid",
+                    "unified_runtime_receipt": unified_receipt,
+                    "unified_runtime_status": str(unified_receipt.get("terminal_status") or unified_receipt.get("status") or ""),
+                    "unified_runtime_claim_boundary": dict(unified_receipt.get("claim_boundary") or {}),
                 }
                 if status == "FAIL" or not code:
                     category = str(out.get("error_category", edit_error or "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
@@ -801,7 +939,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     except Exception as exc:  # noqa: BLE001
         learn_slo_guard["reason"] = f"learn_slo_read_error:{exc}"
 
-    llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if llm_mode_effective else None
+    llm_generator: Optional[LLMCandidateGenerator] = (
+        LLMCandidateGenerator(repo_root, config.safe_mode, target_file=config.target_file)
+        if llm_mode_effective
+        else None
+    )
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
@@ -863,6 +1005,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     gateway_process_sec = 0.0
     gateway_provider_wait_sec = 0.0
     gateway_parse_sec = 0.0
+    unified_runtime_receipts: list[dict[str, Any]] = []
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -1043,7 +1186,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         nonlocal gateway_usage_metadata_present, gateway_prompt_chars, gateway_payload_chars
         nonlocal gateway_total_chars, gateway_timeout_sec, quota_backoffs
         nonlocal gateway_total_sec, gateway_invocation_build_sec, gateway_process_sec
-        nonlocal gateway_provider_wait_sec, gateway_parse_sec
+        nonlocal gateway_provider_wait_sec, gateway_parse_sec, unified_runtime_receipts
         model_calls += int(meta.get("model_calls", 0) or 0)
         if str(meta.get("model_name", "") or ""):
             model_names.add(str(meta.get("model_name")))
@@ -1066,6 +1209,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         gateway_provider_wait_sec += float(meta.get("gateway_provider_wait_sec", 0.0) or 0.0)
         gateway_parse_sec += float(meta.get("gateway_parse_sec", 0.0) or 0.0)
         quota_backoffs += int(meta.get("quota_backoffs", 0) or 0)
+        receipt = meta.get("unified_runtime_receipt")
+        if isinstance(receipt, dict):
+            unified_runtime_receipts.append(receipt)
 
     def _persist_learning(
         *,
@@ -1153,6 +1299,62 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             }
         except Exception as exc:  # noqa: BLE001
             learning_trace["learn_phase_bridge_error"] = str(exc)
+
+    def _finalize_unified_receipt(
+        *,
+        winner_seed: int | None,
+        final_score: float,
+        terminal_status: str,
+        receipt_kind: str = "sprint",
+    ) -> dict[str, Any] | None:
+        """Close the selected Online receipt with observed final gates only."""
+        selected_index: int | None = None
+        for index in range(len(unified_runtime_receipts) - 1, -1, -1):
+            candidate = unified_runtime_receipts[index]
+            task_id = str(candidate.get("task_id", "")) if isinstance(candidate, dict) else ""
+            if receipt_kind == "dayshift" and task_id.startswith("dayshift-"):
+                selected_index = index
+                break
+            if receipt_kind == "sprint" and winner_seed is not None and f"-s{winner_seed}-" in task_id:
+                selected_index = index
+                break
+        if selected_index is None:
+            return None
+        selected = unified_runtime_receipts[selected_index]
+        learning_bridge = learning_trace.get("learn_phase_bridge", {})
+        learning_passed = bool(
+            learning_trace.get("memory_written")
+            or (isinstance(learning_bridge, dict) and str(learning_bridge.get("status", "")).upper() in {"SUCCESS", "SUCCEEDED", "PASS"})
+        )
+        task_id = str(selected.get("task_id", ""))
+        verifier_passed = terminal_status == "SUCCESS" and final_score >= 1.0
+        from nexus.services.unified_runtime import UnifiedRuntime
+
+        finalized = UnifiedRuntime().finalize_receipt(
+            selected,
+            verifier={
+                "task_id": task_id,
+                "status": "pass" if verifier_passed else "fail",
+                "invoked": True,
+                "gate_passed": verifier_passed,
+                "evidence": "sprint_stage1_candidate_score",
+                "evidence_refs": [f"verifier:{task_id}:stage1"],
+                "outcome_contributed": verifier_passed,
+            },
+            learning={
+                "task_id": task_id,
+                "status": "pass" if learning_passed else "fail",
+                "invoked": True,
+                "gate_passed": learning_passed,
+                "evidence": "sprint_learning_closure",
+                "evidence_refs": [f"learning:{task_id}:closure"],
+                "outcome_contributed": learning_passed,
+            },
+            outcome={"score": final_score, "value_measured": True},
+            receipt_path=selected.get("receipt_path"),
+        )
+        unified_runtime_receipts[selected_index] = finalized
+        return finalized
 
     for idx in range(max(1, config.candidate_count)):
         hint = policy.get_mutation_hint(
@@ -1274,6 +1476,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     fallback_used = True
                     failure_meta = getattr(llm_exc, "metadata", {})
                     failure_meta = failure_meta if isinstance(failure_meta, dict) else {}
+                    failure_receipt = failure_meta.get("unified_runtime_receipt")
+                    if isinstance(failure_receipt, dict):
+                        unified_runtime_receipts.append(failure_receipt)
                     meta_model_calls = int(failure_meta.get("model_calls", 0) or 0)
                     model_calls += meta_model_calls if meta_model_calls > 0 else 1
                     meta_model_name = str(failure_meta.get("model_name") or "")
@@ -1638,6 +1843,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             learning_trace=learning_trace,
             candidates=candidates,
             pytest_cmd=pytest_cmd,
+            unified_runtime_receipts=unified_runtime_receipts,
         )
 
     best, routed_candidates = _select_candidate_with_routing_layers(
@@ -1669,6 +1875,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             summary=rejection_summary,
             codes=final_codes,
         )
+        _finalize_unified_receipt(
+            winner_seed=best_model.seed if best_model is not None else best.seed,
+            final_score=best_model.score if best_model is not None else best.score,
+            terminal_status="FAILED",
+        )
         return SprintResult(
             status="FAILED",
             reason="model_required_model_delivery_failed",
@@ -1710,6 +1921,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             learning_trace=learning_trace,
             candidates=candidates,
             pytest_cmd=pytest_cmd,
+            unified_runtime_receipts=unified_runtime_receipts,
             patch=best_model.candidate_code if best_model is not None else "",
         )
     if best.score < 1.0:
@@ -1722,6 +1934,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             final_score=best.score,
             summary=rejection_summary,
             codes=final_codes,
+        )
+        _finalize_unified_receipt(
+            winner_seed=best.seed,
+            final_score=best.score,
+            terminal_status="FAILED",
         )
         return SprintResult(
             status="FAILED",
@@ -1764,6 +1981,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             learning_trace=learning_trace,
             candidates=candidates,
             pytest_cmd=pytest_cmd,
+            unified_runtime_receipts=unified_runtime_receipts,
             patch=best.candidate_code,
         )
 
@@ -1790,6 +2008,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     fallback_model_name="gemini-3.1-pro-preview" if config.safe_mode else "gemini-3-flash-preview",
                 )
                 result = optimizer.optimize()
+                unified_runtime_receipts.extend(
+                    item for item in result.get("unified_runtime_receipts", []) if isinstance(item, dict)
+                )
                 if result.get("status") == "SUCCESS":
                     final_score = float(result.get("score", final_score))
                     final_patch = str(result.get("patch", final_patch))
@@ -1815,6 +2036,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         final_score=final_score,
         summary=rejection_summary,
         codes=final_codes,
+    )
+    _finalize_unified_receipt(
+        winner_seed=best.seed,
+        final_score=final_score,
+        terminal_status="SUCCESS",
+        receipt_kind="dayshift" if final_reason == "dayshift_improved" else "sprint",
     )
     return SprintResult(
         status="SUCCESS",
@@ -1857,6 +2084,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         learning_trace=learning_trace,
         candidates=candidates,
         pytest_cmd=pytest_cmd,
+        unified_runtime_receipts=unified_runtime_receipts,
         promotable=final_score >= 0.9,
         patch=final_patch,
     )

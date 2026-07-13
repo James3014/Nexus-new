@@ -1,18 +1,19 @@
 from pathlib import Path
 
+from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import (
     CandidateEval,
     InPlaceSprintExecutor,
+    LLMCandidateGenerator,
     SprintConfig,
     _build_llm_candidate_prompt,
     _build_value_task_contract,
     _candidate_code_from_llm_output,
-    _should_try_local_preflight_before_llm,
     _select_candidate_with_routing_layers,
+    _should_try_local_preflight_before_llm,
     run_hyper_sprint,
     write_sprint_report,
 )
-from nexus.research.local_sprint_mutator import generate_local_candidate
 
 
 def _write_ready_learn_slo(tmp_path: Path) -> None:
@@ -985,6 +986,80 @@ def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path):
     assert res.gateway_token_source == "stats"
     assert "one small edit" in captured["payload"]
     assert "target_snippet" in captured["schema"]
+
+
+def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch, tmp_path: Path):
+    generator = LLMCandidateGenerator(tmp_path, safe_mode=True)
+    monkeypatch.setattr(generator, "_workspace_revision", lambda: "revision-001")
+    monkeypatch.setattr(
+        generator.gateway,
+        "ask_structured",
+        lambda *_args, **_kwargs: (
+            {
+                "status": "APPROVED",
+                "operation": "replace",
+                "target_snippet": "return text",
+                "replacement": "return text.strip()",
+            },
+            "raw-candidate",
+        ),
+    )
+
+    code, metadata = generator.generate(
+        source_code="def normalize(text):\n    return text\n",
+        task="fix normalize",
+        mutation_hint="strip whitespace",
+        seed=7,
+    )
+
+    receipt = metadata["unified_runtime_receipt"]
+    assert code == "def normalize(text):\n    return text.strip()\n"
+    assert receipt["schema"] == "nexus.unified_runtime.receipt.v1"
+    assert receipt["task_id"].startswith("sprint-")
+    assert receipt["workspace_revision"] == "revision-001"
+    assert receipt["receipt_complete"] is False
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+
+
+def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, tmp_path: Path):
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    monkeypatch.setenv("NEXUS_ONLINE_LOCAL_ASSIST", "1")
+    generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
+    generator._workspace_revision = lambda: "revision-hybrid-001"
+    generator.local_service = LocalAssistService(
+        provider=InjectedLocalModelProvider(lambda _request: "local diagnosis: prefer strip")
+    )
+    online_calls: list[tuple[tuple, dict]] = []
+
+    def _online_call(*args, **kwargs):
+        online_calls.append((args, kwargs))
+        return (
+            {
+                "status": "APPROVED",
+                "operation": "replace",
+                "target_snippet": "return text",
+                "replacement": "return text.strip()",
+            },
+            "raw-candidate",
+        )
+
+    monkeypatch.setattr(generator.gateway, "ask_structured", _online_call)
+    code, metadata = generator.generate(
+        source_code="def normalize(text):\n    return text\n",
+        task="fix normalize",
+        mutation_hint="strip whitespace",
+        seed=8,
+    )
+
+    receipt = metadata["unified_runtime_receipt"]
+    assert code.endswith("return text.strip()\n")
+    assert receipt["local"]["status"] == "SUCCEEDED"
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert "local diagnosis: prefer strip" in online_calls[0][0][0]
+    assert receipt["claim_boundary"]["local_online_continuation"] is True
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
 def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path):
@@ -2322,5 +2397,3 @@ def test_run_hyper_sprint_self_heals_when_llm_first_round_falls_back_to_local_fo
     assert res.status == "SUCCESS"
     assert res.winner_source == "llm_self_heal"
     assert any("self_heal_after_pytest_failed" in h for h in llm_calls)
-
-

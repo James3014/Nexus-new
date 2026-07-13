@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from datetime import datetime, timezone
 import subprocess
 import json
@@ -384,6 +384,203 @@ class BattlesuitGateway:
         schema = output_schema if output_schema is not None else (self.OUTPUT_SCHEMA if system_instruction is None else None)
         sys_msg = self._build_system_instruction(schema, system_instruction)
         return self._ask_via_cli(full_content, selected_model, sys_msg)
+
+    def ask_unified(
+        self,
+        request: Any,
+        *,
+        local_service: Any = None,
+        capability_invokers: Mapping[str, Any] | None = None,
+        verifier: Any = None,
+        learning: Any = None,
+        receipt_path: Any = None,
+        online_invoker: Any = None,
+    ) -> dict[str, Any]:
+        """Run a task through the canonical task-scoped runtime seam.
+
+        Existing ``ask`` and ``ask_structured`` remain compatibility
+        forwarders.  New callers that need Planner/Local/Verifier/Learning
+        lineage must use this method; absent stage callbacks remain incomplete
+        in the unified receipt rather than being inferred as success.
+        """
+        from nexus.services.unified_runtime import UnifiedRuntime, _capability_evidence_summary
+
+        def gateway_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
+            bound_transport = getattr(self.ask_structured, "__func__", None)
+            if bound_transport is self.__class__.ask_structured and os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED") != "1":
+                return {
+                    "invoked": False,
+                    "task_id": str(context.get("task_id", "")),
+                    "output_delivered": False,
+                    "gate_passed": False,
+                    "provider_call_count": 0,
+                    "provider": self.oauth_provider,
+                    "error": "external_authorization_required",
+                    "evidence_refs": [f"gateway:{context.get('task_id')}:authorization_required"],
+                }
+            local_stage = context.get("local", {}) if isinstance(context, dict) else {}
+            local_response = local_stage.get("response", {}) if isinstance(local_stage, dict) else {}
+            local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, dict) else {}
+            local_context = ""
+            capability_context_forwarded = False
+            if local_outputs:
+                local_context = "\n\n[LOCAL_ASSIST_CONTEXT]\n" + json.dumps(
+                    local_outputs,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+            capability_results = context.get("capability_results", {}) if isinstance(context, dict) else {}
+            if capability_results:
+                compressed = bool(context.get("capability_context_compressed"))
+                local_context += (
+                    "\n\n[CAPABILITY_EVIDENCE_SUMMARY]\n"
+                    if compressed
+                    else "\n\n[CAPABILITY_CONTEXT]\n"
+                ) + json.dumps(
+                    _capability_evidence_summary(capability_results)
+                    if compressed
+                    else capability_results,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+                capability_context_forwarded = True
+            result, raw_text = self.ask_structured(
+                str(context.get("online_prompt") or context.get("task_statement") or "") + local_context,
+                str(context.get("online_payload") or ""),
+                phase=str(context.get("online_phase") or "R"),
+                output_schema=context.get("online_output_schema") or None,
+                model_name=context.get("online_model_name") or None,
+            )
+            result_mapping = result if isinstance(result, dict) else {}
+            route_error = str(raw_text or "").strip().lower() in {"gemini_missing", "error", "failed"}
+            delivered = bool(raw_text or result_mapping)
+            return {
+                "invoked": bool(delivered and not route_error),
+                "task_id": str(context.get("task_id", "")),
+                "output_delivered": delivered and not route_error,
+                "gate_passed": bool(delivered and not route_error),
+                "provider_call_count": 1 if delivered and not route_error else 0,
+                "provider": self.oauth_provider,
+                "response": result_mapping or raw_text,
+                "raw_response": raw_text,
+                "evidence_refs": (
+                    [f"gateway:{context.get('task_id')}:provider_call"]
+                    + ([f"gateway:{context.get('task_id')}:local_context_forwarded"] if local_outputs else [])
+                    + ([f"gateway:{context.get('task_id')}:capability_context_forwarded"] if capability_context_forwarded else [])
+                    + ([f"gateway:{context.get('task_id')}:compressed_context_applied"] if context.get("capability_context_compressed") else [])
+                    if delivered and not route_error
+                    else []
+                ),
+            }
+
+        runtime_online_invoker = online_invoker
+        if runtime_online_invoker is None:
+            route = getattr(request, "route", {})
+            requested_provider = (
+                str(route.get("provider", "") or "").strip().lower()
+                if isinstance(route, Mapping)
+                else ""
+            )
+            gateway_provider = str(self.oauth_provider or "").strip().lower()
+            from nexus.services.unified_runtime import (
+                build_registered_online_invoker,
+                resolve_online_transport_binding,
+            )
+
+            # Injected / bound structured transport (tests and fixtures) must
+            # outrank Gateway auto-detected local providers such as Ollama.
+            bound_transport = getattr(self.ask_structured, "__func__", None)
+            structured_injected = bound_transport is not self.__class__.ask_structured
+            binding = resolve_online_transport_binding(
+                has_explicit_invoker=False,
+                structured_transport_injected=structured_injected,
+                route_provider=requested_provider,
+                gateway_provider=gateway_provider,
+            )
+
+            if binding.use_registered_cli:
+                command = None
+                if isinstance(route, Mapping):
+                    command = route.get("online_command") or route.get("command")
+                try:
+                    runtime_online_invoker = build_registered_online_invoker(
+                        binding.provider,
+                        command=command,
+                        timeout_sec=(
+                            float(route.get("timeout_sec", 120.0))
+                            if isinstance(route, Mapping)
+                            else 120.0
+                        ),
+                    )
+                except (TypeError, ValueError, OSError) as exc:
+                    resolution_error = f"{exc.__class__.__name__}:{exc}"
+
+                    def unresolved_provider_cli(
+                        _context: Mapping[str, Any],
+                        *,
+                        _reason: str = resolution_error,
+                        _provider: str = binding.provider,
+                    ) -> dict[str, Any]:
+                        return {
+                            "provider": _provider,
+                            "task_id": str(_context.get("task_id", "")),
+                            "invoked": False,
+                            "output_delivered": False,
+                            "gate_passed": False,
+                            "provider_call_count": 0,
+                            "error": "provider_adapter_resolution_failed",
+                            "reason": _reason,
+                            "execution_role": "online",
+                            "transport": "registered_cli",
+                            "selection_source": binding.selection_source,
+                            "evidence_refs": [
+                                f"gateway:{_context.get('task_id')}:provider_adapter_resolution_failed"
+                            ],
+                        }
+
+                    runtime_online_invoker = unresolved_provider_cli
+            elif binding.resolution_error:
+                def unresolved_provider(
+                    _context: Mapping[str, Any],
+                    *,
+                    _reason: str = binding.resolution_error,
+                    _provider: str = binding.provider,
+                    _selection: str = binding.selection_source,
+                ) -> dict[str, Any]:
+                    return {
+                        "provider": _provider,
+                        "task_id": str(_context.get("task_id", "")),
+                        "invoked": False,
+                        "output_delivered": False,
+                        "gate_passed": False,
+                        "provider_call_count": 0,
+                        "error": "provider_adapter_resolution_failed",
+                        "reason": _reason,
+                        "execution_role": "online",
+                        "transport": "unresolved",
+                        "selection_source": _selection,
+                        "evidence_refs": [
+                            f"gateway:{_context.get('task_id')}:provider_adapter_resolution_failed"
+                        ],
+                    }
+
+                runtime_online_invoker = unresolved_provider
+            else:
+                # Injected structured transport or gateway compatibility path.
+                # Local Ollama discovery must not fail Online when the caller
+                # bound ask_structured or when no Online CLI identity was set.
+                runtime_online_invoker = gateway_online_invoker
+
+        return UnifiedRuntime(local_service=local_service).run(
+            request,
+            online_invoker=runtime_online_invoker or gateway_online_invoker,
+            capability_invokers=capability_invokers,
+            verifier=verifier,
+            learning=learning,
+            receipt_path=receipt_path,
+        )
 
     def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
         """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""

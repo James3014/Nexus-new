@@ -1,17 +1,19 @@
 from __future__ import annotations
 import argparse
 import ast
+import hashlib
 import json
 import os
 import signal
 import subprocess
+import sys
 import time
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from nexus.research.runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
 from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
@@ -105,6 +107,7 @@ class AutoResearchNightShift:
         else:
             self.memory_store = None
         self.last_learning_closure: dict[str, Any] = {}
+        self.last_unified_runtime_receipt: dict[str, Any] = {}
         self.best_score = 0.0
         self.generation_latencies: List[float] = []
         self.no_improve_streak = 0
@@ -153,6 +156,158 @@ class AutoResearchNightShift:
             if model and model not in ordered and model not in self.model_exhausted:
                 ordered.append(model)
         return ordered
+
+    def _workspace_revision(self, workpath: Path) -> str:
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(workpath),
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return ""
+
+    def _ask_unified_candidate(
+        self,
+        *,
+        workpath: Path,
+        round_id: int,
+        attempt: int,
+        model: str,
+        prompt: str,
+        payload: str,
+        output_schema: Mapping[str, Any] | None = None,
+        task_kind: str = "generation",
+    ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        """Route one candidate-generation call through the canonical seam.
+
+        Candidate-shape verification is intentionally weaker than semantic
+        repair verification.  Learning remains absent until the outer round
+        has a verified outcome, so the receipt must remain incomplete here.
+        """
+        from nexus.services.unified_runtime import UnifiedRuntimeRequest
+
+        output_schema = dict(output_schema or {
+            "status": "APPROVED | REJECTED | FAIL",
+            "summary": "Short explanation",
+            "patch": "Full target file content as plain text",
+            "violations": ["list of rule violations"],
+        })
+
+        ask_unified = getattr(self.gateway, "ask_unified", None)
+        revision = self._workspace_revision(workpath)
+        if not revision:
+            revision = f"fixture-{hashlib.sha256(str(workpath).encode()).hexdigest()[:12]}"
+        task_id = (
+            f"nightshift-{hashlib.sha256(self.task.encode('utf-8')).hexdigest()[:12]}"
+            f"-r{round_id}-a{attempt}-{task_kind}"
+        )
+
+        from nexus.services.unified_runtime import build_online_route, extract_online_stage_payload
+
+        def response_contract(context: Mapping[str, Any]) -> dict[str, Any]:
+            online = context.get("online", {}) if isinstance(context, Mapping) else {}
+            provider_response, _raw, _payload = extract_online_stage_payload(
+                online if isinstance(online, Mapping) else {}
+            )
+            delivered = bool(provider_response)
+            return {
+                "task_id": task_id,
+                "status": "pass" if delivered else "fail",
+                "evidence": "online_candidate_payload_present" if delivered else "online_candidate_payload_missing",
+                "evidence_refs": [f"verifier:{task_id}:response_contract"],
+            }
+
+        gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
+        request = UnifiedRuntimeRequest(
+            task_id=task_id,
+            workspace_revision=revision,
+            task_statement=self.task,
+            task_type="repair" if task_kind == "generation" else "evaluation",
+            route=build_online_route(
+                recommended_flow="direct",
+                gateway_provider=gateway_provider,
+            ),
+            online_prompt=prompt,
+            online_payload=payload,
+            online_phase="R",
+            online_model_name=model,
+            online_output_schema=output_schema,
+            evidence_refs=(f"nightshift:{task_id}:request",),
+        )
+        receipt_path = workpath / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
+        if callable(ask_unified):
+            receipt = ask_unified(
+                request,
+                verifier=response_contract,
+                receipt_path=receipt_path,
+            )
+        else:
+            from nexus.services.unified_runtime import UnifiedRuntime, build_structured_online_invoker
+
+            receipt = UnifiedRuntime().run(
+                request,
+                online_invoker=build_structured_online_invoker(
+                    self.gateway.ask_structured,
+                    phase="R",
+                    model_name=model,
+                    output_schema=output_schema,
+                    provider="fixture_gateway",
+                ),
+                verifier=response_contract,
+                receipt_path=receipt_path,
+            )
+        online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), Mapping) else {}
+        provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
+        self.last_unified_runtime_receipt = dict(receipt)
+        if isinstance(provider_response, Mapping):
+            prompt_result = dict(provider_response)
+        else:
+            prompt_result = {
+                "status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL",
+                "patch": str(provider_response or ""),
+            }
+        return prompt_result, raw_response, receipt
+
+    def _finalize_unified_runtime_receipt(self, *, terminal_status: str, final_score: float) -> None:
+        receipt = self.last_unified_runtime_receipt
+        if not isinstance(receipt, Mapping) or receipt.get("schema") != "nexus.unified_runtime.receipt.v1":
+            return
+        if not isinstance(receipt.get("planner"), Mapping) or not isinstance(receipt.get("online"), Mapping):
+            return
+        learning = self.last_learning_closure if isinstance(self.last_learning_closure, Mapping) else {}
+        learning_passed = bool(
+            learning.get("memory_written")
+            or learning.get("lancedb_synced")
+            or str(learning.get("sync_status", "")).upper() in {"SYNCED", "SUCCESS", "COMPLETED"}
+        )
+        verifier_passed = terminal_status == "SUCCESS" and final_score > 0
+        from nexus.services.unified_runtime import UnifiedRuntime
+
+        self.last_unified_runtime_receipt = UnifiedRuntime().finalize_receipt(
+            receipt,
+            verifier={
+                "task_id": str(receipt.get("task_id", "")),
+                "status": "pass" if verifier_passed else "fail",
+                "invoked": True,
+                "gate_passed": verifier_passed,
+                "evidence": "nightshift_final_score",
+                "evidence_refs": [f"verifier:{receipt.get('task_id')}:final"],
+                "outcome_contributed": verifier_passed,
+            },
+            learning={
+                "task_id": str(receipt.get("task_id", "")),
+                "status": "pass" if learning_passed else "fail",
+                "invoked": True,
+                "gate_passed": learning_passed,
+                "evidence": "nightshift_learning_closure",
+                "evidence_refs": [f"learning:{receipt.get('task_id')}:closure"],
+                "outcome_contributed": learning_passed,
+            },
+            outcome={"score": final_score, "value_measured": True},
+            receipt_path=receipt.get("receipt_path"),
+        )
 
     def _probe_model_capacity(self, model_name: str, timeout_sec: int = 20) -> bool:
         """Fast preflight: returns False when model is clearly quota/capacity exhausted."""
@@ -343,17 +498,13 @@ class AutoResearchNightShift:
             effective_gen_timeout = compute_adaptive_budget(self.generation_latencies, default_sec=60)
             print(f"📡 [Battlesuit] Calling Gemini CLI ({model})... Timeout: {effective_gen_timeout}s")
             start_gen = time.time()
-            prompt, raw_content = self.gateway.ask_structured(
+            prompt, raw_content, _ = self._ask_unified_candidate(
+                workpath=workpath,
+                round_id=round_id,
+                attempt=idx,
+                model=model,
                 prompt=_build_generation_prompt(compact=False),
                 payload=f"Target: {self.resolved_target_file}\nParams: {params}\nReturn the FULL file content in the 'patch' field.",
-                phase="R",
-                output_schema={
-                    "status": "APPROVED | REJECTED | FAIL",
-                    "summary": "Short explanation",
-                    "patch": "Full target file content as plain text",
-                    "violations": ["list of rule violations"],
-                },
-                model_name=model,
             )
             elapsed = time.time() - start_gen
             print(f"✅ [Battlesuit] Generation complete in {elapsed:.1f}s."); self.generation_latencies.append(elapsed)
@@ -366,17 +517,13 @@ class AutoResearchNightShift:
             if failed and self._is_timeout_error(failure_text):
                 print(f"⚠️ [Battlesuit] Timeout on {model}. Retrying once with compact prompt...")
                 start_gen = time.time()
-                prompt, raw_content = self.gateway.ask_structured(
+                prompt, raw_content, _ = self._ask_unified_candidate(
+                    workpath=workpath,
+                    round_id=round_id,
+                    attempt=idx + 100,
+                    model=model,
                     prompt=_build_generation_prompt(compact=True),
                     payload=f"Target: {self.resolved_target_file}\nParams: {params}\nReturn the FULL file content in the 'patch' field.",
-                    phase="R",
-                    output_schema={
-                        "status": "APPROVED | REJECTED | FAIL",
-                        "summary": "Short explanation",
-                        "patch": "Full target file content as plain text",
-                        "violations": ["list of rule violations"],
-                    },
-                    model_name=model,
                 )
                 elapsed = time.time() - start_gen
                 print(f"✅ [Battlesuit] Compact retry complete in {elapsed:.1f}s.")
@@ -446,17 +593,20 @@ class AutoResearchNightShift:
             )
 
         # 3. 🧪 Validation round (legacy-compatible) + Feynman fallback
-        judge_resp, _ = self.gateway.ask_structured(
+        judge_resp, _, _judge_receipt = self._ask_unified_candidate(
+            workpath=workpath,
+            round_id=round_id,
+            attempt=200,
+            model=self.model_name,
             prompt=f"Validate candidate patch for {self.resolved_target_file}",
             payload=f"Task: {self.task}\nReturn status/score/issues.",
-            phase="R",
             output_schema={
                 "status": "PASS | FAIL",
                 "summary": "Short validation summary",
                 "score": "numeric score",
                 "issues": ["list of issues"],
             },
-            model_name=self.model_name,
+            task_kind="evaluation",
         )
         if isinstance(judge_resp, dict) and "score" in judge_resp:
             judge_score = float(judge_resp.get("score", 0.0))
@@ -549,8 +699,9 @@ class AutoResearchNightShift:
         targeted = self._discover_targeted_tests()
         if not targeted:
             return False, "tier1_no_targeted_tests: no matching tests or smoke pack available."
+        pytest_command = ["uv", "run", "pytest"] if self.git_enabled else [sys.executable, "-m", "pytest"]
         ok, msg = self._run_cmd(
-            ["uv", "run", "pytest", "-q", "--maxfail=1", *targeted],
+            [*pytest_command, "-q", "--maxfail=1", *targeted],
             cwd=workpath,
             timeout_sec=self.tier1_timeout_sec,
         )
@@ -949,6 +1100,11 @@ class AutoResearchNightShift:
                 reason=final_reason,
                 final_score=self.best_score,
             )
+            self._finalize_unified_runtime_receipt(
+                terminal_status=final_status,
+                final_score=self.best_score,
+            )
+            self._save_json_report(final_status, failure_cat)
             print(f"✅ [AutoResearch] Finished {self.task}. Best Score: {self.best_score:.2f}")
             return {
                 "status": "COMPLETED",
@@ -986,6 +1142,7 @@ class AutoResearchNightShift:
                 "model_exhausted": dict(self.model_exhausted),
                 "artifact_paths": [str(self.tracelog_path), str(self.lesson_writeback_path)],
                 "learning_closure": self.last_learning_closure,
+                "unified_runtime_receipt": self.last_unified_runtime_receipt,
             }
         )
         with open(report_path, "w") as f:
