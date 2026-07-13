@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-`M6-A_UNIVERSAL_AGENT_INTERFACE`
+`M6-D_FINAL_PRODUCT_GATE`
 
 ## Completed milestones
 
@@ -20,10 +20,14 @@
 - `LOCAL_ASSIST_OUTCOME_CONTRIBUTION_PROVEN` — `f459d745f`
 - `LOCAL_ASSIST_CAUSAL_VALUE_MEASURED` — `8e96d6fa4` (bounded internal matrix; no public claim)
 - `LOCAL_ASSIST_DEFAULT_POLICY_DECIDED` — `e1c2c49f1` (recommendation only; runtime defaults not promoted)
+- `UNIVERSAL_AGENT_LOCAL_ASSIST_INTERFACE_PROVEN` — `d1078ce2b`
+- `CANONICAL_NEXUS_LOCAL_ASSIST_RUNTIME_PROVEN` — `f31d8cc3c`
+- `LOCAL_ASSIST_OPERATIONAL_READINESS_PROVEN` — `d95f0a5a5`
+- `FINAL_GATE_AUDITED_BLOCKED_REAL_CLOUD` — `4e7f9d008`
 
 ## Current commit
 
-`e1c2c49f1` — `feat(local-assist): add evidence-backed default policy`
+`4e7f9d008` — `feat(local-assist): add fail-closed final product gate`
 
 ## Evidence
 
@@ -40,6 +44,7 @@
 - Contribution tests → `5 passed`; receipt-only and consumption-only evidence remain false, while candidate adoption/rejection require causal evidence and hashes.
 - Value matrix tests → `3 passed`; five arms and eight task families share task versions/verifier conditions; infra-invalid rows are separated; bounded value measurement remains internal.
 - Default policy tests → `2 passed`; machine-readable recommendations are emitted only with measured evidence; runtime defaults remain unpromoted.
+- Final gate audit → `95 passed` across campaign-focused M3–M6 tests; all required final evidence passes except `real_cloud_local_runtime`.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -52,7 +57,8 @@
 
 - Existing dirty-tree regression failures in `test_capability_routing_contracts.py`; not caused by the M3-A files and intentionally left untouched.
 - No already-authorized real cloud provider is available in this environment; provider-neutral injected fallback proves the contract only. `real_cloud_proven=false` remains enforced.
+- `gemini`, `grok`, `agy`, and `codex` executables are present and `GEMINI_API_KEY` is configured, but no credential authorization/paid external action was verified or invoked. Presence is not real-provider evidence.
 
 ## Next automatic action
 
-Implement M6-A universal Agent interface: expose task identity, recommendation, actions, Assist Envelope, receipts, candidate/verifier/contribution contracts, and claim boundary through CLI/task-file/Python contracts.
+No safe automatic action remains. Resume only with an already-authorized real cloud provider smoke or an explicitly permitted provider-neutral substitute that satisfies the final real-cloud evidence requirement.
