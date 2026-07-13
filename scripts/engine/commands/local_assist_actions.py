@@ -8,6 +8,10 @@ from typing import Any
 
 from nexus.services.local_assist_closeout import run_local_assist_closeout
 from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
+from nexus.services.local_assist_universal_interface import (
+    build_universal_agent_interface,
+    load_universal_agent_task,
+)
 from nexus.services.local_assist_user_relay import write_user_relay_report
 
 
@@ -71,3 +75,14 @@ def run_local_assist_user_relay_command(
         report_file=report_file,
     )
     return report, 0 if report.get("status") != "REJECTED" else 1
+
+
+def run_local_assist_interface_command(
+    *,
+    task_file: str | Path,
+    workspace: str | Path,
+) -> tuple[dict[str, Any], int]:
+    """Emit the provider-neutral Agent interface without executing Local Assist."""
+    interface = load_universal_agent_task(task_file)
+    interface["workspace_root"] = str(Path(workspace).expanduser().resolve())
+    return interface, 0

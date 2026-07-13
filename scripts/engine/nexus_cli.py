@@ -177,6 +177,7 @@ from scripts.engine.commands.learn_actions import (
 from scripts.engine.commands.local_assist_actions import (
     run_local_assist_closeout_command,
     run_local_assist_command,
+    run_local_assist_interface_command,
     run_local_assist_user_relay_command,
 )
 from scripts.engine.commands.multi_agent_actions import (
@@ -367,6 +368,21 @@ def local_assist_verified_subtask(
         allowed_files=allowed_files,
         verifier_command=verifier_command,
     )
+
+
+@local_assist.command(name="interface")
+@click.option("--task-file", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--workspace", type=click.Path(file_okay=False), required=True)
+def local_assist_interface(task_file: str, workspace: str) -> None:
+    """Emit the universal provider-neutral Agent contract as JSON."""
+    try:
+        result, exit_code = run_local_assist_interface_command(task_file=task_file, workspace=workspace)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        click.echo(json.dumps({"status": "FAILED", "error": str(exc)}, ensure_ascii=False))
+        raise click.exceptions.Exit(1)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
 
 
 @local_assist.command(name="closeout")
