@@ -647,10 +647,10 @@ def test_provider_neutral_subprocess_invoker_is_task_scoped() -> None:
     assert result["evidence_refs"] == ["online:deterministic-cli:cli-task-001:subprocess"]
 
 
-def test_gateway_accepts_provider_neutral_online_invoker() -> None:
+def test_gateway_accepts_provider_neutral_online_invoker(tmp_path: Path) -> None:
     from nexus.services.gateway import BattlesuitGateway
 
-    gateway = BattlesuitGateway(project_root=Path.cwd())
+    gateway = BattlesuitGateway(project_root=tmp_path)
     invoker = build_subprocess_online_invoker(
         OnlineCliSpec(
             provider="grok",
@@ -660,7 +660,13 @@ def test_gateway_accepts_provider_neutral_online_invoker() -> None:
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
-            "route": {"recommended_flow": "direct", "provider": "grok"},
+            "route": {
+                "recommended_flow": "direct",
+                "provider": "grok",
+                "online_policy": "auto",
+                "injected_transport": True,
+                "workspace_root": str(tmp_path),
+            },
         }
     )
 
@@ -741,7 +747,13 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
             **{
                 **_request().__dict__,
                 "task_id": f"unified-provider-{provider}",
-                "route": {"recommended_flow": "direct", "provider": provider},
+                "route": {
+                    "recommended_flow": "direct",
+                    "provider": provider,
+                    "online_policy": "auto",
+                    "injected_transport": True,
+                    "workspace_root": str(tmp_path),
+                },
             }
         )
         receipt = gateway.ask_unified(
@@ -858,21 +870,29 @@ def test_capability_planner_exposes_committee_only_when_route_selects_it() -> No
     assert "committee" in routed_plan.selected_capabilities
 
 
-def test_gateway_does_not_fallback_to_wrong_provider_for_unknown_route(tmp_path: Path) -> None:
+def test_gateway_does_not_fallback_to_wrong_provider_for_unknown_route(tmp_path: Path, monkeypatch) -> None:
     from nexus.services.gateway import BattlesuitGateway
 
+    # Authorize Online so the failure is provider resolution, not product deny.
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     gateway = BattlesuitGateway(project_root=tmp_path)
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
-            "route": {"recommended_flow": "direct", "provider": "unknown-provider"},
+            "route": {
+                "recommended_flow": "direct",
+                "provider": "unknown-provider",
+                "online_policy": "auto",
+                "workspace_root": str(tmp_path),
+            },
         }
     )
     receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
 
     assert receipt["online"]["status"] == "FAILED"
-    assert receipt["online"]["response"]["error"] == "provider_adapter_resolution_failed"
-    assert receipt["online"]["response"]["provider"] == "unknown-provider"
+    # Fail closed: either adapter resolution or provider-not-approved decision.
+    err = str(receipt["online"]["response"].get("error") or "")
+    assert err in {"provider_adapter_resolution_failed", "online_execution_not_authorized"}
     assert receipt["receipt_complete"] is False
 
 

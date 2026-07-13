@@ -218,27 +218,28 @@ def resolve_online_execution_decision(
             claim_boundary=claim,
         )
 
-    # Resolve effective policy string (task > workspace > deny).
+    # Precedence (after task deny and injected fixture handling):
+    #   explicit task auto|require
+    #   > workspace policy (including workspace deny — env cannot broaden)
+    #   > emergency environment override (only when no workspace policy file)
+    #   > fail-closed default deny
+    env_override = str(env.get(ENV_OVERRIDE, "") or "").strip() == "1"
     source = "fail_closed_default"
     policy = "deny"
     if task_raw in {"auto", "require"}:
         policy = task_raw
         source = "cli_task_policy"
-    else:
+    elif ws.get("policy_present"):
         ws_policy = str(ws.get("default_online_policy") or "deny").strip().lower()
-        if ws_policy in ONLINE_POLICIES:
-            policy = ws_policy
-            source = "workspace_policy" if ws.get("policy_present") else "fail_closed_default"
-        env_override = str(env.get(ENV_OVERRIDE, "") or "").strip() == "1"
-        if env_override and policy == "deny":
-            # Emergency override elevates to auto when no stronger task/workspace deny.
+        policy = ws_policy if ws_policy in ONLINE_POLICIES else "deny"
+        source = "workspace_policy"
+        # Workspace deny is not elevated by env override (narrowing authority only).
+    else:
+        policy = "deny"
+        source = "fail_closed_default"
+        if env_override:
             policy = "auto"
             source = "operator_environment_override"
-
-    env_override = str(env.get(ENV_OVERRIDE, "") or "").strip() == "1"
-    if env_override and source == "fail_closed_default":
-        policy = "auto"
-        source = "operator_environment_override"
 
     requested = False
     if policy == "require":
@@ -255,8 +256,12 @@ def resolve_online_execution_decision(
             online_execution_authorized=False,
             online_authorization_source=source,
             approved_online_providers=approved,
-            preflight_status=ONLINE_NOT_REQUESTED,
-            reason="online_not_requested_by_policy_or_planner",
+            preflight_status=ONLINE_NOT_REQUESTED if policy != "deny" else ONLINE_DENIED_BY_POLICY,
+            reason=(
+                "online_not_requested_by_policy_or_planner"
+                if policy != "deny"
+                else "online_denied_by_workspace_or_default"
+            ),
             allow_external_context_transfer=transfer_ok,
             maximum_provider_calls=max_calls,
             maximum_retry_count=max_retries,
@@ -299,15 +304,32 @@ def resolve_online_execution_decision(
             claim_boundary=claim,
         )
 
-    if provider and provider not in approved and provider not in {"injected", "gateway", "fixture", "fixture_gateway"}:
-        status = ONLINE_PROVIDER_UNAVAILABLE if policy == "require" else ONLINE_PROVIDER_UNAVAILABLE
+    # require without a concrete provider is a configuration error (fail closed).
+    if policy == "require" and not provider:
         return OnlineExecutionDecision(
             online_policy=policy,
             online_execution_requested=True,
             online_execution_authorized=False,
             online_authorization_source=source,
             approved_online_providers=approved,
-            preflight_status=status,
+            preflight_status=ONLINE_CONFIGURATION_INVALID,
+            reason="require_policy_missing_provider",
+            allow_external_context_transfer=transfer_ok,
+            maximum_provider_calls=max_calls,
+            maximum_retry_count=max_retries,
+            requested_provider=provider,
+            physical_invocation_allowed=False,
+            claim_boundary=claim,
+        )
+
+    if provider and provider not in approved and provider not in {"injected", "gateway", "fixture", "fixture_gateway"}:
+        return OnlineExecutionDecision(
+            online_policy=policy,
+            online_execution_requested=True,
+            online_execution_authorized=False,
+            online_authorization_source=source,
+            approved_online_providers=approved,
+            preflight_status=ONLINE_PROVIDER_UNAVAILABLE,
             reason=f"provider_not_approved:{provider}",
             allow_external_context_transfer=transfer_ok,
             maximum_provider_calls=max_calls,
@@ -318,7 +340,7 @@ def resolve_online_execution_decision(
         )
 
     # Physical real-provider invocation still requires a non-credential authorization
-    # signal: task auto/require, workspace auto/require, or env override.
+    # signal: task auto/require, workspace auto/require, or env override (no workspace file).
     physical_ok = source in {
         "cli_task_policy",
         "workspace_policy",
@@ -341,6 +363,38 @@ def resolve_online_execution_decision(
             physical_invocation_allowed=False,
             claim_boundary=claim,
         )
+
+    # Credential absence is not authorization — surface unauthenticated when
+    # a named cloud provider has no credential-bearing env signal. Binary
+    # presence alone is never treated as authorization.
+    if provider in {"gemini", "grok", "codex", "openai"}:
+        cred_keys = {
+            "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "NEXUS_GEMINI_API_KEY"),
+            "grok": ("XAI_API_KEY", "GROK_API_KEY", "NEXUS_GROK_API_KEY"),
+            "codex": ("OPENAI_API_KEY", "CODEX_API_KEY", "NEXUS_CODEX_API_KEY"),
+            "openai": ("OPENAI_API_KEY", "NEXUS_OPENAI_API_KEY"),
+        }.get(provider, ())
+        has_cred = any(str(env.get(k, "") or "").strip() for k in cred_keys)
+        # Env emergency override still allows physical path for operator-driven
+        # CLI sessions that use local OAuth login without API keys; mark
+        # unauthenticated only when require demands Online completion certainty
+        # and no credential/env override is present.
+        if policy == "require" and not has_cred and source != "operator_environment_override":
+            return OnlineExecutionDecision(
+                online_policy=policy,
+                online_execution_requested=True,
+                online_execution_authorized=False,
+                online_authorization_source=source,
+                approved_online_providers=approved,
+                preflight_status=ONLINE_PROVIDER_UNAUTHENTICATED,
+                reason=f"provider_credentials_missing:{provider}",
+                allow_external_context_transfer=transfer_ok,
+                maximum_provider_calls=max_calls,
+                maximum_retry_count=max_retries,
+                requested_provider=provider,
+                physical_invocation_allowed=False,
+                claim_boundary=claim,
+            )
 
     return OnlineExecutionDecision(
         online_policy=policy,

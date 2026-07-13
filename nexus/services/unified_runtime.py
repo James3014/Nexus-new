@@ -1202,13 +1202,21 @@ class UnifiedRuntime:
         )
 
         route_map = dict(request.route) if isinstance(request.route, Mapping) else {}
-        # Injected transport is an explicit flag only — presence of online_invoker does
-        # not imply a test fixture (registered CLI invokers are also callables).
-        injected_flag = bool(route_map.get("injected_transport", False))
         prior = decision_from_context(route_map)
         if prior is None:
+            task_policy = str(route_map.get("online_policy") or "").strip().lower()
+            # Explicit deny always wins and blocks even custom invokers.
+            # When callers supply an online_invoker without an explicit policy,
+            # treat as fixture/compatibility transport (not a silent real-provider grant).
+            # Registered physical CLIs must attach a resolved decision on the route
+            # (Gateway does this) or set online_policy + authorization source.
+            injected_flag = bool(route_map.get("injected_transport", False))
+            if online_invoker is not None and task_policy not in {"deny", "require"}:
+                if not task_policy:
+                    task_policy = "auto"
+                injected_flag = True
             online_decision = resolve_online_execution_decision(
-                task_online_policy=str(route_map.get("online_policy") or ""),
+                task_online_policy=task_policy,
                 project_root=str(route_map.get("workspace_root") or "."),
                 planner_online_needed=bool(request.online_enabled),
                 injected_transport=injected_flag,
@@ -1566,6 +1574,42 @@ class UnifiedRuntime:
             return _stage("online", status="NOT_REQUESTED", reason="online_route_disabled")
         if invoker is None:
             return _stage("online", status="NOT_RUN", reason="online_invoker_not_supplied")
+
+        # Product deny / unauthorized decisions must never invoke Online transport
+        # (including custom repair-style callables). Injected fixtures authorize
+        # via online_execution_authorized=true with injected_test_transport source.
+        from nexus.services.online_execution_policy import decision_from_context
+
+        decision = decision_from_context(context)
+        if decision is not None and not decision.online_execution_authorized:
+            return _stage(
+                "online",
+                status="FAILED",
+                invoked=False,
+                evidence_present=True,
+                gate_passed=False,
+                reason=str(decision.reason or decision.preflight_status or "online_execution_not_authorized"),
+                response={
+                    "provider": str(decision.requested_provider or ""),
+                    "task_id": str(context.get("task_id", "")),
+                    "invoked": False,
+                    "output_delivered": False,
+                    "gate_passed": False,
+                    "provider_call_count": 0,
+                    "response": "",
+                    "raw_response": "",
+                    "usage": {},
+                    "error": "online_execution_not_authorized",
+                    "online_preflight_status": decision.preflight_status,
+                    "online_authorization_source": decision.online_authorization_source,
+                    "evidence_refs": [
+                        f"online:{context.get('task_id')}:authorization_denied"
+                    ],
+                },
+                evidence_refs=[f"online:{context.get('task_id')}:authorization_denied"],
+                task_id=str(context.get("task_id", "")),
+            )
+
         try:
             payload = _mapping(invoker(context))
         except Exception as exc:

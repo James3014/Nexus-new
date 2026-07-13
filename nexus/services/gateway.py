@@ -403,6 +403,10 @@ class BattlesuitGateway:
         lineage must use this method; absent stage callbacks remain incomplete
         in the unified receipt rather than being inferred as success.
         """
+        from nexus.services.online_execution_policy import (
+            decision_from_context,
+            resolve_online_execution_decision,
+        )
         from nexus.services.unified_runtime import (
             UnifiedRuntime,
             _capability_evidence_summary,
@@ -412,11 +416,10 @@ class BattlesuitGateway:
         )
 
         route = getattr(request, "route", {})
-        requested_provider = (
-            str(route.get("provider", "") or "").strip().lower()
-            if isinstance(route, Mapping)
-            else ""
-        )
+        if not isinstance(route, Mapping):
+            route = {}
+        route = dict(route)
+        requested_provider = str(route.get("provider", "") or "").strip().lower()
         gateway_provider = str(self.oauth_provider or "").strip().lower()
         bound_transport = getattr(self.ask_structured, "__func__", None)
         structured_injected = bound_transport is not self.__class__.ask_structured
@@ -427,18 +430,28 @@ class BattlesuitGateway:
             gateway_provider=gateway_provider,
         )
         # Mark fixture transports for authorization resolution (not real CLI).
-        if structured_injected and isinstance(route, dict):
-            route = dict(route)
+        if structured_injected:
             route["injected_transport"] = True
+        # Resolve and bind product Online authorization once for this call.
+        prior = decision_from_context(route)
+        if prior is None:
+            prior = resolve_online_execution_decision(
+                task_online_policy=str(route.get("online_policy") or ""),
+                project_root=getattr(self, "project_root", ".") or ".",
+                planner_online_needed=True,
+                injected_transport=bool(route.get("injected_transport")),
+                requested_provider=requested_provider or gateway_provider,
+            )
+        route["online_execution_decision"] = prior.to_dict()
+        route["online_policy"] = prior.online_policy
+        self._online_execution_decision = prior
+        try:
+            object.__setattr__(request, "route", route)
+        except Exception:
             try:
-                object.__setattr__(request, "route", route)
+                request.route = route  # type: ignore[misc]
             except Exception:
-                if hasattr(request, "route"):
-                    try:
-                        request.route = route  # type: ignore[misc]
-                    except Exception:
-                        pass
-        # Ensure route carries online_policy from gateway request if present on route only.
+                pass
 
         def gateway_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
             task_id = str(context.get("task_id", ""))
@@ -637,9 +650,50 @@ class BattlesuitGateway:
             receipt_path=receipt_path,
         )
 
+    def _online_physical_allowed(self) -> bool:
+        """Enforce Nexus OnlineExecutionDecision for physical Gateway CLI paths.
+
+        Credentials / binary presence never authorize. Bound decision from
+        ask_unified / runtime context wins; otherwise fail-closed unless the
+        emergency environment override is set (legacy operator path).
+        """
+        from nexus.services.online_execution_policy import (
+            decision_from_context,
+            physical_online_authorized,
+            resolve_online_execution_decision,
+        )
+
+        bound = getattr(self, "_online_execution_decision", None)
+        if bound is not None:
+            if isinstance(bound, Mapping):
+                return physical_online_authorized(bound, injected_transport=False)
+            authorized = bool(getattr(bound, "online_execution_authorized", False))
+            physical = bool(getattr(bound, "physical_invocation_allowed", False))
+            return authorized and physical
+        # No bound decision: resolve conservatively (workspace/env only).
+        decision = resolve_online_execution_decision(
+            task_online_policy="",
+            project_root=getattr(self, "project_root", ".") or ".",
+            planner_online_needed=True,
+            requested_provider=str(getattr(self, "oauth_provider", "") or ""),
+        )
+        return bool(decision.online_execution_authorized and decision.physical_invocation_allowed)
+
     def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
         """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""
         import time
+
+        if not self._online_physical_allowed():
+            # Fail closed for direct physical Online paths (surgical/ask/structured).
+            err = {
+                "status": "FAILED",
+                "error": "online_execution_not_authorized",
+                "error_category": "online_execution_not_authorized",
+                "provider_call_count": 0,
+                "invoked": False,
+            }
+            return err, "online_execution_not_authorized"
+
         max_retries = int(os.getenv("NEXUS_GATEWAY_MAX_RETRIES", "3"))
         last_err = ""
         
