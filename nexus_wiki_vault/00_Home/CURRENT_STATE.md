@@ -58,10 +58,10 @@ World A and World C have **no runtime bridge**. The Canonical CLI does not dispa
 | Governance briefing | RUNTIME_INVOKED | World A agent startup | Only within World A | `enforced.sh`, `nexus_cli.py` |
 | Startup gate | RUNTIME_INVOKED | World A agent startup | World A only | `start_gemini_nexus_enforced.sh` |
 | CLI tool surface | UNIT_VERIFIED | World A agent | Not wired to LocalModelExecutor | `scripts/nexus_cli.py` |
-| Local pipeline (topology/executor/verifier/receipt) | RUNTIME_INVOKED | Benchmark scripts only | Not exposed via Canonical CLI | `nexus/engine/` |
-| A/B uplift measurement | BENCHMARK_VERIFIED | Benchmark harness | Verification instrument only | `capability_ab_runner.py` |
-| Candidate isolation | CONTRACT_VERIFIED | LocalModelExecutor | Benchmark path only | `nexus/core/` |
-| Claim verification | CONTRACT_VERIFIED | LocalModelExecutor | Benchmark path only | `nexus/core/` |
+| Local pipeline (topology/executor/verifier/receipt) | RUNTIME_INVOKED | Benchmark scripts only | Not exposed via Canonical CLI | `nexus/services/local_heal/local_model_executor.py` |
+| A/B uplift measurement | BENCHMARK_VERIFIED | Benchmark harness | Verification instrument only | `scripts/bench/capability_ab_runner.py` |
+| Candidate isolation | CONTRACT_VERIFIED | LocalModelExecutor | Benchmark path only | `nexus/services/local_heal/isolated_local_solve_loop.py` |
+| Claim verification | CONTRACT_VERIFIED | LocalModelExecutor | Benchmark path only | `nexus/services/local_heal/claim_delivery_gate.py` |
 
 ## 5. Not proven / restricted claims
 

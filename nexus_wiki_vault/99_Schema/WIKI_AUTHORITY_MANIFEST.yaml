@@ -109,19 +109,19 @@ known_legacy_entries:
     conflicts_registered: [C-05, C-06, C-07, C-08, C-09]
 
   - path: 00_Home/README_Contributor.md
-    classification: current
-    lifecycle: current
-    reason: still valid contributor guide; cross-linked to PARTNER_ONBOARDING
+    classification: mixed_needs_review
+    lifecycle: mixed_needs_review
+    reason: overly abstract; insufficient for current contributor operations without manual review
 
   - path: 00_Home/Agent Onboarding - Implementation Map.md
-    classification: current
-    lifecycle: current
-    reason: still valid implementation map for navigation
+    classification: mixed_needs_review
+    lifecycle: mixed_needs_review
+    reason: thin content with old path references and format issues
 
   - path: 00_Home/CLI Surface Quickstart.md
-    classification: current
-    lifecycle: current
-    reason: still valid CLI reference
+    classification: mixed_needs_review
+    lifecycle: mixed_needs_review
+    reason: v22/v23 references, Legacy V9 references, malformed nested links
 
 link_health_report:
   path: 99_Schema/WIKI_LINK_HEALTH_REPORT.md
@@ -130,3 +130,20 @@ link_health_report:
   links_scanned: 38
   broken_found: 1
   broken_repaired: 1
+
+unresolved_authority_collisions:
+  - description: "scripts/nexus_cli.py vs scripts/engine/nexus_cli.py"
+    status: resolved
+    resolution: "nexus_cli.py is a 4-line public wrapper; engine/nexus_cli.py is the canonical implementation"
+  - description: "nexus/core/capability_selector.py vs nexus/engine/capability_selector.py"
+    status: resolved
+    resolution: "core is primary (learning policy loader); engine is compatibility shim"
+  - description: "Verifier stacks: isolated_verifier.py (World C) vs nexus/verifiers/ (domain)"
+    status: unresolved
+    reason: "Different verifier stacks for different worlds; no single canonical path"
+  - description: "Claim gate: claim_delivery_gate.py exists but no single nexus/core/claim_gate.py"
+    status: unresolved
+    reason: "Claim gate concept spans multiple files"
+  - description: "Evidence: evidence_collector.py vs evidence_policy.py"
+    status: unresolved
+    reason: "Collector vs policy authority split"

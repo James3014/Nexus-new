@@ -95,7 +95,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: A path (route is a decision within a path), a topology.
 
-**Code/document source**: `nexus/engine/capability_planner.py`, `nexus/engine/skills_router.py`
+**Code/document source**: `nexus/engine/capability_planner.py`, `scripts/core/skills_router.py`
 
 **Legacy aliases**: Capability Route
 
@@ -107,79 +107,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: A route (topology is the structure, route is the decision), a path.
 
-**Code/document source**: `nexus/engine/local_model_executor.py`
-
-**Legacy aliases**: Execution Topology
-
----
-
-### Execution mode
-
-**Definition**: The operational mode under which Nexus runs (e.g., World A governance, World B benchmark, World C local). Each mode has different component availability and evidence requirements.
-
-**Not the same as**: A path, a route, a topology.
-
-**Code/document source**: `nexus_wiki_vault/00_Home/CURRENT_STATE.md`
-
-**Legacy aliases**: Runtime Mode
-
----
-
-### CapabilityPlanner
-
-**Definition**: The component that selects capability combinations based on task signals, phase, and context. It sits between the pipeline and the SkillsRouter.
-
-**Not the same as**: SkillsRouter (planner selects capabilities, router selects skills), Route Authority (planner follows authority, does not define it).
-
-**Code/document source**: `nexus/engine/capability_planner.py`
-
-**Legacy aliases**: Route Planner, Capability Router
-
----
-
-### SPXDRAC
-
-**Definition**: The lifecycle phases of Nexus: Scout (S), Plan (P), eXecute (X), Diagnose (D), Repair (R), Audit (A), Crystallize (C). This is the older naming convention.
-
-**Not the same as**: P-X-D-R-A-C (SPXDRAC includes Scout as a separate phase; P-X-D-R-A-C merges Scout into Plan).
-
-**Code/document source**: `nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md`
-
-**Legacy aliases**: S-P-X-D-R-A-C, v9 lifecycle
-
----
-
-### P-X-D-R-A-C
-
-**Definition**: The current lifecycle phases: Plan (P), eXcribe/explore (X), Diagnose (D), Repair (R), Audit (A), Crystallize (C). This is the canonical naming.
-
-**Not the same as**: SPXDRAC (P-X-D-R-A-C merges Scout into Plan), P-D-R-A-C (older v17 naming without X phase).
-
-**Code/document source**: `nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md` section 2
-
-**Legacy aliases**: PXDRAC, P-X-D-R-A-C Hybrid
-
----
-
-### LocalHeal
-
-**Definition**: The self-healing subsystem that coordinates repair actions when failures are detected. Part of the local model execution path.
-
-**Not the same as**: The Verifier (LocalHeal repairs, Verifier validates), the Claim Gate (LocalHeal produces artifacts, Claim Gate evaluates them).
-
-**Code/document source**: `nexus/services/local_heal/`
-
-**Legacy aliases**: Self-Heal, Auto-Repair
-
----
-
-### Local Armor
-
-**Definition**: The local model execution layer that provides candidate isolation, verification, and receipt generation. World C.
-
-**Not the same as**: World A (agent governance), World B (benchmark), a specific model.
-
-**Code/document source**: `nexus/engine/local_model_executor.py`
+**Code/document source**: `nexus/services/local_heal/local_model_executor.py`
 
 **Legacy aliases**: LocalModelExecutor, Local Armor Executor
 
@@ -191,7 +119,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: The Verifier (committee decides, Verifier checks), the Claim Gate (committee governs, Claim Gate validates evidence).
 
-**Code/document source**: `nexus/engine/committee_orchestrator.py`
+**Code/document source**: `nexus/services/local_heal/committee_orchestrator.py`
 
 **Legacy aliases**: Consensus Guard, Governance Committee
 
@@ -203,7 +131,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: Verifier (isolation prevents contamination, Verifier checks outcome), sandbox (isolation is about candidate independence, sandbox is about execution safety).
 
-**Code/document source**: `nexus/core/candidate_isolation.py`
+**Code/document source**: `nexus/services/local_heal/isolated_local_solve_loop.py`
 
 **Legacy aliases**: (none)
 
@@ -215,7 +143,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: Claim Gate (Verifier checks artifacts, Claim Gate evaluates claims), LocalHeal (Verifier validates, LocalHeal repairs).
 
-**Code/document source**: `nexus/core/verifier.py`
+**Code/document source**: `nexus/services/local_heal/isolated_verifier.py` (World C) / `nexus/verifiers/` (domain verifiers)
 
 **Legacy aliases**: ReceiptVerifier, ArtifactVerifier
 
@@ -227,7 +155,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: A claim (receipt is evidence, claim is the assertion), a report (receipt is machine-readable, report is human-readable).
 
-**Code/document source**: `nexus/core/receipt.py`
+**Code/document source**: `nexus/core/receipt_causality_contract.py` / `nexus/evidence/abort_receipt.py`
 
 **Legacy aliases**: Evidence Receipt, Execution Receipt
 
@@ -239,7 +167,7 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 
 **Not the same as**: Verifier (claim gate evaluates claim level, Verifier checks artifact correctness), Claim Taxonomy (taxonomy defines levels, gate enforces them).
 
-**Code/document source**: `nexus/core/claim_gate.py`
+**Code/document source**: `nexus/services/local_heal/claim_delivery_gate.py`
 
 **Legacy aliases**: Claim Verifier, Evidence Gate
 

@@ -56,4 +56,4 @@ This Wiki contains **current, planned, and historical** material. Version number
 
 - [System Architecture Blueprint](01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md) - normative architecture
 - [Wiki Governance Charter](99_Schema/WIKI_GOVERNANCE_CHARTER.md) - structure freeze and maintenance rules
-- [Source Index](90_Sources/Source Index.md) - authoritative document-to-path mapping
+- [Source Index](90_Sources/Source Index.md) - legacy source inventory; verify paths against the repository before use

@@ -8,33 +8,59 @@ owner: nexus-core
 verified_at: '2026-07-13'
 verified_against_commit: 957cd19c744d168ff050667b611adca5fb20d56f
 source_of_truth: repository evidence and current runtime reports
-confidence: high
+confidence: medium
 ---
 
 # System Map
 
-The main components of Nexus, their responsibilities, authority levels, and known limitations.
+The main components of Nexus, their responsibilities, authority levels, and known limitations. Every code path in this page has been physically verified against the repository.
 
-## Component reference
+## Core component map
 
-| Component | Responsibility | Authority level | Code path | Primary caller | Input | Output | Evidence | Known limitation |
-|-----------|---------------|----------------|-----------|---------------|-------|--------|----------|-----------------|
-| Canonical CLI | User-facing command surface for governance operations | operational | `scripts/nexus_cli.py` | Human operator, Agent | CLI args | Command output, exit code | CLI tests | Not wired to LocalModelExecutor |
-| CampaignGeneral | Task decomposition and P-X-D-R-A-C lifecycle orchestration | operational | `nexus/engine/campaign_general.py` | CLI, Runner | Task manifest | Phase artifacts | Unit tests | Depends on LLM for intent decomposition |
-| NexusPipeline | End-to-end pipeline execution across phases | operational | `nexus/engine/pipeline.py` | CampaignGeneral | Phase inputs | Phase outputs | Pipeline tests | Sequential execution bottleneck |
-| CapabilityPlanner | Selects capability combinations based on task signals | operational | `nexus/engine/capability_planner.py` | Pipeline, Router | Task context, phase | Selected capabilities | Route tests | Cannot add new routes without architecture authorization |
-| SkillsRouter | Routes tasks to formal skills based on phase and signals | operational | `nexus/engine/skills_router.py` | CapabilityPlanner | Phase, signals | Selected skills | Router tests | Decision boundary limited to known skills |
-| CapabilitySelector | Final skill selection from router candidates | operational | `nexus/engine/capability_selector.py` | SkillsRouter | Skill candidates | Selected skill | Selector tests | No learning from past selections |
-| LocalModelExecutor | Local model execution with topology dispatch | operational | `nexus/engine/local_model_executor.py` | Benchmark scripts (primary) | Task, topology | Candidate, receipt | Benchmark tests | Not accessible from Canonical CLI |
-| HealOrchestrator | Coordinates self-healing and repair actions | operational | `nexus/services/local_heal/heal_orchestrator.py` | Pipeline, LocalHeal | Failure signature | Repair plan | Heal tests | Limited to known repair patterns |
-| CommitteeOrchestrator | Multi-agent committee governance and voting | operational | `nexus/engine/committee_orchestrator.py` | Pipeline | Proposal | Committee decision | Committee tests | Committee composition is static |
-| CloudAgentAdapter | Cloud agent integration layer | contract | `nexus/services/cloud_agent_adapter.py` | Pipeline | Task context | Cloud agent response | Contract tests | Uses fake cloud in World B |
-| Verifier | Validates artifacts against contracts | normative | `nexus/core/verifier.py` | Audit phase | Artifact, contract | Pass/fail, receipt | Verifier tests | Cannot be weakened |
-| Candidate Isolation Gate | Ensures candidate providers are isolated | normative | `nexus/core/candidate_isolation.py` | LocalModelExecutor | Candidates | Isolated candidates | Isolation tests | Benchmark path only |
-| Claim Gate | Validates claims against evidence thresholds | normative | `nexus/core/claim_gate.py` | Verifier | Claim, evidence | Claim verdict | Gate tests | Cannot be weakened |
-| Evidence Bundle | Collects and packages evidence artifacts | operational | `nexus/core/evidence_bundle.py` | Verifier, Audit | Evidence sources | Bundled evidence | Bundle tests | May include stale artifacts |
-| Learning Closure | Extracts lessons from task outcomes and writes back | operational | `nexus/services/learning_closure.py` | Crystallize phase | Task outcome, lessons | Learning entries | Learning tests | Depends on successful task completion |
-| Wiki Sync | Synchronizes Wiki with codebase state | operational | `scripts/ops/wiki_sync_check.py` | CI gate, ops | Code changes | Wiki updates | Sync tests | May drift if not run regularly |
+| # | Component | Responsibility | Authority level | Verified path | Primary caller | Known limitation |
+|---|-----------|---------------|----------------|---------------|---------------|-----------------|
+| 1 | Canonical CLI | User-facing command surface for governance operations | operational | `scripts/nexus_cli.py` (public wrapper) -> `scripts/engine/nexus_cli.py` (canonical implementation) | Human operator, Agent | Not wired to LocalModelExecutor |
+| 2 | CampaignGeneral | Task decomposition and P-X-D-R-A-C lifecycle orchestration | operational | `nexus/core/campaign_general.py` | CLI, Runner | Depends on LLM for intent decomposition |
+| 3 | NexusPipeline | End-to-end pipeline execution across phases | operational | `nexus/engine/pipeline.py` | CampaignGeneral | Sequential execution bottleneck |
+| 4 | CapabilityPlanner | Selects capability combinations based on task signals | operational | `nexus/engine/capability_planner.py` | Pipeline, Router | Cannot add new routes without architecture authorization |
+| 5 | SkillsRouter | Routes tasks to formal skills based on phase and signals | operational | `scripts/core/skills_router.py` | CapabilityPlanner | Decision boundary limited to known skills |
+| 6 | CapabilitySelector | Final skill selection from router candidates | operational | `nexus/core/capability_selector.py` (primary) / `nexus/engine/capability_selector.py` (compatibility shim) | SkillsRouter | No learning from past selections |
+| 7 | LocalModelExecutor | Local model execution with topology dispatch | operational | `nexus/services/local_heal/local_model_executor.py` | Benchmark scripts, LocalAssistService | Not accessible from Canonical CLI (Gap 1) |
+| 8 | HealOrchestrator | Coordinates self-healing and repair actions | operational | `nexus/services/local_heal/` (directory) | Pipeline, LocalHeal | Limited to known repair patterns |
+| 9 | CommitteeOrchestrator | Multi-agent committee governance and voting | operational | `nexus/services/local_heal/committee_orchestrator.py` | Pipeline, LocalModelExecutor | Committee composition is static |
+| 10 | CloudAgentAdapter | Cloud agent integration layer | contract | `nexus/services/cloud_agent_cli_adapter.py` / `nexus/services/cloud_agent_contract.py` | Pipeline | Uses fake cloud in World B (Gap 3) |
+| 11 | Verifier | Validates artifacts against contracts | normative | `nexus/services/local_heal/isolated_verifier.py` (World C) / `nexus/verifiers/` (domain verifiers) | Audit phase | Cannot be weakened |
+| 12 | Candidate Isolation Gate | Ensures candidate providers are isolated | normative | `nexus/services/local_heal/isolated_local_solve_loop.py` | LocalModelExecutor | Benchmark path only |
+| 13 | Claim Gate | Validates claims against evidence thresholds | normative | `nexus/services/local_heal/claim_delivery_gate.py` | Verifier | Cannot be weakened |
+| 14 | Evidence Bundle | Collects and packages evidence artifacts | operational | `nexus/orchestrator/evidence_collector.py` / `nexus/orchestrator/evidence_policy.py` | Verifier, Audit | May include stale artifacts |
+| 15 | Learning Closure | Extracts lessons from task outcomes and writes back | operational | `nexus/services/local_heal/learning_closure_bridge.py` | Crystallize phase | Depends on successful task completion |
+| 16 | Wiki Sync | Synchronizes Wiki with codebase state | operational | `scripts/ops/wiki_sync_check.py` | CI gate, ops | May drift if not run regularly |
+
+## CLI wrapper and implementation roles
+
+| File | Role | Evidence |
+|------|------|----------|
+| `scripts/nexus_cli.py` | Public wrapper: imports and delegates to `scripts.engine.nexus_cli.nexus` | File content: 4-line wrapper with `from scripts.engine.nexus_cli import nexus` |
+| `scripts/engine/nexus_cli.py` | Canonical CLI implementation: Click commands, SanitizedRunner, all CLI logic | File content: 600+ lines, main entry point |
+
+## Multiple-authority collisions
+
+| Component | Primary path | Secondary path | Authority status |
+|-----------|-------------|---------------|-----------------|
+| CapabilitySelector | `nexus/core/capability_selector.py` (learning policy loader) | `nexus/engine/capability_selector.py` (compatibility shim, delegates to planner) | Resolved: core is primary, engine is compatibility wrapper |
+| Verifier | `nexus/services/local_heal/isolated_verifier.py` (World C) | `nexus/verifiers/` (domain-specific verifiers) | Unresolved: different verifier stacks for different worlds |
+| Claim Gate | `nexus/services/local_heal/claim_delivery_gate.py` | No single `nexus/core/claim_gate.py` exists | Unresolved: claim gate concept spans multiple files |
+| Evidence | `nexus/orchestrator/evidence_collector.py` | `nexus/orchestrator/evidence_policy.py` | Unresolved: collector vs policy authority split |
+| Learning Closure | `nexus/services/local_heal/learning_closure_bridge.py` | No single `nexus/services/learning_closure.py` exists | Resolved: bridge is the physical implementation |
+
+## Component count vs physical file count
+
+| Metric | Count |
+|--------|-------|
+| Components mapped | 16 |
+| Verified physical files | 18 (some components have multiple files) |
+| Verified caller relationships | 12 |
+| Unresolved authority collisions | 3 (Verifier stacks, Claim Gate span, Evidence split) |
 
 ## World-specific component availability
 

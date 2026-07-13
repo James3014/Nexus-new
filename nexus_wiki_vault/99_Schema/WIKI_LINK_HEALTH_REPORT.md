@@ -82,6 +82,48 @@ The `rg` regex scan for `\]\(` does not distinguish between:
 
 No false positives were found in the canonical pages (none of the new pages contain code-block links or frontmatter alias links with markdown syntax).
 
+## WIKI-5 physical verification findings
+
+### Code paths verified in SYSTEM_MAP.md, TASK_ROUTER.md, GLOSSARY.md, CURRENT_STATE.md
+
+| Documented path | Physical status | Corrected to |
+|-----------------|----------------|---------------|
+| `scripts/nexus_cli.py` | EXISTS | (no change - public wrapper) |
+| `scripts/engine/nexus_cli.py` | EXISTS | (no change - canonical implementation) |
+| `scripts/core/skills_router.py` | EXISTS | (was incorrectly `nexus/engine/skills_router.py`) |
+| `nexus/core/campaign_general.py` | EXISTS | (was incorrectly `nexus/engine/campaign_general.py`) |
+| `nexus/engine/capability_planner.py` | EXISTS | (no change) |
+| `nexus/engine/pipeline.py` | EXISTS | (no change) |
+| `nexus/core/capability_selector.py` | EXISTS | (primary; engine/ is compatibility shim) |
+| `nexus/services/local_heal/local_model_executor.py` | EXISTS | (was incorrectly `nexus/engine/local_model_executor.py`) |
+| `nexus/services/local_heal/committee_orchestrator.py` | EXISTS | (was incorrectly `nexus/engine/committee_orchestrator.py`) |
+| `nexus/services/local_heal/isolated_verifier.py` | EXISTS | (was incorrectly `nexus/core/verifier.py`) |
+| `nexus/services/local_heal/claim_delivery_gate.py` | EXISTS | (was incorrectly `nexus/core/claim_gate.py`) |
+| `nexus/services/local_heal/learning_closure_bridge.py` | EXISTS | (was incorrectly `nexus/services/learning_closure.py`) |
+| `nexus/services/local_heal/isolated_local_solve_loop.py` | EXISTS | (was incorrectly `nexus/core/candidate_isolation.py`) |
+| `nexus/services/cloud_agent_cli_adapter.py` | EXISTS | (was incorrectly `nexus/services/cloud_agent_adapter.py`) |
+| `nexus/orchestrator/evidence_collector.py` | EXISTS | (was incorrectly `nexus/core/evidence_bundle.py`) |
+| `scripts/ops/wiki_sync_check.py` | EXISTS | (no change) |
+| `scripts/ops/ci_gate.py` | EXISTS | (no change) |
+| `nexus/engine/skills_router.py` | MISSING | No such file; skills_router is at `scripts/core/skills_router.py` |
+| `nexus/engine/local_model_executor.py` | MISSING | No such file; executor is at `nexus/services/local_heal/local_model_executor.py` |
+| `nexus/core/verifier.py` | MISSING | No such file; verifier is at `nexus/services/local_heal/isolated_verifier.py` |
+| `nexus/core/claim_gate.py` | MISSING | No such file; claim gate is at `nexus/services/local_heal/claim_delivery_gate.py` |
+| `nexus/core/evidence_bundle.py` | MISSING | No such file; evidence is at `nexus/orchestrator/evidence_collector.py` |
+| `nexus/core/receipt.py` | MISSING | No such file; receipt is at `nexus/core/receipt_causality_contract.py` |
+| `nexus/services/learning_closure.py` | MISSING | No such file; learning closure is at `nexus/services/local_heal/learning_closure_bridge.py` |
+| `nexus/engine/committee_orchestrator.py` | MISSING | No such file; committee is at `nexus/services/local_heal/committee_orchestrator.py` |
+| `nexus/services/cloud_agent_adapter.py` | MISSING | No such file; adapter is at `nexus/services/cloud_agent_cli_adapter.py` |
+| `nexus/core/candidate_isolation.py` | MISSING | No such file; isolation is at `nexus/services/local_heal/isolated_local_solve_loop.py` |
+
+### Unresolved authority collisions
+
+| Collision | Status |
+|-----------|--------|
+| Verifier stacks: World C vs domain verifiers | Unresolved |
+| Claim gate: claim_delivery_gate.py vs concept spanning multiple files | Unresolved |
+| Evidence: collector vs policy split | Unresolved |
+
 ## Wiki linter command
 
 ```
