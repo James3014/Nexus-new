@@ -9,6 +9,7 @@ from typing import Any
 PACKAGE_SCHEMA = "nexus.local_assist.user_relay_package.v1"
 RESPONSE_SCHEMA = "nexus.local_assist.user_relay_response.v1"
 SUCCESS_STATUS = "AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY"
+IMPORTABLE_RESPONSE_STATUSES = {"IMPORTED", "IMPORTED_PENDING_VALIDATION"}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -140,16 +141,26 @@ def validate_user_relay(
 
     if response.get("schema") != RESPONSE_SCHEMA:
         blockers.append("unsupported_response_schema")
-    if response.get("status") != "IMPORTED":
-        blockers.append("response_not_imported")
+    response_status = str(response.get("status", ""))
+    if response_status not in IMPORTABLE_RESPONSE_STATUSES:
+        blockers.append("response_status_not_importable")
     if response.get("external_delivery_mode") != "human_relay":
         blockers.append("response_delivery_mode_not_human_relay")
     if response.get("delivery_authority") != "user":
         blockers.append("response_delivery_authority_not_user")
     if response.get("automated_exfiltration") is not False:
         blockers.append("response_automated_exfiltration_must_be_false")
-    if response.get("agent_output_imported") is not True:
+    if response_status == "IMPORTED" and response.get("agent_output_imported") is not True:
         blockers.append("response_not_marked_imported")
+    if response.get("outcome_contributed") is True:
+        blockers.append("response_outcome_contributed_must_be_false")
+    if response.get("value_measured") is True:
+        blockers.append("response_value_measured_must_be_false")
+    response_claim_boundary = response.get("claim_boundary", {}) or {}
+    if response_claim_boundary.get("outcome_contributed") is True:
+        blockers.append("response_claim_boundary_outcome_must_be_false")
+    if response_claim_boundary.get("value_measured") is True:
+        blockers.append("response_claim_boundary_value_must_be_false")
 
     allowed_files = {
         str(value) for value in package.get("allowed_modified_files", ()) or ()
@@ -166,6 +177,7 @@ def validate_user_relay(
         [
             *(str(item) for item in response.get("agent_consumption_evidence", ()) or ()),
             str(response.get("final_output", "")),
+            str(response.get("external_agent_response", "")),
         ]
     )
     for summary in summaries:

@@ -2,9 +2,10 @@
 
 ## Status
 
-`AGENT_OPERATED_LOCAL_ASSIST_PROVEN_ON_PUBLIC_FIXTURE`
+Track A: `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_ON_PUBLIC_FIXTURE`
+Track B: `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY`
 
-Track A is complete for a public toy fixture. Track B is prepared and intentionally stopped at `USER_RELAY_REQUIRED`. Neither result promotes full M2 productization, M4 cloud integration, or public value claims for Nexus.
+Track A is complete for a public toy fixture. Track B is now closed through the user-authorized relay artifact and local receipt-lineage validator. These alternative paths do not promote full M2 productization, M4 cloud integration, or public value claims for Nexus.
 
 ## Track A: Public Fixture External Agent Smoke
 
@@ -25,13 +26,15 @@ The first `agy` invocation used an invalid duration (`300`); the CLI rejected it
 
 The local package is under `.nexus/reports/local_assist/m2-user-relay-20260713/`:
 
-- `context_package.json` records `external_delivery_mode=human_relay`, `delivery_authority=user`, `automated_exfiltration=false`, `local_assist_receipt_present=true`, `agent_output_imported=false`, and `agent_consumed_proven=false`.
+- `context_package.json` records `external_delivery_mode=human_relay`, `delivery_authority=user`, `automated_exfiltration=false`, and `local_assist_receipt_present=true`.
 - `relay_prompt.md` is pasteable material for a user-controlled external Agent session.
-- `nexus local-assist user-relay-validate` now validates the package locally and produced `USER_RELAY_REQUIRED` with both existing receipt identities verified.
-- Validator tests cover missing response, valid imported response, missing receipt citation, and machine-report output.
+- `agent_response_imported.json` preserves the user-imported response with `status=IMPORTED_PENDING_VALIDATION`, false imported/consumed/contribution/value flags, and both receipt identities.
+- The user-provided external Agent response explicitly consumed both receipt identities and proposed `test_closeout_requires_every_receipt_identity_in_final_output_and_consumption_evidence`; it produced no patch and changed no authority.
+- `nexus local-assist user-relay-validate` produced `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY`, `agent_output_imported=true`, `agent_consumed_proven=true`, `modified_files=[]`, `outcome_contributed=false`, and `value_measured=false`.
+- Validator tests cover missing response, valid imported response, pending-import normalization, missing receipt citation, contribution-claim rejection, and machine-report output.
 - Absolute-path and secret scans passed; private-content presence is explicitly classified, so the package cannot be treated as public data.
-- Status remains `USER_RELAY_REQUIRED`; no automated delivery occurred.
+- The response was supplied by the current user-authorized ChatGPT relay session, not represented as Gemini/agy. No automated repository delivery occurred.
 
 ## Claim Boundary
 
-Track A proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_ON_PUBLIC_FIXTURE` only. Track B does not prove Agent consumption until the user manually relays the package and imports a response that can be checked against the receipt lineage.
+Track A proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_ON_PUBLIC_FIXTURE`. Track B proves `AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY` for this bounded user-authorized response. Neither status proves `outcome_contributed`, `value_measured`, Gemini/agy identity, M4 cloud integration, or broad M2 productization.

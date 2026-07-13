@@ -99,6 +99,83 @@ def test_valid_import_requires_both_receipt_identities_and_verifier(tmp_path: Pa
     assert result["claim_boundary"]["outcome_contributed"] is False
 
 
+def test_pending_import_is_normalized_after_receipt_lineage_validation(tmp_path: Path) -> None:
+    advisor = tmp_path / "advisor.json"
+    verified = tmp_path / "verified.json"
+    _receipt(advisor, "relay-advisor")
+    _receipt(verified, "relay-verified")
+    package = _package(tmp_path, advisor, verified)
+    response = tmp_path / "response.json"
+    response.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.local_assist.user_relay_response.v1",
+                "status": "IMPORTED_PENDING_VALIDATION",
+                "external_delivery_mode": "human_relay",
+                "delivery_authority": "user",
+                "automated_exfiltration": False,
+                "agent_output_imported": False,
+                "modified_files": [],
+                "verifier_result": "pass",
+                "external_agent_response": (
+                    "Consumed relay-advisor and relay-verified receipts."
+                ),
+                "outcome_contributed": False,
+                "value_measured": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_user_relay(
+        package_file=package,
+        response_file=response,
+        repo_root=tmp_path,
+    )
+
+    assert result["status"] == "AGENT_OPERATED_LOCAL_ASSIST_PROVEN_WITH_USER_RELAY"
+    assert result["agent_output_imported"] is True
+    assert result["agent_consumed_proven"] is True
+    assert result["outcome_contributed"] is False
+    assert result["value_measured"] is False
+
+
+def test_import_rejects_contribution_claims(tmp_path: Path) -> None:
+    advisor = tmp_path / "advisor.json"
+    verified = tmp_path / "verified.json"
+    _receipt(advisor, "relay-advisor")
+    _receipt(verified, "relay-verified")
+    package = _package(tmp_path, advisor, verified)
+    response = tmp_path / "response.json"
+    response.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.local_assist.user_relay_response.v1",
+                "status": "IMPORTED_PENDING_VALIDATION",
+                "external_delivery_mode": "human_relay",
+                "delivery_authority": "user",
+                "automated_exfiltration": False,
+                "agent_output_imported": False,
+                "modified_files": [],
+                "verifier_result": "pass",
+                "external_agent_response": "relay-advisor relay-verified",
+                "outcome_contributed": True,
+                "value_measured": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_user_relay(
+        package_file=package,
+        response_file=response,
+        repo_root=tmp_path,
+    )
+
+    assert result["status"] == "REJECTED"
+    assert "response_outcome_contributed_must_be_false" in result["blockers"]
+
+
 def test_import_rejects_missing_receipt_reference(tmp_path: Path) -> None:
     advisor = tmp_path / "advisor.json"
     verified = tmp_path / "verified.json"
