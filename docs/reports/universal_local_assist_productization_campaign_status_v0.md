@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-`M3-D_ADVISOR_CANARY_AUTOMATION`
+`M3-E_CANDIDATE_CANARY_AUTOMATION`
 
 ## Completed milestones
 
@@ -10,10 +10,11 @@
 - `PLANNER_LOCAL_ASSIST_RECOMMENDATION_CONTRACT_PROVEN` — `dca1c56f4`
 - `PLANNER_LOCAL_ASSIST_RECOMMENDATION_SHADOW_PROVEN` — `53bc1d39d`
 - `PLANNER_LOCAL_ASSIST_RECOMMENDATION_CALIBRATED` — `8b5280f89`
+- `PLANNER_AUTOMATIC_ADVISOR_CANARY_PROVEN` — `8b198c94a`
 
 ## Current commit
 
-`8b5280f89` — `fix(local-assist): calibrate shadow recommendation policy`
+`8b198c94a` — `feat(local-assist): enable bounded advisor canary`
 
 ## Evidence
 
@@ -21,6 +22,7 @@
 - `tests/engine/test_local_assist_shadow_runtime.py` → `3 passed in 0.17s`.
 - Shadow dataset → `12` tasks, `3` per action (`skip`, `advisor`, `candidate`, `verified-subtask`); coverage `1.0`; exact agreement `1.0`; unsafe recommendation rate `0.0`; Local Assist invocations `0`.
 - Calibration → `CALIBRATED`; unsafe recommendation rate `0.0`; false-positive rate `0.0`; exact agreement `1.0`; unexplained disagreements `0`; route authority unchanged; automatic dispatch disabled.
+- Advisor canary tests → `8 passed`; provider unavailable, malformed output, timeout, incomplete receipt, mismatched task identity, stale revision, absent recommendation, high risk, and formal mutation all fail closed; successful canary is read-only advisor only.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -35,4 +37,4 @@
 
 ## Next automatic action
 
-Implement M3-D advisor canary: allow only narrowly gated read-only advisor automation with fail-closed provider and receipt handling; candidate and formal workspace mutation remain disabled.
+Implement M3-E candidate canary: generate isolated candidates only after advisor canary proof, preserve Agent adoption authority, and reject stale or unverified candidates.
