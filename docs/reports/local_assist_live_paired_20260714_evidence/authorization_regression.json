@@ -1,0 +1,16 @@
+{
+  "defect": "A_scenario_harness_missing_injected_transport_under_workspace_deny",
+  "symptom": "hybrid scenario terminal_status INCOMPLETE; online ONLINE_DENIED_BY_POLICY workspace deny",
+  "fix": {
+    "scenario_route": "mark command runners as injected_transport + online_policy=auto + live_provider_claim=false",
+    "registered_cli_guard": "allow inject-authorized decisions; stamp selection_source=injected_transport",
+    "gateway_ask_unified": "honor route injected_transport / live_provider_claim=false"
+  },
+  "physical_guard_preserved": true,
+  "focused_suite": {
+    "collected": 219,
+    "passed": 219
+  },
+  "git_head_at_record": "b106534a257c1138a2c4f8706a3999bbc63ea311",
+  "recorded_at": "2026-07-13T23:13:13Z"
+}

@@ -699,13 +699,24 @@ def build_registered_online_invoker(
     )
 
     # Real provider subprocesses require a canonical OnlineExecutionDecision.
-    # Custom runners remain available for deterministic/injected tests.
+    # Injected/deterministic runners (selection_source=injected_transport) may
+    # execute only when authorized as inject — never as a live provider claim.
     if runner is subprocess.run:
         def guarded_invoke(context: Mapping[str, Any]) -> dict[str, Any]:
-            from nexus.services.online_execution_policy import physical_online_authorized
+            from nexus.services.online_execution_policy import (
+                decision_from_context,
+                physical_online_authorized,
+            )
 
             task_id = str(context.get("task_id", ""))
-            if not physical_online_authorized(context, injected_transport=False):
+            decision = decision_from_context(context if isinstance(context, Mapping) else {})
+            inject_authorized = bool(
+                decision is not None
+                and decision.online_execution_authorized
+                and decision.online_authorization_source == "injected_test_transport"
+            )
+            physical_ok = physical_online_authorized(context, injected_transport=False)
+            if not inject_authorized and not physical_ok:
                 return normalize_online_invoker_payload(
                     provider=spec.provider,
                     task_id=task_id,
@@ -720,8 +731,17 @@ def build_registered_online_invoker(
                     evidence_refs=[f"online:{spec.provider}:{task_id}:authorization_required"],
                     transport=TRANSPORT_REGISTERED_CLI,
                     selection_source=SELECTION_EXPLICIT_REQUEST,
+                    extra={"live_provider_claim": False},
                 )
-            return invoker(context)
+            payload = invoker(context)
+            if inject_authorized and isinstance(payload, dict):
+                # Never promote injected command runners to live provider claims.
+                payload = dict(payload)
+                payload["selection_source"] = SELECTION_INJECTED_TRANSPORT
+                payload["live_provider_claim"] = False
+                if payload.get("transport") in {"", None, TRANSPORT_REGISTERED_CLI}:
+                    payload["transport"] = TRANSPORT_STRUCTURED_CALLABLE
+            return payload
 
         return guarded_invoke
     return invoker

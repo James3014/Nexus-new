@@ -1,0 +1,103 @@
+{
+  "schema": "nexus.online_provider_discovery.v1",
+  "workspace_policy": {
+    "default_online_policy": "deny",
+    "approved_online_providers": [
+      "gemini",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "allow_external_context_transfer": true,
+    "maximum_provider_calls": 10,
+    "maximum_retry_count": 3,
+    "policy_path": "/Users/jameschen/Workspace/nexus/.nexus/online_execution_policy.json",
+    "policy_present": true
+  },
+  "discovery_order": [
+    "gemini",
+    "grok",
+    "codex",
+    "openai"
+  ],
+  "results": [
+    {
+      "provider": "gemini",
+      "command": [
+        "/Users/jameschen/.npm-global/bin/gemini"
+      ],
+      "transport": "gateway_compatibility",
+      "selection_source": "explicit_request",
+      "authorization_source": "cli_task_policy",
+      "authentication_result": "failed",
+      "minimal_probe_result": "failed",
+      "error_category": "UNSUPPORTED_CLIENT",
+      "status": "UNSUPPORTED_CLIENT",
+      "executable_path": "/Users/jameschen/.npm-global/bin/gemini",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": false,
+      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google\n    at throwIneligibleOrProjectIdError (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chu",
+      "latency_ms": 19750
+    },
+    {
+      "provider": "grok",
+      "command": [
+        "/Users/jameschen/.grok/bin/grok"
+      ],
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authorization_source": "cli_task_policy",
+      "authentication_result": "failed",
+      "minimal_probe_result": "failed",
+      "error_category": "UNAUTHENTICATED",
+      "status": "UNAUTHENTICATED",
+      "executable_path": "/Users/jameschen/.grok/bin/grok",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": false,
+      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: _GaxiosError: Resource has been exhausted (e.g. check quota).\n    at Gaxios._request (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:20961:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async _OAuth2Client.requestAsync (file://",
+      "latency_ms": 14680
+    },
+    {
+      "provider": "codex",
+      "command": [
+        "/Users/jameschen/.npm-global/bin/codex"
+      ],
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authorization_source": "cli_task_policy",
+      "authentication_result": "failed",
+      "minimal_probe_result": "failed",
+      "error_category": "UNAUTHENTICATED",
+      "status": "UNAUTHENTICATED",
+      "executable_path": "/Users/jameschen/.npm-global/bin/codex",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": false,
+      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: _GaxiosError: Resource has been exhausted (e.g. check quota).\n    at Gaxios._request (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:20961:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async _OAuth2Client.requestAsync (file://",
+      "latency_ms": 14784
+    },
+    {
+      "provider": "openai",
+      "command": [
+        "/Users/jameschen/.npm-global/bin/openai"
+      ],
+      "transport": "registered_cli",
+      "selection_source": "explicit_request",
+      "authorization_source": "cli_task_policy",
+      "authentication_result": "failed",
+      "minimal_probe_result": "failed",
+      "error_category": "UNAUTHENTICATED",
+      "status": "UNAUTHENTICATED",
+      "executable_path": "/Users/jameschen/.npm-global/bin/openai",
+      "preflight_status": "ONLINE_READY",
+      "physical_invocation_allowed": true,
+      "output_delivered": false,
+      "raw_snippet": "\nWarning: Basic terminal detected (TERM=dumb). Visual rendering will be limited. For the best experience, use a terminal emulator with truecolor support.\nError authenticating: _GaxiosError: Resource has been exhausted (e.g. check quota).\n    at Gaxios._request (file:///Users/jameschen/.npm-global/lib/node_modules/@google/gemini-cli/bundle/chunk-SBG6CUNK.js:20961:19)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async _OAuth2Client.requestAsync (file://",
+      "latency_ms": 14048
+    }
+  ],
+  "selected_provider": null,
+  "timestamp": "2026-07-13T23:12:50Z"
+}

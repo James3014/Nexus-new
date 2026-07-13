@@ -432,12 +432,19 @@ class BattlesuitGateway:
         # Mark fixture transports for authorization resolution (not real CLI).
         if structured_injected:
             route["injected_transport"] = True
+        # Explicit scenario/online_command injectors are also non-live when flagged.
+        if route.get("live_provider_claim") is False or route.get("selection_source") == "injected_transport":
+            route["injected_transport"] = True
         # Resolve and bind product Online authorization once for this call.
         prior = decision_from_context(route)
         if prior is None:
             prior = resolve_online_execution_decision(
                 task_online_policy=str(route.get("online_policy") or ""),
-                project_root=getattr(self, "project_root", ".") or ".",
+                project_root=str(
+                    route.get("workspace_root")
+                    or getattr(self, "project_root", ".")
+                    or "."
+                ),
                 planner_online_needed=True,
                 injected_transport=bool(route.get("injected_transport")),
                 requested_provider=requested_provider or gateway_provider,

@@ -1,0 +1,7 @@
+{
+  "status": "NOT_RUN_PROVIDER_AUTH_BLOCKED",
+  "product_entry": "nexus run",
+  "online_policy": "require",
+  "reason": "no_ready_online_provider",
+  "REAL_LOCAL_ONLINE_VERTICAL_PROVEN": false
+}

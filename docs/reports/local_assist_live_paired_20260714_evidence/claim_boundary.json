@@ -1,0 +1,27 @@
+{
+  "AUTHORIZATION_REGRESSION_STATUS": "CLOSED",
+  "LIVE_PAIRED_PILOT_STATUS": "NOT_RUN_PROVIDER_AUTH_BLOCKED",
+  "LOCAL_ONLINE_VERTICAL_STATUS": "NOT_RUN_PROVIDER_AUTH_BLOCKED",
+  "NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE": false,
+  "ONLINE_PROVIDER_READY_STATUS": "NONE_READY",
+  "VALUE_CLAIM_STATUS": "NOT_CLAIMED",
+  "authorization_regression_closed": true,
+  "blocked_providers": {
+    "codex": "UNAUTHENTICATED",
+    "gemini": "UNSUPPORTED_CLIENT",
+    "grok": "UNAUTHENTICATED",
+    "openai": "UNAUTHENTICATED"
+  },
+  "five_task_live_measurement_pipeline_complete": false,
+  "generalized_market_value_proven": false,
+  "git_head": "b106534a257c1138a2c4f8706a3999bbc63ea311",
+  "one_real_online_provider_ready": false,
+  "production_ready": false,
+  "proven_cost_reduction": false,
+  "proven_quality_improvement": false,
+  "proven_time_savings": false,
+  "proven_token_savings": false,
+  "public_claim_allowed": false,
+  "real_local_online_vertical_proven": false,
+  "updated_at": "2026-07-13T23:13:13Z"
+}

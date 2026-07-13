@@ -1,0 +1,26 @@
+{
+  "task_id": "live-pair-t03-crossfile",
+  "family": "cross_file_dependency",
+  "task_statement": "Describe dependency between load_request_file and translate_live_smoke_to_request. Advisory only.",
+  "allowed_files": [
+    "nexus/services/local_assist_service.py",
+    "nexus/services/local_assist_live_smoke.py"
+  ],
+  "workspace_revision": "HEAD",
+  "online_policy": "require",
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "arms": {
+    "A": {
+      "local_assist_policy": "disabled",
+      "online_policy": "require"
+    },
+    "B": {
+      "local_assist_policy": "advisor",
+      "online_policy": "require"
+    }
+  },
+  "execution_order_plan": "alternate_A_B",
+  "fixture_forbidden": true,
+  "live_provider_required": true
+}

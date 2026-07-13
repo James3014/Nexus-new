@@ -1,0 +1,25 @@
+{
+  "task_id": "live-pair-t01-target-id",
+  "family": "target_file_identification",
+  "task_statement": "Identify the single file that owns gate2 live-smoke fixture schema and one risk of empty allowed_files. Advisory only.",
+  "allowed_files": [
+    "docs/bench/local_assist/gate2_live_smoke_task.json"
+  ],
+  "workspace_revision": "HEAD",
+  "online_policy": "require",
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "arms": {
+    "A": {
+      "local_assist_policy": "disabled",
+      "online_policy": "require"
+    },
+    "B": {
+      "local_assist_policy": "advisor",
+      "online_policy": "require"
+    }
+  },
+  "execution_order_plan": "alternate_A_B",
+  "fixture_forbidden": true,
+  "live_provider_required": true
+}

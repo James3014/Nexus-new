@@ -1,0 +1,26 @@
+{
+  "task_id": "live-pair-t04-semantic",
+  "family": "semantic_repair_planning",
+  "task_statement": "Plan a bounded advisory-only semantic check for OnlineExecutionDecision inject vs physical. No file mutation.",
+  "allowed_files": [
+    "nexus/services/online_execution_policy.py",
+    "nexus/services/unified_runtime.py"
+  ],
+  "workspace_revision": "HEAD",
+  "online_policy": "require",
+  "mutation_policy": "isolated_only",
+  "timeout_sec": 180,
+  "arms": {
+    "A": {
+      "local_assist_policy": "disabled",
+      "online_policy": "require"
+    },
+    "B": {
+      "local_assist_policy": "advisor",
+      "online_policy": "require"
+    }
+  },
+  "execution_order_plan": "alternate_A_B",
+  "fixture_forbidden": true,
+  "live_provider_required": true
+}
