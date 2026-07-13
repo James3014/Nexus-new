@@ -2,14 +2,21 @@
 
 ## Status
 
-`M2_IMPLEMENTED_AWAITING_ONLINE_AGENT_SMOKE`
+`M2_STATUS_CONVERGED_AND_SEALED`
 
-This document records the current architecture delta for M1/M2. It does not promote automatic dispatch, cloud runtime, production readiness, or public-claim eligibility.
+This status records the accepted M1/M2 evidence at commit `1ff12d37f` and closes the documentation split. It does not promote automatic dispatch, outcome contribution, value measurement, production readiness, public-claim eligibility, or real cloud runtime.
+
+## Source evidence
+
+- Commit: `1ff12d37f` (`feat: prove any-agent local assist workflow`)
+- Any-Agent closeout: `.nexus/reports/local_assist/m2-agent-audit-20260713/agent_closeout.json`
+- Machine closeout report: `.nexus/reports/local_assist/m2-agent-audit-20260713/agent_closeout_report.json`
+- Consolidated alternative-path report: `docs/reports/m2_external_agent_alternative_paths_v0.md`
 
 ## Current topology
 
 ```text
-Online Agent
+Agent
   -> enforced Nexus briefing
   -> explicit nexus local-assist command
   -> LocalAssistService
@@ -18,25 +25,38 @@ Online Agent
   -> Agent closeout validation
 ```
 
-`candidate` and `verified-subtask` continue through isolated workspace execution. Deterministic verification remains downstream of candidate generation; Local Assist is not verifier authority. The formal workspace is not mutated by the Local Assist path.
+`candidate` and `verified-subtask` continue through isolated workspace execution. Deterministic verification remains downstream of candidate generation; Local Assist is not verifier authority. The formal workspace is not mutated by the Local Assist path itself.
 
 ## Capability state
 
 | Capability | State | Evidence boundary |
 | --- | --- | --- |
-| Explicit advisor/candidate/verified-subtask seam | `PROVEN` | M1 live Ollama receipts and focused service tests |
-| Agent-facing command knowledge | `IMPLEMENTED` | enforced briefing and launcher tests |
-| Receipt-backed Agent closeout contract | `IMPLEMENTED` | closeout tests and CLI contract smoke |
-| Real Ollama invocation | `PROVEN_FOR_M1` | provider ledger, resolved model, call count, delivery fields |
-| Agent consumed output in an audited task | `PENDING` | requires an authorized Gemini/Grok task and final closeout |
-| Automatic planner dispatch | `NOT_IN_SCOPE` | M3 only |
-| Real cloud provider integration | `NOT_IN_SCOPE` | M4 only |
-| Causal value measurement | `NOT_IN_SCOPE` | M5 only |
+| M1 explicit local-assist bridge | `PROVEN` | Live Ollama receipts and focused service tests |
+| Track A public-fixture Agent workflow | `PROVEN` | Public-fixture report and bounded verification |
+| Track B user-relay Agent workflow | `PROVEN` | User-relay package and receipt-lineage validator |
+| Any-Agent audited repository task | `PROVEN` | Commit `1ff12d37f` and the two closeout artifacts above |
+| `outcome_contributed` | `NOT_PROVEN` | The audited closeout records `false` |
+| `value_measured` | `NOT_PROVEN` | The audited closeout records `false` |
+| M3 automatic dispatch | `NOT_STARTED` | Reserved for M3-S0 and later gated work |
+| M4 real cloud integration | `NOT_PROVEN` | No real cloud provider evidence in this closure |
+| `production_ready` | `NOT_PROVEN` | Not established by M1/M2 evidence |
+| `public_claim_allowed` | `NOT_PROVEN` | Not established by M1/M2 evidence |
 
-## Claim boundary
+## Evidence boundary
 
-The architecture currently proves an explicit, receipt-producing local-assist seam. It does not prove `AGENT_OPERATED_LOCAL_ASSIST_PROVEN`, `outcome_contributed`, or `value_measured`. `local_assist_output_consumed=true` is valid only when the Agent's subsequent operation or final output references every required receipt identity.
+The audited task proves the recorded Agent-operated sequence: advisor and candidate were selected, Local Assist was invoked, outputs were delivered and consumed, and the bounded test task was completed with receipt citations. It does not prove causal outcome contribution or measured value.
 
-## Required next transition
+The following states remain distinct and must not be collapsed:
 
-Run one authorized Gemini/Grok audited task that uses advisor plus candidate or verified-subtask, completes a bounded development task, and submits a closeout citing both receipt artifacts. Until that evidence exists, retain the current status and do not start M3.
+| State | Audited evidence |
+| --- | --- |
+| `selected` | Agent selected `advisor` and `candidate` |
+| `invoked` | Local Assist provider invocation was recorded |
+| `delivered` | Local Assist output was delivered |
+| `consumed` | Both receipt identities were cited in Agent consumption evidence |
+| `contributed` | `outcome_contributed=false`; not proven |
+| `value measured` | `value_measured=false`; not proven |
+
+## Next transition
+
+The next milestone is `M3-S0_PLANNER_LOCAL_ASSIST_RECOMMENDATION_SHADOW`. It is not implemented in this task. M3-S0 may emit only a non-authoritative, machine-verifiable recommendation (`skip`, `advisor`, `candidate`, or `verified-subtask`); it must not invoke Local Assist automatically, mutate the workspace, add routing topology, or displace `CapabilityPlanner` as route truth.
