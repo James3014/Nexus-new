@@ -28,6 +28,9 @@ This Wiki contains **current, planned, and historical** material. Version number
 | [AGENT_BOOTSTRAP](00_Home/AGENT_BOOTSTRAP.md) | Canonical Agent startup sequence |
 | [PARTNER_ONBOARDING](00_Home/PARTNER_ONBOARDING.md) | Human partner first-hour path and starter exercises |
 | [CLAIM_TAXONOMY](01_System/CLAIM_TAXONOMY.md) | Evidence thresholds and claim-level definitions |
+| [TASK_ROUTER](00_Home/TASK_ROUTER.md) | Navigate by task type |
+| [SYSTEM_MAP](00_Home/SYSTEM_MAP.md) | Component reference |
+| [GLOSSARY](00_Home/GLOSSARY.md) | Term definitions |
 | [Wiki Index](00_Home/Wiki Index and Coverage Map.md) | Full directory and coverage map |
 
 ## Choose your path

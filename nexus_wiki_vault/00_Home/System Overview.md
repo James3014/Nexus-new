@@ -22,7 +22,7 @@ Nexus 是一個以物理誠信為核心、為 AI Agent Swarm 打造的自動化 
 請選擇您的角色以獲取專屬導航：
 - **[[README_Product|產品導覽]]** | **[[README_Investor|投資人簡報]]**
 - **[[README_Agent|Agent 執碼規約]]** | **[[README_Contributor|貢獻者指南]]**
-- **[[CURRENT_STATE|Current State]]** | **[[AGENT_BOOTSTRAP|Agent Bootstrap]]** | **[[PARTNER_ONBOARDING|Partner Onboarding]]**
+- **[[CURRENT_STATE|Current State]]** | **[[AGENT_BOOTSTRAP|Agent Bootstrap]]** | **[[PARTNER_ONBOARDING|Partner Onboarding]]** | **[[TASK_ROUTER|Task Router]]** | **[[GLOSSARY|Glossary]]**
 
 ---
 

@@ -39,6 +39,18 @@ canonical:
     path: 00_Home/Wiki Index and Coverage Map.md
     authority: navigation
 
+  task_router:
+    path: 00_Home/TASK_ROUTER.md
+    authority: operational
+
+  system_map:
+    path: 00_Home/SYSTEM_MAP.md
+    authority: operational
+
+  glossary:
+    path: 00_Home/GLOSSARY.md
+    authority: normative
+
 classification_rules:
   current:
     description: >
