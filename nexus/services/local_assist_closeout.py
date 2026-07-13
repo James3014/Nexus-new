@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 
 SCHEMA = "nexus.local_assist.agent_closeout.v1"
-ALLOWED_AGENTS = {"gemini", "grok", "codex"}
+ALLOWED_AGENTS = {"gemini", "grok", "codex", "chatgpt"}
 ALLOWED_ACTIONS = {"advisor", "candidate", "verified-subtask"}
 ALLOWED_CONTRIBUTION_CLAIMS = {
     "not_claimed",

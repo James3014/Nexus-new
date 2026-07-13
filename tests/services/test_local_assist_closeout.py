@@ -74,6 +74,20 @@ def test_valid_closeout_requires_and_records_consumption_evidence(tmp_path: Path
     assert result.claim_boundary["output_consumed"] is True
 
 
+def test_any_agent_closeout_accepts_chatgpt_provider(tmp_path: Path) -> None:
+    advisor = tmp_path / "advisor.json"
+    verified = tmp_path / "verified.json"
+    _receipt(advisor, task_id="chatgpt-m2-advisor")
+    _receipt(verified, task_id="chatgpt-m2-candidate", action="candidate", candidate_count=1)
+    payload = _payload(tmp_path, advisor, verified)
+    payload["agent_provider"] = "chatgpt"
+
+    result = LocalAssistAgentCloseout.from_dict(payload).validate(tmp_path)
+
+    assert result.ok is True
+    assert result.claim_boundary["output_consumed"] is True
+
+
 def test_receipt_presence_alone_does_not_prove_output_consumed(tmp_path: Path) -> None:
     advisor = tmp_path / "advisor.json"
     verified = tmp_path / "verified.json"

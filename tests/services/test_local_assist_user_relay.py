@@ -176,6 +176,43 @@ def test_import_rejects_contribution_claims(tmp_path: Path) -> None:
     assert "response_outcome_contributed_must_be_false" in result["blockers"]
 
 
+def test_import_rejects_contribution_and_measurement_claims(tmp_path: Path) -> None:
+    advisor = tmp_path / "advisor.json"
+    verified = tmp_path / "verified.json"
+    _receipt(advisor, "relay-advisor")
+    _receipt(verified, "relay-verified")
+    package = _package(tmp_path, advisor, verified)
+    response = tmp_path / "response.json"
+    response.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.local_assist.user_relay_response.v1",
+                "status": "IMPORTED_PENDING_VALIDATION",
+                "external_delivery_mode": "human_relay",
+                "delivery_authority": "user",
+                "automated_exfiltration": False,
+                "agent_output_imported": True,
+                "claim_boundary": {
+                    "outcome_contributed": True,
+                    "value_measured": True,
+                },
+                "modified_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_user_relay(
+        package_file=package,
+        response_file=response,
+        repo_root=tmp_path,
+    )
+
+    assert result["status"] == "REJECTED"
+    assert "response_claim_boundary_outcome_must_be_false" in result["blockers"]
+    assert "response_claim_boundary_value_must_be_false" in result["blockers"]
+
+
 def test_import_rejects_missing_receipt_reference(tmp_path: Path) -> None:
     advisor = tmp_path / "advisor.json"
     verified = tmp_path / "verified.json"
