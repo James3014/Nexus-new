@@ -147,3 +147,15 @@ ollama_reachable = true (local only; not sufficient for Online authorization)
 ```
 
 Terminal marker `NEXUS_CLI_LOCAL_ASSIST_ADVISOR_EXECUTION_PROVEN` is **not** claimed without live Local+Online receipts.
+
+
+## Skeptic remediation (2026-07-14)
+
+* Removed blind `local_forwarded=True` when Local invoked without packed `local_outputs`.
+* `local_context_forwarded` / `local_assist_contributed` require evidence_refs packing proof.
+* Distinct booleans on metadata/pointer/report:
+  `local_assist_success`, `online_success`, `runtime_receipt_complete`, `task_pipeline_success`.
+* Non-surgical `_execute_single_repair` now runs Advisor via injected Online or `gateway.ask_structured`.
+* Tests enter production `_execute_single_repair` (surgical + non-surgical).
+* Focused suite: **173 passed**.
+* Live: `IMPLEMENTED_NOT_LIVE_PROVEN` (no `NEXUS_EXTERNAL_RUNTIME_AUTHORIZED`).

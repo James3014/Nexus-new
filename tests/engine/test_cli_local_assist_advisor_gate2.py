@@ -166,6 +166,17 @@ def _repair_mixin_harness(tmp_path: Path, *, mode: str, allowed: list[str] | Non
     return harness, ctx, meta
 
 
+def _assert_distinct_truth_booleans(meta: dict) -> None:
+    for key in (
+        "local_assist_success",
+        "online_success",
+        "runtime_receipt_complete",
+        "task_pipeline_success",
+    ):
+        assert key in meta, f"missing distinct truth flag: {key}"
+        assert isinstance(meta[key], bool), f"{key} must be bool, got {type(meta[key])}"
+
+
 def test_disabled_mode_does_not_invoke_local(tmp_path: Path) -> None:
     harness, ctx, meta = _repair_mixin_harness(tmp_path, mode="disabled")
     calls: list[str] = []
@@ -177,9 +188,13 @@ def test_disabled_mode_does_not_invoke_local(tmp_path: Path) -> None:
     res, raw = harness._run_unified_advisor_online(ctx, online_callable=online, repair_attempts=1)
     assert res["status"] == "APPROVED"
     assert raw == "raw-ok"
-    assert meta.get("local_assist_status") in {None, "NOT_REQUESTED"} or "local_assist_status" not in meta or meta.get("local_assist_status") != "SUCCEEDED"
+    assert meta.get("local_assist_status") == "NOT_REQUESTED"
     assert "LOCAL_ASSIST_CONTEXT" not in calls[0]
-    assert meta.get("local_assist_contributed") in {None, False}
+    assert meta.get("local_assist_contributed") is False
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is False
+    assert meta["online_success"] is True
+    assert meta["task_pipeline_success"] is False
 
 
 def test_shadow_mode_records_recommendation_without_local_call(tmp_path: Path) -> None:
@@ -207,6 +222,9 @@ def test_shadow_mode_records_recommendation_without_local_call(tmp_path: Path) -
     assert "LOCAL_ASSIST_CONTEXT" not in online_prompts[0]
     assert meta.get("local_context_forwarded") is False
     assert meta.get("local_assist_contributed") is False
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is False
+    assert meta["online_success"] is True
 
 
 def test_advisor_success_forwards_local_diagnosis_to_online(tmp_path: Path) -> None:
@@ -224,6 +242,7 @@ def test_advisor_success_forwards_local_diagnosis_to_online(tmp_path: Path) -> N
     assert res["patch"] == "fixed"
     assert raw == "raw-online"
     assert "local diagnosis: prefer strip whitespace" in online_prompts[0]
+    assert "LOCAL_ASSIST_CONTEXT" in online_prompts[0]
     assert meta["local_assist_status"] == "SUCCEEDED"
     assert meta["local_context_forwarded"] is True
     assert meta["local_assist_contributed"] is True
@@ -241,6 +260,56 @@ def test_advisor_success_forwards_local_diagnosis_to_online(tmp_path: Path) -> N
     assert (tmp_path / "demo.py").read_text(encoding="utf-8") == "def demo():\n    return 1\n"
     pointer = Path(meta["unified_runtime_pointer_path"])
     assert pointer.is_file()
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is True
+    assert meta["online_success"] is True
+    assert meta["task_pipeline_success"] is False
+
+
+def test_advisor_empty_local_outputs_does_not_force_forward(tmp_path: Path) -> None:
+    """Local invoked with empty local_outputs must not force local_context_forwarded."""
+    harness, ctx, meta = _repair_mixin_harness(tmp_path, mode="advisor")
+    online_prompts: list[str] = []
+
+    def online(prompt: str):
+        online_prompts.append(prompt)
+        return {"status": "APPROVED", "patch": "online"}, "raw"
+
+    class _EmptyBody:
+        def handle(self, request, **_kwargs):
+            return SimpleNamespace(
+                to_dict=lambda: {
+                    "task_id": request.task_id,
+                    "status": "SUCCEEDED",
+                    "local_model_invoked": True,
+                    "invoked": True,
+                    "output_delivered": True,
+                    "local_outputs": {},
+                    "evidence_refs": [f"local:{request.task_id}:empty"],
+                    "receipt_path": str(tmp_path / "empty_local.json"),
+                    "provider": "injected",
+                    "gate_passed": True,
+                },
+                task_id=request.task_id,
+                status="SUCCEEDED",
+                local_model_invoked=True,
+                output_delivered=True,
+                local_outputs={},
+                evidence_refs=(f"local:{request.task_id}:empty",),
+                receipt_path=str(tmp_path / "empty_local.json"),
+            )
+
+    meta["local_assist_service"] = _EmptyBody()
+    res, _raw = harness._run_unified_advisor_online(ctx, online_callable=online, repair_attempts=1)
+    assert res["patch"] == "online"
+    assert "LOCAL_ASSIST_CONTEXT" not in online_prompts[0]
+    assert meta["local_context_forwarded"] is False
+    assert meta["local_assist_contributed"] is False
+    assert meta["local_assist_status"] in {"EMPTY_OUTPUTS", "SUCCEEDED", "FAILED"}
+    # If status is SUCCEEDED only with real body; empty body must not contribute.
+    assert meta["local_assist_success"] is False
+    assert meta["online_success"] is True
+    _assert_distinct_truth_booleans(meta)
 
 
 def test_advisor_degrades_when_bounded_scope_missing(tmp_path: Path) -> None:
@@ -263,6 +332,9 @@ def test_advisor_degrades_when_bounded_scope_missing(tmp_path: Path) -> None:
     assert meta["degraded_to_online"] is True
     assert meta["degradation_reason"] == "bounded_scope_missing"
     assert meta["local_assist_contributed"] is False
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is False
+    assert meta["online_success"] is True
 
 
 def test_advisor_degrades_when_local_provider_fails(tmp_path: Path) -> None:
@@ -288,6 +360,9 @@ def test_advisor_degrades_when_local_provider_fails(tmp_path: Path) -> None:
     if receipt:
         assert receipt["local"]["status"] == "FAILED" or receipt["local"].get("invoked") is False
         assert receipt.get("claim_boundary", {}).get("public_claim_allowed") is False
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is False
+    assert meta["online_success"] is True
 
 
 def test_collect_bounded_allowed_files_from_metadata() -> None:
@@ -296,3 +371,212 @@ def test_collect_bounded_allowed_files_from_metadata() -> None:
         task_desc="",
     )
     assert files == ["b.py", "a.py"]
+
+
+def _build_execute_single_repair_ctx(tmp_path: Path, *, mode: str, surgical: bool):
+    """Minimal real composition for PipelineRepairMixin._execute_single_repair."""
+    from contextlib import nullcontext
+
+    from nexus.engine.pipeline_repair import PipelineRepairMixin
+
+    class _Harness(PipelineRepairMixin):
+        def __init__(self):
+            self.engine = SimpleNamespace(
+                project_root=tmp_path,
+                run_dir=tmp_path / "runs",
+                _add_step_to_history=lambda *a, **k: None,
+            )
+            self.registry = None
+
+        def _prepare_repair_context(self, ctx, repair_attempts):
+            return None
+
+        def _process_repair_response(self, ctx, res, repair_attempts):
+            status = "APPROVED" if isinstance(res, dict) and res.get("status") == "APPROVED" else "FAILED"
+            return {
+                "status": status,
+                "result": res if isinstance(res, dict) else {},
+                "current_decision_id": "d1",
+                "current_skill_id": "s1",
+            }
+
+        def _run_pregate_if_needed(self, ctx, status, result):
+            return status
+
+        def _write_hallucination_evidence_bundle(self, ctx):
+            return None
+
+        def _record_intra_loop_trauma(self, ctx, r_out):
+            return None
+
+        def _run_composition_repair_phase(self, ctx, repair_attempts):
+            return None
+
+        def _register_phase_decision(self, ctx, phase, name):
+            return f"{phase}-{name}"
+
+    (tmp_path / "demo.py").write_text("def demo():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "nexus").mkdir(exist_ok=True)
+
+    online_prompts: list[str] = []
+
+    def _surgical_ask(*, task, symbols=None, phase="R", rejection_receipt=None, attempt=1):
+        online_prompts.append(str(task))
+        return {"status": "APPROVED", "patch": "surgical-ok", "provider": "fixture"}, "raw-surgical"
+
+    def _ask_structured(prompt, payload="", **kwargs):
+        online_prompts.append(str(prompt))
+        return {"status": "APPROVED", "patch": "nonsurgical-ok", "provider": "fixture"}, "raw-ns"
+
+    class _Gateway:
+        use_surgical_repair = surgical
+
+        def surgical_ask(self, *, task, symbols=None, phase="R", rejection_receipt=None, attempt=1):
+            return _surgical_ask(
+                task=task,
+                symbols=symbols,
+                phase=phase,
+                rejection_receipt=rejection_receipt,
+                attempt=attempt,
+            )
+
+        def ask_structured(self, prompt, payload="", **kwargs):
+            return _ask_structured(prompt, payload, **kwargs)
+
+        def apply_patch_v2(self, *a, **k):
+            return {"success": False}
+
+    class _Repairer:
+        def __init__(self):
+            self.gateway = _Gateway()
+
+        def run(self, state, pack, bayesian_params=None):
+            return {"status": "APPROVED", "source": "repairer.run"}
+
+    meta = {
+        "local_assist_mode": mode,
+        "local_assist_policy_raw": mode,
+        "task_id": "exec-repair-1",
+        "workspace_revision": "rev-exec",
+        "target_file": "demo.py",
+        "target_files": ["demo.py"],
+        "use_surgical_repair": surgical,
+        "local_assist_model": "fixture-model",
+        "local_assist_planner_snapshot": {
+            "route_truth_source": "CapabilityPlanner",
+            "execution_topology": "single_local_model",
+            "protocol_mode": "unified_diff",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "fixture-model",
+        },
+        "local_assist_service": LocalAssistService(
+            provider=InjectedLocalModelProvider(lambda _r: "local diagnosis via execute_single_repair")
+        ),
+    }
+    if not surgical:
+        meta["local_assist_online_callable"] = lambda prompt: (
+            online_prompts.append(str(prompt)) or ({"status": "APPROVED", "patch": "nonsurgical-ok"}, "raw-ns")
+        )
+
+    state = SimpleNamespace(metadata=meta, task_id="exec-repair-1", current_step_id="s1", retry_count=0)
+    ctx = SimpleNamespace(
+        state=state,
+        task_id="exec-repair-1",
+        task_desc="repair demo.py bounded",
+        pack={},
+        bayesian_params={},
+        dry_run=False,
+        repairer=_Repairer(),
+        accumulator=SimpleNamespace(record=lambda *a, **k: None),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *a, **k: nullcontext())
+    harness = _Harness()
+    return harness, ctx, meta, online_prompts
+
+
+def test_execute_single_repair_surgical_advisor_path(tmp_path: Path) -> None:
+    harness, ctx, meta, prompts = _build_execute_single_repair_ctx(
+        tmp_path, mode="advisor", surgical=True
+    )
+    r_out = harness._execute_single_repair(ctx, tracer=SimpleNamespace(phase_span=lambda *a, **k: __import__("contextlib").nullcontext()), repair_attempts=1)
+    assert r_out["status"] == "APPROVED"
+    assert any("local diagnosis via execute_single_repair" in p for p in prompts)
+    assert meta["local_context_forwarded"] is True
+    assert meta["local_assist_contributed"] is True
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is True
+    assert meta["online_success"] is True
+
+
+def test_execute_single_repair_nonsurgical_advisor_path(tmp_path: Path) -> None:
+    harness, ctx, meta, prompts = _build_execute_single_repair_ctx(
+        tmp_path, mode="advisor", surgical=False
+    )
+    from contextlib import nullcontext
+
+    r_out = harness._execute_single_repair(
+        ctx,
+        tracer=SimpleNamespace(phase_span=lambda *a, **k: nullcontext()),
+        repair_attempts=1,
+    )
+    assert r_out["status"] == "APPROVED"
+    assert any("local diagnosis via execute_single_repair" in p for p in prompts)
+    assert meta["local_assist_contributed"] is True
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is True
+    assert meta["online_success"] is True
+
+
+def test_execute_single_repair_disabled_skips_local(tmp_path: Path) -> None:
+    harness, ctx, meta, prompts = _build_execute_single_repair_ctx(
+        tmp_path, mode="disabled", surgical=True
+    )
+    from contextlib import nullcontext
+
+    provider_calls = {"n": 0}
+
+    class _Count(InjectedLocalModelProvider):
+        def generate(self, request):  # type: ignore[override]
+            provider_calls["n"] += 1
+            return super().generate(request)
+
+    meta["local_assist_service"] = LocalAssistService(provider=_Count(lambda _r: "nope"))
+    r_out = harness._execute_single_repair(
+        ctx,
+        tracer=SimpleNamespace(phase_span=lambda *a, **k: nullcontext()),
+        repair_attempts=1,
+    )
+    assert r_out["status"] == "APPROVED"
+    assert provider_calls["n"] == 0
+    assert not any("LOCAL_ASSIST_CONTEXT" in p for p in prompts)
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is False
+
+
+def test_execute_single_repair_shadow_no_local_invoke(tmp_path: Path) -> None:
+    harness, ctx, meta, prompts = _build_execute_single_repair_ctx(
+        tmp_path, mode="shadow", surgical=True
+    )
+    from contextlib import nullcontext
+
+    provider_calls = {"n": 0}
+
+    class _Count(InjectedLocalModelProvider):
+        def generate(self, request):  # type: ignore[override]
+            provider_calls["n"] += 1
+            return super().generate(request)
+
+    meta["local_assist_service"] = LocalAssistService(provider=_Count(lambda _r: "nope"))
+    r_out = harness._execute_single_repair(
+        ctx,
+        tracer=SimpleNamespace(phase_span=lambda *a, **k: nullcontext()),
+        repair_attempts=1,
+    )
+    assert r_out["status"] == "APPROVED"
+    assert provider_calls["n"] == 0
+    assert meta["local_assist_status"] == "SHADOW_RECORDED"
+    assert not any("LOCAL_ASSIST_CONTEXT" in p for p in prompts)
+    _assert_distinct_truth_booleans(meta)
+    assert meta["local_assist_success"] is False
+    assert meta["online_success"] is True

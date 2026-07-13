@@ -1133,6 +1133,13 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy):
     report_payload["workspace_revision"] = str(
         runtime_meta.get("workspace_revision") or execution_context.get("workspace_revision") or revision
     )
+    # Distinct stage booleans — never collapse into one status.
+    report_payload["local_assist_success"] = bool(runtime_meta.get("local_assist_success", False))
+    report_payload["online_success"] = bool(runtime_meta.get("online_success", False))
+    report_payload["runtime_receipt_complete"] = bool(runtime_meta.get("runtime_receipt_complete", False))
+    report_payload["task_pipeline_success"] = bool(
+        runtime_meta.get("task_pipeline_success", runtime_ok)
+    )
     claim = runtime_meta.get("claim_boundary")
     report_payload["claim_boundary"] = (
         dict(claim)
