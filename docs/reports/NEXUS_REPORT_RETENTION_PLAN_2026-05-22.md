@@ -6,10 +6,11 @@
 - No files are moved, deleted, staged, or archived by this artifact.
 
 ## Summary
-- Reports scanned: `202`
-- Active Zero Trust V2 reports excluded: `47`
-- Retention class counts: `{'archive_candidate': 26, 'keep_current_entrypoint': 26, 'keep_human_entrypoint': 9, 'keep_review': 68, 'unknown_hold': 73}`
-- Topic counts: `{'ENGINEERING_HYGIENE': 11, 'HEEP': 37, 'LEGACY': 4, 'OPTIMIZATION': 5, 'PUBLIC_CLAIM': 16, 'SF': 49, 'UNKNOWN_HOLD': 80}`
+- Reports scanned: `2049`
+- Active Zero Trust V2 reports excluded: `49`
+- Retention class counts: `{'archive_candidate': 26, 'bounded_handoff': 8, 'experiment_evidence': 20, 'generated_evidence': 19, 'historical_preserved': 670, 'keep_current_entrypoint': 26, 'keep_human_entrypoint': 13, 'keep_review': 71, 'supporting_asset': 11, 'unknown_hold': 1185}`
+- Topic counts: `{'ENGINEERING_HYGIENE': 12, 'HEEP': 37, 'LEGACY': 4, 'OPTIMIZATION': 9, 'PUBLIC_CLAIM': 16, 'SF': 649, 'UNKNOWN_HOLD': 1322}`
+- Report area counts: `{'archive': 670, 'asset': 11, 'experiment': 20, 'generated': 19, 'handoff': 8, 'root': 1321}`
 
 ## Keep Rules
 - Keep current decision, runtime apply, post-apply smoke, and human-readable summary/index files at `docs/reports` root.
@@ -28,6 +29,7 @@
 - `docs/reports/IMPLEMENTATION_TRACKING_RFC_OPT_001.md` (OPTIMIZATION, keep_review)
 - `docs/reports/IRON_NEXUS_PHASE_A_TO_G_STATUS_2026-05-05.md` (LEGACY, keep_review)
 - `docs/reports/MAIN_HARDENED_SYNC_REPORT_2026-05-04.md` (LEGACY, keep_review)
+- `docs/reports/NEXUS_CAPABILITY_PLAN_DDTREE_AUTOREASON_ULTRA_ROUTE_2026-04-28.md` (UNKNOWN_HOLD, keep_human_entrypoint)
 - `docs/reports/NEXUS_CLAIM_TRAINING_POSTURE_P86_5_2026-05-13.md` (PUBLIC_CLAIM, keep_review)
 - `docs/reports/NEXUS_CLEAN_CODE_ROOT_CLEANUP_SAFETY_REVIEW_2026-05-20.md` (ENGINEERING_HYGIENE, keep_review)
 - `docs/reports/NEXUS_CLEAN_CODE_ROOT_RETENTION_INVENTORY_2026-05-20.json` (ENGINEERING_HYGIENE, keep_review)
@@ -56,8 +58,7 @@
 - `docs/reports/NEXUS_HEEP_MAT_B_NEXT_REPLAY_STATUS_2026-05-20.json` (HEEP, keep_review)
 - `docs/reports/NEXUS_HEEP_MODE_MAP_UPDATE_GATE_V2_2026-05-20.json` (HEEP, keep_review)
 - `docs/reports/NEXUS_HEEP_PROVIDER_CLEAN_REPLAY_RCA_2026-05-20.json` (HEEP, keep_review)
-- `docs/reports/NEXUS_HEEP_PROVIDER_RECEIPT_BLOCKER_RCA_2026-05-20.json` (HEEP, keep_review)
-- ... plus `63` more keep/review rows in the JSON inventory.
+- ... plus `70` more keep/review rows in the JSON inventory.
 
 ## Archive Candidates
 - `docs/reports/NEXUS_HEEP_ASSEMBLY_CATALOG_2026-05-20.json` (HEEP, 42804 bytes)
@@ -85,50 +86,50 @@
 - `docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_MATRIX_2026-05-21.json` (SF, 14614 bytes)
 - `docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_SKILL_STATUS_2026-05-21.json` (SF, 3357 bytes)
 - `docs/reports/NEXUS_SF_FINAL_LIVE_COMPARE_TASKS_2026-05-21.json` (SF, 3810 bytes)
-- `docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json` (SF, 2719 bytes)
+- `docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json` (SF, 884 bytes)
 
 ## Unknown Hold
-- `docs/reports/NEXUS_CAPABILITY_INVOCATION_COST_P30_2026-05-10.md` (5872 bytes)
-- `docs/reports/NEXUS_CAPABILITY_ROUTE_P44_CLOSURE_2026-05-12.md` (4080 bytes)
-- `docs/reports/NEXUS_CAPABILITY_ROUTE_WIRING_P24_2026-05-10.md` (2925 bytes)
-- `docs/reports/NEXUS_CBO_IO_MEASUREMENT_2026-05-20.json` (732 bytes)
-- `docs/reports/NEXUS_CBO_REPAIR_SPLIT_DECISION_2026-05-20.json` (2999 bytes)
-- `docs/reports/NEXUS_CODE_REALITY_P180_2026-05-05.md` (3993 bytes)
-- `docs/reports/NEXUS_COMMERCIAL_LANES_GEMINI3FLASH_REPORT_2026-05-02.md` (6137 bytes)
-- `docs/reports/NEXUS_COMMERCIAL_ROUTE_COST_TUNING_2026-05-02.md` (7552 bytes)
-- `docs/reports/NEXUS_CONTEXTPLUS_LEARNING_GUIDE_V1_2026-05-13.md` (4795 bytes)
-- `docs/reports/NEXUS_DCI_RTIMING_ROUTE_COST_P21_2026-05-09.md` (2984 bytes)
-- `docs/reports/NEXUS_DOCS_AUTH_EXECUTOR_SEAM_P84_2026-05-13.md` (4763 bytes)
-- `docs/reports/NEXUS_DOCS_RECEIPT_RUBRIC_P86_2026-05-13.md` (3800 bytes)
-- `docs/reports/NEXUS_EMAS_SAFE_CANDIDATE_INTAKE_2026-05-20.json` (16509 bytes)
-- `docs/reports/NEXUS_FEATURE_REFLEX_P68_FLASH_3TASK_2026-05-13.md` (5718 bytes)
-- `docs/reports/NEXUS_FEATURE_REFLEX_P74_FLASH_3TASK_3TRIAL_2026-05-13.md` (6214 bytes)
-- `docs/reports/NEXUS_FEATURE_REFLEX_P80B_FLASH_3TASK_3TRIAL_2026-05-13.md` (4866 bytes)
-- `docs/reports/NEXUS_FLASH_PRO_GOVERNANCE_DECISION_2026-05-03.md` (2160 bytes)
-- `docs/reports/NEXUS_FLASH_RHYPER_P10_CLOSURE_2026-05-12.md` (3888 bytes)
-- `docs/reports/NEXUS_GEMINI3FLASH_AUTO_SMOKE_2026-05-02.md` (1102 bytes)
-- `docs/reports/NEXUS_GPT55_TEACHER_DISTANCE_P231_P360_2026-05-08.md` (3176 bytes)
-- `docs/reports/NEXUS_HIDDEN_LITE_PRE_RESCUE_P51_2026-05-13.md` (4145 bytes)
-- `docs/reports/NEXUS_HIDDEN_RETRY_MINIMAL_LANE_P35_2026-05-13.md` (5019 bytes)
-- `docs/reports/NEXUS_HIDDEN_RETRY_TELEMETRY_P34_2026-05-13.md` (6356 bytes)
-- `docs/reports/NEXUS_LEARNING_LOOP_CLOSED_LOOP_REPORT_2026-04-03.md` (7355 bytes)
-- `docs/reports/NEXUS_LLM_AUDIT_REPORT.md` (2696 bytes)
-- `docs/reports/NEXUS_MODEL_REQUIRED_UPLIFT_GATE_2026-05-13.md` (4490 bytes)
-- `docs/reports/NEXUS_OUTCOME_MEMORY_RETENTION_2026-05-20.json` (1075 bytes)
-- `docs/reports/NEXUS_P10_ROUTE_COST_EXECUTION_2026-05-09.md` (6864 bytes)
-- `docs/reports/NEXUS_P110_LAUNCH_CANDIDATE_GATE_2026-05-10.md` (4431 bytes)
-- `docs/reports/NEXUS_P120_LAUNCH_READY_CLOSURE_2026-05-10.md` (4921 bytes)
-- `docs/reports/NEXUS_P12_GOAL_CAPABILITY_HEATMAP_2026-05-12.md` (992 bytes)
-- `docs/reports/NEXUS_P12_GOAL_CLOSURE_2026-05-12.md` (6295 bytes)
-- `docs/reports/NEXUS_P130_GOAL_CLOSURE_2026-05-10.md` (4174 bytes)
-- `docs/reports/NEXUS_P23_CAPABILITY_HEATMAP_2026-05-12.md` (992 bytes)
-- `docs/reports/NEXUS_P23_GOAL_CLOSURE_2026-05-12.md` (6662 bytes)
-- `docs/reports/NEXUS_P28_NEXT_ROUND_MAIN_AXIS_EXECUTION_BOARD_2026-05-13.md` (6023 bytes)
-- `docs/reports/NEXUS_RESEARCH_STACK_P30_FLASH_2026-05-05.md` (6196 bytes)
-- `docs/reports/NEXUS_ROOT_TEST_ASSET_ARCHIVE_LOG_2026-05-13.md` (1300 bytes)
-- `docs/reports/NEXUS_ROUTE_CAPABILITY_CLOSURE_P30_2026-05-10.md` (5494 bytes)
-- `docs/reports/NEXUS_ROUTE_CAPABILITY_P90_THREE_ARM_CLOSURE_2026-05-10.md` (6493 bytes)
-- ... plus `33` more unknown rows in the JSON inventory.
+- `docs/reports/3b_override_verified_rate_analysis.md` (4273 bytes)
+- `docs/reports/3b_shadow_advisory_offline_ledger_replay_segment_closure_v0.md` (4096 bytes)
+- `docs/reports/3b_shadow_advisory_offline_ledger_replay_v0.md` (3252 bytes)
+- `docs/reports/3b_shadow_advisory_offline_ledger_replay_validation_gate_v0.md` (3777 bytes)
+- `docs/reports/3b_shadow_advisory_stage2_expansion_approval_packet_v0.md` (4672 bytes)
+- `docs/reports/3b_shadow_advisory_stage2_expansion_execution_v0.md` (3794 bytes)
+- `docs/reports/3b_shadow_advisory_stage2_expansion_sample_review_v0.md` (4871 bytes)
+- `docs/reports/3b_shadow_advisory_stage2_expansion_segment_closure_v0.md` (4362 bytes)
+- `docs/reports/3b_shadow_advisory_stage2_expansion_validation_gate_v0.md` (4057 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_annotation_materialization_segment_closure_v0.md` (3626 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_annotation_materialization_v0.md` (4489 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_annotation_materialization_validation_gate_v0.md` (5182 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_annotation_plan_review_v0.md` (6422 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_archive_receipt_v0.md` (2637 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_final_closure_v0.md` (4649 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_human_review_annotation_plan_v0.md` (7425 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_human_review_annotation_usage_review_v0.md` (4232 bytes)
+- `docs/reports/3b_shadow_advisory_stage3_usage_review_segment_closure_v0.md` (4673 bytes)
+- `docs/reports/3b_shadow_eval_policy_integration_plan_review_v0.md` (3440 bytes)
+- `docs/reports/3b_shadow_eval_policy_integration_plan_v0.md` (5209 bytes)
+- `docs/reports/3b_shadow_eval_sample_review_v0.md` (6150 bytes)
+- `docs/reports/3b_shadow_eval_schema_tightening_v0.md` (6365 bytes)
+- `docs/reports/3b_shadow_eval_tightened_rerun_approval_packet_v0.md` (5364 bytes)
+- `docs/reports/3b_shadow_eval_tightened_rerun_execution_v0.md` (4020 bytes)
+- `docs/reports/3b_shadow_eval_tightened_rerun_segment_closure_v0.md` (3541 bytes)
+- `docs/reports/3b_shadow_eval_tightened_rerun_validation_gate_v0.md` (4751 bytes)
+- `docs/reports/3b_shadow_eval_tightened_result_analysis_v0.md` (4512 bytes)
+- `docs/reports/3b_shadow_eval_tightened_sample_review_v0.md` (3084 bytes)
+- `docs/reports/7R_8R_EVIDENCE_GOVERNANCE_AND_RCA_BIBLE.md` (3801 bytes)
+- `docs/reports/7R_8R_governance_status_matrix.md` (2983 bytes)
+- `docs/reports/7R_claim_separation_report.md` (907 bytes)
+- `docs/reports/7R_pub_bug_004_clean_path_decision.md` (1853 bytes)
+- `docs/reports/7R_pub_bug_004_evidence_matrix.md` (2472 bytes)
+- `docs/reports/7R_pub_bug_004_exclusion_verdict.md` (2446 bytes)
+- `docs/reports/8R_commercial_promotion_manifest.md` (2399 bytes)
+- `docs/reports/GPT_task_upstream_gap_closure_20260619.md` (5855 bytes)
+- `docs/reports/HYBRID_ROUTE_H4_5_CLOUD_MODEL_E2E_SMOKE_REPORT.md` (4272 bytes)
+- `docs/reports/M4_verdict_red_20260619.md` (3927 bytes)
+- `docs/reports/NEXUS_ANTIGRAVITY_CLOSURE_LEDGER_2026-05-22.json` (29626 bytes)
+- `docs/reports/NEXUS_ANTIGRAVITY_FULL_PREREQUISITE_CLOSEOUT_2026-05-22.json` (2910 bytes)
+- ... plus `1145` more unknown rows in the JSON inventory.
 
 ## Execution Gates
 - Do not move Zero Trust V2 files while that agent is active.
