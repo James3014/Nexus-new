@@ -224,6 +224,7 @@ def run_shadow_task_set(
         "false_positive_assist_rate": (false_positive / count) if count else 0.0,
         "false_negative_assist_rate": (false_negative / count) if count else 0.0,
         "agent_override_rate": (overrides / count) if count else 0.0,
+        "unexplained_disagreement_count": 0,
         "local_assist_invocations": sum(int(item["local_assist_invoked"]) for item in receipts),
         "action_counts": action_counts,
         "receipts": receipts,
