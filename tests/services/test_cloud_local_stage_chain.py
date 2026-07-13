@@ -43,7 +43,29 @@ def test_five_stage_chain_records_injected_candidate_without_real_cloud_claim() 
     assert result["real_cloud_call"] is False
     assert result["claim_boundary"]["real_cloud_proven"] is False
     assert result["formal_workspace_mutated"] is False
+    assert result["fake_success"] is True
     assert result["task_id"] == "m4-b-001"
+
+
+def test_real_cloud_verified_candidate_is_not_marked_fake_success() -> None:
+    class RealCloudAdapter(InjectedCloudAgentAdapter):
+        is_real_provider = True
+
+    result = run_cloud_local_stage_chain(
+        request=_request(),
+        cloud_adapter=RealCloudAdapter(
+            lambda request: {
+                "candidate_payload": "candidate-patch",
+                "response_identity": f"response-{request.task_id}",
+            }
+        ),
+        local_diagnosis=lambda _: {"status": "ok"},
+        cheap_verifier=lambda _: {"status": "pass"},
+        local_retry=lambda _: {"status": "not_needed"},
+        committee_escalation=lambda _: {"status": "not_needed"},
+    )
+    assert result["status"] == "CLOUD_CANDIDATE_VERIFIED"
+    assert result["fake_success"] is False
 
 
 def test_cloud_failure_is_visible_and_local_retry_can_succeed() -> None:

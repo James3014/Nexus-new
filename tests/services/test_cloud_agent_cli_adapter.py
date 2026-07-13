@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 
-from nexus.services.cloud_agent_cli_adapter import SubprocessCloudAgentAdapter
+from nexus.services.cloud_agent_cli_adapter import AgyCliCloudAgentAdapter, SubprocessCloudAgentAdapter
 from nexus.services.cloud_agent_contract import CloudAgentRequest, invoke_cloud_agent
 
 
@@ -65,3 +65,29 @@ def test_subprocess_adapter_timeout_is_explicit() -> None:
     response = invoke_cloud_agent(adapter, _request())
     assert response["error"] == "provider_timeout"
     assert response["real_cloud_call"] is False
+
+
+def test_agy_adapter_builds_bounded_plan_command_without_api_key() -> None:
+    adapter = AgyCliCloudAgentAdapter(
+        cwd="/tmp/agy-fixture",
+        agy_entry="/custom/agy",
+        env={"PATH": "/bin", "GEMINI_API_KEY": "must-not-pass", "GOOGLE_API_KEY": "must-not-pass"},
+    )
+    command, prompt = adapter._build_command(_request())
+
+    assert command[:6] == [
+        "/custom/agy",
+        "--new-project",
+        "--add-dir",
+        "/tmp/agy-fixture",
+        "--mode",
+        "plan",
+    ]
+    assert command[6:8] == ["--print-timeout", "300s"]
+    assert "--print" in command
+    assert "--dangerously-skip-permissions" not in command
+    assert prompt is None
+    assert "task_id=m4-real-test-001" in str(command[-1])
+    assert "GEMINI_API_KEY" not in str(command)
+    assert "GOOGLE_API_KEY" not in str(command)
+    assert adapter.env == {"PATH": "/bin"}

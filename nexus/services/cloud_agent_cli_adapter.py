@@ -1,10 +1,11 @@
-"""Provider-neutral subprocess adapter plus an opt-in Gemini CLI adapter."""
+"""Provider-neutral subprocess adapters for bounded external agent CLIs."""
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 from typing import Any, Callable, Mapping, Sequence
 
@@ -12,6 +13,7 @@ from nexus.services.cloud_agent_contract import CloudAgentAdapter, CloudAgentReq
 
 
 CommandBuilder = Callable[[CloudAgentRequest], tuple[Sequence[str], str | None]]
+_API_KEY_ENV_VARS = frozenset({"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"})
 
 
 class SubprocessCloudAgentAdapter(CloudAgentAdapter):
@@ -175,3 +177,60 @@ class GeminiCliCloudAgentAdapter(SubprocessCloudAgentAdapter):
             transport="inline",
         )
         return invocation.command, invocation.prompt_stdin
+
+
+class AgyCliCloudAgentAdapter(SubprocessCloudAgentAdapter):
+    """Opt-in agy CLI adapter with no API-key or unrestricted-permission path."""
+
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        cwd: str | Path,
+        agy_entry: str | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout_sec: float = 320.0,
+        print_timeout: str = "300s",
+    ) -> None:
+        self.model = model or os.environ.get("NEXUS_AGY_MODEL_NAME", "agy-default")
+        self.agy_entry = agy_entry or shutil.which("agy") or "/Users/jameschen/.local/bin/agy"
+        self.print_timeout = print_timeout
+        safe_env = dict(env) if env is not None else dict(os.environ)
+        for key in _API_KEY_ENV_VARS:
+            safe_env.pop(key, None)
+        super().__init__(
+            command_builder=self._build_command,
+            provider="agy",
+            model=self.model,
+            cwd=cwd,
+            env=safe_env,
+            timeout_sec=timeout_sec,
+            is_real_provider=True,
+        )
+
+    def _build_command(self, request: CloudAgentRequest) -> tuple[Sequence[str], str | None]:
+        bounded_prompt = (
+            "Return exactly one JSON object and no prose, markdown, or tool output. "
+            "Do not call tools and do not modify files. "
+            "Fields: response_identity, candidate_payload, usage, latency_sec, error.\n"
+            f"task_id={request.task_id}\n"
+            f"workspace_revision={request.workspace_revision}\n"
+            f"bounded_context={request.bounded_context}\n"
+            f"local_diagnosis={request.local_diagnosis}\n"
+            f"semantic_assertions={json.dumps(request.semantic_assertions)}\n"
+            f"target_files={json.dumps(request.target_files)}\n"
+            f"allowed_mutation_scope={json.dumps(request.allowed_mutation_scope)}"
+        )
+        command = [
+            self.agy_entry,
+            "--new-project",
+            "--add-dir",
+            self.cwd or "/tmp",
+            "--mode",
+            "plan",
+            "--print-timeout",
+            self.print_timeout,
+            "--print",
+            bounded_prompt,
+        ]
+        return command, None

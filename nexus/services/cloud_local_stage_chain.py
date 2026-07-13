@@ -42,7 +42,7 @@ def _result(
         "real_cloud_call": real_cloud_call,
         "cloud_failure": cloud_failure,
         "local_fallback_visible": any(stage["stage"] == 4 for stage in stages),
-        "fake_success": ("TEST_ONLY" in status) is False and status == "CLOUD_CANDIDATE_VERIFIED",
+        "fake_success": bool(status != "FAILED" and not real_cloud_call),
         "formal_workspace_mutated": False,
         "route_truth_source": "CapabilityPlanner",
         "claim_boundary": {
