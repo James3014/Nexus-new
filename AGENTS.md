@@ -55,6 +55,13 @@ This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 rela
 - If impact analysis cannot run, returns `UNKNOWN`, or cannot find the symbol, state that GitNexus impact evidence is unavailable and proceed with a narrower manual blast-radius check.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- **Always run deletion checks before committing:** Run the four commands below to audit modified and deleted paths. If deletions are present, explain the rationale for each file.
+  ```bash
+  git diff --name-status --diff-filter=D
+  git diff --cached --name-status --diff-filter=D
+  git diff --stat
+  git diff --cached --stat
+  ```
 
 ## Never Do
 
@@ -62,6 +69,8 @@ This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 rela
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - Before committing, prefer `gitnexus_detect_changes()`; if unavailable, use `git diff --stat`, targeted diff review, and focused tests instead.
+- **NEVER automatically delete tracked files that match `.gitignore` patterns** (such as historical metrics, learning logs, or tracked cache files) during feature implementation tasks. Git ignore rules only apply to untracked files.
+- **NEVER combine out-of-scope repository cleanup or file deletion with implementation commits.** Keep implementation scopes clean and isolated.
 
 ## Resources
 
@@ -84,3 +93,23 @@ This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 rela
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# 🛡️ Generation Degeneration Guard
+
+懷疑輸出退化或失控重複時，停止後續工具與檔案修改，保留最後已確認動作，回傳 `retry_required=true`，並從新的 bounded context 重啟。AGENTS.md 規則不等於 runtime detector。
+
+## Tool Execution Rules
+* **No Pre-ambles**: Do not describe or explain which tool is about to be used.
+* **Direct Invocation**: Issue the tool call directly without transition phrases or prose.
+
+
+## 🛡️ Telemetry, Gate Verification & Deletion Safety
+
+### 1. Telemetry Verification & Claimability
+- **Structural vs. Model Separation**: For structural capabilities (e.g., `claim_gate`, `artifact_gate`), `token_usage=0` is valid. `token_usage > 0` is only enforced when `model_calls > 0`.
+- **Telemetry Availability**: When executing capabilities in production or simulation executors (e.g., `ExecutorControls`), always measure real execution metrics (e.g., `wall_time_ms`, `overhead_ms`) and populate the receipt's telemetry dict. Simulated receipts with missing telemetry block `is_claimable` checks.
+
+### 2. Strict Proof-Backed Gates (Anti-Hallucination)
+- **Adapter Validation**: Receipt adapters must not blindly trust `claim_verified=True`. They must validate `verifier_artifact` (or `verifier_status`) and `source_hash`. If proof attributes are missing, the gate must fail closed (`gate_passed=False`) and record the failure reason.
+
+
