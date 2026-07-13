@@ -1,0 +1,38 @@
+{
+  "blocker_reasons": {},
+  "blocking_requirements": [],
+  "claim_boundary": {
+    "internal_only": true,
+    "invoked": true,
+    "outcome_contributed": true,
+    "production_ready": false,
+    "public_claim_allowed": false,
+    "selected": true,
+    "value_measured": true
+  },
+  "required_evidence": {
+    "all_focused_tests_pass": true,
+    "canonical_cli_integration": true,
+    "contribution_attribution": true,
+    "critical_fail_closed_paths_pass": true,
+    "explicit_advisor": true,
+    "explicit_candidate": true,
+    "explicit_verified_subtask": true,
+    "local_only_fallback": true,
+    "no_candidate_isolation_bypass": true,
+    "no_route_split": true,
+    "no_verifier_weakening": true,
+    "planner_advisor": true,
+    "planner_candidate": true,
+    "planner_verified_subtask": true,
+    "provider_unavailable_fail_closed": true,
+    "quota_constrained_degradation": true,
+    "real_cloud_local_runtime": true,
+    "receipt_lineage_complete": true,
+    "universal_agent_interface": true,
+    "value_measurement": true
+  },
+  "schema": "nexus.local_assist.final_gate.v1",
+  "status": "PASSED",
+  "terminal_claim": "NEXUS_UNIVERSAL_LOCAL_ASSIST_PRODUCTIZED"
+}
