@@ -1205,15 +1205,11 @@ class UnifiedRuntime:
         prior = decision_from_context(route_map)
         if prior is None:
             task_policy = str(route_map.get("online_policy") or "").strip().lower()
-            # Explicit deny always wins and blocks even custom invokers.
-            # When callers supply an online_invoker without an explicit policy,
-            # treat as fixture/compatibility transport (not a silent real-provider grant).
-            # Registered physical CLIs must attach a resolved decision on the route
-            # (Gateway does this) or set online_policy + authorization source.
             injected_flag = bool(route_map.get("injected_transport", False))
-            if online_invoker is not None and task_policy not in {"deny", "require"}:
-                if not task_policy:
-                    task_policy = "auto"
+            # Fixture default: online_invoker without product policy → injected transport.
+            # Product auto/require must NOT force inject (physical path needs real auth).
+            if online_invoker is not None and not task_policy and not injected_flag:
+                task_policy = "auto"
                 injected_flag = True
             online_decision = resolve_online_execution_decision(
                 task_online_policy=task_policy,

@@ -455,6 +455,15 @@ class BattlesuitGateway:
 
         def gateway_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
             task_id = str(context.get("task_id", ""))
+            # Bind UR decision onto this Gateway before any physical CLI path.
+            from nexus.services.online_execution_policy import (
+                decision_from_context,
+                physical_online_authorized,
+            )
+
+            ctx_decision = decision_from_context(context if isinstance(context, Mapping) else {})
+            if ctx_decision is not None:
+                self.bind_online_execution_decision(ctx_decision)
             # Provider/transport identity comes from the resolved binding, not
             # from raw oauth_provider auto-detect (which may be local-only).
             provider_identity = binding.provider if binding.provider not in {"", "gateway"} else (
@@ -462,14 +471,15 @@ class BattlesuitGateway:
             )
             if binding.selection_source == "injected_transport":
                 provider_identity = "injected"
-            # Canonical authorization only — env is not consulted here.
-            # Injected structured transports are authorized as fixtures; real
-            # CLI/path execution requires physical_invocation_allowed.
-            from nexus.services.online_execution_policy import physical_online_authorized
-
-            if bound_transport is self.__class__.ask_structured and not physical_online_authorized(
-                context if isinstance(context, Mapping) else {},
-                injected_transport=False,
+            # Injected structured transports skip physical gate; real CLI requires
+            # physical_invocation_allowed from the bound decision.
+            if bound_transport is self.__class__.ask_structured and not (
+                structured_injected
+                or self._online_physical_allowed()
+                or physical_online_authorized(
+                    context if isinstance(context, Mapping) else {},
+                    injected_transport=structured_injected,
+                )
             ):
                 return normalize_online_invoker_payload(
                     provider=provider_identity,
@@ -650,14 +660,24 @@ class BattlesuitGateway:
             receipt_path=receipt_path,
         )
 
+    def bind_online_execution_decision(self, decision: Any) -> None:
+        """Bind a previously resolved OnlineExecutionDecision for physical CLI paths.
+
+        Repair / UnifiedRuntime must call this before surgical_ask/ask_structured
+        so Gateway does not re-resolve policy independently (e.g. workspace deny
+        must not override task auto already authorized on the decision).
+        """
+        self._online_execution_decision = decision
+
     def _online_physical_allowed(self) -> bool:
         """Enforce Nexus OnlineExecutionDecision for physical Gateway CLI paths.
 
-        Credentials / binary presence never authorize. Bound decision from
-        ask_unified / runtime context wins; otherwise fail-closed unless the
-        emergency environment override is set (legacy operator path).
+        Bound decision from UnifiedRuntime/repair wins. Unbound paths fail-closed
+        (env emergency override only when no workspace policy file exists).
+        Never re-resolve with empty task policy in a way that drops a bound grant.
         """
         from nexus.services.online_execution_policy import (
+            OnlineExecutionDecision,
             decision_from_context,
             physical_online_authorized,
             resolve_online_execution_decision,
@@ -665,12 +685,16 @@ class BattlesuitGateway:
 
         bound = getattr(self, "_online_execution_decision", None)
         if bound is not None:
+            if isinstance(bound, OnlineExecutionDecision):
+                return bool(bound.online_execution_authorized and bound.physical_invocation_allowed)
             if isinstance(bound, Mapping):
+                # Prefer explicit physical flag from the attached decision dict.
+                if "physical_invocation_allowed" in bound:
+                    return bool(bound.get("online_execution_authorized")) and bool(
+                        bound.get("physical_invocation_allowed")
+                    )
                 return physical_online_authorized(bound, injected_transport=False)
-            authorized = bool(getattr(bound, "online_execution_authorized", False))
-            physical = bool(getattr(bound, "physical_invocation_allowed", False))
-            return authorized and physical
-        # No bound decision: resolve conservatively (workspace/env only).
+        # No bound decision: fail-closed re-resolve (workspace deny stays deny).
         decision = resolve_online_execution_decision(
             task_online_policy="",
             project_root=getattr(self, "project_root", ".") or ".",

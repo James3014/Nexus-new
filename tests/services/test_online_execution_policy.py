@@ -297,3 +297,108 @@ def test_gateway_ask_structured_fails_closed_without_physical_auth(tmp_path: Pat
     assert raw == "online_execution_not_authorized"
     assert isinstance(data, dict)
     assert data.get("error") == "online_execution_not_authorized"
+
+
+def test_task_auto_binds_gateway_physical_under_workspace_deny(tmp_path: Path, monkeypatch) -> None:
+    """CLI/task auto must authorize Gateway physical path when decision is bound.
+
+    Workspace deny must not re-resolve and revoke a task auto grant.
+    """
+    from nexus.services.gateway import BattlesuitGateway
+    from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
+
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    policy_path = tmp_path / ".nexus" / "online_execution_policy.json"
+    policy_path.parent.mkdir(parents=True)
+    policy_path.write_text(
+        json.dumps({"default_online_policy": "deny", "approved_online_providers": ["gemini"]}),
+        encoding="utf-8",
+    )
+
+    decision = resolve_online_execution_decision(
+        task_online_policy="auto",
+        project_root=tmp_path,
+        planner_online_needed=True,
+        requested_provider="gemini",
+        environ={"GEMINI_API_KEY": "test-key"},
+    )
+    assert decision.online_execution_authorized is True
+    assert decision.physical_invocation_allowed is True
+    assert decision.online_authorization_source == "cli_task_policy"
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    # Unbound: workspace deny → fail closed
+    assert gateway._online_physical_allowed() is False
+    # Bound task auto decision → physical allowed
+    gateway.bind_online_execution_decision(decision)
+    assert gateway._online_physical_allowed() is True
+
+    # Repair-style: UR context decision must bind before Gateway callable.
+    bound: list[object] = []
+
+    def online_invoker(context):
+        from nexus.services.online_execution_policy import decision_from_context
+
+        d = decision_from_context(context)
+        assert d is not None
+        assert d.physical_invocation_allowed is True
+        gateway.bind_online_execution_decision(d)
+        bound.append(d)
+        assert gateway._online_physical_allowed() is True
+        return {
+            "provider": "gemini",
+            "task_id": str(context.get("task_id", "")),
+            "invoked": True,
+            "output_delivered": True,
+            "gate_passed": True,
+            "provider_call_count": 1,
+            "response": {"status": "APPROVED", "patch": "ok"},
+            "raw_response": "raw-ok",
+            "usage": {},
+            "error": "",
+            "evidence_refs": [f"online:{context.get('task_id')}:bound"],
+        }
+
+    def verifier(context):
+        return {
+            "task_id": "auto-bind",
+            "status": "pass",
+            "gate_passed": True,
+            "invoked": True,
+            "evidence_refs": ["v"],
+        }
+
+    def learning(context):
+        return {
+            "task_id": "auto-bind",
+            "status": "pass",
+            "gate_passed": True,
+            "invoked": True,
+            "evidence_refs": ["l"],
+        }
+
+    receipt = UnifiedRuntime().run(
+        UnifiedRuntimeRequest(
+            task_id="auto-bind",
+            workspace_revision="rev-auto",
+            task_statement="bounded advisory",
+            task_type="repair",
+            route={
+                "recommended_flow": "direct",
+                "online_policy": "auto",
+                "provider": "gemini",
+                "workspace_root": str(tmp_path),
+            },
+            online_prompt="prompt",
+            online_payload="payload",
+        ),
+        online_invoker=online_invoker,
+        verifier=verifier,
+        learning=learning,
+    )
+    assert bound, "online invoker must receive and bind decision"
+    assert receipt["online"]["invoked"] is True
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert receipt["online_preflight"]["online_execution_authorized"] is True
+    assert receipt["online_preflight"]["physical_invocation_allowed"] is True
+    assert receipt["online_preflight"]["online_authorization_source"] == "cli_task_policy"

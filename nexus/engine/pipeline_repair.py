@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 import logging
 import time
 import subprocess
@@ -340,6 +340,19 @@ class PipelineRepairMixin:
 
         def online_invoker(context: dict[str, Any]) -> dict[str, Any]:
             import json as _json
+
+            from nexus.services.online_execution_policy import decision_from_context
+
+            # Bind UnifiedRuntime OnlineExecutionDecision onto the Gateway before
+            # surgical_ask/ask_structured so physical auth uses the task decision
+            # (e.g. CLI --online-policy auto) rather than re-resolving workspace deny.
+            decision = decision_from_context(context if isinstance(context, Mapping) else {})
+            repairer = getattr(ctx, "repairer", None)
+            gateway = getattr(repairer, "gateway", None) if repairer is not None else None
+            if gateway is not None and decision is not None and hasattr(gateway, "bind_online_execution_decision"):
+                gateway.bind_online_execution_decision(decision)
+            elif gateway is not None and decision is not None:
+                gateway._online_execution_decision = decision
 
             prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
             local_stage = context.get("local", {}) if isinstance(context, dict) else {}
