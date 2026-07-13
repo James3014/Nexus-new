@@ -694,14 +694,9 @@ class BattlesuitGateway:
                         bound.get("physical_invocation_allowed")
                     )
                 return physical_online_authorized(bound, injected_transport=False)
-        # No bound decision: fail-closed re-resolve (workspace deny stays deny).
-        decision = resolve_online_execution_decision(
-            task_online_policy="",
-            project_root=getattr(self, "project_root", ".") or ".",
-            planner_online_needed=True,
-            requested_provider=str(getattr(self, "oauth_provider", "") or ""),
-        )
-        return bool(decision.online_execution_authorized and decision.physical_invocation_allowed)
+        # Unbound product path: fail closed. Do not re-resolve from workspace/env
+        # alone — callers must bind via guard_physical_online / bind_online_execution_decision.
+        return False
 
     def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
         """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""

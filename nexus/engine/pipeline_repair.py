@@ -220,15 +220,35 @@ class PipelineRepairMixin:
             normalize_online_invoker_payload,
         )
 
+        from nexus.services.online_execution_policy import guard_physical_online
+
         meta = ctx.state.metadata
         mode = self._local_assist_mode(ctx)
         task_id = str(meta.get("task_id") or ctx.task_id or "")
         revision = self._ensure_workspace_revision(ctx)
         meta.setdefault("task_id", task_id)
+        root = Path(getattr(self.engine, "project_root", ".") or ".")
+        repairer = getattr(ctx, "repairer", None)
+        gateway = getattr(repairer, "gateway", None) if repairer is not None else None
+
+        def _guarded_online(prompt: str):
+            """Single seam: bind OnlineExecutionDecision before any physical Online call."""
+            allowed, decision, denied = guard_physical_online(
+                gateway,
+                meta,
+                project_root=root,
+                requested_provider=str(meta.get("oauth_provider") or meta.get("online_provider") or ""),
+                planner_online_needed=True,
+                injected_transport=bool(meta.get("injected_transport")),
+                task_id=task_id,
+            )
+            if not allowed and denied is not None:
+                return denied
+            return online_callable(prompt)
 
         if mode == "disabled":
-            res, raw = online_callable(str(ctx.task_desc or ""))
-            online_ok = bool(raw or (isinstance(res, dict) and res))
+            res, raw = _guarded_online(str(ctx.task_desc or ""))
+            online_ok = bool(raw or (isinstance(res, dict) and res)) and str(raw) != "online_execution_not_authorized"
             truth = self._stamp_stage_truth(
                 meta,
                 local_assist_success=False,
@@ -260,8 +280,8 @@ class PipelineRepairMixin:
                 self._record_shadow_local_assist(ctx)
             except Exception as exc:
                 logger.warning("local_assist_shadow_record_failed: %s", exc)
-            res, raw = online_callable(str(ctx.task_desc or ""))
-            online_ok = bool(raw or (isinstance(res, dict) and res))
+            res, raw = _guarded_online(str(ctx.task_desc or ""))
+            online_ok = bool(raw or (isinstance(res, dict) and res)) and str(raw) != "online_execution_not_authorized"
             truth = self._stamp_stage_truth(
                 meta,
                 local_assist_success=False,
@@ -341,18 +361,18 @@ class PipelineRepairMixin:
         def online_invoker(context: dict[str, Any]) -> dict[str, Any]:
             import json as _json
 
-            from nexus.services.online_execution_policy import decision_from_context
+            from nexus.services.online_execution_policy import guard_physical_online
 
-            # Bind UnifiedRuntime OnlineExecutionDecision onto the Gateway before
-            # surgical_ask/ask_structured so physical auth uses the task decision
-            # (e.g. CLI --online-policy auto) rather than re-resolving workspace deny.
-            decision = decision_from_context(context if isinstance(context, Mapping) else {})
+            # Single guard seam: resolve+bind before any physical Online callable.
             repairer = getattr(ctx, "repairer", None)
             gateway = getattr(repairer, "gateway", None) if repairer is not None else None
-            if gateway is not None and decision is not None and hasattr(gateway, "bind_online_execution_decision"):
-                gateway.bind_online_execution_decision(decision)
-            elif gateway is not None and decision is not None:
-                gateway._online_execution_decision = decision
+            root = Path(getattr(self.engine, "project_root", ".") or ".")
+            # Prefer decision already on UR context; fall back to task meta.
+            meta_for_guard = dict(meta)
+            if isinstance(context, Mapping) and context.get("online_execution_decision"):
+                meta_for_guard["online_execution_decision"] = context.get("online_execution_decision")
+            if isinstance(context, Mapping) and context.get("online_policy"):
+                meta_for_guard["online_policy"] = context.get("online_policy")
 
             prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
             local_stage = context.get("local", {}) if isinstance(context, dict) else {}
@@ -367,7 +387,22 @@ class PipelineRepairMixin:
                 )
                 local_forwarded = True
             try:
-                res, raw = online_callable(prompt)
+                allowed, _decision, denied = guard_physical_online(
+                    gateway,
+                    meta_for_guard,
+                    project_root=root,
+                    requested_provider=str(meta.get("oauth_provider") or meta.get("online_provider") or ""),
+                    planner_online_needed=True,
+                    injected_transport=bool(
+                        meta.get("injected_transport")
+                        or (isinstance(context, Mapping) and context.get("online_authorization_source") == "injected_test_transport")
+                    ),
+                    task_id=task_id,
+                )
+                if not allowed and denied is not None:
+                    res, raw = denied
+                else:
+                    res, raw = online_callable(prompt)
             except Exception as exc:
                 return normalize_online_invoker_payload(
                     provider=str(meta.get("online_provider") or "gateway"),
@@ -630,7 +665,24 @@ class PipelineRepairMixin:
                             
                     rejection = ctx.state.metadata.get("last_audit_rejection_receipt")
 
+                    from nexus.services.online_execution_policy import guard_physical_online
+
                     def _online_callable(prompt: str):
+                        allowed, _decision, denied = guard_physical_online(
+                            gateway,
+                            ctx.state.metadata,
+                            project_root=getattr(self.engine, "project_root", ".") or ".",
+                            requested_provider=str(
+                                ctx.state.metadata.get("oauth_provider")
+                                or getattr(gateway, "oauth_provider", "")
+                                or ""
+                            ),
+                            planner_online_needed=True,
+                            injected_transport=bool(ctx.state.metadata.get("injected_transport")),
+                            task_id=str(ctx.state.metadata.get("task_id") or ctx.task_id or ""),
+                        )
+                        if not allowed and denied is not None:
+                            return denied
                         return gateway.surgical_ask(
                             task=prompt,
                             symbols=symbols,
@@ -647,7 +699,10 @@ class PipelineRepairMixin:
                         )
                     else:
                         res, raw = _online_callable(ctx.task_desc)
-                        online_ok = bool(raw or (isinstance(res, dict) and res))
+                        online_ok = (
+                            bool(raw or (isinstance(res, dict) and res))
+                            and str(raw) != "online_execution_not_authorized"
+                        )
                         meta = ctx.state.metadata
                         truth = self._stamp_stage_truth(
                             meta,
@@ -710,12 +765,40 @@ class PipelineRepairMixin:
                     # Prefer injected online callable (tests), else gateway.ask_structured
                     # when available. Without an Online transport, advisor degrades and
                     # legacy repairer.run continues (no silent Local success claim).
+                    from nexus.services.online_execution_policy import guard_physical_online
+
                     injected_online = ctx.state.metadata.get("local_assist_online_callable")
                     online_callable = None
                     if callable(injected_online):
-                        online_callable = injected_online
+                        def online_callable(prompt: str, _fn=injected_online, _gw=gateway):
+                            allowed, _d, denied = guard_physical_online(
+                                _gw,
+                                ctx.state.metadata,
+                                project_root=getattr(self.engine, "project_root", ".") or ".",
+                                planner_online_needed=True,
+                                injected_transport=bool(
+                                    ctx.state.metadata.get("injected_transport") or True
+                                ),
+                                task_id=str(ctx.state.metadata.get("task_id") or ctx.task_id or ""),
+                            )
+                            # injected_transport=True allows fixture callables when authorized as inject;
+                            # task deny still returns denied.
+                            if not allowed and denied is not None:
+                                return denied
+                            return _fn(prompt)
                     elif gateway is not None and hasattr(gateway, "ask_structured"):
                         def online_callable(prompt: str, _gateway=gateway, _pack=ctx.pack):
+                            allowed, _d, denied = guard_physical_online(
+                                _gateway,
+                                ctx.state.metadata,
+                                project_root=getattr(self.engine, "project_root", ".") or ".",
+                                requested_provider=str(getattr(_gateway, "oauth_provider", "") or ""),
+                                planner_online_needed=True,
+                                injected_transport=bool(ctx.state.metadata.get("injected_transport")),
+                                task_id=str(ctx.state.metadata.get("task_id") or ctx.task_id or ""),
+                            )
+                            if not allowed and denied is not None:
+                                return denied
                             return _gateway.ask_structured(
                                 prompt,
                                 str(_pack or ""),

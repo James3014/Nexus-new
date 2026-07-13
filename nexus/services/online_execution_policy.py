@@ -463,5 +463,124 @@ def physical_online_authorized(context: Mapping[str, Any] | None, *, injected_tr
     decision = decision_from_context(context)
     if decision is not None:
         return bool(decision.online_execution_authorized and decision.physical_invocation_allowed)
-    # Legacy emergency only — product path should always attach a decision.
-    return os.environ.get(ENV_OVERRIDE, "").strip() == "1"
+    # Unbound product path: fail closed. Env is only applied when a decision is
+    # resolved via resolve_online_execution_decision / guard_physical_online —
+    # adapters must not re-interpret env or workspace alone.
+    return False
+
+
+def resolve_decision_from_meta(
+    meta: Mapping[str, Any] | None,
+    *,
+    project_root: str | Path = ".",
+    requested_provider: str = "",
+    planner_online_needed: bool = True,
+    injected_transport: bool = False,
+    environ: Mapping[str, str] | None = None,
+) -> OnlineExecutionDecision:
+    """Resolve one OnlineExecutionDecision from pipeline/task metadata."""
+    data = dict(meta or {})
+    prior = decision_from_context(data)
+    if prior is not None:
+        return prior
+    prior = decision_from_context({"online_execution_decision": data.get("online_execution_decision")})
+    if prior is not None:
+        return prior
+    provider = str(
+        requested_provider
+        or data.get("online_provider")
+        or data.get("oauth_provider")
+        or ""
+    ).strip().lower()
+    # Empty/missing task policy is not an explicit task deny — only literal "deny"
+    # wins over inject/workspace. Unset falls through: inject → workspace → env → fail-closed.
+    task_policy = str(data.get("online_policy") or "").strip().lower()
+    return resolve_online_execution_decision(
+        task_online_policy=task_policy,
+        project_root=project_root,
+        planner_online_needed=planner_online_needed,
+        injected_transport=injected_transport or bool(data.get("injected_transport")),
+        requested_provider=provider,
+        environ=environ,
+    )
+
+
+def denied_physical_online_result(
+    *,
+    task_id: str = "",
+    decision: OnlineExecutionDecision | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Canonical (res, raw) when physical Online is not authorized."""
+    payload = {
+        "status": "FAILED",
+        "error": "online_execution_not_authorized",
+        "error_category": "online_execution_not_authorized",
+        "provider_call_count": 0,
+        "invoked": False,
+        "output_delivered": False,
+        "gate_passed": False,
+        "task_id": str(task_id or ""),
+        "online_preflight_status": (
+            decision.preflight_status if decision is not None else ONLINE_DENIED_BY_POLICY
+        ),
+        "online_authorization_source": (
+            decision.online_authorization_source if decision is not None else "fail_closed_default"
+        ),
+        "reason": (decision.reason if decision is not None else "online_execution_not_authorized"),
+    }
+    return payload, "online_execution_not_authorized"
+
+
+def guard_physical_online(
+    gateway: Any,
+    meta: Mapping[str, Any] | None,
+    *,
+    project_root: str | Path = ".",
+    requested_provider: str = "",
+    planner_online_needed: bool = True,
+    injected_transport: bool = False,
+    task_id: str = "",
+    environ: Mapping[str, str] | None = None,
+) -> tuple[bool, OnlineExecutionDecision, tuple[dict[str, Any], str] | None]:
+    """Resolve once, bind onto Gateway, and gate physical Online CLI.
+
+    Returns:
+      (allowed, decision, denied_result_or_none)
+
+    When ``allowed`` is False, callers must return ``denied_result`` and must
+    not invoke surgical_ask / ask_structured / provider subprocesses.
+    """
+    decision = resolve_decision_from_meta(
+        meta,
+        project_root=project_root,
+        requested_provider=requested_provider,
+        planner_online_needed=planner_online_needed,
+        injected_transport=injected_transport,
+        environ=environ,
+    )
+    # Persist on metadata for receipt linkage (callers may already hold a dict).
+    if isinstance(meta, dict):
+        meta["online_execution_decision"] = decision.to_dict()
+        meta["online_policy"] = decision.online_policy
+        meta["online_execution_authorized"] = decision.online_execution_authorized
+        meta["online_authorization_source"] = decision.online_authorization_source
+        meta["online_preflight_status"] = decision.preflight_status
+
+    if gateway is not None:
+        binder = getattr(gateway, "bind_online_execution_decision", None)
+        if callable(binder):
+            binder(decision)
+        else:
+            try:
+                gateway._online_execution_decision = decision
+            except Exception:
+                pass
+
+    physical_ok = bool(decision.online_execution_authorized and decision.physical_invocation_allowed)
+    if physical_ok:
+        return True, decision, None
+    # Fixture transports (injected_test_transport): allow non-CLI callables after bind.
+    # Gateway physical CLI remains blocked because physical_invocation_allowed is false.
+    if injected_transport and decision.online_execution_authorized:
+        return True, decision, None
+    return False, decision, denied_physical_online_result(task_id=task_id, decision=decision)

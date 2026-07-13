@@ -299,6 +299,97 @@ def test_gateway_ask_structured_fails_closed_without_physical_auth(tmp_path: Pat
     assert data.get("error") == "online_execution_not_authorized"
 
 
+def test_guard_physical_online_deny_blocks_and_binds(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.online_execution_policy import guard_physical_online
+
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    # Workspace allows auto, task denies — deny wins.
+    policy_path = tmp_path / ".nexus" / "online_execution_policy.json"
+    policy_path.parent.mkdir(parents=True)
+    policy_path.write_text(
+        json.dumps({"default_online_policy": "auto", "approved_online_providers": ["gemini"]}),
+        encoding="utf-8",
+    )
+
+    class _GW:
+        def __init__(self):
+            self._online_execution_decision = None
+            self.oauth_provider = "gemini"
+
+        def bind_online_execution_decision(self, decision):
+            self._online_execution_decision = decision
+
+    gw = _GW()
+    meta = {"online_policy": "deny", "task_id": "g1"}
+    allowed, decision, denied = guard_physical_online(
+        gw,
+        meta,
+        project_root=tmp_path,
+        requested_provider="gemini",
+        task_id="g1",
+    )
+    assert allowed is False
+    assert denied is not None
+    assert denied[1] == "online_execution_not_authorized"
+    assert denied[0]["provider_call_count"] == 0
+    assert decision.online_policy == "deny"
+    assert gw._online_execution_decision is decision
+    assert meta["online_execution_authorized"] is False
+
+
+def test_guard_physical_online_auto_allows_under_workspace_deny(tmp_path: Path) -> None:
+    from nexus.services.online_execution_policy import guard_physical_online
+
+    policy_path = tmp_path / ".nexus" / "online_execution_policy.json"
+    policy_path.parent.mkdir(parents=True)
+    policy_path.write_text(
+        json.dumps({"default_online_policy": "deny", "approved_online_providers": ["gemini"]}),
+        encoding="utf-8",
+    )
+
+    class _GW:
+        def __init__(self):
+            self._online_execution_decision = None
+
+        def bind_online_execution_decision(self, decision):
+            self._online_execution_decision = decision
+
+        def _online_physical_allowed(self):
+            d = self._online_execution_decision
+            return bool(d and d.online_execution_authorized and d.physical_invocation_allowed)
+
+    gw = _GW()
+    meta = {"online_policy": "auto", "task_id": "g2"}
+    allowed, decision, denied = guard_physical_online(
+        gw,
+        meta,
+        project_root=tmp_path,
+        requested_provider="gemini",
+        environ={"GEMINI_API_KEY": "k"},
+        task_id="g2",
+    )
+    assert allowed is True
+    assert denied is None
+    assert decision.physical_invocation_allowed is True
+    assert gw._online_physical_allowed() is True
+
+
+def test_gateway_unbound_physical_always_false(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.gateway import BattlesuitGateway
+
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    # Workspace auto would previously re-resolve unbound — must not authorize alone.
+    policy_path = tmp_path / ".nexus" / "online_execution_policy.json"
+    policy_path.parent.mkdir(parents=True)
+    policy_path.write_text(
+        json.dumps({"default_online_policy": "auto", "approved_online_providers": ["gemini"]}),
+        encoding="utf-8",
+    )
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    gateway._online_execution_decision = None
+    assert gateway._online_physical_allowed() is False
+
+
 def test_task_auto_binds_gateway_physical_under_workspace_deny(tmp_path: Path, monkeypatch) -> None:
     """CLI/task auto must authorize Gateway physical path when decision is bound.
 

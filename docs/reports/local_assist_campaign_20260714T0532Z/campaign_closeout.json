@@ -1,9 +1,25 @@
 {
-  "timestamp": "2026-07-13T21:36:09.945264+00:00",
   "NEXUS_CLI_MANAGED_ONLINE_CONVERGENCE_COMPLETE": true,
-  "live_status": "IMPLEMENTED_NOT_LIVE_PROVEN",
-  "experiment_status": "HARNESS_READY_NOT_LIVE_MEASURED",
-  "focused_tests_passed": 187,
-  "product_entry": "nexus run",
-  "online_policy_default": "deny"
+  "claim_boundary_path": "docs/reports/local_assist_campaign_20260714T0532Z/claim_boundary.json",
+  "closed_at": "2026-07-13T21:54:58Z",
+  "evidence_dir": "docs/reports/local_assist_campaign_20260714T0532Z",
+  "focused_tests_passed": 198,
+  "live_proof_status": "IMPLEMENTED_NOT_LIVE_PROVEN",
+  "offline_milestones": [
+    "authorization",
+    "workspace_policy",
+    "preflight",
+    "caller_convergence",
+    "paired_harness",
+    "guard_physical_online"
+  ],
+  "scratch_focused_gate": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/grok-goal-90c4cf8049b8/implementer/focused_gate.log",
+  "scratch_online_auth": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/grok-goal-90c4cf8049b8/implementer/online_auth_contract.log",
+  "structural_fix": {
+    "gateway_unbound_fail_closed": true,
+    "guard_physical_online": true,
+    "pipeline_repair_all_paths": true,
+    "task_deny_over_workspace_auto": true
+  },
+  "value_measurement_status": "HARNESS_READY_NOT_LIVE_MEASURED"
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -152,6 +153,9 @@ def _repair_mixin_harness(tmp_path: Path, *, mode: str, allowed: list[str] | Non
         "target_file": "demo.py",
         "target_files": allowed if allowed is not None else ["demo.py"],
         "local_assist_model": "fixture-model",
+        # Fixture Online callables are non-physical; authorize inject path only.
+        # Task deny still wins over inject (see deny-matrix tests).
+        "injected_transport": True,
         "local_assist_planner_snapshot": {
             "route_truth_source": "CapabilityPlanner",
             "execution_topology": "single_local_model",
@@ -462,6 +466,8 @@ def _build_execute_single_repair_ctx(tmp_path: Path, *, mode: str, surgical: boo
         "target_files": ["demo.py"],
         "use_surgical_repair": surgical,
         "local_assist_model": "fixture-model",
+        # Mock Gateway / injected Online callable — not a real provider CLI.
+        "injected_transport": True,
         "local_assist_planner_snapshot": {
             "route_truth_source": "CapabilityPlanner",
             "execution_topology": "single_local_model",
@@ -552,6 +558,161 @@ def test_execute_single_repair_disabled_skips_local(tmp_path: Path) -> None:
     assert not any("LOCAL_ASSIST_CONTEXT" in p for p in prompts)
     _assert_distinct_truth_booleans(meta)
     assert meta["local_assist_success"] is False
+
+
+@pytest.mark.parametrize("path_name", ["disabled_direct", "shadow_direct", "surgical_direct"])
+def test_repair_paths_enforce_task_deny_before_gateway_cli(tmp_path: Path, path_name: str, monkeypatch) -> None:
+    """Workspace auto must not authorize physical Online when task online_policy=deny.
+
+    Covers default product paths: disabled, shadow, and surgical-direct.
+    """
+    from contextlib import nullcontext
+
+    from nexus.engine.pipeline_repair import PipelineRepairMixin
+    from nexus.services.online_execution_policy import guard_physical_online
+
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    # Workspace would allow Online if re-resolved alone.
+    policy_path = tmp_path / ".nexus" / "online_execution_policy.json"
+    policy_path.parent.mkdir(parents=True)
+    policy_path.write_text(
+        json.dumps({"default_online_policy": "auto", "approved_online_providers": ["gemini"]}),
+        encoding="utf-8",
+    )
+    (tmp_path / "demo.py").write_text("x=1\n", encoding="utf-8")
+    (tmp_path / "nexus").mkdir(exist_ok=True)
+
+    calls = {"surgical": 0, "structured": 0}
+
+    class _Gateway:
+        oauth_provider = "gemini"
+        use_surgical_repair = True
+        _online_execution_decision = None
+
+        def bind_online_execution_decision(self, decision):
+            self._online_execution_decision = decision
+
+        def _online_physical_allowed(self):
+            d = self._online_execution_decision
+            return bool(
+                d is not None
+                and getattr(d, "online_execution_authorized", False)
+                and getattr(d, "physical_invocation_allowed", False)
+            )
+
+        def surgical_ask(self, *, task, symbols=None, phase="R", rejection_receipt=None, attempt=1):
+            calls["surgical"] += 1
+            if not self._online_physical_allowed():
+                return {"status": "FAILED", "error": "online_execution_not_authorized", "provider_call_count": 0}, "online_execution_not_authorized"
+            return {"status": "APPROVED", "patch": "leak"}, "raw-leak"
+
+        def ask_structured(self, prompt, payload="", **kwargs):
+            calls["structured"] += 1
+            if not self._online_physical_allowed():
+                return {"status": "FAILED", "error": "online_execution_not_authorized", "provider_call_count": 0}, "online_execution_not_authorized"
+            return {"status": "APPROVED", "patch": "leak"}, "raw-leak"
+
+        def apply_patch_v2(self, *a, **k):
+            return {"success": False}
+
+    class _Repairer:
+        def __init__(self):
+            self.gateway = _Gateway()
+
+        def run(self, state, pack, bayesian_params=None):
+            return {"status": "APPROVED", "source": "repairer.run"}
+
+    class _Harness(PipelineRepairMixin):
+        def __init__(self):
+            self.engine = SimpleNamespace(
+                project_root=tmp_path,
+                run_dir=tmp_path / "runs",
+                _add_step_to_history=lambda *a, **k: None,
+            )
+            self.registry = None
+
+        def _prepare_repair_context(self, ctx, repair_attempts):
+            return None
+
+        def _process_repair_response(self, ctx, res, repair_attempts):
+            return {
+                "status": "FAILED" if str((res or {}).get("error", "")).endswith("not_authorized") else "APPROVED",
+                "result": res if isinstance(res, dict) else {},
+                "current_decision_id": "d1",
+                "current_skill_id": "s1",
+            }
+
+        def _run_pregate_if_needed(self, ctx, status, result):
+            return status
+
+        def _write_hallucination_evidence_bundle(self, ctx):
+            return None
+
+        def _record_intra_loop_trauma(self, ctx, r_out):
+            return None
+
+        def _run_composition_repair_phase(self, ctx, repair_attempts):
+            return None
+
+        def _register_phase_decision(self, ctx, phase, name):
+            return f"{phase}-{name}"
+
+    meta = {
+        "local_assist_mode": {
+            "disabled_direct": "disabled",
+            "shadow_direct": "shadow",
+            "surgical_direct": "disabled",
+        }[path_name],
+        "online_policy": "deny",
+        "task_id": f"deny-{path_name}",
+        "workspace_revision": "rev-deny",
+        "target_file": "demo.py",
+        "target_files": ["demo.py"],
+        "use_surgical_repair": True,
+        "oauth_provider": "gemini",
+    }
+    state = SimpleNamespace(metadata=meta, task_id=meta["task_id"], current_step_id="s1", retry_count=0)
+    repairer = _Repairer()
+    ctx = SimpleNamespace(
+        state=state,
+        task_id=meta["task_id"],
+        task_desc="repair demo.py bounded",
+        pack={},
+        bayesian_params={},
+        dry_run=False,
+        repairer=repairer,
+        accumulator=SimpleNamespace(record=lambda *a, **k: None),
+    )
+    harness = _Harness()
+
+    if path_name in {"disabled_direct", "shadow_direct"}:
+        res, raw = harness._run_unified_advisor_online(
+            ctx,
+            online_callable=lambda p: repairer.gateway.surgical_ask(task=p),
+            repair_attempts=1,
+        )
+        assert raw == "online_execution_not_authorized"
+        assert isinstance(res, dict)
+        assert res.get("error") == "online_execution_not_authorized"
+        assert res.get("provider_call_count", 0) == 0
+        # guard blocks before surgical_ask body that would count a leak call —
+        # surgical may still be entered only after guard; with deny, 0 successful physical.
+        assert calls["surgical"] == 0 or (
+            calls["surgical"] >= 1 and res.get("error") == "online_execution_not_authorized"
+        )
+        # Prefer zero physical attempts after guard short-circuit.
+        assert calls["surgical"] == 0
+    else:
+        r_out = harness._execute_single_repair(
+            ctx,
+            tracer=SimpleNamespace(phase_span=lambda *a, **k: nullcontext()),
+            repair_attempts=1,
+        )
+        assert r_out["status"] == "FAILED"
+        result = r_out.get("result") or {}
+        assert result.get("error") == "online_execution_not_authorized"
+        assert result.get("provider_call_count", 0) == 0
+        assert calls["surgical"] == 0
 
 
 def test_execute_single_repair_shadow_no_local_invoke(tmp_path: Path) -> None:
