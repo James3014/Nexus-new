@@ -1,0 +1,12 @@
+{
+  "schema": "nexus.report_area_manifest.v1",
+  "version": "v1",
+  "directories": {
+    "archive": "archive",
+    "root-generated": "generated",
+    "assets": "asset",
+    "local_model_armor_handoff_pack_v1": "handoff",
+    "3b-shadow-hardening": "experiment",
+    "local_assist_campaign_20260714T0532Z": "experiment"
+  }
+}

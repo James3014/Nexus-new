@@ -5,8 +5,14 @@ import argparse
 import json
 import re
 from collections import Counter
+from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+
+import sys
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ops.report_output import resolve_report_output
 
@@ -14,6 +20,7 @@ from scripts.ops.report_output import resolve_report_output
 DEFAULT_REPORTS_DIR = Path("docs/reports")
 DEFAULT_JSON_OUTPUT = Path("docs/reports/NEXUS_REPORT_RETENTION_INVENTORY_2026-05-22.json")
 DEFAULT_MD_OUTPUT = Path("docs/reports/NEXUS_REPORT_RETENTION_PLAN_2026-05-22.md")
+DEFAULT_AREA_MANIFEST = Path("docs/reports/report_area_manifest.json")
 
 ACTIVE_WORKSTREAM_PATTERNS = ("ZERO_TRUST", "zero_trust")
 
@@ -54,6 +61,26 @@ RAW_HINTS = (
 )
 
 
+class ReportArea(Enum):
+    ROOT = "root"
+    ARCHIVE = "archive"
+    GENERATED = "generated"
+    ASSET = "asset"
+    HANDOFF = "handoff"
+    EXPERIMENT = "experiment"
+    UNKNOWN = "unknown"
+
+
+AREA_RETENTION_MAP = {
+    ReportArea.ARCHIVE: ("historical_preserved", "archive_area_classification"),
+    ReportArea.GENERATED: ("generated_evidence", "generated_area_classification"),
+    ReportArea.ASSET: ("supporting_asset", "asset_area_classification"),
+    ReportArea.HANDOFF: ("bounded_handoff", "handoff_area_classification"),
+    ReportArea.EXPERIMENT: ("experiment_evidence", "experiment_area_classification"),
+    ReportArea.UNKNOWN: ("unknown_hold", "unknown_nested_report_area"),
+}
+
+
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -90,7 +117,44 @@ def _topic(path: Path) -> str:
     return "UNKNOWN_HOLD"
 
 
-def _retention_class(path: Path, *, keep_refs: set[str]) -> tuple[str, str]:
+def _load_area_manifest(manifest_path: Path | None, reports_dir: Path) -> dict[str, str]:
+    if manifest_path is None:
+        candidate = DEFAULT_AREA_MANIFEST
+        if not candidate.exists():
+            return {}
+        manifest_path = candidate
+    elif not manifest_path.exists():
+        return {}
+    payload = _read_json(manifest_path)
+    if payload.get("schema") != "nexus.report_area_manifest.v1":
+        return {}
+    valid_areas = {area.value for area in ReportArea}
+    directories = payload.get("directories", {})
+    for dir_name, area_str in directories.items():
+        if area_str not in valid_areas:
+            raise ValueError(f"Invalid area '{area_str}' in manifest for directory '{dir_name}'")
+    return directories
+
+
+def _classify_nested_area(path: Path, reports_dir: Path, dir_map: dict[str, str]) -> ReportArea:
+    try:
+        relative = path.relative_to(reports_dir)
+    except ValueError:
+        return ReportArea.UNKNOWN
+    parts = relative.parts
+    if len(parts) <= 1:
+        return ReportArea.ROOT
+    top_dir = parts[0]
+    if top_dir in dir_map:
+        return ReportArea(dir_map[top_dir])
+    return ReportArea.UNKNOWN
+
+
+def _retention_class_for_area(area: ReportArea) -> tuple[str, str]:
+    return AREA_RETENTION_MAP[area]
+
+
+def _retention_class_root(path: Path, *, keep_refs: set[str]) -> tuple[str, str]:
     name = path.name
     ref = path.as_posix()
     if name in CURRENT_KEEP_FILES or ref in keep_refs:
@@ -117,18 +181,30 @@ def _manifest_keep_refs(reports_dir: Path) -> set[str]:
     return refs
 
 
-def build_inventory(*, reports_dir: Path = DEFAULT_REPORTS_DIR) -> dict[str, Any]:
+def build_inventory(
+    *,
+    reports_dir: Path = DEFAULT_REPORTS_DIR,
+    area_manifest_path: Path | None = None,
+) -> dict[str, Any]:
     keep_refs = _manifest_keep_refs(reports_dir)
+    dir_map = _load_area_manifest(area_manifest_path, reports_dir)
     rows: list[dict[str, Any]] = []
     excluded: list[str] = []
-    for path in sorted(reports_dir.iterdir()):
+    area_counts: Counter[str] = Counter()
+
+    for path in sorted(reports_dir.rglob("*")):
         if not path.is_file():
             continue
         if _is_active_workstream(path):
             excluded.append(path.as_posix())
             continue
-        retention_class, reason = _retention_class(path, keep_refs=keep_refs)
+        area = _classify_nested_area(path, reports_dir, dir_map)
+        if area == ReportArea.ROOT:
+            retention_class, reason = _retention_class_root(path, keep_refs=keep_refs)
+        else:
+            retention_class, reason = _retention_class_for_area(area)
         stat = path.stat()
+        area_counts[area.value] += 1
         rows.append(
             {
                 "path": path.as_posix(),
@@ -137,6 +213,7 @@ def build_inventory(*, reports_dir: Path = DEFAULT_REPORTS_DIR) -> dict[str, Any
                 "date": _date_from_name(path),
                 "extension": path.suffix.lstrip(".") or "none",
                 "size_bytes": stat.st_size,
+                "report_area": area.value,
                 "retention_class": retention_class,
                 "reason": reason,
                 "action": "no_move_no_delete_inventory_only",
@@ -157,6 +234,8 @@ def build_inventory(*, reports_dir: Path = DEFAULT_REPORTS_DIR) -> dict[str, Any
             "excluded_active_workstream_count": len(excluded),
             "retention_class_counts": dict(sorted(by_class.items())),
             "topic_counts": dict(sorted(by_topic.items())),
+            "report_area_counts": dict(sorted(area_counts.items())),
+            "area_manifest": dir_map,
         },
         "excluded_active_workstream_paths": excluded,
         "rows": rows,
@@ -174,6 +253,7 @@ def render_markdown(inventory: dict[str, Any], *, title: str = "Nexus Report Ret
     archive_candidates = [row for row in rows if row["retention_class"] == "archive_candidate"]
     keep_rows = [row for row in rows if row["retention_class"].startswith("keep_")]
     unknown_rows = [row for row in rows if row["retention_class"] == "unknown_hold"]
+    area_counts = summary.get("report_area_counts", {})
 
     lines = [
         f"# {title}",
@@ -188,6 +268,7 @@ def render_markdown(inventory: dict[str, Any], *, title: str = "Nexus Report Ret
         f"- Active Zero Trust V2 reports excluded: `{summary['excluded_active_workstream_count']}`",
         f"- Retention class counts: `{summary['retention_class_counts']}`",
         f"- Topic counts: `{summary['topic_counts']}`",
+        f"- Report area counts: `{area_counts}`",
         "",
         "## Keep Rules",
         "- Keep current decision, runtime apply, post-apply smoke, and human-readable summary/index files at `docs/reports` root.",
@@ -237,8 +318,9 @@ def write_inventory(
     json_output: Path = DEFAULT_JSON_OUTPUT,
     md_output: Path = DEFAULT_MD_OUTPUT,
     dry_run: bool = False,
+    area_manifest_path: Path | None = None,
 ) -> dict[str, Any]:
-    inventory = build_inventory(reports_dir=reports_dir)
+    inventory = build_inventory(reports_dir=reports_dir, area_manifest_path=area_manifest_path)
     if not dry_run:
         _write_json(json_output, inventory)
         md_output.parent.mkdir(parents=True, exist_ok=True)
@@ -258,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-output", type=Path, default=None)
     parser.add_argument("--md-output", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path(""))
+    parser.add_argument("--area-manifest", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -269,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         json_output=json_output,
         md_output=md_output,
         dry_run=args.dry_run,
+        area_manifest_path=args.area_manifest,
     )
     print(json.dumps(summary, sort_keys=True, ensure_ascii=False))
     return 0 if summary["status"] == "PASS" else 1

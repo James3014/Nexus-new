@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from scripts.ops.build_report_retention_inventory import build_inventory, main, render_markdown, write_inventory
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from scripts.ops.build_report_retention_inventory import ReportArea, build_inventory, main, render_markdown, write_inventory
 
 
 def test_inventory_excludes_zero_trust_active_workstream(tmp_path):
@@ -15,6 +22,99 @@ def test_inventory_excludes_zero_trust_active_workstream(tmp_path):
     assert inventory["summary"]["excluded_active_workstream_count"] == 1
     assert inventory["rows"][0]["retention_class"] == "archive_candidate"
     assert inventory["rows"][0]["action"] == "no_move_no_delete_inventory_only"
+
+
+def test_inventory_recursive_mode_discovers_nested_files_and_records_area(tmp_path):
+    reports = tmp_path / "docs/reports"
+    (reports / "archive/sf").mkdir(parents=True)
+    (reports / "root-generated/2026-06-25").mkdir(parents=True)
+    (reports / "assets").mkdir(parents=True)
+    (reports / "local_model_armor_handoff_pack_v1").mkdir(parents=True)
+    (reports / "3b-shadow-hardening").mkdir(parents=True)
+    (reports / "root.md").write_text("root", encoding="utf-8")
+    (reports / "archive/sf/historical.json").write_text("{}", encoding="utf-8")
+    (reports / "root-generated/2026-06-25/result.jsonl").write_text("{}\n", encoding="utf-8")
+    (reports / "assets/manifest.json").write_text("{}", encoding="utf-8")
+    (reports / "local_model_armor_handoff_pack_v1/INDEX.md").write_text("handoff", encoding="utf-8")
+    (reports / "3b-shadow-hardening/experiment.md").write_text("experiment", encoding="utf-8")
+
+    inventory = build_inventory(reports_dir=reports)
+    rows = {row["name"]: row for row in inventory["rows"]}
+
+    assert inventory["summary"]["rows"] == 6
+    assert rows["root.md"]["report_area"] == ReportArea.ROOT.value
+    assert rows["historical.json"]["report_area"] == ReportArea.ARCHIVE.value
+    assert rows["result.jsonl"]["report_area"] == ReportArea.GENERATED.value
+    assert rows["manifest.json"]["report_area"] == ReportArea.ASSET.value
+    assert rows["INDEX.md"]["report_area"] == ReportArea.HANDOFF.value
+    assert rows["experiment.md"]["report_area"] == ReportArea.EXPERIMENT.value
+
+
+def test_inventory_does_not_reclassify_archive_as_archive_candidate(tmp_path):
+    reports = tmp_path / "docs/reports"
+    target = reports / "archive/sf/NEXUS_HEEP_EXECUTION_MATRIX.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+
+    inventory = build_inventory(reports_dir=reports)
+
+    assert inventory["rows"][0]["report_area"] == ReportArea.ARCHIVE.value
+    assert inventory["rows"][0]["retention_class"] == "historical_preserved"
+
+
+def test_inventory_marks_unknown_nested_domain_fail_closed(tmp_path):
+    reports = tmp_path / "docs/reports"
+    target = reports / "unexpected-domain/report.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("unknown", encoding="utf-8")
+
+    inventory = build_inventory(reports_dir=reports)
+
+    assert inventory["rows"][0]["report_area"] == ReportArea.UNKNOWN.value
+    assert inventory["rows"][0]["retention_class"] == "unknown_hold"
+    assert inventory["rows"][0]["reason"] == "unknown_nested_report_area"
+
+
+def test_inventory_area_mapping_is_loaded_from_manifest(tmp_path):
+    reports = tmp_path / "docs/reports"
+    target = reports / "custom-generated/result.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    manifest = tmp_path / "report_area_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.report_area_manifest.v1",
+                "version": "v1",
+                "directories": {"custom-generated": "generated"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inventory = build_inventory(reports_dir=reports, area_manifest_path=manifest)
+
+    assert inventory["rows"][0]["report_area"] == ReportArea.GENERATED.value
+    assert inventory["rows"][0]["retention_class"] == "generated_evidence"
+
+
+def test_inventory_rejects_invalid_area_manifest(tmp_path):
+    reports = tmp_path / "docs/reports"
+    reports.mkdir(parents=True)
+    manifest = tmp_path / "report_area_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.report_area_manifest.v1",
+                "version": "v1",
+                "directories": {"bad": "not-an-area"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="not-an-area"):
+        build_inventory(reports_dir=reports, area_manifest_path=manifest)
 
 
 def test_inventory_keeps_manifest_referenced_sf_current_files(tmp_path):
@@ -59,6 +159,7 @@ def test_markdown_states_boundaries(tmp_path):
     assert "Excludes active `ZERO_TRUST_V2` artifacts." in text
     assert "Do not use `git mv`" in text
     assert "Archive Candidates" in text
+    assert "Report area counts:" in text
 
 
 def test_main_default_outputs_remain_under_docs_reports(tmp_path, monkeypatch, capsys):
@@ -72,3 +173,24 @@ def test_main_default_outputs_remain_under_docs_reports(tmp_path, monkeypatch, c
     output = capsys.readouterr().out
     assert '"json_output": "docs/reports/NEXUS_REPORT_RETENTION_INVENTORY_2026-05-22.json"' in output
     assert '"md_output": "docs/reports/NEXUS_REPORT_RETENTION_PLAN_2026-05-22.md"' in output
+
+
+def test_script_direct_invocation_supports_dry_run(tmp_path):
+    reports = tmp_path / "docs/reports"
+    reports.mkdir(parents=True)
+    (reports / "report.md").write_text("report", encoding="utf-8")
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts/ops/build_report_retention_inventory.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--reports-dir", str(reports), "--dry-run"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["rows"] == 1
+    assert payload["dry_run"] is True
