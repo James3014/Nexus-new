@@ -2,15 +2,19 @@
 aliases: '[Onboarding, Command Runbook, Essential Commands, Command Pack]'
 confidence: high
 last_compiled: '2026-04-06'
+lifecycle: superseded
 owner: agent
 related_pages: ''
 source_of_truth: scripts/nexus_cli.py
 status: active
+superseded_by: 00_Home/AGENT_BOOTSTRAP.md
 tags: '[home](System Overview.md), onboarding, commands, runbook]'
 title: Agent Onboarding - Command Pack
 type: '[home](System Overview.md)'
 version_scope: '[v17.1, v22, v23]'
 ---
+
+> **SUPERSEDED** — This page is replaced by [AGENT_BOOTSTRAP.md](AGENT_BOOTSTRAP.md) as the canonical Agent startup sequence. Preserved for historical reference. The startup sequence, task classes, and hard boundaries are defined in AGENT_BOOTSTRAP.
 
 
 

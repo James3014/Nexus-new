@@ -44,7 +44,12 @@ version_scope:
 | `C-01` | **Flow** | v17.1 PDRAC vs v22 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] (探查相位切入點矛盾)。 | OPEN | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | `C-02` | **States**| `write_proof.json` 在舊版缺失，但在 v22 [CI Gate](../06_Ops/Ops - CI/CD Promotion Gate.md) 中為 Mandatory。 | RESOLVED | [Source: ci_gate.py] |
 | `C-03` | **Wise** | v23 `OnlineLearner` 的回饋權重尚未在 `manifest.json` 中定義實體欄位。| PENDING | [Source: 00_Home/System Overview.md] |
-| `C-04` | **Security**| NSP/gRPC 採用明文通訊 (Plaintext)，缺乏 mTLS 加密 (導致系統治理分數定格於 8.5)。 | BACKLOG | [Source: nexus_wiki_vault/06_Ops/Security/Audit - mTLS and Service Mesh Gap.md]]] |
+| `C-04` | **Security**| NSP/gRPC 採用明文通訊 (Plaintext)，缺乏 mTLS 加密 (導致系統治理分分数定格於 8.5)。 | BACKLOG | [Source: nexus_wiki_vault/06_Ops/Security/Audit - mTLS and Service Mesh Gap.md]]] |
+| `C-05` | **Proto** | MUSE_PROTO references obsolete absolute Obsidian path `/Users/jameschen/Downloads/obsidian/` as SSoT. Current canonical path is the repository workspace. | OPEN | [Source: 01_System/MUSE_PROTO.md line 71] |
+| `C-06` | **Proto** | MUSE_PROTO requires Felo-first gate (`search_web`) as mandatory startup step. Current canonical Agent bootstrap is defined in `00_Home/AGENT_BOOTSTRAP.md` with no Felo dependency. | OPEN | [Source: 01_System/MUSE_PROTO.md lines 46-49] |
+| `C-07` | **Proto** | MUSE_PROTO references `STATE.yaml` as a physical state fingerprint. No `STATE.yaml` exists in the current repository. | OPEN | [Source: 01_System/MUSE_PROTO.md line 58] |
+| `C-08` | **Proto** | MUSE_PROTO references `nexus-sync` as a mandatory startup command. No `nexus-sync` command exists in the current codebase. | OPEN | [Source: 01_System/MUSE_PROTO.md line 60] |
+| `C-09` | **Proto** | MUSE_PROTO verified hash (`eb3fed5890ad68f9e459e549f89c0b22`) and communication ID reference a specific Obsidian mount that no longer exists in the repository context. | OPEN | [Source: 01_System/MUSE_PROTO.md lines 79-81] |
 
 ## Upstream
 - **Wiki Linter**: 自動注入發現的結構性衝突。

@@ -5,11 +5,13 @@ created: 2026-04-07 07:29:27+00:00
 governance: Trident 3.0
 id: root_readme_summary
 landscape: structural
+lifecycle: historical
 owner: nexus-core
 path: nexus_wiki_vault/00_Home/Root_README_Summary.md
 priority: P2
 soul_alignment: harmonized
 status: active
+superseded_by: README.md
 tags:
 - nexus
 - governance
@@ -19,6 +21,7 @@ version: v1.0.0
 visibility: internal
 ---
 
+> **HISTORICAL PAGE** — This page is preserved for audit trail. It contains mixed-version content (v9, v17, v22, v23, v26) and generated-link corruption. For the canonical entry point, see [README.md](../README.md). For current state, see [CURRENT_STATE.md](CURRENT_STATE.md).
 
 Waiver: 00_Home/[System Overview](System Overview.md).md
 [source: nexus_wiki_vault/00_Home/System Overview.md]].md]

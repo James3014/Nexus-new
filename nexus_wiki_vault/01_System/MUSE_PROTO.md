@@ -2,6 +2,7 @@
 id: muse_proto
 type: doc
 status: active
+lifecycle: mixed_needs_review
 created: 2026-04-07T07:29:27Z
 updated: 2026-04-07T07:29:27Z
 owner: nexus-core
@@ -15,6 +16,9 @@ visibility: internal
 landscape: structural
 path: /MUSE_PROTO.md
 ---
+
+> **MIXED CONTENT** — This page contains both canonical protocol anchors and outdated references (Felo-first gate, STATE.yaml, nexus-sync, absolute Obsidian path). Conflicts registered in [System - Unknowns and Conflicts](System - Unknowns and Conflicts.md). For the canonical Agent startup sequence, see [AGENT_BOOTSTRAP.md](../00_Home/AGENT_BOOTSTRAP.md).
+
 Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
 [source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
 ## One-sentence summary

@@ -2,6 +2,7 @@
 aliases: '[Nexus CLI [[quickstart|Quickstart]], CLI Minimum Set]'
 confidence: high
 last_compiled: '2026-04-07'
+lifecycle: current
 owner: agent
 related_pages: ''
 source_of_truth: scripts/engine/nexus_cli.py

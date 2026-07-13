@@ -68,21 +68,45 @@ classification_rules:
 
 known_legacy_entries:
   - path: 00_Home/Root_README_Summary.md
-    classification: historical_candidate
+    classification: historical
+    lifecycle: historical
     reason: mixed-version content and generated-link corruption
+    superseded_by: README.md
 
   - path: 00_Home/Agent Onboarding - Command Pack.md
-    classification: superseded_candidate
-    reason: older startup path; pending WIKI-2 classification
+    classification: superseded
+    lifecycle: superseded
+    reason: older startup path with v17-v23 command references
+    superseded_by: 00_Home/AGENT_BOOTSTRAP.md
 
   - path: 00_Home/README_Agent.md
-    classification: superseded_candidate
-    reason: older minimal Agent guide; pending WIKI-2 classification
+    classification: superseded
+    lifecycle: superseded
+    reason: older minimal Agent guide
+    superseded_by: 00_Home/AGENT_BOOTSTRAP.md
 
   - path: 00_Home/Agent_Context_Strategy_Guide.md
-    classification: historical_candidate
-    reason: references absolute paths and repomix artifacts; pending WIKI-2 classification
+    classification: historical
+    lifecycle: historical
+    reason: references absolute paths and repomix artifacts
 
   - path: 01_System/MUSE_PROTO.md
-    classification: mixed_needs_review_candidate
-    reason: contains both canonical protocol anchors and outdated Felo-first/STATE.yaml references; pending WIKI-2 conflict registration
+    classification: mixed_needs_review
+    lifecycle: mixed_needs_review
+    reason: contains canonical protocol anchors but also outdated Felo-first, STATE.yaml, nexus-sync, and absolute Obsidian path references
+    conflicts_registered: [C-05, C-06, C-07, C-08, C-09]
+
+  - path: 00_Home/README_Contributor.md
+    classification: current
+    lifecycle: current
+    reason: still valid contributor guide; cross-linked to PARTNER_ONBOARDING
+
+  - path: 00_Home/Agent Onboarding - Implementation Map.md
+    classification: current
+    lifecycle: current
+    reason: still valid implementation map for navigation
+
+  - path: 00_Home/CLI Surface Quickstart.md
+    classification: current
+    lifecycle: current
+    reason: still valid CLI reference

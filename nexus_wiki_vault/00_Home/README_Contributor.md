@@ -2,6 +2,7 @@
 aliases: '[README_Contributor, Contributor Guide]'
 confidence: high
 last_compiled: '2026-05-06'
+lifecycle: current
 owner: agent
 source_of_truth: compiled-wiki
 status: active
@@ -13,6 +14,8 @@ version_scope: '[v26]'
 
 # 👩‍💻 README: 貢獻者導覽 (Contributor Guide)
 **[ROLE: DEVELOPER | AUDIENCE: CONTRIBUTORS]**
+
+For the canonical onboarding path, see [PARTNER_ONBOARDING.md](PARTNER_ONBOARDING.md).
 
 ## 1. 歡迎加入 Nexus 生態
 我們致力於建立最透明的 AI 治理標準。

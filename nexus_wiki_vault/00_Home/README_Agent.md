@@ -2,14 +2,18 @@
 aliases: '[README_Agent, Agent Guide]'
 confidence: high
 last_compiled: '2026-05-06'
+lifecycle: superseded
 owner: agent
 source_of_truth: compiled-wiki
 status: active
+superseded_by: 00_Home/AGENT_BOOTSTRAP.md
 tags: '[home, agent, governance]'
 title: README Agent
 type: home
 version_scope: '[v26]'
 ---
+
+> **SUPERSEDED** — This page is replaced by [AGENT_BOOTSTRAP.md](AGENT_BOOTSTRAP.md) as the canonical Agent startup sequence and by [CURRENT_STATE.md](CURRENT_STATE.md) for current-state information. Preserved for historical reference.
 
 # 🤖 README: Agent 執行導覽 (Agent Guide)
 **[ROLE: AGENT | AUDIENCE: AI_DRONES]**

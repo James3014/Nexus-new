@@ -2,6 +2,7 @@
 aliases: '[Implementation Map, Nexus Map, Entry Point Map]'
 confidence: high
 last_compiled: '2026-04-06'
+lifecycle: current
 owner: agent
 related_pages: ''
 source_of_truth: scripts/ops/ci_gate.py
