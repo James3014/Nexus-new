@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-`M5-A_OUTCOME_CONTRIBUTION_CONTRACT`
+`M6-A_UNIVERSAL_AGENT_INTERFACE`
 
 ## Completed milestones
 
@@ -17,10 +17,13 @@
 - `CLOUD_AGENT_PROVIDER_CONTRACT_PROVEN` — `b33e706d7`
 - `CLOUD_LOCAL_STAGE_CHAIN_CONTRACT_PROVEN` — `e715b60cf` (deterministic injected contract only; real provider not proven)
 - `CLOUD_LOCAL_QUOTA_DEGRADATION_PROVEN` — `fa963c4af`
+- `LOCAL_ASSIST_OUTCOME_CONTRIBUTION_PROVEN` — `f459d745f`
+- `LOCAL_ASSIST_CAUSAL_VALUE_MEASURED` — `8e96d6fa4` (bounded internal matrix; no public claim)
+- `LOCAL_ASSIST_DEFAULT_POLICY_DECIDED` — `e1c2c49f1` (recommendation only; runtime defaults not promoted)
 
 ## Current commit
 
-`fa963c4af` — `feat(cloud-assist): add quota-aware degradation policy`
+`e1c2c49f1` — `feat(local-assist): add evidence-backed default policy`
 
 ## Evidence
 
@@ -34,6 +37,9 @@
 - Bounded dispatch tests → `6 passed`; skip/advisor/candidate/verified-subtask dispatch share recommendation receipt, task identity, workspace revision, and Agent authority; no formal workspace mutation.
 - Cloud/local stage-chain tests → `5 passed`; stages 1–5, explicit shadow skips, visible local fallback, provider usage/latency, lineage, and no-fake-success failure behavior are covered. Injected provider evidence remains test-only; no real cloud claim.
 - Quota policy tests → `5 passed`; HEALTHY, CONSTRAINED, EXHAUSTED, UNKNOWN, and no-local fail-closed paths preserve reason chains and prohibit silent provider switching.
+- Contribution tests → `5 passed`; receipt-only and consumption-only evidence remain false, while candidate adoption/rejection require causal evidence and hashes.
+- Value matrix tests → `3 passed`; five arms and eight task families share task versions/verifier conditions; infra-invalid rows are separated; bounded value measurement remains internal.
+- Default policy tests → `2 passed`; machine-readable recommendations are emitted only with measured evidence; runtime defaults remain unpromoted.
 - Planner regression and Local Assist focused suites → `144 passed`; two pre-existing failures remain in `tests/engine/test_capability_routing_contracts.py` because the worktree already contains unrelated changes in `nexus/services/local_heal/receipt.py`.
 - Recommendation is embedded as `signal_snapshot["local_assist_recommendation"]` and is deterministic, shadow-only, non-mutating, and route-authority preserving.
 - Machine-readable receipt writer: `write_local_assist_recommendation_receipt`.
@@ -49,4 +55,4 @@
 
 ## Next automatic action
 
-Implement M5-A contribution contract: require traceable causal evidence for adoption, localization, verification, rejection, or retry; never infer contribution from receipt existence or consumption alone.
+Implement M6-A universal Agent interface: expose task identity, recommendation, actions, Assist Envelope, receipts, candidate/verifier/contribution contracts, and claim boundary through CLI/task-file/Python contracts.
