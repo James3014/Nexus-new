@@ -38,6 +38,435 @@ class PipelineRepairMixin:
     def _is_rejected_repair_status(status: Any) -> bool:
         return str(status or "").strip().upper() in REJECTED_REPAIR_STATUSES
 
+    def _local_assist_mode(self, ctx: PipelineContextProtocol) -> str:
+        meta = getattr(ctx.state, "metadata", {}) or {}
+        mode = str(meta.get("local_assist_mode") or "disabled").strip().lower()
+        if mode in {"planner", "explicit", "shadow", "advisor", "disabled"}:
+            from nexus.services.canonical_local_assist_policy import normalize_local_assist_policy
+
+            try:
+                return str(normalize_local_assist_policy(mode)["canonical_policy"])
+            except ValueError:
+                return "disabled"
+        return "disabled"
+
+    def _record_shadow_local_assist(self, ctx: PipelineContextProtocol) -> None:
+        """Record shadow policy without Local model invocation or Online mutation."""
+        from nexus.services.canonical_local_assist_policy import build_canonical_policy_receipt
+
+        meta = ctx.state.metadata
+        task_id = str(meta.get("task_id") or ctx.task_id or "")
+        revision = self._ensure_workspace_revision(ctx)
+        raw_policy = str(meta.get("local_assist_policy_raw") or "shadow")
+        policy_receipt = build_canonical_policy_receipt(
+            policy=raw_policy if raw_policy in {"shadow", "planner"} else "shadow",
+            task={
+                "task_id": task_id,
+                "workspace_revision": revision,
+                "task_statement": str(ctx.task_desc or task_id),
+                "task_type": "repair",
+                "route": {"route_features": {"risk_score": 20, "adjusted_root_cause_confidence": 0.8}},
+            },
+        )
+        meta["local_assist_status"] = "SHADOW_RECORDED"
+        meta["local_assist_shadow_receipt"] = policy_receipt
+        meta["local_context_forwarded"] = False
+        meta["local_assist_contributed"] = False
+        meta["local_provider_call_count"] = 0
+        self._write_unified_runtime_pointer(
+            ctx,
+            {
+                "local_assist_mode": "shadow",
+                "local_assist_status": "SHADOW_RECORDED",
+                "local_context_forwarded": False,
+                "unified_runtime_receipt_path": "",
+                "unified_runtime_task_id": task_id,
+                "online_provider": "",
+                "workspace_revision": revision,
+                "claim_boundary": policy_receipt.get("claim_boundary") or {},
+                "local_provider_call_count": 0,
+                "automatic_dispatch": False,
+                "runtime_behavior_changed": False,
+            },
+        )
+
+    def _ensure_workspace_revision(self, ctx: PipelineContextProtocol) -> str:
+        meta = ctx.state.metadata
+        revision = str(meta.get("workspace_revision") or "").strip()
+        if revision:
+            return revision
+        root = Path(getattr(self.engine, "project_root", ".") or ".")
+        try:
+            revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            revision = f"ws-{str(ctx.task_id or 'task')[:24]}"
+        meta["workspace_revision"] = revision
+        return revision
+
+    def _write_unified_runtime_pointer(self, ctx: PipelineContextProtocol, payload: dict[str, Any]) -> None:
+        """Durable pointer for CLI pipeline report linkage (not a second truth schema)."""
+        root = Path(getattr(self.engine, "project_root", ".") or ".")
+        task_key = str(payload.get("unified_runtime_task_id") or ctx.task_id or "task")
+        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", task_key)[:120] or "task"
+        path = root / ".nexus" / "reports" / "run" / f"{safe}.unified_runtime_pointer.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        ctx.state.metadata["unified_runtime_pointer_path"] = str(path)
+
+    def _build_advisor_local_request(self, ctx: PipelineContextProtocol, *, allowed_files: list[str]):
+        from nexus.services.local_assist_service import LocalAssistRequest, REQUEST_SCHEMA, build_planner_snapshot
+
+        meta = ctx.state.metadata
+        task_id = str(meta.get("task_id") or ctx.task_id or "")
+        revision = self._ensure_workspace_revision(ctx)
+        target = str(meta.get("target_file") or (allowed_files[0] if allowed_files else ""))
+        model = str(meta.get("local_assist_model") or "qwen2.5-coder:7b")
+        snapshot = dict(meta.get("local_assist_planner_snapshot") or {})
+        if not snapshot:
+            snapshot = build_planner_snapshot(task_statement=str(ctx.task_desc or ""), model=model)
+            # Explicit CLI advisor policy authorizes a bounded local model call.
+            snapshot["model_call_allowed"] = True
+            snapshot["executor_provider"] = "ollama"
+            snapshot["executor_model"] = model
+            snapshot["route_truth_source"] = "CapabilityPlanner"
+            snapshot.setdefault("execution_topology", "single_local_model")
+            snapshot.setdefault("protocol_mode", "unified_diff")
+        return LocalAssistRequest(
+            schema=REQUEST_SCHEMA,
+            task_id=task_id,
+            parent_task_id=task_id,
+            workspace_root=str(Path(getattr(self.engine, "project_root", ".") or ".")),
+            workspace_revision=revision,
+            task_statement=str(ctx.task_desc or task_id),
+            action="advisor",
+            allowed_files=tuple(allowed_files),
+            target_file=target if target in allowed_files else allowed_files[0],
+            target_symbol=str(meta.get("target_symbol") or ""),
+            evidence_refs=tuple(
+                meta.get("local_assist_evidence_refs")
+                or [f"pipeline:{task_id}:advisor_request", f"repair:{task_id}:bounded_scope"]
+            ),
+            requested_role="advisor",
+            mutation_policy="isolated_only",
+            planner_snapshot=snapshot,
+        )
+
+    def _run_unified_advisor_online(
+        self,
+        ctx: PipelineContextProtocol,
+        *,
+        online_callable,
+        repair_attempts: int,
+    ) -> tuple[Any, Any]:
+        """Optional Local Advisor then Online via UnifiedRuntime on the active repair seam.
+
+        ``online_callable`` must accept ``(prompt: str)`` and return ``(res, raw)``.
+        """
+        from nexus.services.canonical_local_assist_policy import (
+            collect_bounded_allowed_files,
+            normalize_local_assist_policy,
+        )
+        from nexus.services.unified_runtime import (
+            UnifiedRuntime,
+            UnifiedRuntimeRequest,
+            build_online_route,
+            extract_online_stage_payload,
+            normalize_online_invoker_payload,
+        )
+
+        meta = ctx.state.metadata
+        mode = self._local_assist_mode(ctx)
+        task_id = str(meta.get("task_id") or ctx.task_id or "")
+        revision = self._ensure_workspace_revision(ctx)
+        meta.setdefault("task_id", task_id)
+
+        if mode == "disabled":
+            return online_callable(str(ctx.task_desc or ""))
+
+        if mode == "shadow":
+            try:
+                raw_policy = str(meta.get("local_assist_policy_raw") or "shadow")
+                receipt = {
+                    "schema": "nexus.local_assist.shadow_stage.v1",
+                    "local_assist_mode": "shadow",
+                    "canonical_policy": "shadow",
+                    "legacy_policy_alias": meta.get("legacy_policy_alias"),
+                    "migration_warning": meta.get("migration_warning") or "",
+                    "automatic_dispatch": False,
+                    "runtime_behavior_changed": False,
+                    "local_provider_call_count": 0,
+                    "task_id": task_id,
+                    "workspace_revision": revision,
+                }
+                # Record planner recommendation without invoking local model.
+                from nexus.services.canonical_local_assist_policy import build_canonical_policy_receipt
+
+                policy_receipt = build_canonical_policy_receipt(
+                    policy=raw_policy if raw_policy in {"shadow", "planner"} else "shadow",
+                    task={
+                        "task_id": task_id,
+                        "workspace_revision": revision,
+                        "task_statement": str(ctx.task_desc or task_id),
+                        "task_type": "repair",
+                        "route": {"route_features": {"risk_score": 20, "adjusted_root_cause_confidence": 0.8}},
+                    },
+                )
+                meta["local_assist_status"] = "SHADOW_RECORDED"
+                meta["local_assist_shadow_receipt"] = policy_receipt
+                meta["local_context_forwarded"] = False
+                meta["local_assist_contributed"] = False
+                pointer = {
+                    "local_assist_mode": "shadow",
+                    "local_assist_status": "SHADOW_RECORDED",
+                    "local_context_forwarded": False,
+                    "unified_runtime_receipt_path": "",
+                    "unified_runtime_task_id": task_id,
+                    "online_provider": "",
+                    "workspace_revision": revision,
+                    "claim_boundary": policy_receipt.get("claim_boundary") or {},
+                    "local_provider_call_count": 0,
+                }
+                self._write_unified_runtime_pointer(ctx, pointer)
+            except Exception as exc:
+                logger.warning("local_assist_shadow_record_failed: %s", exc)
+            return online_callable(str(ctx.task_desc or ""))
+
+        # mode == advisor
+        allowed = collect_bounded_allowed_files(meta, str(ctx.task_desc or ""))
+        if not allowed:
+            meta.update(
+                {
+                    "local_assist_status": "NOT_INVOKED",
+                    "local_assist_reason": "bounded_scope_missing",
+                    "degraded_to_online": True,
+                    "degradation_reason": "bounded_scope_missing",
+                    "local_assist_contributed": False,
+                    "local_context_forwarded": False,
+                }
+            )
+            self._write_unified_runtime_pointer(
+                ctx,
+                {
+                    "local_assist_mode": "advisor",
+                    "local_assist_status": "NOT_INVOKED",
+                    "local_context_forwarded": False,
+                    "unified_runtime_receipt_path": "",
+                    "unified_runtime_task_id": task_id,
+                    "online_provider": "",
+                    "workspace_revision": revision,
+                    "degraded_to_online": True,
+                    "degradation_reason": "bounded_scope_missing",
+                    "local_assist_contributed": False,
+                    "claim_boundary": {"public_claim_allowed": False, "production_ready": False},
+                },
+            )
+            res, raw = online_callable(str(ctx.task_desc or ""))
+            meta["online_continued_without_local_assist"] = True
+            return res, raw
+
+        local_request = self._build_advisor_local_request(ctx, allowed_files=allowed)
+        local_service = meta.get("local_assist_service")
+        if local_service is None:
+            from nexus.services.local_assist_service import LocalAssistService
+
+            local_service = LocalAssistService()
+
+        root = Path(getattr(self.engine, "project_root", ".") or ".")
+        receipt_path = root / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def online_invoker(context: dict[str, Any]) -> dict[str, Any]:
+            import json as _json
+
+            prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
+            local_stage = context.get("local", {}) if isinstance(context, dict) else {}
+            local_response = local_stage.get("response", {}) if isinstance(local_stage, dict) else {}
+            local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, dict) else {}
+            local_forwarded = False
+            if local_outputs:
+                prompt = (
+                    prompt
+                    + "\n\n[LOCAL_ASSIST_CONTEXT]\n"
+                    + _json.dumps(local_outputs, ensure_ascii=False, sort_keys=True, default=str)
+                )
+                local_forwarded = True
+            try:
+                res, raw = online_callable(prompt)
+            except Exception as exc:
+                return normalize_online_invoker_payload(
+                    provider=str(meta.get("online_provider") or "gateway"),
+                    task_id=task_id,
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    raw_response="",
+                    usage={},
+                    error=f"online_exception:{exc}",
+                    evidence_refs=[f"online:{task_id}:exception"],
+                    transport="gateway_compatibility",
+                    selection_source="compatibility_default",
+                )
+            result_mapping = res if isinstance(res, dict) else {}
+            delivered = bool(raw or result_mapping)
+            refs = [f"online:{task_id}:repair_seam"] if delivered else []
+            if delivered and local_forwarded:
+                refs.append(f"online:{task_id}:local_context_forwarded")
+            return normalize_online_invoker_payload(
+                provider=str(result_mapping.get("provider") or meta.get("online_provider") or "gateway"),
+                task_id=task_id,
+                invoked=delivered,
+                output_delivered=delivered,
+                gate_passed=delivered,
+                provider_call_count=1 if delivered else 0,
+                response=result_mapping or raw,
+                raw_response=str(raw or ""),
+                usage={},
+                error="" if delivered else "online_empty_response",
+                evidence_refs=refs,
+                transport="gateway_compatibility",
+                selection_source="compatibility_default",
+            )
+
+        def response_contract(context: dict[str, Any]) -> dict[str, Any]:
+            online = context.get("online", {}) if isinstance(context, dict) else {}
+            domain, _raw, payload = extract_online_stage_payload(online if isinstance(online, dict) else {})
+            delivered = bool(domain) or bool(payload.get("output_delivered"))
+            return {
+                "task_id": task_id,
+                "status": "pass" if delivered else "fail",
+                "gate_passed": delivered,
+                "invoked": True,
+                "evidence": "online_payload_present" if delivered else "online_payload_missing",
+                "evidence_refs": [f"verifier:{task_id}:repair_response_contract"],
+            }
+
+        request = UnifiedRuntimeRequest(
+            task_id=task_id,
+            workspace_revision=revision,
+            task_statement=str(ctx.task_desc or task_id),
+            task_type="repair",
+            route=build_online_route(
+                recommended_flow="hybrid",
+                gateway_provider=str(meta.get("oauth_provider") or ""),
+                local_enabled=True,
+            ),
+            online_prompt=str(ctx.task_desc or ""),
+            online_payload=f"attempt={repair_attempts}",
+            online_phase="R",
+            local_enabled=True,
+            local_request=local_request,
+            evidence_refs=(f"pipeline:{task_id}:advisor_online",),
+        )
+
+        try:
+            receipt = UnifiedRuntime(local_service=local_service).run(
+                request,
+                online_invoker=online_invoker,
+                verifier=response_contract,
+                receipt_path=receipt_path,
+            )
+        except Exception as exc:
+            meta.update(
+                {
+                    "local_assist_status": "FAILED",
+                    "local_assist_reason": f"unified_runtime_exception:{exc}",
+                    "degraded_to_online": True,
+                    "degradation_reason": f"unified_runtime_exception:{exc}",
+                    "local_assist_contributed": False,
+                    "local_context_forwarded": False,
+                }
+            )
+            self._write_unified_runtime_pointer(
+                ctx,
+                {
+                    "local_assist_mode": "advisor",
+                    "local_assist_status": "FAILED",
+                    "local_context_forwarded": False,
+                    "unified_runtime_receipt_path": "",
+                    "unified_runtime_task_id": task_id,
+                    "online_provider": "",
+                    "workspace_revision": revision,
+                    "degraded_to_online": True,
+                    "degradation_reason": str(exc),
+                    "local_assist_contributed": False,
+                    "claim_boundary": {"public_claim_allowed": False},
+                },
+            )
+            return online_callable(str(ctx.task_desc or ""))
+
+        local_stage = receipt.get("local", {}) if isinstance(receipt, dict) else {}
+        online_stage = receipt.get("online", {}) if isinstance(receipt, dict) else {}
+        domain, raw, payload = extract_online_stage_payload(online_stage if isinstance(online_stage, dict) else {})
+        local_invoked = bool(local_stage.get("invoked"))
+        local_delivered = bool(local_stage.get("gate_passed") or local_stage.get("status") == "SUCCEEDED")
+        online_invoked = bool(online_stage.get("invoked") or payload.get("invoked"))
+        local_forwarded = any(
+            "local_context_forwarded" in str(ref)
+            for ref in (online_stage.get("evidence_refs") or payload.get("evidence_refs") or [])
+        )
+        # Gate 1 contract also records forwarding inside gateway invoker refs;
+        # UnifiedRuntime merges local into online_prompt before invoker call.
+        if local_invoked and online_invoked and not local_forwarded:
+            # Prompt enrichment is owned by UnifiedRuntime context packing.
+            local_forwarded = True
+
+        claim = dict(receipt.get("claim_boundary") or {})
+        meta["unified_runtime_receipt"] = receipt
+        meta["unified_runtime_receipt_path"] = str(receipt_path)
+        meta["unified_runtime_task_id"] = task_id
+        meta["unified_runtime_claim_boundary"] = claim
+        meta["local_context_forwarded"] = bool(local_forwarded and local_invoked and online_invoked)
+        meta["online_provider"] = str(payload.get("provider") or "")
+        meta["local_assist_contributed"] = bool(local_invoked and local_delivered and local_forwarded)
+        if local_invoked and local_delivered:
+            meta["local_assist_status"] = "SUCCEEDED"
+            meta["degraded_to_online"] = False
+        else:
+            meta["local_assist_status"] = str(local_stage.get("status") or "FAILED")
+            meta["degraded_to_online"] = True
+            meta["degradation_reason"] = str(
+                local_stage.get("reason") or local_stage.get("status") or "local_assist_unavailable"
+            )
+            meta["online_continued_without_local_assist"] = True
+            meta["local_assist_status_detail"] = "ONLINE_CONTINUED_WITHOUT_LOCAL_ASSIST"
+
+        self._write_unified_runtime_pointer(
+            ctx,
+            {
+                "local_assist_mode": "advisor",
+                "local_assist_status": meta.get("local_assist_status"),
+                "local_context_forwarded": meta.get("local_context_forwarded"),
+                "unified_runtime_receipt_path": str(receipt_path),
+                "unified_runtime_task_id": task_id,
+                "online_provider": meta.get("online_provider", ""),
+                "workspace_revision": revision,
+                "degraded_to_online": bool(meta.get("degraded_to_online")),
+                "degradation_reason": meta.get("degradation_reason", ""),
+                "local_assist_contributed": bool(meta.get("local_assist_contributed")),
+                "claim_boundary": claim,
+            },
+        )
+
+        if isinstance(domain, dict):
+            return domain, raw
+        return (
+            {
+                "status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAILED",
+                "patch": str(domain or raw or ""),
+            },
+            raw,
+        )
+
     def _is_mock_engine_environment(self) -> bool:
         try:
             from unittest.mock import MagicMock
@@ -77,6 +506,7 @@ class PipelineRepairMixin:
                 # 🛡️ [v26.1] Surgical Alignment
                 gateway = getattr(ctx.repairer, "gateway", None)
                 use_surgical = ctx.state.metadata.get("use_surgical_repair") or getattr(gateway, "use_surgical_repair", False)
+                local_assist_mode = self._local_assist_mode(ctx)
                 
                 print(f"DEBUG_GATEWAY: gateway={gateway}, use_surgical={use_surgical}, has_surgical_ask={hasattr(gateway, 'surgical_ask')}")
                 if use_surgical and hasattr(gateway, "surgical_ask"):
@@ -94,13 +524,26 @@ class PipelineRepairMixin:
                                 symbols = [match.group(1)]
                             
                     rejection = ctx.state.metadata.get("last_audit_rejection_receipt")
-                    res, raw = gateway.surgical_ask(
-                        task=ctx.task_desc,
-                        symbols=symbols,
-                        phase="R",
-                        rejection_receipt=rejection,
-                        attempt=repair_attempts
-                    )
+
+                    def _online_callable(prompt: str):
+                        return gateway.surgical_ask(
+                            task=prompt,
+                            symbols=symbols,
+                            phase="R",
+                            rejection_receipt=rejection,
+                            attempt=repair_attempts,
+                        )
+
+                    if local_assist_mode in {"advisor", "shadow"}:
+                        res, raw = self._run_unified_advisor_online(
+                            ctx,
+                            online_callable=_online_callable,
+                            repair_attempts=repair_attempts,
+                        )
+                    else:
+                        res, raw = _online_callable(ctx.task_desc)
+                    if not isinstance(res, dict):
+                        res = {"status": "FAILED", "patch": str(res or "")}
 
                     # 🛡️ [v26.1] Hardened Patch Application
                     from nexus.engine.direct_mode import extract_target_files
@@ -134,7 +577,23 @@ class PipelineRepairMixin:
                     else:
                         logger.warning(f"⚠️ [Pipeline:Apply] No target file identified. (Found files: {target_files})")
                 else:
-                    res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
+                    # Non-surgical path: still honor Local Assist policy around Online ask
+                    # when an injectable online callable is provided on metadata (tests),
+                    # otherwise preserve legacy repairer.run behavior.
+                    injected_online = ctx.state.metadata.get("local_assist_online_callable")
+                    if local_assist_mode in {"advisor", "shadow"} and callable(injected_online):
+                        res, raw = self._run_unified_advisor_online(
+                            ctx,
+                            online_callable=injected_online,
+                            repair_attempts=repair_attempts,
+                        )
+                        if not isinstance(res, dict):
+                            res = {"status": "FAILED", "patch": str(res or "")}
+                    else:
+                        if local_assist_mode == "shadow":
+                            # Record shadow recommendation only; Online path unchanged.
+                            self._record_shadow_local_assist(ctx)
+                        res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
             except TypeError:
                 # Backward compatibility for older repairer signatures.
                 res = ctx.repairer.run(ctx.state, ctx.pack)
