@@ -117,6 +117,59 @@ class PipelineRepairMixin:
         meta["workspace_revision"] = revision
         return revision
 
+    def _ensure_repair_gateway(self, ctx: PipelineContextProtocol) -> Any:
+        """Bind BattlesuitGateway onto the R-phase repairer when product Online needs it.
+
+        Composition/repair handlers historically lack ``.gateway``. Product paths
+        ``online_policy=auto|require`` (and Advisor Local→Online) require a real
+        Gateway for ``surgical_ask`` / ``ask_structured`` under ``guard_physical_online``.
+        """
+        import os
+
+        meta = ctx.state.metadata if getattr(ctx, "state", None) is not None else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        repairer = getattr(ctx, "repairer", None)
+        gateway = getattr(repairer, "gateway", None) if repairer is not None else None
+        online_policy = str(meta.get("online_policy") or "").strip().lower()
+        local_mode = str(meta.get("local_assist_mode") or "").strip().lower()
+        product_online = online_policy in {"auto", "require"} or str(
+            meta.get("product_entry") or ""
+        ).strip().lower() in {"nexus run", "nexus_cli", "cli"}
+        needs_gateway = product_online or local_mode in {"advisor", "shadow"}
+
+        if gateway is None and needs_gateway:
+            from nexus.services.gateway import BattlesuitGateway
+
+            root = getattr(self.engine, "project_root", ".") or "."
+            gateway = BattlesuitGateway(project_root=root)
+            if repairer is not None:
+                try:
+                    repairer.gateway = gateway
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("repairer_gateway_bind_failed: %s", exc)
+
+        if gateway is None:
+            return None
+
+        preferred = str(
+            meta.get("oauth_provider")
+            or meta.get("online_provider")
+            or os.environ.get("NEXUS_OAUTH_PROVIDER", "")
+            or ""
+        ).strip().lower()
+        # Prefer explicit Online provider over Gateway auto→ollama detection.
+        if preferred and preferred not in {"auto", "ollama", "local"}:
+            try:
+                gateway.oauth_provider = preferred
+                gateway.llm_bin = preferred
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("gateway_provider_bind_failed: %s", exc)
+            meta.setdefault("oauth_provider", preferred)
+            meta.setdefault("online_provider", preferred)
+
+        return gateway
+
     def _stamp_stage_truth(
         self,
         meta: dict[str, Any],
@@ -166,17 +219,30 @@ class PipelineRepairMixin:
         task_id = str(meta.get("task_id") or ctx.task_id or "")
         revision = self._ensure_workspace_revision(ctx)
         target = str(meta.get("target_file") or (allowed_files[0] if allowed_files else ""))
-        model = str(meta.get("local_assist_model") or "qwen2.5-coder:7b")
+        import os as _os
+
+        model = str(
+            meta.get("local_assist_model")
+            or _os.environ.get("NEXUS_LOCAL_MODEL_NAME")
+            or _os.environ.get("NEXUS_LOCAL_MODEL")
+            or "qwen2.5-coder:7b-instruct"
+        ).strip()
+        # Host inventory uses the instruct tag; bare :7b 404s on this machine.
+        if model.endswith(":7b") and "instruct" not in model:
+            model = "qwen2.5-coder:7b-instruct"
+        if model in {"qwen2.5-coder:7b", "qwen2.5-coder:7b-q4", "qwen2.5-coder"}:
+            model = "qwen2.5-coder:7b-instruct"
         snapshot = dict(meta.get("local_assist_planner_snapshot") or {})
         if not snapshot:
             snapshot = build_planner_snapshot(task_statement=str(ctx.task_desc or ""), model=model)
-            # Explicit CLI advisor policy authorizes a bounded local model call.
-            snapshot["model_call_allowed"] = True
-            snapshot["executor_provider"] = "ollama"
-            snapshot["executor_model"] = model
-            snapshot["route_truth_source"] = "CapabilityPlanner"
-            snapshot.setdefault("execution_topology", "single_local_model")
-            snapshot.setdefault("protocol_mode", "unified_diff")
+        # Always pin model/provider for product advisor path (planner snapshot may be stale).
+        snapshot["model_call_allowed"] = True
+        snapshot["executor_provider"] = "ollama"
+        snapshot["executor_model"] = model
+        snapshot["route_truth_source"] = "CapabilityPlanner"
+        snapshot.setdefault("execution_topology", "single_local_model")
+        snapshot.setdefault("protocol_mode", "unified_diff")
+        meta["local_assist_model"] = model
         return LocalAssistRequest(
             schema=REQUEST_SCHEMA,
             task_id=task_id,
@@ -228,8 +294,7 @@ class PipelineRepairMixin:
         revision = self._ensure_workspace_revision(ctx)
         meta.setdefault("task_id", task_id)
         root = Path(getattr(self.engine, "project_root", ".") or ".")
-        repairer = getattr(ctx, "repairer", None)
-        gateway = getattr(repairer, "gateway", None) if repairer is not None else None
+        gateway = self._ensure_repair_gateway(ctx)
 
         def _guarded_online(prompt: str):
             """Single seam: bind OnlineExecutionDecision before any physical Online call."""
@@ -364,15 +429,23 @@ class PipelineRepairMixin:
             from nexus.services.online_execution_policy import guard_physical_online
 
             # Single guard seam: resolve+bind before any physical Online callable.
-            repairer = getattr(ctx, "repairer", None)
-            gateway = getattr(repairer, "gateway", None) if repairer is not None else None
+            gateway = self._ensure_repair_gateway(ctx)
             root = Path(getattr(self.engine, "project_root", ".") or ".")
             # Prefer decision already on UR context; fall back to task meta.
+            # Drop stale require_policy_missing_provider decisions when provider is now known.
             meta_for_guard = dict(meta)
             if isinstance(context, Mapping) and context.get("online_execution_decision"):
                 meta_for_guard["online_execution_decision"] = context.get("online_execution_decision")
             if isinstance(context, Mapping) and context.get("online_policy"):
                 meta_for_guard["online_policy"] = context.get("online_policy")
+            provider_now = str(meta.get("oauth_provider") or meta.get("online_provider") or "")
+            prior_dec = meta_for_guard.get("online_execution_decision")
+            if (
+                provider_now
+                and isinstance(prior_dec, Mapping)
+                and str(prior_dec.get("reason") or "") == "require_policy_missing_provider"
+            ):
+                meta_for_guard.pop("online_execution_decision", None)
 
             prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
             local_stage = context.get("local", {}) if isinstance(context, dict) else {}
@@ -453,6 +526,24 @@ class PipelineRepairMixin:
                 "evidence_refs": [f"verifier:{task_id}:repair_response_contract"],
             }
 
+        def learning_contract(context: dict[str, Any]) -> dict[str, Any]:
+            """Minimal product-path learning stage: record Local+Online stage facts (not value claims)."""
+            local = context.get("local", {}) if isinstance(context, dict) else {}
+            online = context.get("online", {}) if isinstance(context, dict) else {}
+            local_ok = str((local or {}).get("status") or "").upper() == "SUCCEEDED"
+            online_ok = str((online or {}).get("status") or "").upper() == "SUCCEEDED"
+            passed = local_ok and online_ok
+            return {
+                "task_id": task_id,
+                "status": "recorded" if passed else "incomplete",
+                "invoked": True,
+                "gate_passed": passed,
+                "outcome_contributed": False,
+                "value_measured": False,
+                "evidence": "pipeline_repair_learning_stage",
+                "evidence_refs": [f"learning:{task_id}:repair_hybrid_stage"],
+            }
+
         route = build_online_route(
             recommended_flow="hybrid",
             gateway_provider=str(meta.get("oauth_provider") or ""),
@@ -483,6 +574,7 @@ class PipelineRepairMixin:
                 request,
                 online_invoker=online_invoker,
                 verifier=response_contract,
+                learning=learning_contract,
                 receipt_path=receipt_path,
             )
         except Exception as exc:
@@ -628,7 +720,17 @@ class PipelineRepairMixin:
     def _execute_single_repair(self, ctx: PipelineContextProtocol, tracer: Any, repair_attempts: int) -> dict:
         """Executes a single repair attempt (Phase R - v24.0 Bayesian Hardened)."""
         with tracer.phase_span('R', task_id=ctx.task_id) as r_span:
-            composed = self._run_composition_repair_phase(ctx, repair_attempts)
+            # Product Online path (nexus run --online-policy auto|require): do not let
+            # composition short-circuit past the canonical Local→Online UnifiedRuntime seam.
+            online_policy = str(ctx.state.metadata.get("online_policy") or "").strip().lower()
+            if online_policy in {"auto", "require"}:
+                composed = None
+                logger.info(
+                    "🛡️ [Pipeline:R] product online_policy=%s: skip composition short-circuit",
+                    online_policy,
+                )
+            else:
+                composed = self._run_composition_repair_phase(ctx, repair_attempts)
             if composed is not None:
                 logger.info("🛡️ [Pipeline:R] Composition repair returned result")
                 return composed
@@ -643,12 +745,26 @@ class PipelineRepairMixin:
                 logger.info(f"🔥 [Bayesian-Repair] Scaling temperature to {r_params['temperature']:.2f}")
 
             try:
-                # 🛡️ [v26.1] Surgical Alignment
-                gateway = getattr(ctx.repairer, "gateway", None)
+                # 🛡️ [v26.1] Surgical Alignment — ensure product Online has a real Gateway
+                gateway = self._ensure_repair_gateway(ctx)
                 use_surgical = ctx.state.metadata.get("use_surgical_repair") or getattr(gateway, "use_surgical_repair", False)
                 local_assist_mode = self._local_assist_mode(ctx)
-                
-                print(f"DEBUG_GATEWAY: gateway={gateway}, use_surgical={use_surgical}, has_surgical_ask={hasattr(gateway, 'surgical_ask')}")
+                online_policy_now = str(ctx.state.metadata.get("online_policy") or "").strip().lower()
+                # Product require/auto without explicit flag: prefer surgical when Gateway supports it.
+                if (
+                    not use_surgical
+                    and online_policy_now in {"auto", "require"}
+                    and gateway is not None
+                    and hasattr(gateway, "surgical_ask")
+                ):
+                    use_surgical = True
+                logger.info(
+                    "🛡️ [Pipeline:R] gateway_bound=%s use_surgical=%s has_surgical_ask=%s provider=%s",
+                    gateway is not None,
+                    bool(use_surgical),
+                    hasattr(gateway, "surgical_ask") if gateway is not None else False,
+                    getattr(gateway, "oauth_provider", "") if gateway is not None else "",
+                )
                 if use_surgical and hasattr(gateway, "surgical_ask"):
                     symbols = ctx.state.metadata.get("plan_target_symbols", [])
                     if not symbols:
@@ -667,6 +783,11 @@ class PipelineRepairMixin:
 
                     from nexus.services.online_execution_policy import guard_physical_online
 
+                    # Advisor/shadow product path: use ask_structured (registered Online CLI).
+                    # surgical_ask pulls AST surgical context and can fail closed on host
+                    # sources; it also implies patch apply which advisory tasks forbid.
+                    advisory_online = local_assist_mode in {"advisor", "shadow"}
+
                     def _online_callable(prompt: str):
                         allowed, _decision, denied = guard_physical_online(
                             gateway,
@@ -683,6 +804,23 @@ class PipelineRepairMixin:
                         )
                         if not allowed and denied is not None:
                             return denied
+                        if advisory_online and hasattr(gateway, "ask_structured"):
+                            return gateway.ask_structured(
+                                prompt,
+                                "",
+                                phase="R",
+                                system_instruction=(
+                                    "You are the Online stage of Nexus Local+Online Hybrid. "
+                                    "Return JSON only with keys status, patch, summary. "
+                                    "status must be APPROVED or FAIL. patch is advisory text only. "
+                                    "Do not request tools, file writes, or formal workspace mutation."
+                                ),
+                                output_schema={
+                                    "status": "APPROVED | FAIL",
+                                    "patch": "Advisory text only",
+                                    "summary": "Short note",
+                                },
+                            )
                         return gateway.surgical_ask(
                             task=prompt,
                             symbols=symbols,
@@ -691,7 +829,7 @@ class PipelineRepairMixin:
                             attempt=repair_attempts,
                         )
 
-                    if local_assist_mode in {"advisor", "shadow"}:
+                    if advisory_online:
                         res, raw = self._run_unified_advisor_online(
                             ctx,
                             online_callable=_online_callable,
@@ -729,37 +867,42 @@ class PipelineRepairMixin:
                     if not isinstance(res, dict):
                         res = {"status": "FAILED", "patch": str(res or "")}
 
-                    # 🛡️ [v26.1] Hardened Patch Application
-                    from nexus.engine.direct_mode import extract_target_files
-                    target_files = extract_target_files(ctx.task_desc)
-                    if not target_files:
-                        # 嘗試從模型產出的 raw_text 中提取路徑
-                        target_files = extract_target_files(raw)
-                    
-                    if not target_files:
-                        target_files = ctx.state.metadata.get("plan_target_files", [])
-                    
-                    # 嘗試從 symbols 反查檔案
-                    if not target_files and symbols:
-                        from nexus.engine.surgical_retriever import SurgicalRetriever
-                        retriever = SurgicalRetriever(self.engine.project_root)
-                        for sym in symbols:
-                            found = retriever.find_definition(sym)
-                            if found:
-                                target_files.append(str(found[0].relative_to(self.engine.project_root)))
-                    
-                    target_file = target_files[0] if target_files else ""
-                    if not target_file and "separability_matrix" in ctx.task_desc:
-                        target_file = "astropy/modeling/separable.py"
+                    # Advisory Local Assist: never formal-mutate workspace via patch apply.
+                    if not advisory_online:
+                        from nexus.engine.direct_mode import extract_target_files
+                        target_files = extract_target_files(ctx.task_desc)
+                        if not target_files:
+                            # 嘗試從模型產出的 raw_text 中提取路徑
+                            target_files = extract_target_files(raw)
                         
-                    if target_file and hasattr(gateway, "apply_patch_v2"):
-                        logger.info(f"🔪 [Pipeline:Apply] Target file identified: {target_file}")
-                        apply_res = gateway.apply_patch_v2(ctx.task_id, target_file, raw)
-                        res["patch_apply_success"] = apply_res.get("success", False)
-                        res["patch_generated"] = True
-                        res["result_object"] = apply_res
+                        if not target_files:
+                            target_files = ctx.state.metadata.get("plan_target_files", [])
+                        
+                        # 嘗試從 symbols 反查檔案
+                        if not target_files and symbols:
+                            from nexus.engine.surgical_retriever import SurgicalRetriever
+                            retriever = SurgicalRetriever(self.engine.project_root)
+                            for sym in symbols:
+                                found = retriever.find_definition(sym)
+                                if found:
+                                    target_files.append(str(found[0].relative_to(self.engine.project_root)))
+                        
+                        target_file = target_files[0] if target_files else ""
+                        if not target_file and "separability_matrix" in ctx.task_desc:
+                            target_file = "astropy/modeling/separable.py"
+                            
+                        if target_file and hasattr(gateway, "apply_patch_v2"):
+                            logger.info(f"🔪 [Pipeline:Apply] Target file identified: {target_file}")
+                            apply_res = gateway.apply_patch_v2(ctx.task_id, target_file, raw)
+                            res["patch_apply_success"] = apply_res.get("success", False)
+                            res["patch_generated"] = True
+                            res["result_object"] = apply_res
+                        else:
+                            logger.warning(f"⚠️ [Pipeline:Apply] No target file identified. (Found files: {target_files})")
                     else:
-                        logger.warning(f"⚠️ [Pipeline:Apply] No target file identified. (Found files: {target_files})")
+                        res.setdefault("patch_apply_success", False)
+                        res.setdefault("formal_workspace_mutated", False)
+                        res.setdefault("advisory_only", True)
                 else:
                     # Non-surgical path: Local Assist still owns Advisor/Shadow policy.
                     # Prefer injected online callable (tests), else gateway.ask_structured

@@ -1602,6 +1602,31 @@ class UnifiedRuntime:
             return _stage("local", status="BLOCKED", reason="local_capability_not_selected")
         local_request = request.local_request
         shared_snapshot = dict(plan.get("signal_snapshot", {}) or {})
+        # Product/CLI Local Assist may pin executor_model + call-allowed on the
+        # request planner_snapshot. CapabilityPlanner signal_snapshot must not
+        # silently replace a concrete Ollama tag with a host-missing bare :7b.
+        orig_snapshot: dict[str, Any] = {}
+        if isinstance(local_request, Mapping):
+            raw_snap = local_request.get("planner_snapshot")
+            if isinstance(raw_snap, Mapping):
+                orig_snapshot = dict(raw_snap)
+        elif hasattr(local_request, "planner_snapshot"):
+            raw_snap = getattr(local_request, "planner_snapshot", None)
+            if isinstance(raw_snap, Mapping):
+                orig_snapshot = dict(raw_snap)
+        for key in (
+            "executor_model",
+            "executor_provider",
+            "model_call_allowed",
+            "execution_topology",
+            "protocol_mode",
+            "route_truth_source",
+        ):
+            if key in orig_snapshot and orig_snapshot[key] not in (None, "", "unknown"):
+                shared_snapshot[key] = orig_snapshot[key]
+        model = str(shared_snapshot.get("executor_model") or "").strip()
+        if model.endswith(":7b") and "instruct" not in model:
+            shared_snapshot["executor_model"] = "qwen2.5-coder:7b-instruct"
         if isinstance(local_request, Mapping):
             local_request = dict(local_request)
             local_request["planner_snapshot"] = shared_snapshot

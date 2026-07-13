@@ -1,26 +1,32 @@
 {
   "AUTHORIZATION_REGRESSION_STATUS": "CLOSED",
-  "LIVE_PAIRED_PILOT_STATUS": "COMPLETE",
-  "LOCAL_ONLINE_VERTICAL_STATUS": "PROVEN",
-  "NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE": true,
   "ONLINE_PROVIDER_READY_STATUS": "READY",
+  "LOCAL_ONLINE_VERTICAL_STATUS": "PROVEN",
+  "LIVE_PAIRED_PILOT_STATUS": "COMPLETE",
   "VALUE_CLAIM_STATUS": "NOT_CLAIMED",
-  "also_ready": [
-    "agy",
-    "gemini"
-  ],
+  "NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE": true,
   "authorization_regression_closed": true,
-  "five_task_live_measurement_pipeline_complete": true,
-  "generalized_market_value_proven": false,
-  "git_head": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
   "one_real_online_provider_ready": true,
-  "production_ready": false,
+  "real_local_online_vertical_proven": true,
+  "five_task_live_measurement_pipeline_complete": true,
+  "selected_provider": "grok",
+  "also_ready": [
+    "agy"
+  ],
+  "proven_token_savings": false,
+  "proven_time_savings": false,
   "proven_cost_reduction": false,
   "proven_quality_improvement": false,
-  "proven_time_savings": false,
-  "proven_token_savings": false,
+  "production_ready": false,
   "public_claim_allowed": false,
-  "real_local_online_vertical_proven": true,
-  "selected_provider": "grok",
-  "updated_at": "2026-07-13T23:35:59Z"
+  "generalized_market_value_proven": false,
+  "product_entry_vertical": "nexus run",
+  "vertical_supersedes_ask_unified_claim": true,
+  "git_head": "24c362f7a3418f0b5f4733068591b05610088c24",
+  "updated_at": "2026-07-13T23:59:04Z",
+  "notes": [
+    "R2 vertical proven via product entry: scripts/engine/nexus_cli.py nexus run --local-assist-policy advisor --online-policy require",
+    "Local ollama qwen2.5-coder:7b-instruct invoked+delivered; Online grok invoked+delivered; UR receipt_complete=true",
+    "Prior Gateway.ask_unified-only vertical is superseded as product_entry proof"
+  ]
 }

@@ -1,87 +1,53 @@
-# Live Online Recovery and Paired Pilot — 2026-07-14
+# Local Assist Live Paired Pilot — 2026-07-14
 
 ## Campaign
+`live_paired_20260713T2311Z` — Nexus Live Online Recovery and Five-Task Measured Paired Pilot (R0–R5).
 
-`live_paired_20260713T2311Z` on branch `feature/repair-mainline-p0-20260708`.
+## Terminal
+`NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE = true`
 
-## Starting Baseline
-
-| Field | Value |
+| Field | Status |
 |---|---|
-| Prior HEAD | `b106534a2` |
-| LOCAL_ONLY | PROVEN (5× Ollama) |
-| Prior Gemini Hybrid | IneligibleTierError (false discovery matrix later corrected) |
+| AUTHORIZATION_REGRESSION_STATUS | CLOSED |
+| ONLINE_PROVIDER_READY_STATUS | READY (grok; also agy) |
+| LOCAL_ONLINE_VERTICAL_STATUS | PROVEN via product `nexus run` |
+| LIVE_PAIRED_PILOT_STATUS | COMPLETE (5/5 live pairs, no fixtures) |
+| VALUE_CLAIM_STATUS | NOT_CLAIMED |
 
-## Authorization Regression (R0)
+## Product vertical (R2)
+- Entry: `scripts/engine/nexus_cli.py nexus run --local-assist-policy advisor --online-policy require`
+- Local: ollama `qwen2.5-coder:7b-instruct`, invoked+delivered, call_count=1
+- Online: grok registered print CLI via Gateway, invoked+delivered, call_count=1, gate passed
+- Context forwarded with hashes; UR `receipt_complete=true`, terminal SUCCEEDED
+- Formal workspace mutation: false
+- Log: `SCRATCH/grok-goal-live-paired-r2cli/r2_vertical_nexus_run.log`
+- Receipt: `.nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/vertical_receipt.json`
 
-**Defect A:** scenario `online_command` not classified as inject under workspace deny.
+## Authorization fixes (R0)
+- Injected scenario Online runners authorized as `injected_transport` without credentials
+- Product path binds BattlesuitGateway when repairer lacks gateway
+- `require` decision re-resolves when provider arrives after initial missing-provider seal
+- UnifiedRuntime preserves product Local model pin over CapabilityPlanner bare `:7b` snapshot
 
-**Fix:** inject transport flags + inject-aware registered CLI guard; physical fail-closed preserved.
+## Provider discovery (R1)
+- Selected: **grok** READY / ONLINE_READY / output delivered
+- Blocked / weaker: gemini IneligibleTier / UNSUPPORTED_CLIENT historically; codex/openai PROVIDER_ERROR in earlier probes
+- agy also READY in multi-provider CLI routing
 
-## Provider Discovery (R1) — corrected
+## Five live pairs (R3–R4)
+- 5 task families, arms A (disabled+require) / B (advisor+require)
+- Provider: grok; measurement quality excludes FIXTURE_MEASURED
+- Value claims (savings/quality) remain false — pilot sample only
 
-Probe method: `Gateway.ask_structured` with bound OnlineExecutionDecision and **provider-specific CLI** (not always gemini).
+## Tests
+- Command recorded in `focused_tests.json`
+- Collected 103, passed 103, failed 0
+- HEAD at test capture: `24c362f7a3418f0b5f4733068591b05610088c24`
 
-| Provider | Status |
-|---|---|
-| grok | **READY** (output delivered) |
-| agy | **READY** (output delivered) |
-| gemini | **READY** via agy preference path / or probe |
-| codex | PROVIDER_ERROR (model version mismatch) |
-| openai | PROVIDER_ERROR |
+## Claim boundary
+May be true: authorization closed, one Online provider ready, real Local+Online vertical proven, five-task live measurement pipeline complete.
+Must remain false: proven_*_savings, production_ready, public_claim_allowed, generalized_market_value_proven.
 
-**Selected:** `grok`
-
-## Real Vertical Proof (R2)
-
-| Field | Value |
-|---|---|
-| Seam | Gateway.ask_unified + UnifiedRuntime |
-| Online policy | require |
-| Local | ollama qwen2.5-coder:7b-instruct, invoked+delivered, calls≥1 |
-| Online | grok, ONLINE_READY, invoked+delivered, gate passed |
-| Context forward | true |
-| Verifier | passed |
-| receipt_complete | true |
-| REAL_LOCAL_ONLINE_VERTICAL_PROVEN | **true** |
-
-## Five Live Pairs (R3)
-
-| Field | Value |
-|---|---|
-| Pairs | **5/5** complete |
-| Provider | grok (same for all arms) |
-| Arms | A disabled+require / B advisor+require |
-| Order | alternating A/B |
-| FIXTURE_MEASURED in live set | **false** |
-| fixture_rows | 0 |
-
-## Measurement Integrity (R4)
-
-Live qualities: PROVIDER_REPORTED / LOCALLY_MEASURED / UNAVAILABLE (no FIXTURE_MEASURED).
-Deltas recomputed; pair invariants enforced.
-
-## Terminal States
-
-```text
-AUTHORIZATION_REGRESSION_STATUS = CLOSED
-ONLINE_PROVIDER_READY_STATUS    = READY
-LOCAL_ONLINE_VERTICAL_STATUS    = PROVEN
-LIVE_PAIRED_PILOT_STATUS        = COMPLETE
-VALUE_CLAIM_STATUS              = NOT_CLAIMED
-NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE = true
-```
-
-## Claim Boundary
-
-| Flag | Value |
-|---|---|
-| authorization_regression_closed | true |
-| one_real_online_provider_ready | true |
-| real_local_online_vertical_proven | true |
-| five_task_live_measurement_pipeline_complete | true |
-| proven_*_savings / production_ready / public_claim_allowed | **false** |
-
-## Next Benchmark
-
-Larger 30–50 task set; optional multi-repeat pairs; never auto-promote savings claims.
+## Evidence
+- `.nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/`
+- Mirror: `docs/reports/local_assist_live_paired_20260714_evidence/`

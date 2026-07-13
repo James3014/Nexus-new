@@ -1,17 +1,18 @@
 {
   "schema": "nexus.unified_runtime.receipt.v1",
-  "task_id": "live-vertical-5fef46a9",
-  "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
-  "task_statement_hash": "1c8ea6537cfd880b3e08d4ea4fb9f3a9671d961a04abed810ece8f58911678eb",
+  "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+  "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
+  "task_statement_hash": "d54532894cbfc4bed30576751e1c78074aef4992b2045fff6d3bbe1d55cc981a",
   "context_trace": {
-    "task_id": "live-vertical-5fef46a9",
-    "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
-    "task_statement_hash": "1c8ea6537cfd880b3e08d4ea4fb9f3a9671d961a04abed810ece8f58911678eb",
-    "online_prompt_hash": "36103d0db54f4283b5d5d4bd94a90cc2cfe6a303e58a6045749baf8d55def468",
-    "online_payload_hash": "84ae0e973f5acf924081318fd9803f7db0fec61c59fb180cd00d45194e672042",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
+    "task_statement_hash": "d54532894cbfc4bed30576751e1c78074aef4992b2045fff6d3bbe1d55cc981a",
+    "online_prompt_hash": "b3ce86d6354e5aec784d9a4201ac98cc6477f826f111a0bd58b7c59b9f0ac27c",
+    "online_payload_hash": "1ac0a71758e9ce73072fec4adc2dcf10882332b6bf1d96bbe1c2a9c8ec1e3710",
     "capability_results_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
     "selected_capabilities": [
       "harness_preflight_sensor",
+      "repair_loop",
       "research_route",
       "delivery_gate",
       "mempalace_gate",
@@ -39,6 +40,7 @@
     "reason": "",
     "selected_capabilities": [
       "harness_preflight_sensor",
+      "repair_loop",
       "research_route",
       "delivery_gate",
       "mempalace_gate",
@@ -47,7 +49,7 @@
       "local_model_executor"
     ],
     "plan_schema": "nexus_capability_plan_v1",
-    "plan_hash": "125113b14ed7ced230b4194c77ece214448aa551b1eed4fc296333b9c0e96f33"
+    "plan_hash": "1dbe2d1af14fc274a00c6f0cfd3ee8ac87d4f1a21ad47d4967f3c6fab8b1ccc3"
   },
   "capabilities": [
     {
@@ -61,7 +63,22 @@
       "gate_passed": false,
       "outcome_contributed": false,
       "evidence_refs": [],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+      "status": "SELECTED_NOT_EXECUTED",
+      "reason": "planner_selected_no_runtime_executor"
+    },
+    {
+      "name": "repair_loop",
+      "selected": true,
+      "selection_source": "CapabilityPlanner",
+      "delegated_to": "PlannerOnly",
+      "stage": "",
+      "invoked": false,
+      "evidence_present": false,
+      "gate_passed": false,
+      "outcome_contributed": false,
+      "evidence_refs": [],
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "SELECTED_NOT_EXECUTED",
       "reason": "planner_selected_no_runtime_executor"
     },
@@ -76,7 +93,7 @@
       "gate_passed": false,
       "outcome_contributed": false,
       "evidence_refs": [],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "SELECTED_NOT_EXECUTED",
       "reason": "planner_selected_no_runtime_executor"
     },
@@ -91,7 +108,7 @@
       "gate_passed": false,
       "outcome_contributed": false,
       "evidence_refs": [],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "SELECTED_NOT_EXECUTED",
       "reason": "planner_selected_no_runtime_executor"
     },
@@ -106,7 +123,7 @@
       "gate_passed": false,
       "outcome_contributed": false,
       "evidence_refs": [],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "SELECTED_NOT_EXECUTED",
       "reason": "planner_selected_no_runtime_executor"
     },
@@ -121,7 +138,7 @@
       "gate_passed": false,
       "outcome_contributed": false,
       "evidence_refs": [],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "SELECTED_NOT_EXECUTED",
       "reason": "planner_selected_no_runtime_executor"
     },
@@ -136,7 +153,7 @@
       "gate_passed": false,
       "outcome_contributed": false,
       "evidence_refs": [],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "SELECTED_NOT_EXECUTED",
       "reason": "planner_selected_no_runtime_executor"
     },
@@ -151,9 +168,10 @@
       "gate_passed": true,
       "outcome_contributed": false,
       "evidence_refs": [
-        "vertical:live-vertical-5fef46a9:req"
+        "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_request",
+        "repair:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:bounded_scope"
       ],
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "INVOKED",
       "reason": ""
     }
@@ -173,18 +191,19 @@
     "gate_passed": true,
     "outcome_contributed": false,
     "evidence_refs": [
-      "vertical:live-vertical-5fef46a9:req"
+      "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_request",
+      "repair:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:bounded_scope"
     ],
     "reason": "",
-    "planner_snapshot_hash": "44bd00abcab1802f8e3e682c76130693d19a4254721bf05c47fe4a3a0516e4c6",
-    "task_id": "live-vertical-5fef46a9",
-    "response_task_id": "live-vertical-5fef46a9",
+    "planner_snapshot_hash": "196766b0fa7be3b74bc54d11d0ba1521b3e37c31107f49be14b07887d97a47ce",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
     "task_identity_shared": true,
     "response": {
       "schema": "nexus.local_assist.response.v1",
       "status": "SUCCEEDED",
-      "task_id": "live-vertical-5fef46a9",
-      "parent_task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+      "parent_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "action": "advisor",
       "planner_decision": {
         "source": "CapabilityPlanner",
@@ -200,7 +219,7 @@
         "qwen2.5-coder:7b-instruct"
       ],
       "local_outputs": {
-        "diagnosis": "### Diagnosis:\n\n**Live-Smoke Mutation Policy**: Confirmed to be `isolation_only`.\n**Allowed Files**: Bounded within the specified directory structure.\n\n### Evidence References:\n- **vertical:live-vertical-5fef46a9:req**\n\n### Risk Findings:\nNo immediate high-risk findings identified. The mutation policy is set to `isolation_only`, which limits changes to isolated components, reducing potential impact on other parts of the system.\n\n### Confidence:\nHigh (90%).\n\n### Next Action:\nNo immediate action required. Ensure that any future changes adhere strictly to the `isolation_only` policy and do not exceed the allowed files as specified. Regularly review and audit the mutation policy and allowed files to maintain security and compliance.",
+        "diagnosis": "**Concise Diagnosis**: The `gate2_live_smoke_task.json` file is within the bounds of allowed modifications for the `live-vertical-cli-r2e` pipeline. However, any formal workspace mutations are strictly forbidden.\n\n**Recommended Files/Symbols**: `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n**Risk Findings**: There are no risk findings related to the current file content or scope of allowed modifications.\n\n**Confidence**: High\n\n**Next Action**: Review and make necessary changes within the bounds of the specified JSON schema for `gate2_live_smoke_task.json`. Ensure that no formal workspace mutations occur.",
         "recommended_next_action": "Online Agent must independently decide and record consumption.",
         "provider_error": ""
       },
@@ -216,9 +235,10 @@
         "verifier_status": "not_run",
         "verifier_command": []
       },
-      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/live-vertical-5fef46a9/execution_receipt.json",
+      "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only./execution_receipt.json",
       "evidence_refs": [
-        "vertical:live-vertical-5fef46a9:req"
+        "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_request",
+        "repair:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:bounded_scope"
       ],
       "fallback_reason": "",
       "claim_boundary": {
@@ -244,33 +264,44 @@
     "gate_passed": true,
     "outcome_contributed": false,
     "evidence_refs": [
-      "online:grok:live-vertical-5fef46a9:subprocess",
-      "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+      "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_seam",
+      "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:local_context_forwarded"
     ],
     "reason": "",
-    "task_id": "live-vertical-5fef46a9",
-    "response_task_id": "live-vertical-5fef46a9",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
     "task_identity_shared": true,
     "response": {
       "provider": "grok",
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "invoked": true,
       "output_delivered": true,
       "gate_passed": true,
       "provider_call_count": 1,
-      "response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
-      "raw_response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
+      "response": {
+        "status": "APPROVED",
+        "provider": "grok",
+        "provider_call_count": 1,
+        "invoked": true,
+        "output_delivered": true,
+        "usage": {},
+        "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
+        "gateway_prompt_chars": 478,
+        "gateway_payload_chars": 926,
+        "gateway_total_chars": 1404,
+        "gateway_timeout_sec": 120,
+        "provider_path": "grok"
+      },
+      "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
       "usage": {},
       "error": "",
       "evidence_refs": [
-        "online:grok:live-vertical-5fef46a9:subprocess",
-        "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+        "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_seam",
+        "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:local_context_forwarded"
       ],
       "execution_role": "online",
-      "transport": "registered_cli",
-      "selection_source": "explicit_request",
-      "returncode": 0,
-      "stderr": ""
+      "transport": "gateway_compatibility",
+      "selection_source": "compatibility_default"
     }
   },
   "online_preflight": {
@@ -297,19 +328,20 @@
     "gate_passed": true,
     "outcome_contributed": false,
     "evidence_refs": [
-      "v:live-vertical-5fef46a9"
+      "verifier:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_response_contract"
     ],
     "reason": "",
-    "task_id": "live-vertical-5fef46a9",
-    "response_task_id": "live-vertical-5fef46a9",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
     "task_identity_shared": true,
     "response": {
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "pass",
       "gate_passed": true,
       "invoked": true,
+      "evidence": "online_payload_present",
       "evidence_refs": [
-        "v:live-vertical-5fef46a9"
+        "verifier:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_response_contract"
       ]
     }
   },
@@ -319,24 +351,25 @@
     "invoked": true,
     "evidence_present": true,
     "gate_passed": true,
-    "outcome_contributed": true,
+    "outcome_contributed": false,
     "evidence_refs": [
-      "learning:live-vertical-5fef46a9"
+      "learning:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_hybrid_stage"
     ],
     "reason": "",
-    "task_id": "live-vertical-5fef46a9",
-    "response_task_id": "live-vertical-5fef46a9",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
     "task_identity_shared": true,
     "response": {
-      "task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "status": "recorded",
       "invoked": true,
       "gate_passed": true,
+      "outcome_contributed": false,
+      "value_measured": false,
+      "evidence": "pipeline_repair_learning_stage",
       "evidence_refs": [
-        "learning:live-vertical-5fef46a9"
-      ],
-      "outcome_contributed": true,
-      "value_measured": false
+        "learning:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_hybrid_stage"
+      ]
     }
   },
   "stages": [
@@ -353,6 +386,7 @@
       "reason": "",
       "selected_capabilities": [
         "harness_preflight_sensor",
+        "repair_loop",
         "research_route",
         "delivery_gate",
         "mempalace_gate",
@@ -361,7 +395,7 @@
         "local_model_executor"
       ],
       "plan_schema": "nexus_capability_plan_v1",
-      "plan_hash": "125113b14ed7ced230b4194c77ece214448aa551b1eed4fc296333b9c0e96f33"
+      "plan_hash": "1dbe2d1af14fc274a00c6f0cfd3ee8ac87d4f1a21ad47d4967f3c6fab8b1ccc3"
     },
     {
       "name": "local",
@@ -371,18 +405,19 @@
       "gate_passed": true,
       "outcome_contributed": false,
       "evidence_refs": [
-        "vertical:live-vertical-5fef46a9:req"
+        "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_request",
+        "repair:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:bounded_scope"
       ],
       "reason": "",
-      "planner_snapshot_hash": "44bd00abcab1802f8e3e682c76130693d19a4254721bf05c47fe4a3a0516e4c6",
-      "task_id": "live-vertical-5fef46a9",
-      "response_task_id": "live-vertical-5fef46a9",
+      "planner_snapshot_hash": "196766b0fa7be3b74bc54d11d0ba1521b3e37c31107f49be14b07887d97a47ce",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+      "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "task_identity_shared": true,
       "response": {
         "schema": "nexus.local_assist.response.v1",
         "status": "SUCCEEDED",
-        "task_id": "live-vertical-5fef46a9",
-        "parent_task_id": "live-vertical-5fef46a9",
+        "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+        "parent_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
         "action": "advisor",
         "planner_decision": {
           "source": "CapabilityPlanner",
@@ -398,7 +433,7 @@
           "qwen2.5-coder:7b-instruct"
         ],
         "local_outputs": {
-          "diagnosis": "### Diagnosis:\n\n**Live-Smoke Mutation Policy**: Confirmed to be `isolation_only`.\n**Allowed Files**: Bounded within the specified directory structure.\n\n### Evidence References:\n- **vertical:live-vertical-5fef46a9:req**\n\n### Risk Findings:\nNo immediate high-risk findings identified. The mutation policy is set to `isolation_only`, which limits changes to isolated components, reducing potential impact on other parts of the system.\n\n### Confidence:\nHigh (90%).\n\n### Next Action:\nNo immediate action required. Ensure that any future changes adhere strictly to the `isolation_only` policy and do not exceed the allowed files as specified. Regularly review and audit the mutation policy and allowed files to maintain security and compliance.",
+          "diagnosis": "**Concise Diagnosis**: The `gate2_live_smoke_task.json` file is within the bounds of allowed modifications for the `live-vertical-cli-r2e` pipeline. However, any formal workspace mutations are strictly forbidden.\n\n**Recommended Files/Symbols**: `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n**Risk Findings**: There are no risk findings related to the current file content or scope of allowed modifications.\n\n**Confidence**: High\n\n**Next Action**: Review and make necessary changes within the bounds of the specified JSON schema for `gate2_live_smoke_task.json`. Ensure that no formal workspace mutations occur.",
           "recommended_next_action": "Online Agent must independently decide and record consumption.",
           "provider_error": ""
         },
@@ -414,9 +449,10 @@
           "verifier_status": "not_run",
           "verifier_command": []
         },
-        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/live-vertical-5fef46a9/execution_receipt.json",
+        "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only./execution_receipt.json",
         "evidence_refs": [
-          "vertical:live-vertical-5fef46a9:req"
+          "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_request",
+          "repair:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:bounded_scope"
         ],
         "fallback_reason": "",
         "claim_boundary": {
@@ -441,33 +477,44 @@
       "gate_passed": true,
       "outcome_contributed": false,
       "evidence_refs": [
-        "online:grok:live-vertical-5fef46a9:subprocess",
-        "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+        "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_seam",
+        "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:local_context_forwarded"
       ],
       "reason": "",
-      "task_id": "live-vertical-5fef46a9",
-      "response_task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+      "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "task_identity_shared": true,
       "response": {
         "provider": "grok",
-        "task_id": "live-vertical-5fef46a9",
+        "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
         "invoked": true,
         "output_delivered": true,
         "gate_passed": true,
         "provider_call_count": 1,
-        "response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
-        "raw_response": "Confirming live-smoke mutation policy and allowed_files bounds from repo sources.```json\n{\n  \"advisory\": \"live-smoke mutation_policy is isolated_only (not isolation_only); allowed_files stay non-empty and fixture-bounded\",\n  \"mutation_policy\": \"isolated_only\",\n  \"allowed_files\": [\"docs/bench/local_assist/gate2_live_smoke_task.json\"],\n  \"bounds\": {\n    \"request_patch\": false,\n    \"formal_workspace_mutation_allowed\": false,\n    \"action\": \"advisor\",\n    \"rejects_non_isolated_mutation\": true,\n    \"rejects_empty_allowed_files\": true\n  },\n  \"evidence_refs\": [\n    \"docs/bench/local_assist/gate2_live_smoke_task.json\",\n    \"nexus/services/local_assist_live_smoke.py:translate_live_smoke_to_request\",\n    \"tests/services/test_local_assist_live_smoke.py\",\n    \"vertical:live-vertical-5fef46a9:req\"\n  ],\n  \"risk_findings\": [],\n  \"confidence\": 0.95,\n  \"next_action\": \"consume as advisory-only; no patch; keep future live-smoke payloads isolated_only with explicit bounded allowed_files\",\n  \"local_assist_note\": \"prior diagnosis typo isolation_only corrected to isolated_only; no formal workspace mutation\"\n}\n```\n",
+        "response": {
+          "status": "APPROVED",
+          "provider": "grok",
+          "provider_call_count": 1,
+          "invoked": true,
+          "output_delivered": true,
+          "usage": {},
+          "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
+          "gateway_prompt_chars": 478,
+          "gateway_payload_chars": 926,
+          "gateway_total_chars": 1404,
+          "gateway_timeout_sec": 120,
+          "provider_path": "grok"
+        },
+        "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
         "usage": {},
         "error": "",
         "evidence_refs": [
-          "online:grok:live-vertical-5fef46a9:subprocess",
-          "online:grok:live-vertical-5fef46a9:local_context_forwarded"
+          "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_seam",
+          "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:local_context_forwarded"
         ],
         "execution_role": "online",
-        "transport": "registered_cli",
-        "selection_source": "explicit_request",
-        "returncode": 0,
-        "stderr": ""
+        "transport": "gateway_compatibility",
+        "selection_source": "compatibility_default"
       }
     },
     {
@@ -478,19 +525,20 @@
       "gate_passed": true,
       "outcome_contributed": false,
       "evidence_refs": [
-        "v:live-vertical-5fef46a9"
+        "verifier:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_response_contract"
       ],
       "reason": "",
-      "task_id": "live-vertical-5fef46a9",
-      "response_task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+      "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "task_identity_shared": true,
       "response": {
-        "task_id": "live-vertical-5fef46a9",
+        "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
         "status": "pass",
         "gate_passed": true,
         "invoked": true,
+        "evidence": "online_payload_present",
         "evidence_refs": [
-          "v:live-vertical-5fef46a9"
+          "verifier:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_response_contract"
         ]
       }
     },
@@ -500,35 +548,37 @@
       "invoked": true,
       "evidence_present": true,
       "gate_passed": true,
-      "outcome_contributed": true,
+      "outcome_contributed": false,
       "evidence_refs": [
-        "learning:live-vertical-5fef46a9"
+        "learning:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_hybrid_stage"
       ],
       "reason": "",
-      "task_id": "live-vertical-5fef46a9",
-      "response_task_id": "live-vertical-5fef46a9",
+      "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+      "response_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
       "task_identity_shared": true,
       "response": {
-        "task_id": "live-vertical-5fef46a9",
+        "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
         "status": "recorded",
         "invoked": true,
         "gate_passed": true,
+        "outcome_contributed": false,
+        "value_measured": false,
+        "evidence": "pipeline_repair_learning_stage",
         "evidence_refs": [
-          "learning:live-vertical-5fef46a9"
-        ],
-        "outcome_contributed": true,
-        "value_measured": false
+          "learning:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_hybrid_stage"
+        ]
       }
     }
   ],
   "evidence_refs": [
-    "learning:live-vertical-5fef46a9",
-    "online:grok:live-vertical-5fef46a9:local_context_forwarded",
-    "online:grok:live-vertical-5fef46a9:subprocess",
+    "learning:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_hybrid_stage",
+    "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:local_context_forwarded",
+    "online:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_seam",
+    "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_online",
+    "pipeline:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:advisor_request",
+    "repair:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:bounded_scope",
     "runtime:planner_invoked",
-    "v:live-vertical-5fef46a9",
-    "vertical:live-vertical-5fef46a9",
-    "vertical:live-vertical-5fef46a9:req"
+    "verifier:live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.:repair_response_contract"
   ],
   "receipt_complete": true,
   "terminal_status": "SUCCEEDED",
@@ -537,9 +587,9 @@
     "planner_shared": true,
     "local_online_continuation": true,
     "receipt_complete": true,
-    "outcome_contributed": true,
+    "outcome_contributed": false,
     "value_measured": false,
     "public_claim_allowed": false
   },
-  "receipt_path": ".nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/vertical_receipt.json"
+  "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/unified_runtime/live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only..json"
 }

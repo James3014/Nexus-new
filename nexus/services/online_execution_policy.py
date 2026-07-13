@@ -115,16 +115,19 @@ def build_online_execution_context_fields(
     task_id: str = "",
     workspace_revision: str = "",
     policy_source: str = "cli",
+    requested_provider: str = "",
 ) -> dict[str, Any]:
     """Fields for TaskRequest.execution_context propagation."""
     policy = normalize_online_policy(online_policy)
+    provider = str(requested_provider or "").strip().lower()
     decision = resolve_online_execution_decision(
         task_online_policy=policy,
         project_root=project_root,
         planner_online_needed=policy in {"auto", "require"},
         injected_transport=False,
+        requested_provider=provider,
     )
-    return {
+    fields: dict[str, Any] = {
         "online_policy": policy,
         "online_execution_requested": bool(decision.online_execution_requested),
         "online_execution_authorized": bool(decision.online_execution_authorized),
@@ -136,6 +139,10 @@ def build_online_execution_context_fields(
         "workspace_revision": str(workspace_revision or ""),
         "online_execution_decision": decision.to_dict(),
     }
+    if provider:
+        fields["oauth_provider"] = provider
+        fields["online_provider"] = provider
+    return fields
 
 
 def resolve_online_execution_decision(
@@ -493,18 +500,36 @@ def resolve_decision_from_meta(
 ) -> OnlineExecutionDecision:
     """Resolve one OnlineExecutionDecision from pipeline/task metadata."""
     data = dict(meta or {})
-    prior = decision_from_context(data)
-    if prior is not None:
-        return prior
-    prior = decision_from_context({"online_execution_decision": data.get("online_execution_decision")})
-    if prior is not None:
-        return prior
     provider = str(
         requested_provider
         or data.get("online_provider")
         or data.get("oauth_provider")
         or ""
     ).strip().lower()
+
+    def _stale_missing_provider(prior: OnlineExecutionDecision | None) -> bool:
+        """True when require/auto was resolved before a concrete provider was known."""
+        if prior is None:
+            return False
+        if not provider:
+            return False
+        if str(prior.requested_provider or "").strip():
+            return False
+        if prior.reason == "require_policy_missing_provider":
+            return True
+        # Prior denied only because provider was empty under require/auto.
+        return (
+            prior.online_policy in {"auto", "require"}
+            and not prior.online_execution_authorized
+            and prior.preflight_status == ONLINE_CONFIGURATION_INVALID
+        )
+
+    prior = decision_from_context(data)
+    if prior is not None and not _stale_missing_provider(prior):
+        return prior
+    prior = decision_from_context({"online_execution_decision": data.get("online_execution_decision")})
+    if prior is not None and not _stale_missing_provider(prior):
+        return prior
     # Empty/missing task policy is not an explicit task deny — only literal "deny"
     # wins over inject/workspace. Unset falls through: inject → workspace → env → fail-closed.
     task_policy = str(data.get("online_policy") or "").strip().lower()

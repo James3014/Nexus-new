@@ -1044,15 +1044,50 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy, onli
         workspace_revision=revision,
         policy_source="cli",
     )
+    # Provider identity for physical Online CLI — resolve before authorization decision
+    # so require/auto is not sealed as require_policy_missing_provider.
+    oauth = str(os.environ.get("NEXUS_OAUTH_PROVIDER", "") or "").strip().lower()
+    if oauth in {"auto", "ollama", "local", ""}:
+        oauth = ""
     online_fields = build_online_execution_context_fields(
         online_policy=online_norm,
         project_root=REPO_ROOT,
         task_id=str(task_id),
         workspace_revision=revision,
         policy_source="cli",
+        requested_provider=oauth,
     )
     execution_context.update(online_fields)
     execution_context["product_entry"] = "nexus run"
+    if oauth:
+        execution_context["oauth_provider"] = oauth
+        execution_context["online_provider"] = oauth
+    # Bounded advisory files for Local Assist when not otherwise specified.
+    execution_context.setdefault(
+        "target_files",
+        ["docs/bench/local_assist/gate2_live_smoke_task.json"],
+    )
+    execution_context.setdefault(
+        "target_file",
+        "docs/bench/local_assist/gate2_live_smoke_task.json",
+    )
+    # Local Ollama gates for product advisor/shadow (fail-closed unless explicitly allowed).
+    if policy_norm.get("canonical_policy") in {"advisor", "shadow"}:
+        local_model = (
+            str(os.environ.get("NEXUS_LOCAL_MODEL_NAME") or "").strip()
+            or str(os.environ.get("NEXUS_LOCAL_MODEL") or "").strip()
+            or "qwen2.5-coder:7b-instruct"
+        )
+        execution_context.setdefault("local_assist_model", local_model)
+        # Enable physical Local model call only when operator has not denied it.
+        if os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "":
+            os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
+        if not str(os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER") or "").strip():
+            os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
+        if not str(os.environ.get("NEXUS_LOCAL_MODEL_NAME") or "").strip():
+            os.environ["NEXUS_LOCAL_MODEL_NAME"] = local_model
+        if not str(os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER") or "").strip():
+            os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "ollama"
     policy_receipt = None
     policy_path = None
     if policy_norm["canonical_policy"] != "disabled":
@@ -2878,12 +2913,23 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
     name="run",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
-@click.option("--local-assist-policy", type=click.Choice(["planner", "explicit", "disabled"]), default=None)
+@click.option(
+    "--local-assist-policy",
+    type=click.Choice(["disabled", "shadow", "advisor", "planner", "explicit"]),
+    default=None,
+)
+@click.option(
+    "--online-policy",
+    type=click.Choice(["deny", "auto", "require"]),
+    default=None,
+)
 @click.pass_context
-def compat_run(ctx: click.Context, local_assist_policy: str | None):
-    """Compatibility alias for `nexus run`."""
+def compat_run(ctx: click.Context, local_assist_policy: str | None, online_policy: str | None):
+    """Compatibility alias for `nexus run` (forwards to nested group)."""
     if local_assist_policy is not None:
         ctx.args.extend(["--local-assist-policy", local_assist_policy])
+    if online_policy is not None:
+        ctx.args.extend(["--online-policy", online_policy])
     _forward_to_nested_nexus(ctx, "run")
 
 

@@ -1,14 +1,466 @@
 {
-  "policy": "campaign_only",
-  "paths": [
-    "nexus/services/gateway.py",
-    "nexus/services/unified_runtime.py",
-    "nexus/services/online_execution_policy.py",
-    "scripts/ops/unified_runtime_scenarios.py",
-    "tests/ops/test_unified_runtime_scenarios.py",
-    "tests/services/test_unified_runtime.py",
-    "docs/reports/local_assist_live_paired_20260714.md",
-    "docs/reports/local_assist_live_paired_20260714_evidence/",
-    "docs/bench/local_assist/live_paired_tasks/"
-  ]
+  "files": [
+    {
+      "path": ".nexus/reports/learn/learning_closure.jsonl",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": ".nexus/reports/learn/phase_slo_summary.json",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": ".nexus/reports/learn/phase_writeback.jsonl",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": ".nexus/reports/startup_hardening/startup_contract_ack.json",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": ".nexus/reports/startup_hardening/startup_contract_check_report.json",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "Daily_Log.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "artifacts/external_sources/sympy_13852",
+      "status": "?",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/runbooks/local_model_nexus_armor_operator_runbook_v0.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/engine/capability_planner.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/engine/pipeline_repair.py",
+      "status": "M",
+      "campaign_owned": true
+    },
+    {
+      "path": "nexus/services/local_heal/isolated_workspace_apply.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/services/local_heal/linear_replay_runner.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/services/local_heal/receipt.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/services/online_execution_policy.py",
+      "status": "M",
+      "campaign_owned": true
+    },
+    {
+      "path": "nexus/services/unified_runtime.py",
+      "status": "M",
+      "campaign_owned": true
+    },
+    {
+      "path": "nexus_wiki_vault/01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus_wiki_vault/01_System/Supreme_Master_Loop_Spec.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus_wiki_vault/03_Flows/Capability_Routing_And_AB_Evolution.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "\"nexus_wiki_vault/03_Flows/Flow - PXDRAC Runtime.md\"",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus_wiki_vault/03_Flows/Local_Heal_Architecture_Flow.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus_wiki_vault/04_Research/ARCHITECTURAL_GAP_ANALYSIS_V24.md",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "\"nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md\"",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "scripts/engine/nexus_cli.py",
+      "status": "M",
+      "campaign_owned": true
+    },
+    {
+      "path": "scripts/ops/crystal_factory.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "tests/engine/test_capability_planner.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "tests/test_cli_content_rewrite.py",
+      "status": "M",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773613/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773616/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773624/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773626/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773627/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773629/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773664/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773667/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773670/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773673/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773676/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773679/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773715/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773737/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773811/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773919/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773923/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773925/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773928/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773931/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783773933/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783809864/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783809869/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783809872/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783809875/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783809877/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v1_artifacts/1783809880/",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v32_micro_benchmark_manifest.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v32_vertical_proof_manifest.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v32_vertical_results_20260711T224825Z.jsonl",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/bench/n30r/v32_vertical_summary_20260711T224825Z.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/plans/N30R_V32_VALUE_GATE_FUNNEL_2026-07-12.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/archive/n30r_r2d_request_integrity_precheck_20260711.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/capability_delegation_matrix.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/capability_economics.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/capability_truth_matrix.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/local_model_armor_temp_path_inventory_p1.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/local_runtime_audit.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/n30r_real_core_retirement_readiness_20260713.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/n30r_real_core_unique_content_preservation_20260713.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/n30r_v32_integration_review_20260712.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/nexus_merged_dirty_worktree_diff_manifest_20260713.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/nexus_workspace_convergence_20260713.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/online_runtime_audit.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_capability_probe_receipts.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_claim_boundary.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_context_trace.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_context_trace_audit.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_dependency_graph.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_digital_twin.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_entry_audit.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_entry_matrix.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_truth_inventory.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_truth_inventory.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_truth_map_v1.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/runtime_truth_map_v1.md",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "docs/reports/unified_runtime_v1_closeout_audit.json",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/services/local_assist_live_proof.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/services/local_heal/armor_artifact_storage.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "nexus/services/local_heal/armor_operator_cli.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "scripts/bench/n30r_v32_value_gate.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "scripts/ops/unified_runtime_closeout.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "tests/ops/test_crystal_factory.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "tests/ops/test_unified_runtime_closeout.py",
+      "status": "??",
+      "campaign_owned": true
+    },
+    {
+      "path": "tests/unit/local_heal/test_armor_artifact_storage.py",
+      "status": "??",
+      "campaign_owned": false
+    },
+    {
+      "path": "tests/unit/local_heal/test_armor_operator_cli.py",
+      "status": "??",
+      "campaign_owned": false
+    }
+  ],
+  "head": "24c362f7a3418f0b5f4733068591b05610088c24",
+  "at": "2026-07-13T23:59:04Z"
 }

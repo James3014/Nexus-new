@@ -1,11 +1,71 @@
 {
-  "product_entry": "nexus run",
-  "unified_runtime_receipt_path": ".nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/vertical_receipt.json",
-  "task_id": "live-vertical-5fef46a9",
-  "workspace_revision": "5fef46a909f445a53bb8efef5c9f7791f9e631e7",
+  "command_name": "run",
+  "task_name": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+  "status": "SUCCESS",
+  "runtime_classification": "verified_pass",
+  "semantic_status": "VERIFIED",
+  "semantic_failures": [],
+  "retryable": false,
+  "blocker_type": "none",
+  "next_action": "none",
+  "gate_verdict": {},
+  "artifact_paths": [
+    "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/vertical_task_output_nexus_run_r2.json"
+  ],
+  "evidence_paths": [],
+  "rollback_triggered": false,
+  "rollback_evidence": [],
+  "execution_path": "cli->command_service->engine",
+  "tests_run": [],
+  "semantic_correctness_passed": null,
+  "timestamp": "2026-07-13T23:58:04.727502+00:00",
+  "local_assist_mode": "advisor",
+  "local_assist_status": "SUCCEEDED",
   "local_context_forwarded": true,
+  "unified_runtime_receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/unified_runtime/live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only..json",
+  "unified_runtime_task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
   "online_provider": "grok",
-  "online_success": true,
+  "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
   "local_assist_success": true,
-  "formal_workspace_mutated": false
+  "online_success": true,
+  "runtime_receipt_complete": true,
+  "task_pipeline_success": false,
+  "claim_boundary": {
+    "local_online_continuation": true,
+    "outcome_contributed": false,
+    "planner_shared": true,
+    "public_claim_allowed": false,
+    "receipt_complete": true,
+    "task_identity_shared": true,
+    "value_measured": false
+  },
+  "local_assist_policy_receipt": {
+    "schema": "nexus.local_assist.canonical_policy.v1",
+    "policy": "advisor",
+    "canonical_policy": "advisor",
+    "local_assist_mode": "advisor",
+    "legacy_policy_alias": null,
+    "migration_warning": "",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
+    "available_actions": [
+      "skip",
+      "advisor",
+      "candidate",
+      "verified-subtask"
+    ],
+    "automatic_dispatch": false,
+    "recommendation_visible_before_dispatch": false,
+    "runtime_behavior_changed": true,
+    "formal_workspace_mutated": false,
+    "route_truth_source": "CapabilityPlanner",
+    "claim_boundary": {
+      "outcome_contributed": false,
+      "value_measured": false,
+      "production_ready": false,
+      "public_claim_allowed": false
+    },
+    "planner_recommendation": null
+  },
+  "local_assist_policy_receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/local_assist/canonical/live-vertical-cli-r2e_Bounded_advisory_only._Formal_workspace_mutation_forbidden._Allowed_files_stay_bounded._Advisory_t.json"
 }

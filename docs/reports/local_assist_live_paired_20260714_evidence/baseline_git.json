@@ -1,6 +1,6 @@
 {
-  "head": "b106534a257c1138a2c4f8706a3999bbc63ea311",
+  "head": "24c362f7a3418f0b5f4733068591b05610088c24",
   "branch": "feature/repair-mainline-p0-20260708",
-  "expected_prior": "b106534a257c1138a2c4f8706a3999bbc63ea311",
-  "recorded_at": "2026-07-13T23:11:21Z"
+  "captured_at": "2026-07-13T23:59:04Z",
+  "note": "campaign closeout baseline after CLI vertical proof"
 }
