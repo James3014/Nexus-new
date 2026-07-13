@@ -110,3 +110,11 @@ known_legacy_entries:
     classification: current
     lifecycle: current
     reason: still valid CLI reference
+
+link_health_report:
+  path: 99_Schema/WIKI_LINK_HEALTH_REPORT.md
+  generated_at: '2026-07-13'
+  pages_scanned: 7
+  links_scanned: 38
+  broken_found: 1
+  broken_repaired: 1

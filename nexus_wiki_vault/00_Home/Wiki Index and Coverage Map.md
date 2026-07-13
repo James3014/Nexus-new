@@ -45,7 +45,7 @@ version_scope: '[v30]'
 
 ### 🗺️ 專案計劃與狀態 (Status & Plans)
 - **[能力路由狀態總表 (2026-04-30)](../../docs/arch/CAPABILITY_ROUTE_STATUS_2026-04-30.md)**
-- **[能力路由遷移計劃 (2026-04-29)](../../docs/arch/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md)**
+- **[能力路由遷移計劃 (2026-04-29)](../09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md)**
 - **[智慧路由整合長計劃 v2](../../docs/arch/NEXUS_ROUTING_LONG_PLAN_V2.md)**
 
 ### 📜 追溯 Nexus (Trace)
