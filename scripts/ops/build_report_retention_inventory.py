@@ -21,6 +21,7 @@ DEFAULT_REPORTS_DIR = Path("docs/reports")
 DEFAULT_JSON_OUTPUT = Path("docs/reports/NEXUS_REPORT_RETENTION_INVENTORY_2026-05-22.json")
 DEFAULT_MD_OUTPUT = Path("docs/reports/NEXUS_REPORT_RETENTION_PLAN_2026-05-22.md")
 DEFAULT_AREA_MANIFEST = Path("docs/reports/report_area_manifest.json")
+DEFAULT_POLICY_MANIFEST = Path("docs/reports/report_retention_policy_manifest.json")
 
 ACTIVE_WORKSTREAM_PATTERNS = ("ZERO_TRUST", "zero_trust")
 
@@ -81,6 +82,46 @@ AREA_RETENTION_MAP = {
 }
 
 
+class PolicyManifest:
+    def __init__(
+        self,
+        active_workstream_patterns: tuple[str, ...],
+        current_keep_files: set[str],
+        raw_hints: tuple[str, ...],
+        root_human_entrypoint_keywords: list[str],
+    ) -> None:
+        self.active_workstream_patterns = active_workstream_patterns
+        self.current_keep_files = current_keep_files
+        self.raw_hints = raw_hints
+        self.root_human_entrypoint_keywords = root_human_entrypoint_keywords
+
+
+def _load_policy_manifest(manifest_path: Path | None) -> PolicyManifest:
+    path = manifest_path or DEFAULT_POLICY_MANIFEST
+    if not path.exists():
+        return PolicyManifest(
+            active_workstream_patterns=ACTIVE_WORKSTREAM_PATTERNS,
+            current_keep_files=CURRENT_KEEP_FILES,
+            raw_hints=RAW_HINTS,
+            root_human_entrypoint_keywords=["SUMMARY", "INDEX", "PLAN", "CURRENT_STATE", "FINALIZATION"],
+        )
+    payload = _read_json(path)
+    if payload.get("schema") != "nexus.report_retention_policy_manifest.v1":
+        raise ValueError(f"Invalid policy manifest schema: {payload.get('schema')}")
+    patterns = tuple(payload.get("active_workstream_patterns", ACTIVE_WORKSTREAM_PATTERNS))
+    keep = set(payload.get("current_keep_files", CURRENT_KEEP_FILES))
+    hints = tuple(payload.get("raw_hints", RAW_HINTS))
+    keywords = payload.get("root_retention_keywords", {}).get(
+        "human_entrypoint", ["SUMMARY", "INDEX", "PLAN", "CURRENT_STATE", "FINALIZATION"]
+    )
+    return PolicyManifest(
+        active_workstream_patterns=patterns,
+        current_keep_files=keep,
+        raw_hints=hints,
+        root_human_entrypoint_keywords=keywords,
+    )
+
+
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -95,9 +136,9 @@ def _date_from_name(path: Path) -> str:
     return match.group(1) if match else "undated"
 
 
-def _is_active_workstream(path: Path) -> bool:
+def _is_active_workstream(path: Path, policy: PolicyManifest) -> bool:
     text = path.as_posix()
-    return any(pattern in text for pattern in ACTIVE_WORKSTREAM_PATTERNS)
+    return any(pattern in text for pattern in policy.active_workstream_patterns)
 
 
 def _topic(path: Path) -> str:
@@ -154,14 +195,14 @@ def _retention_class_for_area(area: ReportArea) -> tuple[str, str]:
     return AREA_RETENTION_MAP[area]
 
 
-def _retention_class_root(path: Path, *, keep_refs: set[str]) -> tuple[str, str]:
+def _retention_class_root(path: Path, *, keep_refs: set[str], policy: PolicyManifest) -> tuple[str, str]:
     name = path.name
     ref = path.as_posix()
-    if name in CURRENT_KEEP_FILES or ref in keep_refs:
+    if name in policy.current_keep_files or ref in keep_refs:
         return "keep_current_entrypoint", "listed_current_or_manifest_referenced"
-    if path.suffix == ".md" and any(token in name for token in ("SUMMARY", "INDEX", "PLAN", "CURRENT_STATE", "FINALIZATION")):
+    if path.suffix == ".md" and any(token in name for token in policy.root_human_entrypoint_keywords):
         return "keep_human_entrypoint", "human_readable_summary_or_plan"
-    if path.suffix == ".json" and any(token in name for token in RAW_HINTS):
+    if path.suffix == ".json" and any(token in name for token in policy.raw_hints):
         return "archive_candidate", "raw_matrix_or_generated_evidence_candidate"
     if _topic(path) == "UNKNOWN_HOLD":
         return "unknown_hold", "no_safe_automatic_classification"
@@ -185,7 +226,9 @@ def build_inventory(
     *,
     reports_dir: Path = DEFAULT_REPORTS_DIR,
     area_manifest_path: Path | None = None,
+    policy_manifest_path: Path | None = None,
 ) -> dict[str, Any]:
+    policy = _load_policy_manifest(policy_manifest_path)
     keep_refs = _manifest_keep_refs(reports_dir)
     dir_map = _load_area_manifest(area_manifest_path, reports_dir)
     rows: list[dict[str, Any]] = []
@@ -195,12 +238,12 @@ def build_inventory(
     for path in sorted(reports_dir.rglob("*")):
         if not path.is_file():
             continue
-        if _is_active_workstream(path):
+        if _is_active_workstream(path, policy):
             excluded.append(path.as_posix())
             continue
         area = _classify_nested_area(path, reports_dir, dir_map)
         if area == ReportArea.ROOT:
-            retention_class, reason = _retention_class_root(path, keep_refs=keep_refs)
+            retention_class, reason = _retention_class_root(path, keep_refs=keep_refs, policy=policy)
         else:
             retention_class, reason = _retention_class_for_area(area)
         stat = path.stat()
@@ -319,8 +362,13 @@ def write_inventory(
     md_output: Path = DEFAULT_MD_OUTPUT,
     dry_run: bool = False,
     area_manifest_path: Path | None = None,
+    policy_manifest_path: Path | None = None,
 ) -> dict[str, Any]:
-    inventory = build_inventory(reports_dir=reports_dir, area_manifest_path=area_manifest_path)
+    inventory = build_inventory(
+        reports_dir=reports_dir,
+        area_manifest_path=area_manifest_path,
+        policy_manifest_path=policy_manifest_path,
+    )
     if not dry_run:
         _write_json(json_output, inventory)
         md_output.parent.mkdir(parents=True, exist_ok=True)
@@ -341,6 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--md-output", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path(""))
     parser.add_argument("--area-manifest", type=Path, default=None)
+    parser.add_argument("--policy-manifest", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -353,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
         md_output=md_output,
         dry_run=args.dry_run,
         area_manifest_path=args.area_manifest,
+        policy_manifest_path=args.policy_manifest,
     )
     print(json.dumps(summary, sort_keys=True, ensure_ascii=False))
     return 0 if summary["status"] == "PASS" else 1

@@ -194,3 +194,81 @@ def test_script_direct_invocation_supports_dry_run(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["rows"] == 1
     assert payload["dry_run"] is True
+
+
+def test_policy_manifest_loads_custom_keep_files(tmp_path):
+    reports = tmp_path / "docs/reports"
+    reports.mkdir(parents=True)
+    (reports / "CUSTOM_KEPT_FILE.json").write_text("{}", encoding="utf-8")
+    (reports / "other.json").write_text("{}", encoding="utf-8")
+    manifest = tmp_path / "policy_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.report_retention_policy_manifest.v1",
+                "version": "v1",
+                "active_workstream_patterns": [],
+                "current_keep_files": ["CUSTOM_KEPT_FILE.json"],
+                "raw_hints": [],
+                "root_retention_keywords": {"human_entrypoint": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inventory = build_inventory(reports_dir=reports, policy_manifest_path=manifest)
+    by_name = {row["name"]: row for row in inventory["rows"]}
+
+    assert by_name["CUSTOM_KEPT_FILE.json"]["retention_class"] == "keep_current_entrypoint"
+    assert by_name["other.json"]["retention_class"] == "unknown_hold"
+
+
+def test_policy_manifest_rejects_invalid_schema(tmp_path):
+    reports = tmp_path / "docs/reports"
+    reports.mkdir(parents=True)
+    manifest = tmp_path / "policy_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.wrong.schema.v1",
+                "version": "v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Invalid policy manifest schema"):
+        build_inventory(reports_dir=reports, policy_manifest_path=manifest)
+
+
+def test_policy_manifest_missing_fields_falls_back_to_defaults(tmp_path):
+    reports = tmp_path / "docs/reports"
+    reports.mkdir(parents=True)
+    (reports / "NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md").write_text("{}", encoding="utf-8")
+    manifest = tmp_path / "policy_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.report_retention_policy_manifest.v1",
+                "version": "v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inventory = build_inventory(reports_dir=reports, policy_manifest_path=manifest)
+    by_name = {row["name"]: row for row in inventory["rows"]}
+
+    assert by_name["NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md"]["retention_class"] == "keep_current_entrypoint"
+
+
+def test_policy_manifest_missing_file_falls_back_to_defaults(tmp_path):
+    reports = tmp_path / "docs/reports"
+    reports.mkdir(parents=True)
+    (reports / "NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md").write_text("{}", encoding="utf-8")
+    manifest = tmp_path / "nonexistent_manifest.json"
+
+    inventory = build_inventory(reports_dir=reports, policy_manifest_path=manifest)
+    by_name = {row["name"]: row for row in inventory["rows"]}
+
+    assert by_name["NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md"]["retention_class"] == "keep_current_entrypoint"
