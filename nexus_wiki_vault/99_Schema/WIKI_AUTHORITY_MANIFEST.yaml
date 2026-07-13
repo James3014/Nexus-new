@@ -1,0 +1,88 @@
+schema: nexus.wiki.authority.v1
+generated_for_commit: 957cd19c744d168ff050667b611adca5fb20d56f
+verified_at: '2026-07-13'
+
+canonical:
+  entry:
+    path: README.md
+    authority: navigation
+
+  current_state:
+    path: 00_Home/CURRENT_STATE.md
+    authority: operational
+
+  system_overview:
+    path: 00_Home/System Overview.md
+    authority: explanatory
+
+  architecture:
+    path: 01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+    authority: normative
+
+  agent_bootstrap:
+    path: 00_Home/AGENT_BOOTSTRAP.md
+    authority: operational
+
+  partner_onboarding:
+    path: 00_Home/PARTNER_ONBOARDING.md
+    authority: operational
+
+  claims:
+    path: 01_System/CLAIM_TAXONOMY.md
+    authority: normative
+
+  wiki_governance:
+    path: 99_Schema/WIKI_GOVERNANCE_CHARTER.md
+    authority: normative
+
+  wiki_index:
+    path: 00_Home/Wiki Index and Coverage Map.md
+    authority: navigation
+
+classification_rules:
+  current:
+    description: >
+      Page reflects the present state of the system. Frontmatter lifecycle
+      is 'current' and content is verified against the latest commit.
+
+  superseded:
+    description: >
+      Page contains information that has been replaced by a canonical
+      page. The page remains available for historical reference but
+      should not be used as the primary source.
+
+  historical:
+    description: >
+      Page documents a past state, decision, or implementation that
+      is no longer active. Preserved for audit trail.
+
+  draft:
+    description: >
+      Page is incomplete or under development. Should not be cited
+      as authoritative.
+
+  mixed_needs_review:
+    description: >
+      Page contains a mix of current and outdated content and requires
+      manual review before classification.
+
+known_legacy_entries:
+  - path: 00_Home/Root_README_Summary.md
+    classification: historical_candidate
+    reason: mixed-version content and generated-link corruption
+
+  - path: 00_Home/Agent Onboarding - Command Pack.md
+    classification: superseded_candidate
+    reason: older startup path; pending WIKI-2 classification
+
+  - path: 00_Home/README_Agent.md
+    classification: superseded_candidate
+    reason: older minimal Agent guide; pending WIKI-2 classification
+
+  - path: 00_Home/Agent_Context_Strategy_Guide.md
+    classification: historical_candidate
+    reason: references absolute paths and repomix artifacts; pending WIKI-2 classification
+
+  - path: 01_System/MUSE_PROTO.md
+    classification: mixed_needs_review_candidate
+    reason: contains both canonical protocol anchors and outdated Felo-first/STATE.yaml references; pending WIKI-2 conflict registration
