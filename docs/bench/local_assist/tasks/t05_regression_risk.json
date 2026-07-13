@@ -1,0 +1,14 @@
+{
+  "task_id": "la-exp-t05-regression-risk",
+  "task_type": "risk_analysis",
+  "task_statement": "List three regression risks if UnifiedRuntime were replaced by per-agent runtimes for Grok/Codex/Gemini.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "docs/reports/runtime_contract_stabilization_baseline_20260714.md",
+    "nexus/services/unified_runtime.py"
+  ],
+  "expected_evidence": ["single_execution_authority"],
+  "verifier": "response_contract_online_payload_present",
+  "timeout_sec": 120,
+  "mutation_policy": "isolated_only"
+}

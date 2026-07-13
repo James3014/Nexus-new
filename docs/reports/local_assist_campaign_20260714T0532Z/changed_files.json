@@ -1,0 +1,17 @@
+{
+  "campaign_files": [
+    "nexus/services/online_execution_policy.py",
+    "nexus/services/unified_runtime.py",
+    "nexus/services/gateway.py",
+    "nexus/engine/pipeline_repair.py",
+    "scripts/engine/nexus_cli.py",
+    "nexus/research/local_assist_paired_experiment.py",
+    "tests/services/test_online_execution_policy.py",
+    "tests/research/test_local_assist_paired_experiment.py",
+    "docs/reports/runtime_caller_inventory_20260714.md",
+    "docs/reports/runtime_caller_inventory_20260714.json",
+    "docs/reports/local_assist_continuous_convergence_20260714.md",
+    "docs/bench/local_assist/",
+    ".nexus/online_execution_policy.json"
+  ]
+}

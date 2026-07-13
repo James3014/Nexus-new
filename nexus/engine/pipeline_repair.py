@@ -405,16 +405,23 @@ class PipelineRepairMixin:
                 "evidence_refs": [f"verifier:{task_id}:repair_response_contract"],
             }
 
+        route = build_online_route(
+            recommended_flow="hybrid",
+            gateway_provider=str(meta.get("oauth_provider") or ""),
+            local_enabled=True,
+        )
+        # Propagate Nexus-owned Online policy from task context (CLI/workspace).
+        if meta.get("online_policy"):
+            route["online_policy"] = str(meta.get("online_policy"))
+        if meta.get("online_execution_decision"):
+            route["online_execution_decision"] = meta.get("online_execution_decision")
+        route["workspace_root"] = str(Path(getattr(self.engine, "project_root", ".") or "."))
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=str(ctx.task_desc or task_id),
             task_type="repair",
-            route=build_online_route(
-                recommended_flow="hybrid",
-                gateway_provider=str(meta.get("oauth_provider") or ""),
-                local_enabled=True,
-            ),
+            route=route,
             online_prompt=str(ctx.task_desc or ""),
             online_payload=f"attempt={repair_attempts}",
             online_phase="R",

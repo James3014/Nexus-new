@@ -1,0 +1,11 @@
+{
+  "task_id": "la-exp-t01-target-id",
+  "task_type": "navigation",
+  "task_statement": "Identify the single bounded target file that owns Local Assist live-smoke configuration and list one risk of unbounded allowed_files.",
+  "workspace_revision": "HEAD",
+  "allowed_files": ["docs/bench/local_assist/gate2_live_smoke_task.json"],
+  "expected_evidence": ["allowed_files_non_empty", "advisory_only"],
+  "verifier": "response_contract_online_payload_present",
+  "timeout_sec": 120,
+  "mutation_policy": "isolated_only"
+}

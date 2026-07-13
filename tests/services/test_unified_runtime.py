@@ -1040,7 +1040,7 @@ def test_registered_online_invoker_fails_closed_without_external_authorization(m
 
     assert result["invoked"] is False
     assert result["provider_call_count"] == 0
-    assert result["error"] == "external_authorization_required"
+    assert result["error"] == "online_execution_not_authorized"
     assert result["task_id"] == "auth-task"
 
 
@@ -1055,7 +1055,7 @@ def test_gateway_default_transport_fails_closed_without_external_authorization(m
     )
 
     assert receipt["online"]["status"] == "FAILED"
-    assert receipt["online"]["response"]["error"] == "external_authorization_required"
+    assert receipt["online"]["response"]["error"] == "online_execution_not_authorized"
     assert receipt["online"]["response"]["task_id"] == receipt["task_id"]
     assert receipt["receipt_complete"] is False
 

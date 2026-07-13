@@ -1,0 +1,14 @@
+{
+  "task_id": "la-exp-t03-patch-plan",
+  "task_type": "patch_plan",
+  "task_statement": "Propose a read-only advisory plan for implementing Local Assist Advisor context forwarding checks without writing a code patch.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "nexus/engine/pipeline_repair.py",
+    "docs/reports/cli_local_assist_advisor_gate2_baseline_20260714.md"
+  ],
+  "expected_evidence": ["no_formal_mutation", "advisor_role"],
+  "verifier": "response_contract_online_payload_present",
+  "timeout_sec": 180,
+  "mutation_policy": "isolated_only"
+}

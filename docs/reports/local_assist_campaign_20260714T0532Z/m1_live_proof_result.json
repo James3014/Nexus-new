@@ -1,0 +1,18 @@
+{
+  "schema": "nexus.local_assist.live_proof.v1",
+  "status": "LIVE_PROOF_NOT_RUN",
+  "reason": "external_runtime_not_authorized",
+  "failures": [
+    "pipeline_report_missing",
+    "unified_runtime_receipt_missing"
+  ],
+  "evidence": {
+    "external_authorized": false
+  },
+  "claim_boundary": {
+    "public_claim_allowed": false,
+    "production_ready": false,
+    "value_measured": false,
+    "proven_token_savings": false
+  }
+}

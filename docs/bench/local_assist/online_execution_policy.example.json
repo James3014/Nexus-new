@@ -1,0 +1,8 @@
+{
+  "default_online_policy": "deny",
+  "approved_online_providers": ["gemini", "grok", "codex", "openai"],
+  "allow_external_context_transfer": true,
+  "maximum_provider_calls": 10,
+  "maximum_retry_count": 3,
+  "schema": "nexus.online_execution_policy.v1"
+}

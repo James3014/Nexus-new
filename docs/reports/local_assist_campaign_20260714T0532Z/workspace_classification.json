@@ -1,0 +1,9 @@
+{
+  "note": "unrelated dirty wiki/bench/local_heal not staged",
+  "NEW_CAMPAIGN_CHANGE": [
+    "nexus/services/online_execution_policy.py",
+    "nexus/research/local_assist_paired_experiment.py",
+    "tests/services/test_online_execution_policy.py",
+    "tests/research/test_local_assist_paired_experiment.py"
+  ]
+}

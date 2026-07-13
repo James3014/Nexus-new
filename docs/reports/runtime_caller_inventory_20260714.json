@@ -1,0 +1,49 @@
+{
+  "schema": "nexus.runtime_caller_inventory.v1",
+  "timestamp": "2026-07-14T05:35:00+08:00",
+  "active_repair_seam": "nexus.engine.pipeline_repair.PipelineRepairMixin._execute_single_repair",
+  "callers": [
+    {
+      "path": "nexus/engine/pipeline_repair.py",
+      "symbol": "_run_unified_advisor_online",
+      "classification": "CANONICAL_UNIFIED_RUNTIME_CALLER",
+      "migration": "RETAIN",
+      "runtime_reachability": "nexus_run_pipeline_R"
+    },
+    {
+      "path": "nexus/services/gateway.py",
+      "symbol": "ask_unified",
+      "classification": "CANONICAL_UNIFIED_RUNTIME_CALLER",
+      "migration": "RETAIN",
+      "runtime_reachability": "product_edge"
+    },
+    {
+      "path": "nexus/research/sprint_service.py",
+      "symbol": "_ask_unified_candidate",
+      "classification": "CANONICAL_UNIFIED_RUNTIME_CALLER",
+      "migration": "THIN_COMPATIBILITY_WRAPPER",
+      "runtime_reachability": "research_sprint"
+    },
+    {
+      "path": "nexus/research/day_shift_optimizer.py",
+      "symbol": "_ask_unified",
+      "classification": "CANONICAL_UNIFIED_RUNTIME_CALLER",
+      "migration": "THIN_COMPATIBILITY_WRAPPER",
+      "runtime_reachability": "research_dayshift"
+    },
+    {
+      "path": "nexus/app/nightshift_runner_service.py",
+      "symbol": "_ask_unified_candidate",
+      "classification": "CANONICAL_UNIFIED_RUNTIME_CALLER",
+      "migration": "THIN_COMPATIBILITY_WRAPPER",
+      "runtime_reachability": "nightshift"
+    },
+    {
+      "path": "nexus/engine/phases/repair.py",
+      "symbol": "RepairPhaseHandler.surgical_ask_fallback",
+      "classification": "LEGACY_ACTIVE_CALLER",
+      "migration": "RETAIN_WITH_JUSTIFICATION",
+      "runtime_reachability": "secondary_phase_plugin_only"
+    }
+  ]
+}

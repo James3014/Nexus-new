@@ -1,0 +1,178 @@
+{
+  "workspace_policy": {
+    "default_online_policy": "deny",
+    "approved_online_providers": [
+      "gemini",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "allow_external_context_transfer": true,
+    "maximum_provider_calls": 10,
+    "maximum_retry_count": 3,
+    "policy_path": ".nexus/online_execution_policy.json",
+    "policy_present": true
+  },
+  "deny": {
+    "online_policy": "deny",
+    "online_execution_requested": false,
+    "online_execution_authorized": false,
+    "online_authorization_source": "cli_task_policy",
+    "approved_online_providers": [
+      "gemini",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "preflight_status": "ONLINE_DENIED_BY_POLICY",
+    "reason": "task_online_policy_deny",
+    "allow_external_context_transfer": true,
+    "maximum_provider_calls": 10,
+    "maximum_retry_count": 3,
+    "requested_provider": "",
+    "physical_invocation_allowed": false,
+    "claim_boundary": {
+      "public_claim_allowed": false,
+      "production_ready": false,
+      "credentials_do_not_imply_authorization": true
+    }
+  },
+  "auto": {
+    "online_policy": "auto",
+    "online_execution_requested": true,
+    "online_execution_authorized": true,
+    "online_authorization_source": "cli_task_policy",
+    "approved_online_providers": [
+      "gemini",
+      "grok",
+      "codex",
+      "openai"
+    ],
+    "preflight_status": "ONLINE_READY",
+    "reason": "online_execution_authorized",
+    "allow_external_context_transfer": true,
+    "maximum_provider_calls": 10,
+    "maximum_retry_count": 3,
+    "requested_provider": "",
+    "physical_invocation_allowed": true,
+    "claim_boundary": {
+      "public_claim_allowed": false,
+      "production_ready": false,
+      "credentials_do_not_imply_authorization": true
+    }
+  },
+  "local_assist_preflight": {
+    "schema": "nexus.local_assist.preflight.v1",
+    "overall_status": "BLOCKED_EXTERNAL_AUTHORIZATION",
+    "ready_for_live_smoke": false,
+    "timestamp": "2026-07-13T21:36:00.681050+00:00",
+    "workspace_revision": "a9b4429a7bd6a270635f0d07123a8aa6cdae7a77",
+    "checks": [
+      {
+        "name": "external_runtime_authorization",
+        "status": "BLOCKED_EXTERNAL_AUTHORIZATION",
+        "detail": "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED not set to 1",
+        "evidence": {
+          "env": "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED",
+          "value_present": false
+        }
+      },
+      {
+        "name": "local_provider",
+        "status": "READY",
+        "detail": "ollama reachable",
+        "evidence": {
+          "reachable": true,
+          "model_count": 11
+        }
+      },
+      {
+        "name": "local_model",
+        "status": "READY",
+        "detail": "model=qwen2.5-coder:7b",
+        "evidence": {
+          "requested_model": "qwen2.5-coder:7b",
+          "available_models": [
+            "qwythos:9b",
+            "hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q4_K_M",
+            "ornith:9b",
+            "qwen2.5-coder:7b-instruct",
+            "deepseek-coder:6.7b-instruct",
+            "qwen2.5-coder:14b-instruct-q3_K_M",
+            "deepseek-r1-14b-q4km:latest",
+            "gemma4-coder-12b-q4km:latest",
+            "qwen2.5:1.5b",
+            "qwen2.5-s2t-advisor:3b",
+            "nomic-embed-text:latest"
+          ]
+        }
+      },
+      {
+        "name": "online_provider_selection",
+        "status": "READY",
+        "detail": "provider=gemini",
+        "evidence": {
+          "provider": "gemini",
+          "registered": [
+            "codex",
+            "gemini",
+            "grok",
+            "openai"
+          ]
+        }
+      },
+      {
+        "name": "online_authorization",
+        "status": "BLOCKED_ONLINE_AUTHORIZATION",
+        "detail": "online authorization requires NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1",
+        "evidence": {
+          "binary": "/Users/jameschen/.npm-global/bin/gemini",
+          "authorized": false,
+          "provider": "gemini"
+        }
+      },
+      {
+        "name": "workspace_revision",
+        "status": "READY",
+        "detail": "a9b4429a7bd6a270635f0d07123a8aa6cdae7a77",
+        "evidence": {
+          "workspace_revision": "a9b4429a7bd6a270635f0d07123a8aa6cdae7a77"
+        }
+      },
+      {
+        "name": "bounded_scope",
+        "status": "READY",
+        "detail": "allowed_files present",
+        "evidence": {
+          "allowed_files": [
+            "docs/bench/local_assist/gate2_live_smoke_task.json"
+          ],
+          "missing": []
+        }
+      },
+      {
+        "name": "receipt_destination",
+        "status": "READY",
+        "detail": "/Users/jameschen/Workspace/nexus/.nexus/reports/unified_runtime",
+        "evidence": {
+          "path": "/Users/jameschen/Workspace/nexus/.nexus/reports/unified_runtime",
+          "writable": true
+        }
+      },
+      {
+        "name": "formal_mutation_policy",
+        "status": "READY",
+        "detail": "advisor mutation_policy=isolated_only (no formal workspace mutation)",
+        "evidence": {
+          "mutation_policy": "isolated_only",
+          "formal_workspace_mutated": false
+        }
+      }
+    ],
+    "claim_boundary": {
+      "public_claim_allowed": false,
+      "production_ready": false,
+      "live_proof_pass_requires_real_invocations": true
+    }
+  }
+}

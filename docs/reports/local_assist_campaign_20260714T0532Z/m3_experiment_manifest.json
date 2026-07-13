@@ -1,0 +1,88 @@
+{
+  "tasks": [
+    {
+      "task_id": "la-exp-t01-target-id",
+      "task_type": "navigation",
+      "task_statement": "Identify the single bounded target file that owns Local Assist live-smoke configuration and list one risk of unbounded allowed_files.",
+      "workspace_revision": "HEAD",
+      "allowed_files": [
+        "docs/bench/local_assist/gate2_live_smoke_task.json"
+      ],
+      "expected_evidence": [
+        "allowed_files_non_empty",
+        "advisory_only"
+      ],
+      "verifier": "response_contract_online_payload_present",
+      "timeout_sec": 120,
+      "mutation_policy": "isolated_only"
+    },
+    {
+      "task_id": "la-exp-t02-failure-diagnosis",
+      "task_type": "diagnosis",
+      "task_statement": "Diagnose why copying oauth_provider=ollama into Online route.provider would empty Online structured output under UnifiedRuntime.",
+      "workspace_revision": "HEAD",
+      "allowed_files": [
+        "docs/reports/runtime_contract_stabilization_baseline_20260714.md",
+        "nexus/services/unified_runtime.py"
+      ],
+      "expected_evidence": [
+        "provider_transport_separation"
+      ],
+      "verifier": "response_contract_online_payload_present",
+      "timeout_sec": 180,
+      "mutation_policy": "isolated_only"
+    },
+    {
+      "task_id": "la-exp-t03-patch-plan",
+      "task_type": "patch_plan",
+      "task_statement": "Propose a read-only advisory plan for implementing Local Assist Advisor context forwarding checks without writing a code patch.",
+      "workspace_revision": "HEAD",
+      "allowed_files": [
+        "nexus/engine/pipeline_repair.py",
+        "docs/reports/cli_local_assist_advisor_gate2_baseline_20260714.md"
+      ],
+      "expected_evidence": [
+        "no_formal_mutation",
+        "advisor_role"
+      ],
+      "verifier": "response_contract_online_payload_present",
+      "timeout_sec": 180,
+      "mutation_policy": "isolated_only"
+    },
+    {
+      "task_id": "la-exp-t04-semantic-repair",
+      "task_type": "semantic_repair_advisory",
+      "task_statement": "Advise on the safest bounded next step when Local Advisor returns empty local_outputs but Online must continue.",
+      "workspace_revision": "HEAD",
+      "allowed_files": [
+        "nexus/engine/pipeline_repair.py"
+      ],
+      "expected_evidence": [
+        "degraded_to_online_visible"
+      ],
+      "verifier": "response_contract_online_payload_present",
+      "timeout_sec": 120,
+      "mutation_policy": "isolated_only"
+    },
+    {
+      "task_id": "la-exp-t05-regression-risk",
+      "task_type": "risk_analysis",
+      "task_statement": "List three regression risks if UnifiedRuntime were replaced by per-agent runtimes for Grok/Codex/Gemini.",
+      "workspace_revision": "HEAD",
+      "allowed_files": [
+        "docs/reports/runtime_contract_stabilization_baseline_20260714.md",
+        "nexus/services/unified_runtime.py"
+      ],
+      "expected_evidence": [
+        "single_execution_authority"
+      ],
+      "verifier": "response_contract_online_payload_present",
+      "timeout_sec": 120,
+      "mutation_policy": "isolated_only"
+    }
+  ],
+  "arms": [
+    "A_online_only",
+    "B_local_advisor_online"
+  ]
+}

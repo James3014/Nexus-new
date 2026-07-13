@@ -1,0 +1,10 @@
+{
+  "passed": 187,
+  "log_tail": [
+    "  /opt/homebrew/lib/python3.14/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.1) or chardet (7.2.0)/charset_normalizer (3.4.4) doesn't match a supported version!",
+    "    warnings.warn(",
+    "",
+    "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+    "======================= 187 passed, 1 warning in 17.70s ========================"
+  ]
+}

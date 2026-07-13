@@ -426,6 +426,19 @@ class BattlesuitGateway:
             route_provider=requested_provider,
             gateway_provider=gateway_provider,
         )
+        # Mark fixture transports for authorization resolution (not real CLI).
+        if structured_injected and isinstance(route, dict):
+            route = dict(route)
+            route["injected_transport"] = True
+            try:
+                object.__setattr__(request, "route", route)
+            except Exception:
+                if hasattr(request, "route"):
+                    try:
+                        request.route = route  # type: ignore[misc]
+                    except Exception:
+                        pass
+        # Ensure route carries online_policy from gateway request if present on route only.
 
         def gateway_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
             task_id = str(context.get("task_id", ""))
@@ -436,9 +449,14 @@ class BattlesuitGateway:
             )
             if binding.selection_source == "injected_transport":
                 provider_identity = "injected"
-            if (
-                bound_transport is self.__class__.ask_structured
-                and os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED") != "1"
+            # Canonical authorization only — env is not consulted here.
+            # Injected structured transports are authorized as fixtures; real
+            # CLI/path execution requires physical_invocation_allowed.
+            from nexus.services.online_execution_policy import physical_online_authorized
+
+            if bound_transport is self.__class__.ask_structured and not physical_online_authorized(
+                context if isinstance(context, Mapping) else {},
+                injected_transport=False,
             ):
                 return normalize_online_invoker_payload(
                     provider=provider_identity,
@@ -450,7 +468,7 @@ class BattlesuitGateway:
                     response="",
                     raw_response="",
                     usage={},
-                    error="external_authorization_required",
+                    error="online_execution_not_authorized",
                     evidence_refs=[f"gateway:{task_id}:authorization_required"],
                     transport=binding.transport or "gateway_compatibility",
                     selection_source=binding.selection_source or "compatibility_default",

@@ -1,0 +1,1026 @@
+{
+  "claim_boundary": {
+    "proven_cost_reduction": false,
+    "proven_quality_improvement": false,
+    "proven_time_savings": false,
+    "proven_token_savings": false,
+    "public_claim_allowed": false
+  },
+  "experiment_status": "HARNESS_READY_NOT_LIVE_MEASURED",
+  "rows": [
+    {
+      "arm_a": {
+        "arm": "A_online_only",
+        "context_bytes": 133,
+        "end_to_end_latency_ms": {
+          "quality": "MEASURED",
+          "value": 3
+        },
+        "error": "local_route_disabled",
+        "evidence_refs": [
+          "online:f:la-exp-t01-target-id:A",
+          "online:f:la-exp-t01-target-id:A"
+        ],
+        "input_tokens": {
+          "quality": "UNAVAILABLE",
+          "value": null
+        },
+        "local_assist_policy": "disabled",
+        "local_contribution_observed": false,
+        "local_invoked": false,
+        "local_output_delivered": false,
+        "local_provider_call_count": 0,
+        "online_invoked": true,
+        "online_latency_ms": {
+          "quality": "MEASURED",
+          "value": 3
+        },
+        "online_output_delivered": true,
+        "online_provider_call_count": 1,
+        "output_tokens": {
+          "quality": "UNAVAILABLE",
+          "value": null
+        },
+        "receipt": {
+          "capabilities": [
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "harness_preflight_sensor",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "research_route",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "delivery_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "mempalace_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "artifact_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "claim_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            }
+          ],
+          "capability_results": {},
+          "claim_boundary": {
+            "local_online_continuation": false,
+            "outcome_contributed": false,
+            "planner_shared": true,
+            "public_claim_allowed": false,
+            "receipt_complete": false,
+            "task_identity_shared": true,
+            "value_measured": false
+          },
+          "context_trace": {
+            "capability_context_compressed": false,
+            "capability_results_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "online_payload_hash": "2ece43a051a8856fa085a61a58a7a76819d5346b29833320c5113d597881ce2b",
+            "online_prompt_hash": "20392a39196c2e4524018c76e5b8d795313d13fca00ea29430f8182cb2c086b1",
+            "online_received_context": {
+              "capability_context_forwarded": false,
+              "compressed_context_applied": false,
+              "local_context_forwarded": false
+            },
+            "selected_capabilities": [
+              "harness_preflight_sensor",
+              "research_route",
+              "delivery_gate",
+              "mempalace_gate",
+              "artifact_gate",
+              "claim_gate"
+            ],
+            "task_id": "la-exp-t01-target-id",
+            "task_statement_hash": "90f4f23c33321a1fa1e2164c9d7f7d4f0636262d1a486a9a4f1d0a95307f9ee7",
+            "workspace_revision": "HEAD"
+          },
+          "delegation": {
+            "learning": "Hybrid",
+            "local_assist": "NOT_REQUESTED",
+            "online_provider": "Online",
+            "planner": "Nexus",
+            "verifier": "Hybrid"
+          },
+          "evidence_refs": [
+            "online:f:la-exp-t01-target-id:A",
+            "paired:la-exp-t01-target-id:A_online_only",
+            "runtime:planner_invoked",
+            "verifier:la-exp-t01-target-id:paired"
+          ],
+          "learning": {
+            "evidence_present": false,
+            "evidence_refs": [],
+            "gate_passed": false,
+            "invoked": false,
+            "name": "learning",
+            "outcome_contributed": false,
+            "reason": "learning_callback_not_supplied",
+            "status": "NOT_RUN"
+          },
+          "local": {
+            "evidence_present": false,
+            "evidence_refs": [],
+            "gate_passed": false,
+            "invoked": false,
+            "name": "local",
+            "outcome_contributed": false,
+            "reason": "local_route_disabled",
+            "status": "NOT_REQUESTED"
+          },
+          "online": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "online:f:la-exp-t01-target-id:A"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "online",
+            "outcome_contributed": false,
+            "reason": "",
+            "response": {
+              "error": "",
+              "evidence_refs": [
+                "online:f:la-exp-t01-target-id:A"
+              ],
+              "execution_role": "online",
+              "gate_passed": true,
+              "invoked": true,
+              "output_delivered": true,
+              "provider": "fixture",
+              "provider_call_count": 1,
+              "raw_response": "raw",
+              "response": {
+                "patch": "ok",
+                "status": "APPROVED"
+              },
+              "selection_source": "injected_transport",
+              "task_id": "la-exp-t01-target-id",
+              "transport": "structured_callable",
+              "usage": {
+                "total_tokens": 100
+              }
+            },
+            "response_task_id": "la-exp-t01-target-id",
+            "status": "SUCCEEDED",
+            "task_id": "la-exp-t01-target-id",
+            "task_identity_shared": true
+          },
+          "online_preflight": {
+            "approved_online_providers": [
+              "gemini",
+              "grok",
+              "codex",
+              "openai"
+            ],
+            "online_authorization_source": "workspace_policy",
+            "online_execution_authorized": false,
+            "online_execution_requested": false,
+            "online_policy": "deny",
+            "physical_invocation_allowed": false,
+            "reason": "online_not_requested_by_policy_or_planner",
+            "status": "ONLINE_NOT_REQUESTED"
+          },
+          "planner": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "runtime:planner_invoked"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "planner",
+            "outcome_contributed": false,
+            "plan_hash": "378a42da5778d08452ec69ff8d06668de7474422551265cfe1331ea1758ea35b",
+            "plan_schema": "nexus_capability_plan_v1",
+            "reason": "",
+            "selected_capabilities": [
+              "harness_preflight_sensor",
+              "research_route",
+              "delivery_gate",
+              "mempalace_gate",
+              "artifact_gate",
+              "claim_gate"
+            ],
+            "status": "SUCCEEDED"
+          },
+          "receipt_complete": false,
+          "schema": "nexus.unified_runtime.receipt.v1",
+          "stages": [
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "runtime:planner_invoked"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "planner",
+              "outcome_contributed": false,
+              "plan_hash": "378a42da5778d08452ec69ff8d06668de7474422551265cfe1331ea1758ea35b",
+              "plan_schema": "nexus_capability_plan_v1",
+              "reason": "",
+              "selected_capabilities": [
+                "harness_preflight_sensor",
+                "research_route",
+                "delivery_gate",
+                "mempalace_gate",
+                "artifact_gate",
+                "claim_gate"
+              ],
+              "status": "SUCCEEDED"
+            },
+            {
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "local",
+              "outcome_contributed": false,
+              "reason": "local_route_disabled",
+              "status": "NOT_REQUESTED"
+            },
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "online:f:la-exp-t01-target-id:A"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "online",
+              "outcome_contributed": false,
+              "reason": "",
+              "response": {
+                "error": "",
+                "evidence_refs": [
+                  "online:f:la-exp-t01-target-id:A"
+                ],
+                "execution_role": "online",
+                "gate_passed": true,
+                "invoked": true,
+                "output_delivered": true,
+                "provider": "fixture",
+                "provider_call_count": 1,
+                "raw_response": "raw",
+                "response": {
+                  "patch": "ok",
+                  "status": "APPROVED"
+                },
+                "selection_source": "injected_transport",
+                "task_id": "la-exp-t01-target-id",
+                "transport": "structured_callable",
+                "usage": {
+                  "total_tokens": 100
+                }
+              },
+              "response_task_id": "la-exp-t01-target-id",
+              "status": "SUCCEEDED",
+              "task_id": "la-exp-t01-target-id",
+              "task_identity_shared": true
+            },
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "verifier:la-exp-t01-target-id:paired"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "verifier",
+              "outcome_contributed": false,
+              "reason": "",
+              "response": {
+                "evidence_refs": [
+                  "verifier:la-exp-t01-target-id:paired"
+                ],
+                "gate_passed": true,
+                "invoked": true,
+                "status": "pass",
+                "task_id": "la-exp-t01-target-id"
+              },
+              "response_task_id": "la-exp-t01-target-id",
+              "status": "SUCCEEDED",
+              "task_id": "la-exp-t01-target-id",
+              "task_identity_shared": true
+            },
+            {
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "learning",
+              "outcome_contributed": false,
+              "reason": "learning_callback_not_supplied",
+              "status": "NOT_RUN"
+            }
+          ],
+          "task_id": "la-exp-t01-target-id",
+          "task_statement_hash": "90f4f23c33321a1fa1e2164c9d7f7d4f0636262d1a486a9a4f1d0a95307f9ee7",
+          "terminal_status": "INCOMPLETE",
+          "verifier": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "verifier:la-exp-t01-target-id:paired"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "verifier",
+            "outcome_contributed": false,
+            "reason": "",
+            "response": {
+              "evidence_refs": [
+                "verifier:la-exp-t01-target-id:paired"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "status": "pass",
+              "task_id": "la-exp-t01-target-id"
+            },
+            "response_task_id": "la-exp-t01-target-id",
+            "status": "SUCCEEDED",
+            "task_id": "la-exp-t01-target-id",
+            "task_identity_shared": true
+          },
+          "workspace_revision": "HEAD"
+        },
+        "retry_count": 0,
+        "task_id": "la-exp-t01-target-id",
+        "task_success": true,
+        "total_tokens": {
+          "quality": "MEASURED",
+          "value": 100
+        },
+        "verified_success": true,
+        "workspace_revision": "HEAD"
+      },
+      "arm_b": {
+        "arm": "B_local_advisor_online",
+        "context_bytes": 133,
+        "end_to_end_latency_ms": {
+          "quality": "MEASURED",
+          "value": 2
+        },
+        "error": "",
+        "evidence_refs": [
+          "online:f:la-exp-t01-target-id:B",
+          "online:f:la-exp-t01-target-id:B"
+        ],
+        "input_tokens": {
+          "quality": "UNAVAILABLE",
+          "value": null
+        },
+        "local_assist_policy": "advisor",
+        "local_contribution_observed": false,
+        "local_invoked": true,
+        "local_output_delivered": true,
+        "local_provider_call_count": 1,
+        "online_invoked": true,
+        "online_latency_ms": {
+          "quality": "MEASURED",
+          "value": 2
+        },
+        "online_output_delivered": true,
+        "online_provider_call_count": 1,
+        "output_tokens": {
+          "quality": "UNAVAILABLE",
+          "value": null
+        },
+        "receipt": {
+          "capabilities": [
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "harness_preflight_sensor",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "research_route",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "delivery_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "mempalace_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "artifact_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "PlannerOnly",
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "claim_gate",
+              "outcome_contributed": false,
+              "reason": "planner_selected_no_runtime_executor",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "",
+              "status": "SELECTED_NOT_EXECUTED",
+              "task_id": "la-exp-t01-target-id"
+            },
+            {
+              "delegated_to": "Local",
+              "evidence_present": true,
+              "evidence_refs": [
+                "paired:la-exp-t01-target-id:request"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "local_model_executor",
+              "outcome_contributed": false,
+              "reason": "",
+              "selected": true,
+              "selection_source": "CapabilityPlanner",
+              "stage": "local",
+              "status": "INVOKED",
+              "task_id": "la-exp-t01-target-id"
+            }
+          ],
+          "capability_results": {},
+          "claim_boundary": {
+            "local_online_continuation": true,
+            "outcome_contributed": false,
+            "planner_shared": true,
+            "public_claim_allowed": false,
+            "receipt_complete": false,
+            "task_identity_shared": true,
+            "value_measured": false
+          },
+          "context_trace": {
+            "capability_context_compressed": false,
+            "capability_results_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "online_payload_hash": "2ece43a051a8856fa085a61a58a7a76819d5346b29833320c5113d597881ce2b",
+            "online_prompt_hash": "20392a39196c2e4524018c76e5b8d795313d13fca00ea29430f8182cb2c086b1",
+            "online_received_context": {
+              "capability_context_forwarded": false,
+              "compressed_context_applied": false,
+              "local_context_forwarded": false
+            },
+            "selected_capabilities": [
+              "harness_preflight_sensor",
+              "research_route",
+              "delivery_gate",
+              "mempalace_gate",
+              "artifact_gate",
+              "claim_gate",
+              "local_model_executor"
+            ],
+            "task_id": "la-exp-t01-target-id",
+            "task_statement_hash": "90f4f23c33321a1fa1e2164c9d7f7d4f0636262d1a486a9a4f1d0a95307f9ee7",
+            "workspace_revision": "HEAD"
+          },
+          "delegation": {
+            "learning": "Hybrid",
+            "local_assist": "Local",
+            "online_provider": "Online",
+            "planner": "Nexus",
+            "verifier": "Hybrid"
+          },
+          "evidence_refs": [
+            "online:f:la-exp-t01-target-id:B",
+            "paired:la-exp-t01-target-id:B_local_advisor_online",
+            "paired:la-exp-t01-target-id:request",
+            "runtime:planner_invoked",
+            "verifier:la-exp-t01-target-id:paired"
+          ],
+          "learning": {
+            "evidence_present": false,
+            "evidence_refs": [],
+            "gate_passed": false,
+            "invoked": false,
+            "name": "learning",
+            "outcome_contributed": false,
+            "reason": "learning_callback_not_supplied",
+            "status": "NOT_RUN"
+          },
+          "local": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "paired:la-exp-t01-target-id:request"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "local",
+            "outcome_contributed": false,
+            "planner_snapshot_hash": "8594f7e6b3c86602edbe57fc196dea989d27e3c2560a154d461e3a5840f119f5",
+            "reason": "",
+            "response": {
+              "action": "advisor",
+              "agent_consumed": false,
+              "candidate_summary": {
+                "candidate_count": 0,
+                "candidate_hashes": [],
+                "isolation_status": "not_run",
+                "selected": false,
+                "selected_candidate_hash": ""
+              },
+              "claim_boundary": {
+                "agent_consumed": false,
+                "outcome_contributed": false,
+                "output_delivered": true,
+                "planner_selected": true,
+                "registry_known": true,
+                "runtime_invoked": true,
+                "value_measured": false
+              },
+              "evidence_refs": [
+                "paired:la-exp-t01-target-id:request"
+              ],
+              "fallback_reason": "",
+              "local_model_invoked": true,
+              "local_outputs": {
+                "diagnosis": "diag",
+                "provider_error": "",
+                "recommended_next_action": "Online Agent must independently decide and record consumption."
+              },
+              "outcome_contributed": false,
+              "output_delivered": true,
+              "parent_task_id": "la-exp-t01-target-id",
+              "planner_decision": {
+                "automatic_dispatch": false,
+                "selected_action": "advisor",
+                "source": "CapabilityPlanner",
+                "validated": true
+              },
+              "planner_selected": true,
+              "provider": "injected",
+              "receipt_path": "/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/tmp3442f1i6/.nexus/reports/local_assist/la-exp-t01-target-id/execution_receipt.json",
+              "resolved_models": [
+                "qwen2.5-coder:7b"
+              ],
+              "schema": "nexus.local_assist.response.v1",
+              "status": "SUCCEEDED",
+              "task_id": "la-exp-t01-target-id",
+              "value_measured": false,
+              "verifier_summary": {
+                "verifier_command": [],
+                "verifier_reached": false,
+                "verifier_status": "not_run"
+              }
+            },
+            "response_task_id": "la-exp-t01-target-id",
+            "status": "SUCCEEDED",
+            "task_id": "la-exp-t01-target-id",
+            "task_identity_shared": true
+          },
+          "online": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "online:f:la-exp-t01-target-id:B"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "online",
+            "outcome_contributed": false,
+            "reason": "",
+            "response": {
+              "error": "",
+              "evidence_refs": [
+                "online:f:la-exp-t01-target-id:B"
+              ],
+              "execution_role": "online",
+              "gate_passed": true,
+              "invoked": true,
+              "output_delivered": true,
+              "provider": "fixture",
+              "provider_call_count": 1,
+              "raw_response": "raw",
+              "response": {
+                "patch": "ok",
+                "status": "APPROVED"
+              },
+              "selection_source": "injected_transport",
+              "task_id": "la-exp-t01-target-id",
+              "transport": "structured_callable",
+              "usage": {
+                "total_tokens": 90
+              }
+            },
+            "response_task_id": "la-exp-t01-target-id",
+            "status": "SUCCEEDED",
+            "task_id": "la-exp-t01-target-id",
+            "task_identity_shared": true
+          },
+          "online_preflight": {
+            "approved_online_providers": [
+              "gemini",
+              "grok",
+              "codex",
+              "openai"
+            ],
+            "online_authorization_source": "workspace_policy",
+            "online_execution_authorized": false,
+            "online_execution_requested": false,
+            "online_policy": "deny",
+            "physical_invocation_allowed": false,
+            "reason": "online_not_requested_by_policy_or_planner",
+            "status": "ONLINE_NOT_REQUESTED"
+          },
+          "planner": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "runtime:planner_invoked"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "planner",
+            "outcome_contributed": false,
+            "plan_hash": "0362eb4c22afc12804e733e8ae8d361afd72f662b282bc3e4fc50b684542e530",
+            "plan_schema": "nexus_capability_plan_v1",
+            "reason": "",
+            "selected_capabilities": [
+              "harness_preflight_sensor",
+              "research_route",
+              "delivery_gate",
+              "mempalace_gate",
+              "artifact_gate",
+              "claim_gate",
+              "local_model_executor"
+            ],
+            "status": "SUCCEEDED"
+          },
+          "receipt_complete": false,
+          "schema": "nexus.unified_runtime.receipt.v1",
+          "stages": [
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "runtime:planner_invoked"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "planner",
+              "outcome_contributed": false,
+              "plan_hash": "0362eb4c22afc12804e733e8ae8d361afd72f662b282bc3e4fc50b684542e530",
+              "plan_schema": "nexus_capability_plan_v1",
+              "reason": "",
+              "selected_capabilities": [
+                "harness_preflight_sensor",
+                "research_route",
+                "delivery_gate",
+                "mempalace_gate",
+                "artifact_gate",
+                "claim_gate",
+                "local_model_executor"
+              ],
+              "status": "SUCCEEDED"
+            },
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "paired:la-exp-t01-target-id:request"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "local",
+              "outcome_contributed": false,
+              "planner_snapshot_hash": "8594f7e6b3c86602edbe57fc196dea989d27e3c2560a154d461e3a5840f119f5",
+              "reason": "",
+              "response": {
+                "action": "advisor",
+                "agent_consumed": false,
+                "candidate_summary": {
+                  "candidate_count": 0,
+                  "candidate_hashes": [],
+                  "isolation_status": "not_run",
+                  "selected": false,
+                  "selected_candidate_hash": ""
+                },
+                "claim_boundary": {
+                  "agent_consumed": false,
+                  "outcome_contributed": false,
+                  "output_delivered": true,
+                  "planner_selected": true,
+                  "registry_known": true,
+                  "runtime_invoked": true,
+                  "value_measured": false
+                },
+                "evidence_refs": [
+                  "paired:la-exp-t01-target-id:request"
+                ],
+                "fallback_reason": "",
+                "local_model_invoked": true,
+                "local_outputs": {
+                  "diagnosis": "diag",
+                  "provider_error": "",
+                  "recommended_next_action": "Online Agent must independently decide and record consumption."
+                },
+                "outcome_contributed": false,
+                "output_delivered": true,
+                "parent_task_id": "la-exp-t01-target-id",
+                "planner_decision": {
+                  "automatic_dispatch": false,
+                  "selected_action": "advisor",
+                  "source": "CapabilityPlanner",
+                  "validated": true
+                },
+                "planner_selected": true,
+                "provider": "injected",
+                "receipt_path": "/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/tmp3442f1i6/.nexus/reports/local_assist/la-exp-t01-target-id/execution_receipt.json",
+                "resolved_models": [
+                  "qwen2.5-coder:7b"
+                ],
+                "schema": "nexus.local_assist.response.v1",
+                "status": "SUCCEEDED",
+                "task_id": "la-exp-t01-target-id",
+                "value_measured": false,
+                "verifier_summary": {
+                  "verifier_command": [],
+                  "verifier_reached": false,
+                  "verifier_status": "not_run"
+                }
+              },
+              "response_task_id": "la-exp-t01-target-id",
+              "status": "SUCCEEDED",
+              "task_id": "la-exp-t01-target-id",
+              "task_identity_shared": true
+            },
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "online:f:la-exp-t01-target-id:B"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "online",
+              "outcome_contributed": false,
+              "reason": "",
+              "response": {
+                "error": "",
+                "evidence_refs": [
+                  "online:f:la-exp-t01-target-id:B"
+                ],
+                "execution_role": "online",
+                "gate_passed": true,
+                "invoked": true,
+                "output_delivered": true,
+                "provider": "fixture",
+                "provider_call_count": 1,
+                "raw_response": "raw",
+                "response": {
+                  "patch": "ok",
+                  "status": "APPROVED"
+                },
+                "selection_source": "injected_transport",
+                "task_id": "la-exp-t01-target-id",
+                "transport": "structured_callable",
+                "usage": {
+                  "total_tokens": 90
+                }
+              },
+              "response_task_id": "la-exp-t01-target-id",
+              "status": "SUCCEEDED",
+              "task_id": "la-exp-t01-target-id",
+              "task_identity_shared": true
+            },
+            {
+              "evidence_present": true,
+              "evidence_refs": [
+                "verifier:la-exp-t01-target-id:paired"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "name": "verifier",
+              "outcome_contributed": false,
+              "reason": "",
+              "response": {
+                "evidence_refs": [
+                  "verifier:la-exp-t01-target-id:paired"
+                ],
+                "gate_passed": true,
+                "invoked": true,
+                "status": "pass",
+                "task_id": "la-exp-t01-target-id"
+              },
+              "response_task_id": "la-exp-t01-target-id",
+              "status": "SUCCEEDED",
+              "task_id": "la-exp-t01-target-id",
+              "task_identity_shared": true
+            },
+            {
+              "evidence_present": false,
+              "evidence_refs": [],
+              "gate_passed": false,
+              "invoked": false,
+              "name": "learning",
+              "outcome_contributed": false,
+              "reason": "learning_callback_not_supplied",
+              "status": "NOT_RUN"
+            }
+          ],
+          "task_id": "la-exp-t01-target-id",
+          "task_statement_hash": "90f4f23c33321a1fa1e2164c9d7f7d4f0636262d1a486a9a4f1d0a95307f9ee7",
+          "terminal_status": "INCOMPLETE",
+          "verifier": {
+            "evidence_present": true,
+            "evidence_refs": [
+              "verifier:la-exp-t01-target-id:paired"
+            ],
+            "gate_passed": true,
+            "invoked": true,
+            "name": "verifier",
+            "outcome_contributed": false,
+            "reason": "",
+            "response": {
+              "evidence_refs": [
+                "verifier:la-exp-t01-target-id:paired"
+              ],
+              "gate_passed": true,
+              "invoked": true,
+              "status": "pass",
+              "task_id": "la-exp-t01-target-id"
+            },
+            "response_task_id": "la-exp-t01-target-id",
+            "status": "SUCCEEDED",
+            "task_id": "la-exp-t01-target-id",
+            "task_identity_shared": true
+          },
+          "workspace_revision": "HEAD"
+        },
+        "retry_count": 0,
+        "task_id": "la-exp-t01-target-id",
+        "task_success": true,
+        "total_tokens": {
+          "quality": "MEASURED",
+          "value": 90
+        },
+        "verified_success": true,
+        "workspace_revision": "HEAD"
+      },
+      "claim_boundary": {
+        "proven_cost_reduction": false,
+        "proven_time_savings": false,
+        "proven_token_savings": false,
+        "public_claim_allowed": false
+      },
+      "claim_eligibility": {
+        "paired_measured": true,
+        "reason": "measured_but_public_claim_still_false_without_campaign_gate",
+        "time_savings_claim_allowed": false,
+        "token_savings_claim_allowed": false
+      },
+      "deltas": {
+        "end_to_end_latency_delta": {
+          "quality": "MEASURED",
+          "value": -1.0
+        },
+        "online_latency_delta": {
+          "quality": "MEASURED",
+          "value": -1.0
+        },
+        "online_token_delta": {
+          "quality": "MEASURED",
+          "value": -10.0
+        },
+        "retry_delta": {
+          "quality": "MEASURED",
+          "value": 0
+        },
+        "success_delta": {
+          "quality": "MEASURED",
+          "value": 0
+        },
+        "total_token_delta": {
+          "quality": "MEASURED",
+          "value": -10.0
+        }
+      },
+      "measurement_quality": {
+        "arm_a_tokens": "MEASURED",
+        "arm_b_tokens": "MEASURED"
+      },
+      "task_id": "la-exp-t01-target-id",
+      "workspace_revision": "HEAD"
+    }
+  ],
+  "schema": "nexus.local_assist.paired_experiment_summary.v1",
+  "task_count": 1,
+  "timestamp": "2026-07-13T21:36:00.946165+00:00"
+}

@@ -1,0 +1,14 @@
+{
+  "task_id": "la-exp-t02-failure-diagnosis",
+  "task_type": "diagnosis",
+  "task_statement": "Diagnose why copying oauth_provider=ollama into Online route.provider would empty Online structured output under UnifiedRuntime.",
+  "workspace_revision": "HEAD",
+  "allowed_files": [
+    "docs/reports/runtime_contract_stabilization_baseline_20260714.md",
+    "nexus/services/unified_runtime.py"
+  ],
+  "expected_evidence": ["provider_transport_separation"],
+  "verifier": "response_contract_online_payload_present",
+  "timeout_sec": 180,
+  "mutation_policy": "isolated_only"
+}

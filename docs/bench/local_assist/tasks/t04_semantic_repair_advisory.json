@@ -1,0 +1,11 @@
+{
+  "task_id": "la-exp-t04-semantic-repair",
+  "task_type": "semantic_repair_advisory",
+  "task_statement": "Advise on the safest bounded next step when Local Advisor returns empty local_outputs but Online must continue.",
+  "workspace_revision": "HEAD",
+  "allowed_files": ["nexus/engine/pipeline_repair.py"],
+  "expected_evidence": ["degraded_to_online_visible"],
+  "verifier": "response_contract_online_payload_present",
+  "timeout_sec": 120,
+  "mutation_policy": "isolated_only"
+}

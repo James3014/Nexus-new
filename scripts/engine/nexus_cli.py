@@ -282,8 +282,15 @@ def top_status(ctx, as_json):
     default="disabled",
     show_default=True,
 )
+@click.option(
+    "--online-policy",
+    type=click.Choice(["deny", "auto", "require"]),
+    default="deny",
+    show_default=True,
+    help="Nexus-owned Online execution policy (deny|auto|require). Default deny is conservative.",
+)
 @click.pass_context
-def top_run(ctx, task_id, complexity, output_file, report_file, local_assist_policy):
+def top_run(ctx, task_id, complexity, output_file, report_file, local_assist_policy, online_policy):
     """🚀 [Direct] Execute task with autonomic governance."""
     ctx.invoke(
         run,
@@ -292,6 +299,7 @@ def top_run(ctx, task_id, complexity, output_file, report_file, local_assist_pol
         output_file=output_file,
         report_file=report_file,
         local_assist_policy=local_assist_policy,
+        online_policy=online_policy,
     )
 
 
@@ -991,7 +999,14 @@ def delivery_receipt(receipt_path, as_json):
     default="disabled",
     show_default=True,
 )
-def run(task_id, complexity, output_file, report_file, local_assist_policy):
+@click.option(
+    "--online-policy",
+    type=click.Choice(["deny", "auto", "require"]),
+    default="deny",
+    show_default=True,
+    help="Nexus-owned Online execution policy (deny|auto|require). Default deny is conservative.",
+)
+def run(task_id, complexity, output_file, report_file, local_assist_policy, online_policy):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
     from nexus.services.canonical_local_assist_policy import (
         build_canonical_policy_receipt,
@@ -999,11 +1014,16 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy):
         normalize_local_assist_policy,
         write_canonical_policy_receipt,
     )
+    from nexus.services.online_execution_policy import (
+        build_online_execution_context_fields,
+        normalize_online_policy,
+    )
 
     try:
         policy_norm = normalize_local_assist_policy(local_assist_policy)
+        online_norm = normalize_online_policy(online_policy)
     except ValueError as exc:
-        raise click.ClickException(f"local_assist_policy_failed_closed: {exc}") from exc
+        raise click.ClickException(f"policy_failed_closed: {exc}") from exc
 
     revision = ""
     try:
@@ -1024,6 +1044,15 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy):
         workspace_revision=revision,
         policy_source="cli",
     )
+    online_fields = build_online_execution_context_fields(
+        online_policy=online_norm,
+        project_root=REPO_ROOT,
+        task_id=str(task_id),
+        workspace_revision=revision,
+        policy_source="cli",
+    )
+    execution_context.update(online_fields)
+    execution_context["product_entry"] = "nexus run"
     policy_receipt = None
     policy_path = None
     if policy_norm["canonical_policy"] != "disabled":

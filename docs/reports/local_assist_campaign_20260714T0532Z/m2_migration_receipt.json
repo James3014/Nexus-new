@@ -1,0 +1,5 @@
+{
+  "status": "ACTIVE_CALLERS_ON_UNIFIED_RUNTIME",
+  "repair_seam": "pipeline_repair._execute_single_repair",
+  "authorization": "online_execution_policy.OnlineExecutionDecision"
+}

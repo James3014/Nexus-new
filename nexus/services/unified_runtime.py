@@ -652,13 +652,14 @@ def build_registered_online_invoker(
         include_local_context=include_local_context,
     )
 
-    # Real provider subprocesses require an explicit execution grant. Custom
-    # runners remain available for deterministic/injected tests and bounded
-    # probes; they never imply a live provider claim.
+    # Real provider subprocesses require a canonical OnlineExecutionDecision.
+    # Custom runners remain available for deterministic/injected tests.
     if runner is subprocess.run:
         def guarded_invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+            from nexus.services.online_execution_policy import physical_online_authorized
+
             task_id = str(context.get("task_id", ""))
-            if os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED") != "1":
+            if not physical_online_authorized(context, injected_transport=False):
                 return normalize_online_invoker_payload(
                     provider=spec.provider,
                     task_id=task_id,
@@ -669,7 +670,7 @@ def build_registered_online_invoker(
                     response="",
                     raw_response="",
                     usage={},
-                    error="external_authorization_required",
+                    error="online_execution_not_authorized",
                     evidence_refs=[f"online:{spec.provider}:{task_id}:authorization_required"],
                     transport=TRANSPORT_REGISTERED_CLI,
                     selection_source=SELECTION_EXPLICIT_REQUEST,
@@ -1195,6 +1196,27 @@ class UnifiedRuntime:
             effective_online_prompt = compressed_context
             capability_context_compressed = True
 
+        from nexus.services.online_execution_policy import (
+            decision_from_context,
+            resolve_online_execution_decision,
+        )
+
+        route_map = dict(request.route) if isinstance(request.route, Mapping) else {}
+        # Injected transport is an explicit flag only — presence of online_invoker does
+        # not imply a test fixture (registered CLI invokers are also callables).
+        injected_flag = bool(route_map.get("injected_transport", False))
+        prior = decision_from_context(route_map)
+        if prior is None:
+            online_decision = resolve_online_execution_decision(
+                task_online_policy=str(route_map.get("online_policy") or ""),
+                project_root=str(route_map.get("workspace_root") or "."),
+                planner_online_needed=bool(request.online_enabled),
+                injected_transport=injected_flag,
+                requested_provider=str(route_map.get("provider") or ""),
+            )
+        else:
+            online_decision = prior
+
         context: dict[str, Any] = {
             "schema": REQUEST_SCHEMA,
             "task_id": request.task_id,
@@ -1210,6 +1232,13 @@ class UnifiedRuntime:
             "local": local_stage,
             "capability_results": capability_results,
             "capability_context_compressed": capability_context_compressed,
+            "online_execution_decision": online_decision.to_dict(),
+            "online_policy": online_decision.online_policy,
+            "online_execution_requested": online_decision.online_execution_requested,
+            "online_execution_authorized": online_decision.online_execution_authorized,
+            "online_authorization_source": online_decision.online_authorization_source,
+            "online_preflight_status": online_decision.preflight_status,
+            "approved_online_providers": list(online_decision.approved_online_providers),
         }
         online_stage = self._run_online(request, online_invoker, context)
         if request.online_enabled:
@@ -1328,6 +1357,16 @@ class UnifiedRuntime:
             "local": local_stage,
             "capability_results": capability_results,
             "online": online_stage,
+            "online_preflight": {
+                "status": online_decision.preflight_status,
+                "online_policy": online_decision.online_policy,
+                "online_execution_requested": online_decision.online_execution_requested,
+                "online_execution_authorized": online_decision.online_execution_authorized,
+                "online_authorization_source": online_decision.online_authorization_source,
+                "approved_online_providers": list(online_decision.approved_online_providers),
+                "reason": online_decision.reason,
+                "physical_invocation_allowed": online_decision.physical_invocation_allowed,
+            },
             "verifier": verifier_stage,
             "learning": learning_stage,
             "stages": list(stages.values()),
