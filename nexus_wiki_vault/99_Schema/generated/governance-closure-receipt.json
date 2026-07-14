@@ -2,41 +2,55 @@
   "schema": "nexus.wiki.governance-closure-receipt.v1",
   "authority": "derived_non_authoritative",
   "status": "closed",
+  "source_fingerprint": "48a8704b6a870849fc163df8ef46da05d20971cb066f4707c945bbd610a80c81",
+  "governance_input_fingerprint": "0e148964a67c8ce749aee067fcc3e8872f4c88aa1e64a533e87b244a5d456df3",
+  "artifact_hashes": {
+    "agent-index.json": "5fcc3e8d039f8cfb024976dbf1c95cd2c0e4e866a85574f58a26e6ac283f12e4",
+    "wikilink-graph.json": "5817369ea6016710c39d2467c4c49ab7b839b348be0fce37ebb781f8ae77da78",
+    "unresolved-link-inventory.json": "aef57ca0be9325f0fef4d78d08c4d14a74287455ff1ee50b8184656141c885a3"
+  },
   "checks": [
     {
       "name": "committed_tree_reproducibility",
       "description": "Committed-tree reproducibility gate",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     },
     {
       "name": "classifier_determinism",
       "description": "Unresolved-link classifier determinism",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     },
     {
       "name": "link_repair_receipt",
       "description": "Link repair receipt verification",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     },
     {
       "name": "compiler_tests",
       "description": "Compiler test suite",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     },
     {
       "name": "reproducibility_tests",
       "description": "Reproducibility test suite",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     },
     {
       "name": "classifier_tests",
       "description": "Classifier test suite",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     },
     {
       "name": "repair_tests",
       "description": "Repair test suite",
-      "passed": true
+      "passed": true,
+      "exit_code": 0
     }
   ],
   "total_checks": 7,

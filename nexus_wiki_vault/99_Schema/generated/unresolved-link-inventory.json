@@ -1,7 +1,7 @@
 {
   "schema": "nexus.wiki.unresolved-link-inventory.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "667def09cffbd4dfa8a88d9bb33b8d8ab4c00ff42539371a6a7c290e0c154b3d",
+  "source_fingerprint": "48a8704b6a870849fc163df8ef46da05d20971cb066f4707c945bbd610a80c81",
   "total_unresolved": 319,
   "category_counts": {
     "repo_source": 0,
