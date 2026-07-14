@@ -481,15 +481,22 @@ def main() -> None:
             sys.exit(1)
 
         existing = json.loads(inventory_path.read_text(encoding="utf-8"))
-        if existing["total_unresolved"] != result["total_unresolved"]:
-            print(
-                f"DRIFT: total_unresolved {existing['total_unresolved']} != {result['total_unresolved']}"
-            )
-            sys.exit(1)
-
-        if existing["category_counts"] != result["category_counts"]:
-            print("DRIFT: category_counts mismatch")
-            sys.exit(1)
+        required_fields = (
+            "schema",
+            "authority",
+            "source_fingerprint",
+            "total_unresolved",
+            "category_counts",
+            "entries",
+            "repair_batches",
+        )
+        for field in required_fields:
+            if field not in existing:
+                print(f"DRIFT: missing field {field}")
+                sys.exit(1)
+            if existing[field] != result[field]:
+                print(f"DRIFT: {field} mismatch")
+                sys.exit(1)
 
         print("CHECK PASSED: classification matches")
 

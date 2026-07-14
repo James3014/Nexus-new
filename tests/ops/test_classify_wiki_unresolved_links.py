@@ -164,6 +164,45 @@ def test_classifier_check_mode_is_read_only(tmp_path):
     assert before == after
 
 
+def test_check_rejects_source_fingerprint_drift_with_equal_counts(tmp_path):
+    _run_classifier(tmp_path, repo_root=str(REPO_ROOT))
+    inventory_path = tmp_path / "unresolved-link-inventory.json"
+    inventory = json.loads(inventory_path.read_text())
+    inventory["source_fingerprint"] = "stale"
+    inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
+
+    res = _run_classifier(tmp_path, mode="--check", repo_root=str(REPO_ROOT))
+
+    assert res.returncode == 1
+    assert "source_fingerprint" in res.stdout
+
+
+def test_check_rejects_entry_drift_with_equal_category_counts(tmp_path):
+    _run_classifier(tmp_path, repo_root=str(REPO_ROOT))
+    inventory_path = tmp_path / "unresolved-link-inventory.json"
+    inventory = json.loads(inventory_path.read_text())
+    inventory["entries"][0]["raw_target"] += "-drift"
+    inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
+
+    res = _run_classifier(tmp_path, mode="--check", repo_root=str(REPO_ROOT))
+
+    assert res.returncode == 1
+    assert "entries" in res.stdout
+
+
+def test_check_rejects_repair_batch_drift_with_equal_counts(tmp_path):
+    _run_classifier(tmp_path, repo_root=str(REPO_ROOT))
+    inventory_path = tmp_path / "unresolved-link-inventory.json"
+    inventory = json.loads(inventory_path.read_text())
+    inventory["repair_batches"] = [{"batch_id": "drift", "source_pages": [], "edits": []}]
+    inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
+
+    res = _run_classifier(tmp_path, mode="--check", repo_root=str(REPO_ROOT))
+
+    assert res.returncode == 1
+    assert "repair_batches" in res.stdout
+
+
 def test_classifier_does_not_modify_wiki_sources(tmp_path):
     """Classifier must not modify any wiki source files."""
     before = subprocess.run(

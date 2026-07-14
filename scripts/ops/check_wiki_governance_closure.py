@@ -28,8 +28,8 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def run_check(script_path: Path, args: list[str], repo_root: Path) -> bool:
-    """Run a check script and return True if it passes."""
+def run_check(script_path: Path, args: list[str], repo_root: Path) -> dict[str, Any]:
+    """Run a check script and return deterministic execution evidence."""
     result = subprocess.run(
         [sys.executable, str(script_path), *args],
         cwd=repo_root,
@@ -37,7 +37,42 @@ def run_check(script_path: Path, args: list[str], repo_root: Path) -> bool:
         text=True,
         timeout=120,
     )
-    return result.returncode == 0
+    return {
+        "passed": result.returncode == 0,
+        "exit_code": result.returncode,
+    }
+
+
+def build_artifact_identity(vault_root: Path) -> dict[str, Any]:
+    generated_dir = vault_root / "99_Schema" / "generated"
+    artifact_names = (
+        "agent-index.json",
+        "wikilink-graph.json",
+        "unresolved-link-inventory.json",
+    )
+    artifact_hashes: dict[str, str] = {}
+    for name in artifact_names:
+        path = generated_dir / name
+        if not path.exists():
+            raise FileNotFoundError(path)
+        artifact_hashes[name] = sha256_bytes(path.read_bytes())
+
+    inventory = json.loads(
+        (generated_dir / "unresolved-link-inventory.json").read_text(encoding="utf-8")
+    )
+    source_fingerprint = inventory.get("source_fingerprint", "")
+    identity_payload = {
+        "source_fingerprint": source_fingerprint,
+        "artifact_hashes": artifact_hashes,
+    }
+    governance_input_fingerprint = sha256_bytes(
+        json.dumps(identity_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    return {
+        "source_fingerprint": source_fingerprint,
+        "governance_input_fingerprint": governance_input_fingerprint,
+        "artifact_hashes": artifact_hashes,
+    }
 
 
 def main() -> None:
@@ -115,22 +150,30 @@ def main() -> None:
     all_passed = True
 
     for check in checks:
-        passed = run_check(check["script"], check["args"], repo_root)
+        execution = run_check(check["script"], check["args"], repo_root)
         results.append(
             {
                 "name": check["name"],
                 "description": check["description"],
-                "passed": passed,
+                "passed": execution["passed"],
+                "exit_code": execution["exit_code"],
             }
         )
-        if not passed:
+        if not execution["passed"]:
             all_passed = False
 
-    # Build receipt
+    try:
+        artifact_identity = build_artifact_identity(vault_root)
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"ERROR: cannot build artifact identity: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build deterministic, non-self-referential receipt.
     receipt = {
         "schema": SCHEMA,
         "authority": "derived_non_authoritative",
         "status": "closed" if all_passed else "open",
+        **artifact_identity,
         "checks": results,
         "total_checks": len(results),
         "passed_checks": sum(1 for r in results if r["passed"]),
@@ -155,6 +198,37 @@ def main() -> None:
         if not all_passed:
             print(f"DRIFT: {receipt['failed_checks']} governance checks failed")
             sys.exit(1)
+
+        receipt_path = output_dir / "governance-closure-receipt.json"
+        if not receipt_path.exists():
+            print("DRIFT: governance closure receipt not found")
+            sys.exit(1)
+        try:
+            existing = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print("DRIFT: governance closure receipt is invalid JSON")
+            sys.exit(1)
+
+        required_fields = (
+            "schema",
+            "authority",
+            "status",
+            "source_fingerprint",
+            "governance_input_fingerprint",
+            "artifact_hashes",
+            "checks",
+            "total_checks",
+            "passed_checks",
+            "failed_checks",
+        )
+        for field in required_fields:
+            if field not in existing:
+                print(f"DRIFT: missing field {field}")
+                sys.exit(1)
+            if existing[field] != receipt[field]:
+                print(f"DRIFT: {field} mismatch")
+                sys.exit(1)
+
         print("CHECK PASSED: governance closure complete")
 
 
