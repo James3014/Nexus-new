@@ -1,7 +1,7 @@
 {
   "schema": "nexus.wiki.wikilink-graph.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "6e7fec14daa9b612e5b932155e673f887d99169415aa1a7e7a07343b00a02a14",
+  "source_fingerprint": "667def09cffbd4dfa8a88d9bb33b8d8ab4c00ff42539371a6a7c290e0c154b3d",
   "nodes": [
     {
       "id": "canonical:entry",

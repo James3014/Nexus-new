@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "6e7fec14daa9b612e5b932155e673f887d99169415aa1a7e7a07343b00a02a14",
+  "source_fingerprint": "667def09cffbd4dfa8a88d9bb33b8d8ab4c00ff42539371a6a7c290e0c154b3d",
   "included_page_count": 251,
   "excluded_page_count": 39,
   "canonical_page_count": 12,
@@ -294,7 +294,7 @@
       "is_canonical": true,
       "canonical_key": "architecture",
       "one_sentence_summary": "> [!abstract] 核心意圖",
-      "content_sha256": "aa84e31d959e343dae8cd949db0e427832bd53b5f12a1c5491b1fe0b8946ce00",
+      "content_sha256": "24847a7fa1784f5ad185e9738f3936d742f09c754723e95aedca1c5daa4ddfc6",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "",
@@ -464,7 +464,7 @@
       "is_canonical": true,
       "canonical_key": "wiki_governance",
       "one_sentence_summary": "**[VERSION: v1.0 | STATUS: STRUCTURE_FROZEN]**",
-      "content_sha256": "67ac083e5b573b24229fa668cbd0564d76e44107ce341e5cee3aaaba2d5e67c2",
+      "content_sha256": "598877dbe0318d7ac0251c365c981b16dc19b35c7511d4405b3d8b01536c1047",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "",
@@ -3944,7 +3944,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁定義 Supreme Master Loop 的 P-X-D-R-A-C 執行骨架，作為系統治理、執行與驗收的一致控制面。",
-      "content_sha256": "d647e32343c5b09183b8ec4088d02ac9c8eeb09bfc2c6f5cc7b5fa88e3760a2c",
+      "content_sha256": "269b6b56fc4c2ec0206f0e34557ddb80a1b56e79660c5337aac5d546651f860e",
       "outgoing_links": [
         [
           "page:01_System/MUSE_PROTO.md",
@@ -6617,7 +6617,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "**建立日期**: 2026-06-05",
-      "content_sha256": "d06557603903766866960ccd8febfba499711a5e8a9cb559a7ad041bd26a4746",
+      "content_sha256": "7f640299c235ff17977fec47e2cc607ba6126a55b889647dd62f94062d6a0a0e",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "",
@@ -6703,7 +6703,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]",
-      "content_sha256": "a7ee95d9b1ce02cbde0457e6e107a3d3b27f47eb8f3dd54fedbbe4bfdf0af8cd",
+      "content_sha256": "abe7d7afa18f1defd7eb22af59340d1f5f7441b105a82627dee1bc82ee8d409c",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -6859,7 +6859,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "**建立日期**: 2026-06-05",
-      "content_sha256": "ff2910b0e978af6c7f696dd63fe4fcfac1aa9c5d9008a98bddf4b2aeb9db50ed",
+      "content_sha256": "9a3b35c795f94d3d6a2ded24645d41fd159f8c7ceb977acfd44a24b0c4cee744",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "",
@@ -6887,8 +6887,8 @@
       "tags": [],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "本頁評估 Nexus 當前架構差距，基於 `codex/local-armor-baseline-integration` 分支 (HEAD `ffae4fe20`) 的 source-level 驗證結果。",
-      "content_sha256": "1573d63f5bfb192028f9c14f95ff07b0c56131d1854e7c324ca137076ea31e08",
+      "one_sentence_summary": "本頁評估 v24.7 架構差距，並把尚待改進的缺口轉為可落地的治理與實作優先清單。",
+      "content_sha256": "72fba5e7ce7ba672a13472a5bd4097ff553486acf20115f0b20b5cefdf3bfc35",
       "outgoing_links": [
         [
           "page:06_Ops/Ops - Wisdom Layer v22 Architecture.md",
@@ -9319,7 +9319,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁將常見錯誤類型映射到防再發策略與 CI 檢查點，確保「發生一次就學會一次」，形成可驗證的治理閉環。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]",
-      "content_sha256": "b676b246bddc76fd85d7038f7f3833701cd2677c91527c9f68f8190327f2ba8c",
+      "content_sha256": "ba9b1015c97d9c2fcee53e4636b01205d7215c532663b44dacb18ed31ec13871",
       "outgoing_links": [
         [
           "canonical:system_overview",
