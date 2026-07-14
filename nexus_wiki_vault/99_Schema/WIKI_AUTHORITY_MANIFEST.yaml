@@ -148,3 +148,12 @@ unresolved_authority_collisions:
   - description: "Evidence: evidence_collector.py vs evidence_policy.py"
     status: unresolved
     reason: "Collector vs policy authority split"
+
+generated_retrieval_layer:
+  schema: nexus.wiki.agent-index.v1
+  authority: derived_non_authoritative
+  generator: scripts/ops/build_wiki_agent_index.py
+  outputs:
+    agent_index: 99_Schema/generated/agent-index.json
+    llms_entry: 99_Schema/generated/llms.txt
+    wikilink_graph: 99_Schema/generated/wikilink-graph.json
