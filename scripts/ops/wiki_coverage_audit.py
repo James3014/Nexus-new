@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import ast
+from functools import lru_cache
 import os
 import re
 import json
 from pathlib import Path
+import yaml
 
 # 🛡️ Nexus Wiki Coverage Audit (Agent G - WS-A Hardened v2.1)
 # Purpose: Quantify true governance coverage for mandatory domains and enforce 100% Key Path.
@@ -14,7 +16,7 @@ REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_coverage_report.json"
 KEYPATH_REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_keypath_coverage_report.json"
 
 TARGET_DIRS = [
-    "nexus/core", "nexus/services", "scripts/ops", "scripts/engine"
+    "nexus/core", "nexus/engine", "nexus/services", "scripts/ops", "scripts/engine"
 ]
 SYMBOL_SCAN_DIRS = [*TARGET_DIRS, "tests"]
 
@@ -96,6 +98,13 @@ def coverage_policy() -> dict:
         "matching": "exact_code_path_and_symbol_only",
         "fuzzy_basename_matches_are_not_coverage": True,
         "generated_or_legacy_authority_is_rejected": True,
+        "formal_mapping_manifest_key": "code_symbol_mapping_rules",
+        "formal_mapping_wave_thresholds": {
+            "1": 1.0,
+            "2": 1.0,
+            "3": 1.0,
+            "4": COVERAGE_THRESHOLD,
+        },
     }
 
 
@@ -125,6 +134,7 @@ def classify_coverage_item(
     return "should_document"
 
 
+@lru_cache(maxsize=None)
 def _python_symbols(path: Path) -> tuple[list[str], bool]:
     """Return deterministic module and qualified Python symbols for one file."""
     try:
@@ -296,6 +306,227 @@ def validate_mappings(
         "error_count": len(errors),
     }
 
+
+def load_authority_manifest() -> dict:
+    path = VAULT_ROOT / "99_Schema" / "WIKI_AUTHORITY_MANIFEST.yaml"
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return {}
+
+
+def _frontmatter(content: str) -> dict:
+    if not content.startswith("---"):
+        return {}
+    end = content.find("---", 3)
+    if end == -1:
+        return {}
+    try:
+        return yaml.safe_load(content[3:end]) or {}
+    except yaml.YAMLError:
+        return {}
+
+
+def get_authority_pages(manifest: dict | None = None) -> dict:
+    """Return exact vault paths and their live classification."""
+    manifest = manifest or load_authority_manifest()
+    legacy = {
+        str(entry.get("path", "")).replace("\\", "/"): str(
+            entry.get("classification", "legacy")
+        ).strip().lower()
+        for entry in manifest.get("known_legacy_entries", [])
+        if isinstance(entry, dict)
+    }
+    pages: dict[str, dict] = {}
+    for path in VAULT_ROOT.glob("**/*.md"):
+        relative = str(path.relative_to(VAULT_ROOT)).replace("\\", "/")
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        frontmatter = _frontmatter(content)
+        lifecycle = str(frontmatter.get("lifecycle", "")).strip().lower()
+        status = str(frontmatter.get("status", "")).strip().lower()
+        classification = lifecycle or status or "unclassified"
+        if relative in legacy:
+            classification = legacy[relative]
+        if any(marker in relative.lower() for marker in GENERATED_PATH_MARKERS):
+            classification = "generated"
+        if any(marker in relative.lower() for marker in LEGACY_PATH_MARKERS):
+            classification = "legacy"
+        pages[relative] = {
+            "classification": classification,
+            "owner": frontmatter.get("owner", ""),
+            "content": content,
+        }
+    return pages
+
+
+def _mapping_rule_matches(rule: dict, code_path: str) -> bool:
+    normalized = code_path.replace("\\", "/")
+    exact_paths = {
+        str(path).replace("\\", "/") for path in rule.get("code_paths", [])
+    }
+    if normalized in exact_paths:
+        return True
+    return any(
+        normalized.startswith(str(prefix).replace("\\", "/"))
+        for prefix in rule.get("code_path_prefixes", [])
+    )
+
+
+def expand_formal_mappings(
+    symbol_inventory: list[dict] | None = None,
+    manifest: dict | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Expand explicit path rules into exact code-path/symbol mappings."""
+    manifest = manifest or load_authority_manifest()
+    rules = manifest.get("code_symbol_mapping_rules", [])
+    if not isinstance(rules, list):
+        return [], ["code_symbol_mapping_rules_not_a_list"]
+
+    inventory = symbol_inventory if symbol_inventory is not None else get_symbol_inventory()
+    mappings: list[dict] = []
+    errors: list[str] = []
+    for item in inventory:
+        if item["classification"] not in {"must_document", "should_document"}:
+            continue
+        exact_matches = [
+            rule
+            for rule in rules
+            if isinstance(rule, dict)
+            and item["code_path"] in {
+                str(path).replace("\\", "/")
+                for path in rule.get("code_paths", [])
+            }
+        ]
+        matches = exact_matches or [
+            rule
+            for rule in rules
+            if isinstance(rule, dict) and _mapping_rule_matches(rule, item["code_path"])
+        ]
+        if len(matches) != 1:
+            errors.append(
+                f"{item['code_path']}::{item['symbol']}:mapping_rule_count={len(matches)}"
+            )
+            continue
+        rule = matches[0]
+        mappings.append(
+            {
+                "code_path": item["code_path"],
+                "symbol": item["symbol"],
+                "authority_page": str(rule.get("authority_page", "")).replace("\\", "/"),
+                "authority_classification": rule.get("authority_classification", ""),
+                "source_evidence": {
+                    "kind": rule.get("source_evidence_kind", "code_backed"),
+                    "source_path": item["code_path"],
+                    "symbol": item["symbol"],
+                },
+                "mapping_rule_id": rule.get("id", ""),
+                "wave": rule.get("wave", "unassigned"),
+            }
+        )
+    return mappings, sorted(errors)
+
+
+def formal_mapping_report(
+    symbol_inventory: list[dict],
+    manifest: dict,
+) -> dict:
+    eligible = [
+        item
+        for item in symbol_inventory
+        if item["classification"] in {"must_document", "should_document"}
+    ]
+    mappings, expansion_errors = expand_formal_mappings(symbol_inventory, manifest)
+    authority_pages = get_authority_pages(manifest)
+    validation = validate_mappings(
+        mappings,
+        REPO_ROOT,
+        VAULT_ROOT,
+        authority_pages=authority_pages,
+    )
+    valid_keys = {
+        (mapping["code_path"], mapping["symbol"])
+        for mapping in validation["valid"]
+    }
+    mappings_by_key = {
+        (mapping["code_path"], mapping["symbol"]): mapping
+        for mapping in mappings
+    }
+
+    wave_stats: dict[str, dict] = {}
+    for item in eligible:
+        mapping = mappings_by_key.get((item["code_path"], item["symbol"]))
+        wave = str(mapping.get("wave", "unassigned")) if mapping else "unassigned"
+        stats = wave_stats.setdefault(wave, {"eligible": 0, "mapped": 0})
+        stats["eligible"] += 1
+        if (item["code_path"], item["symbol"]) in valid_keys:
+            stats["mapped"] += 1
+    for wave, stats in wave_stats.items():
+        stats["ratio"] = stats["mapped"] / stats["eligible"] if stats["eligible"] else 0.0
+        threshold = 0.85
+        if wave in {"1", "2", "3"}:
+            threshold = 1.0
+        stats["threshold"] = threshold
+        stats["status"] = "PASS" if stats["ratio"] >= threshold else "FAIL"
+
+    priority_scopes = {
+        "core_runtime": ("nexus/core/", "nexus/engine/", "scripts/engine/"),
+        "critical_services": ("nexus/services/",),
+        "operator_flows": ("scripts/ops/",),
+    }
+    priority_scope_stats: dict[str, dict] = {}
+    for scope, prefixes in priority_scopes.items():
+        scope_items = [
+            item
+            for item in eligible
+            if item["code_path"].startswith(prefixes)
+        ]
+        mapped = sum(
+            (item["code_path"], item["symbol"]) in valid_keys
+            for item in scope_items
+        )
+        ratio = mapped / len(scope_items) if scope_items else 0.0
+        priority_scope_stats[scope] = {
+            "eligible": len(scope_items),
+            "mapped": mapped,
+            "ratio": ratio,
+            "threshold": 1.0,
+            "status": "PASS" if ratio >= 1.0 else "FAIL",
+        }
+
+    ratio = validation["valid_count"] / len(eligible) if eligible else 0.0
+    return {
+        "status": "PASS"
+        if (
+            not expansion_errors
+            and not validation["errors"]
+            and ratio >= COVERAGE_THRESHOLD
+            and all(
+                stat["status"] == "PASS"
+                for stat in wave_stats.values()
+                if stat["eligible"]
+            )
+            and all(stat["status"] == "PASS" for stat in priority_scope_stats.values())
+        )
+        else "FAIL",
+        "eligible_symbols": len(eligible),
+        "mapped_symbols": validation["valid_count"],
+        "unmapped_symbols": len(eligible) - validation["valid_count"],
+        "coverage_ratio_float": ratio,
+        "coverage_ratio": f"{ratio:.2%}",
+        "threshold": COVERAGE_THRESHOLD,
+        "wave_stats": wave_stats,
+        "priority_scope_stats": priority_scope_stats,
+        "expansion_error_count": len(expansion_errors),
+        "validation_error_count": validation["error_count"],
+        "expansion_errors": expansion_errors[:20],
+        "validation_errors": validation["errors"][:20],
+        "mapping_rule_count": len(manifest.get("code_symbol_mapping_rules", [])),
+        "required_mapping_fields": list(REQUIRED_MAPPING_FIELDS),
+    }
+
 def get_code_files():
     files = set()
     for d in TARGET_DIRS:
@@ -342,6 +573,8 @@ def run_audit():
     print("🛡️ WS-A: Executing Hardened Wiki Coverage Audit v2.1...")
     all_code_files = get_code_files()
     symbol_inventory = get_symbol_inventory()
+    authority_manifest = load_authority_manifest()
+    formal_mapping = formal_mapping_report(symbol_inventory, authority_manifest)
     wiki_mentions = get_covered_files_from_wiki()
     
     covered_files = []
@@ -400,10 +633,13 @@ def run_audit():
             "total_files": len(all_code_files),
             "covered_files": len(covered_files),
             "uncovered_files": len(uncovered_files),
-            "coverage_ratio_float": coverage_ratio,
-            "coverage_ratio": f"{coverage_ratio:.2%}",
+            "coverage_ratio_float": formal_mapping["coverage_ratio_float"],
+            "coverage_ratio": formal_mapping["coverage_ratio"],
+            "file_coverage_ratio_float": coverage_ratio,
+            "file_coverage_ratio": f"{coverage_ratio:.2%}",
             "keypath_coverage_ratio": f"{keypath_ratio:.2%}",
-            "global_status": global_status,
+            "global_status": formal_mapping["status"],
+            "file_global_status": global_status,
             "keypath_status": keypath_status,
             "domain_stats": domain_stats,
             "taxonomy_counts": taxonomy_counts,
@@ -433,9 +669,7 @@ def run_audit():
                 "taxonomy_counts": symbol_taxonomy_counts,
             },
             "formal_symbol_mapping": {
-                "status": "not_collected_phase2",
-                "valid_count": 0,
-                "required_fields": list(REQUIRED_MAPPING_FIELDS),
+                **formal_mapping,
             },
         },
         "policy": coverage_policy(),
@@ -456,7 +690,8 @@ def run_audit():
     with open(KEYPATH_REPORT_PATH, "w") as f:
         json.dump(keypath_report, f, indent=2)
         
-    print(f"📊 Global Result: {report['summary']['coverage_ratio']} ({global_status})")
+    print(f"📊 Global Formal Result: {formal_mapping['coverage_ratio']} ({formal_mapping['status']})")
+    print(f"🗂️ File Baseline Result: {coverage_ratio:.2%} ({global_status})")
     print(f"🎯 Key Path Result: {report['summary']['keypath_coverage_ratio']} ({keypath_status})")
     print(f"📁 Domain Analysis:")
     for d, stat in domain_stats.items():
@@ -468,7 +703,12 @@ def run_audit():
         print(f"ℹ️ Key Path products not present in this checkout: {', '.join(missing_key_paths)}")
     
     if coverage_ratio < COVERAGE_THRESHOLD:
-        print(f"⚠️ Gap: {len(uncovered_files)} files remaining.")
+        print(f"ℹ️ File baseline gap: {len(uncovered_files)} files remain outside formal symbol coverage.")
+    if formal_mapping["status"] != "PASS":
+        print(
+            f"⚠️ Formal mapping gap: {formal_mapping['unmapped_symbols']} eligible symbols remain."
+        )
+    return 0 if formal_mapping["status"] == "PASS" and keypath_status == "PASS" else 1
 
 if __name__ == "__main__":
-    run_audit()
+    raise SystemExit(run_audit())

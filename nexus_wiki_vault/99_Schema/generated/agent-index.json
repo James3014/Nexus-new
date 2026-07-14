@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "bfaa335ac8bcc8fe3251c368c59548f128e4404dea92c7758105c87663899533",
+  "source_fingerprint": "51d0be26606758b0cf1d75f112b65e1a895631f5a3a7f645929aefbcb0859474",
   "included_page_count": 251,
   "excluded_page_count": 40,
   "canonical_page_count": 12,

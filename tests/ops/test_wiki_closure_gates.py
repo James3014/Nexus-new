@@ -67,26 +67,13 @@ def test_wiki_slo_dashboard_reads_nested_coverage_report():
 
 def test_wiki_global_coverage_meets_closure_threshold():
     audit = importlib.import_module("scripts.ops.wiki_coverage_audit")
+    result = audit.formal_mapping_report(
+        audit.get_symbol_inventory(), audit.load_authority_manifest()
+    )
 
-    files = audit.get_code_files()
-    mentions = audit.get_covered_files_from_wiki()
-    basename_to_rels = {}
-    for path in files:
-        basename_to_rels.setdefault(path.rsplit("/", 1)[-1], []).append(path)
-
-    covered_count = 0
-    for path in files:
-        basename = path.rsplit("/", 1)[-1]
-        if path in mentions:
-            covered_count += 1
-            continue
-        if basename in mentions and len(basename_to_rels.get(basename, [])) == 1:
-            covered_count += 1
-            continue
-        if any(match == path or match.endswith(path) or path.endswith(match) for match in mentions):
-            covered_count += 1
-
-    assert covered_count / len(files) >= 0.85
+    assert result["status"] == "PASS"
+    assert result["coverage_ratio_float"] >= 0.85
+    assert result["unmapped_symbols"] == 0
 
 
 def _authority_row(label: str, page: str) -> dict:
@@ -157,3 +144,63 @@ def test_missing_authority_page_fails_closed(tmp_path: Path, monkeypatch):
 
     assert result["status"] == "FAIL"
     assert "test[0]:missing_authority_page:01_System/Missing.md" in result["missing"]
+
+
+def test_formal_mapping_coverage_passes_all_waves():
+    audit = importlib.import_module("scripts.ops.wiki_coverage_audit")
+    inventory = audit.get_symbol_inventory()
+    result = audit.formal_mapping_report(inventory, audit.load_authority_manifest())
+
+    assert result["status"] == "PASS"
+    assert result["coverage_ratio"] == "100.00%"
+    assert result["validation_error_count"] == 0
+    assert result["expansion_error_count"] == 0
+    assert {
+        scope: data["status"]
+        for scope, data in result["priority_scope_stats"].items()
+    } == {
+        "core_runtime": "PASS",
+        "critical_services": "PASS",
+        "operator_flows": "PASS",
+    }
+    assert {wave: data["status"] for wave, data in result["wave_stats"].items()} == {
+        "1": "PASS",
+        "2": "PASS",
+        "3": "PASS",
+        "4": "PASS",
+    }
+
+
+def test_exact_mapping_rule_wins_over_broad_prefix():
+    audit = importlib.import_module("scripts.ops.wiki_coverage_audit")
+    inventory = [{
+        "code_path": "scripts/ops/ci_gate.py",
+        "symbol": "main",
+        "classification": "must_document",
+        "parse_error": False,
+    }]
+    mappings, errors = audit.expand_formal_mappings(
+        inventory,
+        {
+            "code_symbol_mapping_rules": [
+                {
+                    "id": "broad",
+                    "wave": 4,
+                    "code_path_prefixes": ["scripts/ops/"],
+                    "authority_page": "06_Ops/Ops - CI/CD Promotion Gate.md",
+                    "authority_classification": "active",
+                },
+                {
+                    "id": "exact",
+                    "wave": 3,
+                    "code_paths": ["scripts/ops/ci_gate.py"],
+                    "authority_page": "06_Ops/Ops - CI/CD Promotion Gate.md",
+                    "authority_classification": "active",
+                },
+            ]
+        },
+    )
+
+    assert errors == []
+    assert mappings[0]["mapping_rule_id"] == "exact"
+    assert mappings[0]["wave"] == 3

@@ -202,6 +202,61 @@ required_authorities:
         kind: spec_backed
         source_path: MUSE-NEXUS-Engine-Specification-v22-Eternal.md
 
+code_symbol_mapping_rules:
+  - id: wave1_core_runtime
+    wave: 1
+    code_path_prefixes:
+      - nexus/core/
+      - nexus/engine/
+    authority_page: 01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+    authority_classification: active
+    source_evidence_kind: code_backed
+
+  - id: wave1_cli_entrypoints
+    wave: 1
+    code_path_prefixes:
+      - scripts/engine/
+    authority_page: 05_Protocols/Protocol - CLI Surface.md
+    authority_classification: active
+    source_evidence_kind: code_backed
+
+  - id: wave2_runtime_services
+    wave: 2
+    code_path_prefixes:
+      - nexus/services/
+    authority_page: 02_Modules/Module - Runtime Services.md
+    authority_classification: active
+    source_evidence_kind: code_backed
+
+  - id: wave3_operator_critical
+    wave: 3
+    code_paths:
+      - scripts/ops/ci_gate.py
+      - scripts/ops/wiki_linter.py
+      - scripts/ops/wiki_drift_audit.py
+      - scripts/ops/wiki_coverage_audit.py
+      - scripts/ops/wiki_capability_coverage_audit.py
+      - scripts/ops/build_wiki_agent_index.py
+      - scripts/ops/nexus_pre_flash_gate.py
+      - scripts/ops/qualification_suite.py
+      - scripts/ops/select_tests.py
+      - scripts/ops/task_runner.py
+      - scripts/ops/incident_rca_adapter.py
+      - scripts/ops/wiki_truth_claims_check.py
+      - scripts/ops/check_wiki_governance_closure.py
+      - scripts/ops/classify_wiki_unresolved_links.py
+    authority_page: 06_Ops/Ops - CI/CD Promotion Gate.md
+    authority_classification: active
+    source_evidence_kind: code_backed
+
+  - id: wave4_operator_support
+    wave: 4
+    code_path_prefixes:
+      - scripts/ops/
+    authority_page: 06_Ops/Ops - CI/CD Promotion Gate.md
+    authority_classification: active
+    source_evidence_kind: code_backed
+
 generated_retrieval_layer:
   schema: nexus.wiki.agent-index.v1
   authority: derived_non_authoritative
