@@ -2,11 +2,11 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "51d0be26606758b0cf1d75f112b65e1a895631f5a3a7f645929aefbcb0859474",
+  "source_fingerprint": "f3eea47476232a6e0aaf5d11c1288cf94fc87faf3ecb7518e2e4ce031f1fdd58",
   "included_page_count": 251,
   "excluded_page_count": 40,
   "canonical_page_count": 12,
-  "unresolved_link_count": 319,
+  "unresolved_link_count": 313,
   "exclusion_rules": [
     "Dir: .nexus",
     "Dir: .obsidian",
@@ -165,8 +165,12 @@
       "is_canonical": true,
       "canonical_key": "system_overview",
       "one_sentence_summary": "系統總覽頁定義 Nexus 的治理作業模型、核心角色入口與三大任務主線，作為全域導航與信任錨點。",
-      "content_sha256": "3d1c6246e4f60517b95c514f442ca2f7b1ac536637ac61925deb7e6a62454e91",
+      "content_sha256": "f8287e1a3b015a2a28ca3f995f8e4b6c56f5528d06ea3f17f984253c04671064",
       "outgoing_links": [
+        [
+          "page:00_Home/README_Product.md",
+          "wikilink"
+        ],
         [
           "page:00_Home/README_Investor.md",
           "wikilink"
@@ -256,15 +260,7 @@
           "wikilink"
         ]
       ],
-      "unresolved_links": [
-        {
-          "source": "page:00_Home/System Overview.md",
-          "source_path": "00_Home/System Overview.md",
-          "raw_target": "README_Product",
-          "syntax": "wikilink",
-          "reason": "ambiguous"
-        }
-      ],
+      "unresolved_links": [],
       "content_verified_against_commit": "",
       "document_updated_in_commit": "",
       "verified_at": "",
@@ -3795,16 +3791,8 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁提供 Nexus 核心術語的單一語義定義，降低多代理協作中的用詞歧義與規約誤解。 [Source: 00_Home/System Overview.md]",
-      "content_sha256": "099b8f161deec3dfceb7e4f2231136b5dbba6c9fbfbef466eaa4d67929ed8048",
+      "content_sha256": "43b8c16a3f903aba77bb65d7442fdda50fb6515d16fbe8dcce8ea2c1945348bd",
       "outgoing_links": [
-        [
-          "canonical:architecture",
-          "wikilink"
-        ],
-        [
-          "canonical:architecture",
-          "wikilink"
-        ],
         [
           "canonical:architecture",
           "wikilink"
@@ -3859,13 +3847,6 @@
         ]
       ],
       "unresolved_links": [
-        {
-          "source": "page:01_System/Nexus Glossary.md",
-          "source_path": "01_System/Nexus Glossary.md",
-          "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
-          "syntax": "wikilink",
-          "reason": "missing"
-        },
         {
           "source": "page:01_System/Nexus Glossary.md",
           "source_path": "01_System/Nexus Glossary.md",
@@ -4860,23 +4841,11 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本模組執行雙階段診斷邏輯，將 Exploration 相位的發現轉換為具體的修復路徑建議。 [Source: nexus/services/dual_phase_d.py]",
-      "content_sha256": "9b1100468640b5b8ad3c2cc4779ed481fe3f21a894f09fdff35553e49707ed9d",
+      "content_sha256": "cf9c4bbea37abe57f3a236def85f519bf8cdc770be1c087ecf73121e46d6f545",
       "outgoing_links": [
-        [
-          "canonical:architecture",
-          "wikilink"
-        ],
-        [
-          "canonical:architecture",
-          "wikilink"
-        ],
         [
           "canonical:system_overview",
           "wikilink"
-        ],
-        [
-          "page:02_Modules/Module - Core Orchestrator.md",
-          "markdown"
         ],
         [
           "page:03_Flows/Flow - PXDRAC Runtime.md",
@@ -4895,36 +4864,7 @@
           "markdown"
         ]
       ],
-      "unresolved_links": [
-        {
-          "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-          "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-          "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
-          "syntax": "wikilink",
-          "reason": "missing"
-        },
-        {
-          "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-          "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-          "raw_target": "[[Module - Core Orchestrator",
-          "syntax": "wikilink",
-          "reason": "missing"
-        },
-        {
-          "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-          "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-          "raw_target": "Module\n  - Core Orchestrator",
-          "syntax": "wikilink",
-          "reason": "missing"
-        },
-        {
-          "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-          "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-          "raw_target": "[[Module - Core Orchestrator",
-          "syntax": "wikilink",
-          "reason": "missing"
-        }
-      ],
+      "unresolved_links": [],
       "content_verified_against_commit": "",
       "document_updated_in_commit": "",
       "verified_at": "",

@@ -8,8 +8,7 @@ last_compiled: 2026-04-07
 owner: agent
 related_pages:
 - '[System Overview](../00_Home/System Overview.md)'
-- '[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime|[[Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]
-  Runtime|Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime]]]]'
+- '01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md'
 - '[Ops - Acceptance and Release](../06_Ops/Ops - Acceptance and Release.md)'
 - '[Truth Claims](../06_Ops/Ops - Truth Claims Register.md) Register|[[Ops - [[Ops - Truth Claims
   Register|Truth Claims]] Register|Ops - [Truth Claims](../06_Ops/Ops - Truth Claims Register.md)

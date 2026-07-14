@@ -1,8 +1,8 @@
 {
   "schema": "nexus.wiki.unresolved-link-inventory.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "48a8704b6a870849fc163df8ef46da05d20971cb066f4707c945bbd610a80c81",
-  "total_unresolved": 319,
+  "source_fingerprint": "f3eea47476232a6e0aaf5d11c1288cf94fc87faf3ecb7518e2e4ce031f1fdd58",
+  "total_unresolved": 313,
   "category_counts": {
     "repo_source": 0,
     "excluded_wiki_target": 0,
@@ -10,9 +10,9 @@
     "placeholder_or_template": 57,
     "exact_alias_match": 0,
     "mechanical_path_error": 0,
-    "ambiguous": 1,
-    "missing": 230,
-    "unsupported": 2
+    "ambiguous": 0,
+    "missing": 227,
+    "unsupported": 0
   },
   "entries": [
     {
@@ -31,25 +31,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
-    },
-    {
-      "source_id": "page:00_Home/System Overview.md",
-      "source_path": "00_Home/System Overview.md",
-      "source_classification": "unclassified",
-      "raw_target": "README_Product",
-      "syntax": "wikilink",
-      "original_reason": "ambiguous",
-      "category": "ambiguous",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
@@ -67,7 +58,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
@@ -85,7 +85,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
@@ -103,7 +112,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
@@ -121,7 +139,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Agent Boot Sequence.md",
@@ -139,7 +166,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Agent Onboarding - Command Pack.md",
@@ -157,7 +193,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/CLI Surface Quickstart.md",
@@ -175,7 +220,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/CLI Surface Quickstart.md",
@@ -193,7 +247,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/README_Investor.md",
@@ -211,7 +274,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/README_Product.md",
@@ -229,7 +301,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -247,7 +328,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -265,7 +355,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -283,7 +382,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -301,7 +409,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -319,7 +436,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -337,7 +463,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -355,7 +490,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -373,7 +517,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -391,7 +544,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -409,7 +571,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -427,7 +598,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:00_Home/Root_README_Summary.md",
@@ -445,7 +625,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
@@ -463,7 +652,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
@@ -481,7 +679,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
@@ -499,7 +706,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
@@ -517,7 +733,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
@@ -535,7 +760,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
@@ -553,7 +787,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
@@ -571,7 +814,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
@@ -589,7 +841,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
@@ -607,7 +868,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
@@ -625,7 +895,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
@@ -643,7 +922,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
@@ -661,7 +949,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -679,7 +976,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -697,7 +1003,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -715,7 +1030,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -733,7 +1057,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -751,7 +1084,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -769,7 +1111,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/MUSE_PROTO.md",
@@ -787,25 +1138,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
-    },
-    {
-      "source_id": "page:01_System/Nexus Glossary.md",
-      "source_path": "01_System/Nexus Glossary.md",
-      "source_classification": "active",
-      "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
-      "syntax": "wikilink",
-      "original_reason": "missing",
-      "category": "unsupported",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/Nexus Glossary.md",
@@ -823,7 +1165,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Component Maturity Map.md",
@@ -841,7 +1192,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Next Questions for Human.md",
@@ -859,7 +1219,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Next Questions for Human.md",
@@ -877,7 +1246,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Physical Topology.md",
@@ -895,7 +1273,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Physical Topology.md",
@@ -913,7 +1300,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Unknowns and Conflicts.md",
@@ -931,7 +1327,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System - Unknowns and Conflicts.md",
@@ -949,7 +1354,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:01_System/System Relationship and Dependency Graph.md",
@@ -967,7 +1381,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Fleet Command System.md",
@@ -985,7 +1408,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
@@ -1003,7 +1435,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Domain Services and Adapters.md",
@@ -1021,79 +1462,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
-    },
-    {
-      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_classification": "active",
-      "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
-      "syntax": "wikilink",
-      "original_reason": "missing",
-      "category": "unsupported",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": ""
-    },
-    {
-      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_classification": "active",
-      "raw_target": "[[Module - Core Orchestrator",
-      "syntax": "wikilink",
-      "original_reason": "missing",
-      "category": "missing",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": ""
-    },
-    {
-      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_classification": "active",
-      "raw_target": "Module\n  - Core Orchestrator",
-      "syntax": "wikilink",
-      "original_reason": "missing",
-      "category": "missing",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": ""
-    },
-    {
-      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_classification": "active",
-      "raw_target": "[[Module - Core Orchestrator",
-      "syntax": "wikilink",
-      "original_reason": "missing",
-      "category": "missing",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1111,7 +1489,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1129,7 +1516,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1147,7 +1543,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1165,7 +1570,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1183,7 +1597,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1201,7 +1624,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1219,7 +1651,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1237,7 +1678,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1255,7 +1705,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1273,7 +1732,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1291,7 +1759,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1309,7 +1786,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
@@ -1327,7 +1813,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1345,7 +1840,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1363,7 +1867,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1381,7 +1894,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1399,7 +1921,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1417,7 +1948,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1435,7 +1975,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1453,7 +2002,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
@@ -1471,7 +2029,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
@@ -1489,7 +2056,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
@@ -1507,7 +2083,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
@@ -1525,7 +2110,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
@@ -1543,7 +2137,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
@@ -1561,7 +2164,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Memory Repository.md",
@@ -1579,7 +2191,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Memory Repository.md",
@@ -1597,7 +2218,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Metadata Collectors.md",
@@ -1615,7 +2245,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Platform Core Registry.md",
@@ -1633,7 +2272,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Policy and Learning Governance.md",
@@ -1651,7 +2299,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Runtime Services.md",
@@ -1669,7 +2326,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Runtime Services.md",
@@ -1687,7 +2353,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
@@ -1705,7 +2380,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
@@ -1723,7 +2407,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
@@ -1741,7 +2434,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
@@ -1759,7 +2461,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
@@ -1777,7 +2488,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
@@ -1795,7 +2515,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
@@ -1813,7 +2542,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
@@ -1831,7 +2569,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
@@ -1849,7 +2596,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - State Contracts.md",
@@ -1867,7 +2623,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
@@ -1885,7 +2650,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:03_Flows/Flow - PXDRAC Runtime.md",
@@ -1903,7 +2677,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:03_Flows/Flow - Recursive Auto-Repair.md",
@@ -1921,7 +2704,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:04_Research/RESEARCH_STATUS_REPORT.md",
@@ -1939,7 +2731,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:04_Research/Research - DeepScientist Integration.md",
@@ -1957,7 +2758,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
@@ -1975,7 +2785,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
@@ -1993,7 +2812,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
@@ -2011,7 +2839,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
@@ -2029,7 +2866,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - CLI Surface.md",
@@ -2047,7 +2893,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
@@ -2065,7 +2920,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
@@ -2083,7 +2947,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
@@ -2101,7 +2974,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
@@ -2119,7 +3001,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
@@ -2137,7 +3028,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
@@ -2155,7 +3055,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
@@ -2173,7 +3082,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
@@ -2191,7 +3109,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
@@ -2209,7 +3136,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
@@ -2227,7 +3163,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
@@ -2245,7 +3190,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Evidence_Bundle_Format.md",
@@ -2263,7 +3217,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Evidence_Bundle_Format.md",
@@ -2281,7 +3244,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/NEXUS_ENFORCED_LAUNCH.md",
@@ -2299,7 +3271,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
@@ -2317,7 +3298,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
@@ -2335,12 +3325,21 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Acceptance and Release.md",
       "source_path": "06_Ops/Ops - Acceptance and Release.md",
-      "source_classification": "unclassified",
+      "source_classification": "active",
       "raw_target": "07_HALLUCINATION_GUARD_AND_HI_AUDIT",
       "syntax": "wikilink",
       "original_reason": "missing",
@@ -2353,7 +3352,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
@@ -2371,7 +3379,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
@@ -2389,7 +3406,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
@@ -2407,7 +3433,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
@@ -2425,7 +3460,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
@@ -2443,7 +3487,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
@@ -2461,7 +3514,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
@@ -2479,7 +3541,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
@@ -2497,7 +3568,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
@@ -2515,7 +3595,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
@@ -2533,7 +3622,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
@@ -2551,7 +3649,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
@@ -2569,7 +3676,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
@@ -2587,7 +3703,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
@@ -2605,7 +3730,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
@@ -2623,7 +3757,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
@@ -2641,7 +3784,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Closeout Hard Gate.md",
@@ -2659,7 +3811,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Closeout Hard Gate.md",
@@ -2677,7 +3838,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Governance Changelog.md",
@@ -2695,7 +3865,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Governance Changelog.md",
@@ -2713,7 +3892,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Governance Changelog.md",
@@ -2731,7 +3919,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Governance Changelog.md",
@@ -2749,7 +3946,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Learning Closure Matrix.md",
@@ -2767,7 +3973,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Ownership and Review SLA.md",
@@ -2785,7 +4000,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
@@ -2803,7 +4027,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
@@ -2821,7 +4054,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
@@ -2839,7 +4081,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
@@ -2857,7 +4108,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
@@ -2875,7 +4135,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
@@ -2893,7 +4162,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Query Writeback Policy.md",
@@ -2911,7 +4189,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Query Writeback Policy.md",
@@ -2929,7 +4216,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Query Writeback Policy.md",
@@ -2947,7 +4243,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Command Policy.md",
@@ -2965,7 +4270,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -2983,7 +4297,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -3001,7 +4324,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -3019,7 +4351,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -3037,7 +4378,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -3055,7 +4405,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -3073,7 +4432,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
@@ -3091,7 +4459,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Drift Audit.md",
@@ -3109,7 +4486,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Link Integrity.md",
@@ -3127,7 +4513,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Link Integrity.md",
@@ -3145,7 +4540,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
@@ -3163,7 +4567,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
@@ -3181,7 +4594,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
@@ -3199,7 +4621,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wiki Regression Evals.md",
@@ -3217,7 +4648,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
@@ -3235,7 +4675,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
@@ -3253,7 +4702,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
@@ -3271,7 +4729,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
@@ -3289,7 +4756,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
@@ -3307,7 +4783,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:07_Compliance/Compliance_Dashboard.md",
@@ -3325,7 +4810,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:07_Compliance/Hallucination_Guard_Scoring_Spec.md",
@@ -3343,7 +4837,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
@@ -3361,7 +4864,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
@@ -3379,7 +4891,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
@@ -3397,7 +4918,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
@@ -3415,7 +4945,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
@@ -3433,7 +4972,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
@@ -3451,7 +4999,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3469,7 +5026,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3487,7 +5053,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3505,7 +5080,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3523,7 +5107,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3541,7 +5134,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3559,7 +5161,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3577,7 +5188,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3595,7 +5215,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3613,7 +5242,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
@@ -3631,7 +5269,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source Index.md",
@@ -3649,7 +5296,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source Index.md",
@@ -3667,7 +5323,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source Index.md",
@@ -3685,7 +5350,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source Index.md",
@@ -3703,7 +5377,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source Index.md",
@@ -3721,7 +5404,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:90_Sources/Source Index.md",
@@ -3739,7 +5431,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "category": "legacy_or_historical",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:99_Schema/AGENT_SCHEMA.md",
@@ -3757,7 +5458,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:LLM_Wiki/EXCLUDE_RULES.md",
@@ -3775,7 +5485,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3793,7 +5512,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3811,7 +5539,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3829,7 +5566,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3847,7 +5593,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3865,7 +5620,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3883,7 +5647,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3901,7 +5674,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3919,7 +5701,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3937,7 +5728,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3955,7 +5755,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3973,7 +5782,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -3991,7 +5809,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/QUICKSTART.md",
@@ -4009,7 +5836,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4027,7 +5863,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4045,7 +5890,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4063,7 +5917,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4081,7 +5944,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4099,7 +5971,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4117,7 +5998,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4135,7 +6025,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4153,7 +6052,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/README.md",
@@ -4171,7 +6079,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
@@ -4189,7 +6106,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
@@ -4207,7 +6133,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
@@ -4225,7 +6160,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
@@ -4243,7 +6187,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4261,7 +6214,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4279,7 +6241,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4297,7 +6268,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4315,7 +6295,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4333,7 +6322,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4351,7 +6349,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4369,7 +6376,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4387,7 +6403,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4405,7 +6430,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4423,7 +6457,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4441,7 +6484,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4459,7 +6511,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4477,7 +6538,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4495,7 +6565,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4513,7 +6592,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4531,7 +6619,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4549,7 +6646,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4567,7 +6673,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4585,7 +6700,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4603,7 +6727,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4621,7 +6754,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4639,7 +6781,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4657,7 +6808,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4675,7 +6835,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4693,7 +6862,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4711,7 +6889,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4729,7 +6916,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4747,7 +6943,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4765,7 +6970,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4783,7 +6997,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4801,7 +7024,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4819,7 +7051,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4837,7 +7078,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4855,7 +7105,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4873,7 +7132,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4891,7 +7159,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4909,7 +7186,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4927,7 +7213,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4945,7 +7240,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4963,7 +7267,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4981,7 +7294,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -4999,7 +7321,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -5017,7 +7348,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -5035,7 +7375,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -5053,7 +7402,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
@@ -5071,7 +7429,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/en/README_Product.md",
@@ -5089,7 +7456,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/en/README_Product.md",
@@ -5107,7 +7483,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/en/README_Product.md",
@@ -5125,7 +7510,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/en/SDK_Quickstart.md",
@@ -5143,7 +7537,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/en/SDK_Quickstart.md",
@@ -5161,7 +7564,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5179,7 +7591,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5197,7 +7618,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5215,7 +7645,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5233,7 +7672,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5251,7 +7699,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5269,7 +7726,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5287,7 +7753,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5305,7 +7780,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5323,7 +7807,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5341,7 +7834,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5359,7 +7861,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/nexus_truth_dashboard.md",
@@ -5377,7 +7888,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5395,7 +7915,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5413,7 +7942,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5431,7 +7969,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5449,7 +7996,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5467,7 +8023,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5485,7 +8050,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/program.md",
@@ -5503,7 +8077,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5521,7 +8104,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5539,7 +8131,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5557,7 +8158,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5575,7 +8185,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5593,7 +8212,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5611,7 +8239,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/task.md",
@@ -5629,7 +8266,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5647,7 +8293,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5665,7 +8320,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5683,7 +8347,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5701,7 +8374,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5719,7 +8401,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5737,7 +8428,16 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     },
     {
       "source_id": "page:Reference/walkthrough.md",
@@ -5755,8 +8455,124 @@
       },
       "repairable": false,
       "proposed_target": "",
-      "batch_id": ""
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "category": "placeholder_or_template",
+        "gate": "governed"
+      }
     }
   ],
-  "repair_batches": []
+  "repair_batches": [],
+  "governance_policy": {
+    "schema": "nexus.wiki.unresolved-link-governance.v1",
+    "owner": "wiki-governance",
+    "required_fields": [
+      "status",
+      "disposition",
+      "reason",
+      "owner",
+      "policy"
+    ],
+    "categories": {
+      "repo_source": {
+        "status": "governed",
+        "disposition": "explicit_external_or_code_reference",
+        "reason": "The target is an exact repository source outside the Wiki vault.",
+        "owner": "wiki-governance",
+        "policy": "repo-source-reference-v1",
+        "gate": "governed"
+      },
+      "excluded_wiki_target": {
+        "status": "governed",
+        "disposition": "accepted_excluded_reference",
+        "reason": "The target is intentionally excluded from current Wiki authority.",
+        "owner": "wiki-governance",
+        "policy": "excluded-target-v1",
+        "gate": "governed"
+      },
+      "legacy_or_historical": {
+        "status": "governed",
+        "disposition": "documented_legacy_reference",
+        "reason": "Historical or legacy reference is retained for traceability and cannot be current authority.",
+        "owner": "wiki-governance",
+        "policy": "legacy-successor-v1",
+        "gate": "governed"
+      },
+      "placeholder_or_template": {
+        "status": "governed",
+        "disposition": "accepted_placeholder_debt",
+        "reason": "Placeholder is explicitly retained as governed debt; no destination is guessed.",
+        "owner": "wiki-governance",
+        "policy": "placeholder-debt-v1",
+        "gate": "governed"
+      },
+      "exact_alias_match": {
+        "status": "review_required",
+        "disposition": "deterministic_repair_required",
+        "reason": "An exact alias destination exists and must be applied through a frozen repair batch.",
+        "owner": "wiki-governance",
+        "policy": "exact-alias-repair-v1",
+        "gate": "fail_closed"
+      },
+      "mechanical_path_error": {
+        "status": "review_required",
+        "disposition": "deterministic_repair_required",
+        "reason": "An allowlisted mechanical path correction exists and must be applied through a frozen repair batch.",
+        "owner": "wiki-governance",
+        "policy": "mechanical-path-repair-v1",
+        "gate": "fail_closed"
+      },
+      "ambiguous": {
+        "status": "review_required",
+        "disposition": "manual_destination_decision_required",
+        "reason": "Multiple or uncertain destinations require an explicit human decision; automatic guessing is forbidden.",
+        "owner": "wiki-governance",
+        "policy": "ambiguous-destination-v1",
+        "gate": "fail_closed"
+      },
+      "missing": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "gate": "governed"
+      },
+      "unsupported": {
+        "status": "review_required",
+        "disposition": "parser_or_source_correction_required",
+        "reason": "Malformed or unsupported syntax must be corrected before the reference can be treated as resolved.",
+        "owner": "wiki-governance",
+        "policy": "unsupported-syntax-v1",
+        "gate": "fail_closed"
+      }
+    }
+  },
+  "governance_summary": {
+    "status": "PASS",
+    "total_entries": 313,
+    "governed_entries": 313,
+    "ungoverned_entries": 0,
+    "fail_closed_entries": 0,
+    "repairable_count": 0,
+    "unreviewed_ambiguous_count": 0,
+    "unsupported_undispositioned_count": 0,
+    "by_disposition": {
+      "accepted_missing_debt": 227,
+      "accepted_placeholder_debt": 57,
+      "documented_legacy_reference": 29
+    },
+    "required_fields": [
+      "status",
+      "disposition",
+      "reason",
+      "owner",
+      "policy"
+    ]
+  }
 }

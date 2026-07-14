@@ -257,6 +257,80 @@ code_symbol_mapping_rules:
     authority_classification: active
     source_evidence_kind: code_backed
 
+unresolved_link_governance:
+  schema: nexus.wiki.unresolved-link-governance.v1
+  owner: wiki-governance
+  required_fields:
+    - status
+    - disposition
+    - reason
+    - owner
+    - policy
+  categories:
+    repo_source:
+      status: governed
+      disposition: explicit_external_or_code_reference
+      reason: "The target is an exact repository source outside the Wiki vault."
+      owner: wiki-governance
+      policy: repo-source-reference-v1
+      gate: governed
+    excluded_wiki_target:
+      status: governed
+      disposition: accepted_excluded_reference
+      reason: "The target is intentionally excluded from current Wiki authority."
+      owner: wiki-governance
+      policy: excluded-target-v1
+      gate: governed
+    legacy_or_historical:
+      status: governed
+      disposition: documented_legacy_reference
+      reason: "Historical or legacy reference is retained for traceability and cannot be current authority."
+      owner: wiki-governance
+      policy: legacy-successor-v1
+      gate: governed
+    placeholder_or_template:
+      status: governed
+      disposition: accepted_placeholder_debt
+      reason: "Placeholder is explicitly retained as governed debt; no destination is guessed."
+      owner: wiki-governance
+      policy: placeholder-debt-v1
+      gate: governed
+    exact_alias_match:
+      status: review_required
+      disposition: deterministic_repair_required
+      reason: "An exact alias destination exists and must be applied through a frozen repair batch."
+      owner: wiki-governance
+      policy: exact-alias-repair-v1
+      gate: fail_closed
+    mechanical_path_error:
+      status: review_required
+      disposition: deterministic_repair_required
+      reason: "An allowlisted mechanical path correction exists and must be applied through a frozen repair batch."
+      owner: wiki-governance
+      policy: mechanical-path-repair-v1
+      gate: fail_closed
+    ambiguous:
+      status: review_required
+      disposition: manual_destination_decision_required
+      reason: "Multiple or uncertain destinations require an explicit human decision; automatic guessing is forbidden."
+      owner: wiki-governance
+      policy: ambiguous-destination-v1
+      gate: fail_closed
+    missing:
+      status: governed
+      disposition: accepted_missing_debt
+      reason: "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden."
+      owner: wiki-governance
+      policy: missing-link-debt-v1
+      gate: governed
+    unsupported:
+      status: review_required
+      disposition: parser_or_source_correction_required
+      reason: "Malformed or unsupported syntax must be corrected before the reference can be treated as resolved."
+      owner: wiki-governance
+      policy: unsupported-syntax-v1
+      gate: fail_closed
+
 generated_retrieval_layer:
   schema: nexus.wiki.agent-index.v1
   authority: derived_non_authoritative

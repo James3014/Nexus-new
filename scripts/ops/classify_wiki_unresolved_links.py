@@ -48,6 +48,14 @@ CATEGORIES = [
     "unsupported",
 ]
 
+GOVERNANCE_REQUIRED_FIELDS = (
+    "status",
+    "disposition",
+    "reason",
+    "owner",
+    "policy",
+)
+
 PLACEHOLDER_PATTERNS = {"documentation", "TODO", "TBD", "placeholder", "pending"}
 
 MECHANICAL_TRANSFORMS = [
@@ -207,6 +215,73 @@ class UnresolvedLinkClassifier:
         self.pages_by_classification: dict[str, str] = {}
         self._build_indexes()
 
+    def _governance_for_category(self, category: str) -> dict[str, Any]:
+        policy_root = self.manifest.get("unresolved_link_governance", {})
+        category_policy = policy_root.get("categories", {}).get(category, {})
+        if not isinstance(category_policy, dict):
+            category_policy = {}
+        governance = {
+            field: category_policy.get(field, "")
+            for field in GOVERNANCE_REQUIRED_FIELDS
+        }
+        governance["category"] = category
+        governance["gate"] = category_policy.get("gate", "fail_closed")
+        return governance
+
+    @staticmethod
+    def _governance_summary(entries: list[dict]) -> dict[str, Any]:
+        governed_entries = 0
+        ungoverned_entries = 0
+        fail_closed_entries = 0
+        repairable_count = 0
+        ambiguous_count = 0
+        unsupported_count = 0
+        by_disposition: dict[str, int] = {}
+
+        for entry in entries:
+            governance = entry.get("governance", {})
+            complete = all(governance.get(field) for field in GOVERNANCE_REQUIRED_FIELDS)
+            is_governed = complete and governance.get("status") == "governed"
+            if is_governed:
+                governed_entries += 1
+            else:
+                ungoverned_entries += 1
+            if governance.get("gate") == "fail_closed":
+                fail_closed_entries += 1
+            if entry.get("repairable"):
+                repairable_count += 1
+            if entry.get("category") == "ambiguous":
+                ambiguous_count += 1
+            if entry.get("category") == "unsupported":
+                unsupported_count += 1
+            disposition = str(governance.get("disposition", ""))
+            by_disposition[disposition] = by_disposition.get(disposition, 0) + 1
+
+        status = (
+            "PASS"
+            if (
+                governed_entries == len(entries)
+                and ungoverned_entries == 0
+                and fail_closed_entries == 0
+                and repairable_count == 0
+                and ambiguous_count == 0
+                and unsupported_count == 0
+            )
+            else "FAIL"
+        )
+        return {
+            "status": status,
+            "total_entries": len(entries),
+            "governed_entries": governed_entries,
+            "ungoverned_entries": ungoverned_entries,
+            "fail_closed_entries": fail_closed_entries,
+            "repairable_count": repairable_count,
+            "unreviewed_ambiguous_count": ambiguous_count,
+            "unsupported_undispositioned_count": unsupported_count,
+            "by_disposition": dict(sorted(by_disposition.items())),
+            "required_fields": list(GOVERNANCE_REQUIRED_FIELDS),
+        }
+
     def _load_json(self, path: Path) -> dict:
         if not path.exists():
             print(f"ERROR: File not found: {path}", file=sys.stderr)
@@ -281,6 +356,7 @@ class UnresolvedLinkClassifier:
                 "proposed_target": "",
                 "batch_id": "",
             }
+            entry["governance"] = self._governance_for_category(category)
 
             # Build evidence
             if category == "repo_source":
@@ -312,6 +388,7 @@ class UnresolvedLinkClassifier:
         # Build repair batches
         repair_batches = self._build_repair_batches(entries)
 
+        governance_summary = self._governance_summary(entries)
         return {
             "schema": SCHEMA,
             "authority": AUTHORITY,
@@ -320,6 +397,8 @@ class UnresolvedLinkClassifier:
             "category_counts": category_counts,
             "entries": entries,
             "repair_batches": repair_batches,
+            "governance_policy": self.manifest.get("unresolved_link_governance", {}),
+            "governance_summary": governance_summary,
         }
 
     def _build_repair_batches(self, entries: list[dict]) -> list[dict]:
@@ -472,6 +551,13 @@ def main() -> None:
         print(
             f"OK: wrote inventory ({result['total_unresolved']} entries) to {output_dir}"
         )
+        if result["governance_summary"]["status"] != "PASS":
+            print(
+                "WIKI_UNRESOLVED_LINK_GOVERNANCE_FAIL: "
+                f"{result['governance_summary']}"
+            )
+            sys.exit(1)
+        print("WIKI_UNRESOLVED_LINK_GOVERNANCE_PASS")
 
     elif args.check:
         # Verify matches
@@ -489,6 +575,8 @@ def main() -> None:
             "category_counts",
             "entries",
             "repair_batches",
+            "governance_policy",
+            "governance_summary",
         )
         for field in required_fields:
             if field not in existing:
@@ -498,7 +586,14 @@ def main() -> None:
                 print(f"DRIFT: {field} mismatch")
                 sys.exit(1)
 
-        print("CHECK PASSED: classification matches")
+        if result["governance_summary"]["status"] != "PASS":
+            print(
+                "WIKI_UNRESOLVED_LINK_GOVERNANCE_FAIL: "
+                f"{result['governance_summary']}"
+            )
+            sys.exit(1)
+        print("CHECK PASSED: classification and unresolved-link governance match")
+        print("WIKI_UNRESOLVED_LINK_GOVERNANCE_PASS")
 
 
 if __name__ == "__main__":

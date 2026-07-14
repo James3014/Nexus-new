@@ -8,12 +8,8 @@ owner: agent
 raw_sources:
 - nexus/services/dual_phase_d.py
 related_pages:
-- '[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime|[[Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]
-  Runtime|Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime]]]]'
-- '[[[[Module - Core Orchestrator|Module - Core Orchestrator]] Deep Dive|[[Module
-  - Core Orchestrator|Module - Core Orchestrator]] Deep Dive]]|[[[[Module - Core Orchestrator|Module
-  - Core Orchestrator]] Deep Dive|[Module - Core Orchestrator](Module - Core Orchestrator.md)
-  Deep Dive]]]]'
+- '03_Flows/Flow - PXDRAC Runtime.md'
+- '02_Modules/Module - Core Orchestrator Deep Dive.md'
 source_of_truth: nexus/services/dual_phase_d.py
 status: active
 tags:

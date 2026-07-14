@@ -1,7 +1,7 @@
 {
   "schema": "nexus.wiki.wikilink-graph.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "51d0be26606758b0cf1d75f112b65e1a895631f5a3a7f645929aefbcb0859474",
+  "source_fingerprint": "f3eea47476232a6e0aaf5d11c1288cf94fc87faf3ecb7518e2e4ce031f1fdd58",
   "nodes": [
     {
       "id": "canonical:entry",
@@ -2087,6 +2087,12 @@
     },
     {
       "source": "canonical:system_overview",
+      "target": "page:00_Home/README_Product.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "canonical:system_overview",
       "target": "page:00_Home/README_Investor.md",
       "type": "explicit_link",
       "syntax": "wikilink"
@@ -2196,12 +2202,6 @@
     {
       "source": "canonical:system_overview",
       "target": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
-      "type": "explicit_link",
-      "syntax": "wikilink"
-    },
-    {
-      "source": "canonical:system_overview",
-      "target": "page:00_Home/README_Product.md",
       "type": "explicit_link",
       "syntax": "wikilink"
     },
@@ -3527,21 +3527,9 @@
     },
     {
       "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "target": "canonical:architecture",
-      "type": "explicit_link",
-      "syntax": "wikilink"
-    },
-    {
-      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
       "target": "canonical:system_overview",
       "type": "explicit_link",
       "syntax": "wikilink"
-    },
-    {
-      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "target": "page:02_Modules/Module - Core Orchestrator.md",
-      "type": "explicit_link",
-      "syntax": "markdown"
     },
     {
       "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
@@ -6007,13 +5995,6 @@
       "reason": "missing"
     },
     {
-      "source": "page:00_Home/System Overview.md",
-      "source_path": "00_Home/System Overview.md",
-      "raw_target": "README_Product",
-      "syntax": "wikilink",
-      "reason": "ambiguous"
-    },
-    {
       "source": "page:00_Home/Wiki Index and Coverage Map.md",
       "source_path": "00_Home/Wiki Index and Coverage Map.md",
       "raw_target": "99_Schema/WIKI_AUTHORITY_MANIFEST",
@@ -6303,13 +6284,6 @@
     {
       "source": "page:01_System/Nexus Glossary.md",
       "source_path": "01_System/Nexus Glossary.md",
-      "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
-      "syntax": "wikilink",
-      "reason": "missing"
-    },
-    {
-      "source": "page:01_System/Nexus Glossary.md",
-      "source_path": "01_System/Nexus Glossary.md",
       "raw_target": "Ops - [[Ops - Truth Claims\n  Register",
       "syntax": "wikilink",
       "reason": "missing"
@@ -6388,34 +6362,6 @@
       "source": "page:02_Modules/Module - Domain Services and Adapters.md",
       "source_path": "02_Modules/Module - Domain Services and Adapters.md",
       "raw_target": "17_UNIFIED_SERVICE_REGISTRY_AND_MESH_V1",
-      "syntax": "wikilink",
-      "reason": "missing"
-    },
-    {
-      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
-      "syntax": "wikilink",
-      "reason": "missing"
-    },
-    {
-      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "raw_target": "[[Module - Core Orchestrator",
-      "syntax": "wikilink",
-      "reason": "missing"
-    },
-    {
-      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "raw_target": "Module\n  - Core Orchestrator",
-      "syntax": "wikilink",
-      "reason": "missing"
-    },
-    {
-      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
-      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
-      "raw_target": "[[Module - Core Orchestrator",
       "syntax": "wikilink",
       "reason": "missing"
     },
