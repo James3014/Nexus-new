@@ -1,0 +1,5762 @@
+{
+  "schema": "nexus.wiki.unresolved-link-inventory.v1",
+  "authority": "derived_non_authoritative",
+  "source_fingerprint": "667def09cffbd4dfa8a88d9bb33b8d8ab4c00ff42539371a6a7c290e0c154b3d",
+  "total_unresolved": 319,
+  "category_counts": {
+    "repo_source": 0,
+    "excluded_wiki_target": 0,
+    "legacy_or_historical": 29,
+    "placeholder_or_template": 57,
+    "exact_alias_match": 0,
+    "mechanical_path_error": 0,
+    "ambiguous": 1,
+    "missing": 230,
+    "unsupported": 2
+  },
+  "entries": [
+    {
+      "source_id": "page:README.md",
+      "source_path": "README.md",
+      "source_classification": "current",
+      "raw_target": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/System Overview.md",
+      "source_path": "00_Home/System Overview.md",
+      "source_classification": "unclassified",
+      "raw_target": "README_Product",
+      "syntax": "wikilink",
+      "original_reason": "ambiguous",
+      "category": "ambiguous",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
+      "source_path": "00_Home/Wiki Index and Coverage Map.md",
+      "source_classification": "active",
+      "raw_target": "99_Schema/WIKI_AUTHORITY_MANIFEST",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
+      "source_path": "00_Home/Wiki Index and Coverage Map.md",
+      "source_classification": "active",
+      "raw_target": "01_System/ADR/",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
+      "source_path": "00_Home/Wiki Index and Coverage Map.md",
+      "source_classification": "active",
+      "raw_target": "../../docs/arch/CAPABILITY_ROUTE_STATUS_2026-04-30.md",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Wiki Index and Coverage Map.md",
+      "source_path": "00_Home/Wiki Index and Coverage Map.md",
+      "source_classification": "active",
+      "raw_target": "../../docs/arch/NEXUS_ROUTING_LONG_PLAN_V2.md",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Agent Boot Sequence.md",
+      "source_path": "00_Home/Agent Boot Sequence.md",
+      "source_classification": "active",
+      "raw_target": "01_Core/Specs/Legacy_V9/INDEX",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "source_path": "00_Home/Agent Onboarding - Command Pack.md",
+      "source_classification": "superseded",
+      "raw_target": "01_Core/Specs/Legacy_V9/INDEX",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/CLI Surface Quickstart.md",
+      "source_path": "00_Home/CLI Surface Quickstart.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "01_Core/Specs/Legacy_V9/INDEX",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/CLI Surface Quickstart.md",
+      "source_path": "00_Home/CLI Surface Quickstart.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "01_Core/Specs/Muse-Nexus-v152-upgrade/INDEX",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/README_Investor.md",
+      "source_path": "00_Home/README_Investor.md",
+      "source_classification": "active",
+      "raw_target": "05_Protocols/Protocol - Commercial Trust",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/README_Product.md",
+      "source_path": "00_Home/README_Product.md",
+      "source_classification": "active",
+      "raw_target": "05_Protocols/Protocol - Product Trust",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:00_Home/Root_README_Summary.md",
+      "source_path": "00_Home/Root_README_Summary.md",
+      "source_classification": "historical",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase 8 - Hybrid Repair Armor",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_classification": "unclassified",
+      "raw_target": "../../06_Ops/Ops - Learning Closure Matrix",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_classification": "unclassified",
+      "raw_target": "../../09_Roadmap/Phase 6 - Nexus Hardening",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase%208%20-%20Hybrid%20Repair%20Armor.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase%206%20-%20Nexus%20Hardening.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "source_classification": "unclassified",
+      "raw_target": "../../06_Ops/Ops%20-%20Learning%20Closure%20Matrix.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase 8 - Hybrid Repair Armor",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_classification": "unclassified",
+      "raw_target": "../../06_Ops/Ops - Learning Closure Matrix",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase%208%20-%20Hybrid%20Repair%20Armor.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "source_classification": "unclassified",
+      "raw_target": "../../06_Ops/Ops%20-%20Learning%20Closure%20Matrix.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase 8 - Hybrid Repair Armor",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "source_path": "01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "source_classification": "unclassified",
+      "raw_target": "../09_Roadmap/Phase%208%20-%20Hybrid%20Repair%20Armor.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/MUSE_PROTO.md",
+      "source_path": "01_System/MUSE_PROTO.md",
+      "source_classification": "mixed_needs_review",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/Nexus Glossary.md",
+      "source_path": "01_System/Nexus Glossary.md",
+      "source_classification": "active",
+      "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "unsupported",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/Nexus Glossary.md",
+      "source_path": "01_System/Nexus Glossary.md",
+      "source_classification": "active",
+      "raw_target": "Ops - [[Ops - Truth Claims\n  Register",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Component Maturity Map.md",
+      "source_path": "01_System/System - Component Maturity Map.md",
+      "source_classification": "active",
+      "raw_target": "05_Governance",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Next Questions for Human.md",
+      "source_path": "01_System/System - Next Questions for Human.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Next Questions for Human.md",
+      "source_path": "01_System/System - Next Questions for Human.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Physical Topology.md",
+      "source_path": "01_System/System - Physical Topology.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Physical Topology.md",
+      "source_path": "01_System/System - Physical Topology.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Unknowns and Conflicts.md",
+      "source_path": "01_System/System - Unknowns and Conflicts.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System - Unknowns and Conflicts.md",
+      "source_path": "01_System/System - Unknowns and Conflicts.md",
+      "source_classification": "active",
+      "raw_target": "../07_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:01_System/System Relationship and Dependency Graph.md",
+      "source_path": "01_System/System Relationship and Dependency Graph.md",
+      "source_classification": "unclassified",
+      "raw_target": "05_Protocols/Protocol - Master Loop",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Fleet Command System.md",
+      "source_path": "02_Modules/Fleet Command System.md",
+      "source_classification": "active",
+      "raw_target": "Module - Router Decision Flow",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "source_path": "02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Domain Services and Adapters.md",
+      "source_path": "02_Modules/Module - Domain Services and Adapters.md",
+      "source_classification": "unclassified",
+      "raw_target": "17_UNIFIED_SERVICE_REGISTRY_AND_MESH_V1",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_classification": "active",
+      "raw_target": "Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "unsupported",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_classification": "active",
+      "raw_target": "[[Module - Core Orchestrator",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_classification": "active",
+      "raw_target": "Module\n  - Core Orchestrator",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_path": "02_Modules/Module - Dual Phase Diagnosis.md",
+      "source_classification": "active",
+      "raw_target": "[[Module - Core Orchestrator",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Agent [[Agent Onboarding - Command Pack",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Agent [[Agent Onboarding - Command Pack",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Agent Onboarding\n  - Command Pack",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Agent [[Agent Onboarding - Command Pack",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Agent [[Agent Onboarding - Command Pack",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "[[Module - Core Orchestrator",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Module\n  - Core Orchestrator",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "[[Module - Core Orchestrator",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Module - Guard and [[Module\n  - Guard and Gate Control",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Module - Guard and\n  Gate Control",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Module - [[Module - State Contracts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "CD [[CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "BELIEF",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Context Core.md",
+      "source_classification": "active",
+      "raw_target": "BELIEF",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_path": "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "source_path": "02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Memory Repository.md",
+      "source_path": "02_Modules/Module - Memory Repository.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Memory Repository.md",
+      "source_path": "02_Modules/Module - Memory Repository.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Metadata Collectors.md",
+      "source_path": "02_Modules/Module - Metadata Collectors.md",
+      "source_classification": "unclassified",
+      "raw_target": "Source\n  [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Platform Core Registry.md",
+      "source_path": "02_Modules/Module - Platform Core Registry.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "source_path": "02_Modules/Module - Policy and Learning Governance.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Runtime Services.md",
+      "source_path": "02_Modules/Module - Runtime Services.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Runtime Services.md",
+      "source_path": "02_Modules/Module - Runtime Services.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "source_path": "02_Modules/Module - Security and Tool Guard Registry.md",
+      "source_classification": "active",
+      "raw_target": "Module - Guard and [[Module\n  - Guard and Gate Control",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "source_path": "02_Modules/Module - Security and Tool Guard Registry.md",
+      "source_classification": "active",
+      "raw_target": "Module - Guard and\n  Gate Control",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "source_path": "02_Modules/Module - Security and Tool Guard Registry.md",
+      "source_classification": "active",
+      "raw_target": "compatibility",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_classification": "active",
+      "raw_target": "../../nexus/core/context_hub.py",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_classification": "active",
+      "raw_target": "../../nexus/learning/skill_registry.py",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_classification": "active",
+      "raw_target": "../../nexus/core/context_hub.py",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_classification": "active",
+      "raw_target": "../../nexus/services/mem_palace.py",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_classification": "active",
+      "raw_target": "../../nexus/services/continuous_learning.py",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "source_classification": "active",
+      "raw_target": "../../nexus/engine/autonomic_router.py",
+      "syntax": "markdown",
+      "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - State Contracts.md",
+      "source_path": "02_Modules/Module - State Contracts.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "source_path": "02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:03_Flows/Flow - PXDRAC Runtime.md",
+      "source_path": "03_Flows/Flow - PXDRAC Runtime.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:03_Flows/Flow - Recursive Auto-Repair.md",
+      "source_path": "03_Flows/Flow - Recursive Auto-Repair.md",
+      "source_classification": "active",
+      "raw_target": "../scripts/ops/autonomous_repair_loop.py",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:04_Research/RESEARCH_STATUS_REPORT.md",
+      "source_path": "04_Research/RESEARCH_STATUS_REPORT.md",
+      "source_classification": "active",
+      "raw_target": "DeepScientist Research Integration",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:04_Research/Research - DeepScientist Integration.md",
+      "source_path": "04_Research/Research - DeepScientist Integration.md",
+      "source_classification": "active",
+      "raw_target": "DEEPSCIENTIST",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_path": "05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_path": "05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_path": "05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_path": "05_Protocols/Protocol - CLI Drift Matrix.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - CLI Surface.md",
+      "source_path": "05_Protocols/Protocol - CLI Surface.md",
+      "source_classification": "active",
+      "raw_target": "api",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
+      "source_path": "05_Protocols/Protocol - Evidence Map.md",
+      "source_classification": "active",
+      "raw_target": "Module - [[Module - State Contracts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
+      "source_path": "05_Protocols/Protocol - Evidence Map.md",
+      "source_classification": "active",
+      "raw_target": "CD [[CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
+      "source_path": "05_Protocols/Protocol - Evidence Map.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
+      "source_path": "05_Protocols/Protocol - Evidence Map.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Evidence Map.md",
+      "source_path": "05_Protocols/Protocol - Evidence Map.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_classification": "active",
+      "raw_target": "Module - [[Module - State Contracts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_classification": "active",
+      "raw_target": "Protocol - [[Protocol - Evidence Map",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_classification": "active",
+      "raw_target": "CD [[CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Evidence_Bundle_Format.md",
+      "source_path": "06_Ops/Evidence_Bundle_Format.md",
+      "source_classification": "unclassified",
+      "raw_target": "../nexus/orchestrator/evidence_policy.py",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Evidence_Bundle_Format.md",
+      "source_path": "06_Ops/Evidence_Bundle_Format.md",
+      "source_classification": "unclassified",
+      "raw_target": "../nexus/core/hallucination_guard.py",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/NEXUS_ENFORCED_LAUNCH.md",
+      "source_path": "06_Ops/NEXUS_ENFORCED_LAUNCH.md",
+      "source_classification": "unclassified",
+      "raw_target": "why",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "source_path": "06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "source_classification": "unclassified",
+      "raw_target": "api",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "source_path": "06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "source_classification": "unclassified",
+      "raw_target": "api",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Acceptance and Release.md",
+      "source_path": "06_Ops/Ops - Acceptance and Release.md",
+      "source_classification": "unclassified",
+      "raw_target": "07_HALLUCINATION_GUARD_AND_HI_AUDIT",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_classification": "active",
+      "raw_target": "CD [[CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_classification": "active",
+      "raw_target": "Protocol - [[Protocol - Evidence Map",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "source_path": "06_Ops/Ops - CI Failure Playbook.md",
+      "source_classification": "active",
+      "raw_target": "troubleshooting",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "source_path": "06_Ops/Ops - CI Failure Playbook.md",
+      "source_classification": "active",
+      "raw_target": "troubleshooting",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "source_path": "06_Ops/Ops - CI Failure Playbook.md",
+      "source_classification": "active",
+      "raw_target": "troubleshooting",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "source_path": "06_Ops/Ops - CI Failure Playbook.md",
+      "source_classification": "active",
+      "raw_target": "api",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "source_path": "06_Ops/Ops - CI Failure Playbook.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_classification": "active",
+      "raw_target": "Module - [[Module - State Contracts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "source_path": "06_Ops/Ops - Closeout Hard Gate.md",
+      "source_classification": "unclassified",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "source_path": "06_Ops/Ops - Closeout Hard Gate.md",
+      "source_classification": "unclassified",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Governance Changelog.md",
+      "source_path": "06_Ops/Ops - Governance Changelog.md",
+      "source_classification": "active",
+      "raw_target": "CHANGELOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Governance Changelog.md",
+      "source_path": "06_Ops/Ops - Governance Changelog.md",
+      "source_classification": "active",
+      "raw_target": "CHANGELOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Governance Changelog.md",
+      "source_path": "06_Ops/Ops - Governance Changelog.md",
+      "source_classification": "active",
+      "raw_target": "CHANGELOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Governance Changelog.md",
+      "source_path": "06_Ops/Ops - Governance Changelog.md",
+      "source_classification": "active",
+      "raw_target": "../07_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "source_path": "06_Ops/Ops - Learning Closure Matrix.md",
+      "source_classification": "active",
+      "raw_target": "Path",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Ownership and Review SLA.md",
+      "source_path": "06_Ops/Ops - Ownership and Review SLA.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_classification": "active",
+      "raw_target": "exceptions",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_classification": "active",
+      "raw_target": "exceptions",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Query Writeback Policy.md",
+      "source_path": "06_Ops/Ops - Query Writeback Policy.md",
+      "source_classification": "active",
+      "raw_target": "nexus_wiki_vault/",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Query Writeback Policy.md",
+      "source_path": "06_Ops/Ops - Query Writeback Policy.md",
+      "source_classification": "active",
+      "raw_target": "scripts/ops/wiki_linter.py",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Query Writeback Policy.md",
+      "source_path": "06_Ops/Ops - Query Writeback Policy.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Command Policy.md",
+      "source_path": "06_Ops/Ops - Truth Claims Command Policy.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "CD [[CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "CHANGELOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "source_path": "06_Ops/Ops - Truth Claims Register.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Drift Audit.md",
+      "source_path": "06_Ops/Ops - Wiki Drift Audit.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Link Integrity.md",
+      "source_path": "06_Ops/Ops - Wiki Link Integrity.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Link Integrity.md",
+      "source_path": "06_Ops/Ops - Wiki Link Integrity.md",
+      "source_classification": "active",
+      "raw_target": "CHANGELOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "source_path": "06_Ops/Ops - Wiki Page Type Contracts.md",
+      "source_classification": "active",
+      "raw_target": "99_Schema/nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "source_path": "06_Ops/Ops - Wiki Page Type Contracts.md",
+      "source_classification": "active",
+      "raw_target": "scripts/ops/wiki_linter.py",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "source_path": "06_Ops/Ops - Wiki Page Type Contracts.md",
+      "source_classification": "active",
+      "raw_target": "scripts/ops/wiki_capability_coverage_audit.py",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wiki Regression Evals.md",
+      "source_path": "06_Ops/Ops - Wiki Regression Evals.md",
+      "source_classification": "active",
+      "raw_target": "scripts/ops/scripts/ops/ci_gate.py",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
+      "source_path": "06_Ops/Ops - Wisdom Layer.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
+      "source_path": "06_Ops/Ops - Wisdom Layer.md",
+      "source_classification": "active",
+      "raw_target": "v23_wisdom_spec",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
+      "source_path": "06_Ops/Ops - Wisdom Layer.md",
+      "source_classification": "active",
+      "raw_target": "Ops - CI/CD Promotion Gate",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Ops - Wisdom Layer.md",
+      "source_path": "06_Ops/Ops - Wisdom Layer.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
+      "source_path": "06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
+      "source_classification": "active",
+      "raw_target": "file:///Users/jameschen/.gemini/antigravity/brain/0d389da5-3a15-4717-b21c-cd5aad468415/overview.txt",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:07_Compliance/Compliance_Dashboard.md",
+      "source_path": "07_Compliance/Compliance_Dashboard.md",
+      "source_classification": "active",
+      "raw_target": "99_Norms/治理規範",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "source_path": "07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "source_classification": "unclassified",
+      "raw_target": "../nexus/core/hallucination_guard.py",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "source_path": "08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "source_classification": "active",
+      "raw_target": "System - [[System\n  - Unknowns and Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "source_path": "08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "source_classification": "active",
+      "raw_target": "System - Unknowns and\n  Conflicts",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "source_path": "08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "source_classification": "active",
+      "raw_target": "MUSE_ENGINE_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "source_path": "10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "file:///Users/jameschen/workspace/nexus/nexus_wiki_vault/10_Analysis_Scans/repomix/repomix_complete.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "source_path": "10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "file:///Users/jameschen/workspace/nexus/nexus_wiki_vault/10_Analysis_Scans/codegraph_audit/codegraph_status.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "source_path": "10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "file:///Users/jameschen/workspace/nexus/nexus_wiki_vault/10_Analysis_Scans/codex_complexity/complexity_optimizer_report.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "qa",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "source_path": "90_Sources/Source - Nexus Anti Registry.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source Index.md",
+      "source_path": "90_Sources/Source Index.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source Index.md",
+      "source_path": "90_Sources/Source Index.md",
+      "source_classification": "active",
+      "raw_target": "v23_wisdom_spec",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source Index.md",
+      "source_path": "90_Sources/Source Index.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source Index.md",
+      "source_path": "90_Sources/Source Index.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source Index.md",
+      "source_path": "90_Sources/Source Index.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:90_Sources/Source Index.md",
+      "source_path": "90_Sources/Source Index.md",
+      "source_classification": "active",
+      "raw_target": "../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "legacy_or_historical",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:99_Schema/AGENT_SCHEMA.md",
+      "source_path": "99_Schema/AGENT_SCHEMA.md",
+      "source_classification": "active",
+      "raw_target": "exceptions",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:LLM_Wiki/EXCLUDE_RULES.md",
+      "source_path": "LLM_Wiki/EXCLUDE_RULES.md",
+      "source_classification": "active",
+      "raw_target": "../scripts/ops/wiki_linter.py",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "api",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "api",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "Validation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/QUICKSTART.md",
+      "source_path": "Reference/QUICKSTART.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/README.md",
+      "source_path": "Reference/README.md",
+      "source_classification": "active",
+      "raw_target": "SKILL",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
+      "source_path": "Reference/Role_Guides/Expert_Guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "../00_Home/System Overview.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
+      "source_path": "Reference/Role_Guides/Expert_Guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "../01_System/MUSE_PROTO.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
+      "source_path": "Reference/Role_Guides/Expert_Guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "../01_System/Nexus v24.0 Agent Handover & Truth Protocol.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/Role_Guides/Expert_Guide.md",
+      "source_path": "Reference/Role_Guides/Expert_Guide.md",
+      "source_classification": "unclassified",
+      "raw_target": "../06_Ops/Ops - Acceptance and Release.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[01_CURRENT_STATE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "01_CURRENT_STATE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[02_TARGET_ARCHITECTURE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "02_TARGET_ARCHITECTURE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[03_GAP_ANALYSIS",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "03_GAP_ANALYSIS",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[04_REFACTOR_ROADMAP",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "04_REFACTOR_ROADMAP",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[05_BACKLOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "05_BACKLOG",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[06_REPO_CLEANUP_PLAN",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "06_REPO_CLEANUP_PLAN",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[07_SCRIPT_OWNERSHIP_MAP",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "07_SCRIPT_OWNERSHIP_MAP",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[08_MIGRATION_RUNBOOK_V1_5_2_PLUS",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "08_MIGRATION_RUNBOOK_V1_5_2_PLUS",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[09_STATE_CONTRACT_DRAFT",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "09_STATE_CONTRACT_DRAFT",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[10_IMPLEMENTATION_SEQUENCE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "10_IMPLEMENTATION_SEQUENCE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[11_FIRST_CUT_FILE_PLAN",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "11_FIRST_CUT_FILE_PLAN",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[12_AGENT_EXECUTION_GUIDE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "12_AGENT_EXECUTION_GUIDE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[13_ACCEPTANCE_CHECKLIST",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "13_ACCEPTANCE_CHECKLIST",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[14_SKILLS_ROUTER_DECISION_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "14_SKILLS_ROUTER_DECISION_SPEC",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[15_MIGRATION_SAFETY_VALIDATOR_PLAN",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "15_MIGRATION_SAFETY_VALIDATOR_PLAN",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[16_EXECUTION_TIMELINE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "16_EXECUTION_TIMELINE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[17_GEMINI_CODEX_HANDOFF_USAGE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "17_GEMINI_CODEX_HANDOFF_USAGE",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[18_REFACTOR_PROGRESS_BOARD",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "18_REFACTOR_PROGRESS_BOARD",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "[19_AGENT_TASK_PACK_v1",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "19_AGENT_TASK_PACK_v1",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "source_path": "Reference/docs/00_PROJECT_INDEX.md",
+      "source_classification": "active",
+      "raw_target": "../../.nexus/graph/index.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/en/README_Product.md",
+      "source_path": "Reference/en/README_Product.md",
+      "source_classification": "active",
+      "raw_target": "../00_Home/System Overview.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/en/README_Product.md",
+      "source_path": "Reference/en/README_Product.md",
+      "source_classification": "active",
+      "raw_target": "../00_Home/README_Product.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/en/README_Product.md",
+      "source_path": "Reference/en/README_Product.md",
+      "source_classification": "active",
+      "raw_target": "../06_Ops/Ops - Governance SLO Dashboard.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/en/SDK_Quickstart.md",
+      "source_path": "Reference/en/SDK_Quickstart.md",
+      "source_classification": "active",
+      "raw_target": "../06_Ops/Ops - Wiki Link Integrity.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/en/SDK_Quickstart.md",
+      "source_path": "Reference/en/SDK_Quickstart.md",
+      "source_classification": "active",
+      "raw_target": "QUICKSTART.md",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "Validation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/nexus_truth_dashboard.md",
+      "source_path": "Reference/nexus_truth_dashboard.md",
+      "source_classification": "active",
+      "raw_target": "Source [[index",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/program.md",
+      "source_path": "Reference/program.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/task.md",
+      "source_path": "Reference/task.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    },
+    {
+      "source_id": "page:Reference/walkthrough.md",
+      "source_path": "Reference/walkthrough.md",
+      "source_classification": "active",
+      "raw_target": "documentation",
+      "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "placeholder_or_template",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": ""
+    }
+  ],
+  "repair_batches": []
+}

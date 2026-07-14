@@ -69,3 +69,18 @@ Generated retrieval artifacts must match committed source. A dirty-worktree `--w
 ```bash
 check_wiki_committed_reproducibility.py --check --repo-root . --ref HEAD
 ```
+
+## 7. Unresolved-Link Inventory
+
+Classification of unresolved Wiki links is derived and non-authoritative. Only physical-exact repair candidates may be batched for repair. Missing, ambiguous, and legacy links must not be guessed.
+
+**Properties:**
+- Classification uses deterministic rules with no network or model calls.
+- Each unresolved link is classified into exactly one category.
+- Repair batches contain only entries with `repairable=true` and physical evidence.
+- The inventory is a governance artifact, not architectural truth.
+
+**Verification contract:**
+```bash
+classify_wiki_unresolved_links.py --check
+```
