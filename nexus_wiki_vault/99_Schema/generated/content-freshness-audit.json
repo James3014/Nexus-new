@@ -1,0 +1,932 @@
+{
+  "schema": "nexus.wiki.content-freshness.v1",
+  "authority": "derived_non_authoritative",
+  "status": "PASS",
+  "source_commit": "7108ed87a3a0d965c45d783f0046b0da679ddbbf14ab9aaa246e0cb02d094675",
+  "source_commits": [
+    "24c362f7a3418f0b5f4733068591b05610088c24",
+    "28d701b235bce64a59b7623b273debabc5232340",
+    "34c99b7e884b043421d6c2925df95fd5346ae8bc",
+    "3c9caab4dc7ef667a4fdb5f2123c75977f51f856",
+    "5e31d771f26303f5612938a1e0393816c679170a",
+    "8f20350751aa1901c5d35fd7bf58f6ba297adee0",
+    "93fca8e048d2c676a71b4e10ae941290f36dec59",
+    "951ccb21fefbb127739db8fe68116528c97493a9",
+    "990f83199dadce0d93eeecf6fc2d6b36398e8627",
+    "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+    "a1a87cd19dc669b2a71e1177049903b7207242cc",
+    "b350cd29b4973bfa4c6298057e072f0f69fbb347",
+    "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+    "bae0916292934a0ccc8d49a32d23f898df97f103",
+    "e532792e2dc65daa62b5d10a891a76f9df6242e3"
+  ],
+  "pages": [
+    {
+      "path": "00_Home/AGENT_BOOTSTRAP.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "3fcbdc2c1e1b7b8eed79e576c03b686d69edba65d69f13352d430005feb3a75d",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "AGENTS.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "990f83199dadce0d93eeecf6fc2d6b36398e8627",
+          "sha256": "9c3bac4acbfa0585e7f1c49954361b6f3783ef9f44304dd6ef508a74c998b71c"
+        },
+        {
+          "path": "MUSE_PROTO.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "24c362f7a3418f0b5f4733068591b05610088c24",
+          "sha256": "47206277f2894b0f2e949d1f35bf36bfa25c967d4b061013314c2f96fbce051a"
+        },
+        {
+          "path": "scripts/ops/check_wiki_governance_closure.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "951ccb21fefbb127739db8fe68116528c97493a9",
+          "sha256": "b44f70f858c1d07e63f84051f1cc6c2db268c73a7d875513e2d676e69020bc68"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/CURRENT_STATE.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "11ef910a8c306f566b576582162ade289e90942d64cbd63216a74b3094a45c2c",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "nexus/core/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+        },
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/GLOSSARY.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "5070e9ef1bd644cfdb3d7cf5e23b0e4939ba2d76f91432b8a4c78ef5daaceb97",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "nexus/core/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+        },
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/PARTNER_ONBOARDING.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "4d1de3e145f62cf8efeb50d5e2aeae479e09469e95918620e208c625fbd375ec",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "README.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "bae0916292934a0ccc8d49a32d23f898df97f103",
+          "sha256": "522d6a98e89a140e383bf21f7238c5ed0b4c3baf1db13191de5191905d3f0823"
+        },
+        {
+          "path": "nexus_wiki_vault/00_Home/CURRENT_STATE.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "28d701b235bce64a59b7623b273debabc5232340",
+          "sha256": "11ef910a8c306f566b576582162ade289e90942d64cbd63216a74b3094a45c2c"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/SYSTEM_MAP.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "7c4b45895c79531cf342e2135cfef8e9f61f47cef9c910da79d4d85f0f6b020c",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "nexus/core/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+        },
+        {
+          "path": "nexus/engine/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/System Overview.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "f8287e1a3b015a2a28ca3f995f8e4b6c56f5528d06ea3f17f984253c04671064",
+      "source_of_truth": "compiled-wiki",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "5e31d771f26303f5612938a1e0393816c679170a",
+          "sha256": "ef4c72178e8f36cb04e943be24bc75a0ec3ba53153f82a01019210af5fe4f051"
+        },
+        {
+          "path": "nexus/core/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+        },
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/TASK_ROUTER.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "d446abcbe8f880e989b89468028a726d8a832062a955740cbabca0341c292ab8",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "00_Home/Wiki Index and Coverage Map.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "764777a151a3aadb9ec3ae2c045f35dbe5d51687132f401706a75d484a55dc40",
+      "source_of_truth": "compiled-wiki",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "scripts/ops/build_wiki_agent_index.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "34c99b7e884b043421d6c2925df95fd5346ae8bc",
+          "sha256": "850f52691db7611d29f62a0b9d87fb77a8dc94319a4766c6e050e5ff6dcdaea7"
+        },
+        {
+          "path": "scripts/ops/wiki_coverage_audit.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "93fca8e048d2c676a71b4e10ae941290f36dec59",
+          "sha256": "60abfba0c1ab5e9b45650bc850c50d72930415caa9a7e9970bf14c7041a1ce23"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "01_System/CLAIM_TAXONOMY.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "6e63b88a95f5daa7000e143131e98eca36c3e3a6ee389917dd29f28230ed96e2",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "scripts/ops/ci_gate.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+        },
+        {
+          "path": "scripts/ops/wiki_truth_claims_check.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+          "sha256": "e97369d47ce7297d0db649c6c48677d2ee4fd1b19214772539f7eb6bfb017fea"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "roles": [
+        "canonical",
+        "code_symbol_mapping",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-architecture",
+      "exists": true,
+      "content_sha256": "24847a7fa1784f5ad185e9738f3936d742f09c754723e95aedca1c5daa4ddfc6",
+      "source_of_truth": "",
+      "required_markers": [
+        "Rust Governance Kernel",
+        "P → X → D → R → A → C",
+        "Fail-Closed"
+      ],
+      "source_paths": [
+        {
+          "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "5e31d771f26303f5612938a1e0393816c679170a",
+          "sha256": "ef4c72178e8f36cb04e943be24bc75a0ec3ba53153f82a01019210af5fe4f051"
+        },
+        {
+          "path": "nexus/core/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+        },
+        {
+          "path": "nexus/engine/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "src/governance/transition_engine.rs",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b350cd29b4973bfa4c6298057e072f0f69fbb347",
+          "sha256": "05e4366b401ad5912dbbf4652c5854cc4e76c7842b0415eda63a314ec84aa3c5"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "02_Modules/Module - Runtime Services.md",
+      "roles": [
+        "code_symbol_mapping",
+        "freshness_contract"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "5ed16f1ae6d6308fd03ea4b5e9123eaf9faa0fb3daad84430d727645caf94f6c",
+      "source_of_truth": "nexus/services/",
+      "required_markers": [
+        "nexus/services/",
+        "scripts/engine/nexus_cli.py"
+      ],
+      "source_paths": [
+        {
+          "path": "nexus/services/",
+          "exists": true,
+          "kind": "directory",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "03_Flows/Flow - PXDRAC Runtime.md",
+      "roles": [
+        "freshness_contract",
+        "required_authority"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "4ce16ac8e1163464696f7d1076f72ba2d0c94efdd2c634e5f2fb76325c3a50d7",
+      "source_of_truth": "src/governance/transition_engine.rs",
+      "required_markers": [
+        "TransitionEngine",
+        "P -> X -> D -> R -> A -> C",
+        "Fail-Closed"
+      ],
+      "source_paths": [
+        {
+          "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "5e31d771f26303f5612938a1e0393816c679170a",
+          "sha256": "ef4c72178e8f36cb04e943be24bc75a0ec3ba53153f82a01019210af5fe4f051"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        },
+        {
+          "path": "src/governance/transition_engine.rs",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b350cd29b4973bfa4c6298057e072f0f69fbb347",
+          "sha256": "05e4366b401ad5912dbbf4652c5854cc4e76c7842b0415eda63a314ec84aa3c5"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "05_Protocols/Protocol - CLI Surface.md",
+      "roles": [
+        "code_symbol_mapping",
+        "freshness_contract",
+        "required_authority"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "ec8b392380076254f1dae9e4c90f8a8fbf9e1cfe8cc26fd9b527e749fbb06dbf",
+      "source_of_truth": "scripts/engine/nexus_cli.py",
+      "required_markers": [
+        "scripts/engine/nexus_cli.py",
+        "Protocol - CLI Surface"
+      ],
+      "source_paths": [
+        {
+          "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "5e31d771f26303f5612938a1e0393816c679170a",
+          "sha256": "ef4c72178e8f36cb04e943be24bc75a0ec3ba53153f82a01019210af5fe4f051"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "06_Ops/Ops - Acceptance and Release.md",
+      "roles": [
+        "freshness_contract",
+        "required_authority"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "45a79516487ce7f09182e64944578d9292ec21b5ee3463b63d78e539cc9b4969",
+      "source_of_truth": "scripts/engine/nexus_cli.py",
+      "required_markers": [
+        "scripts/engine/nexus_cli.py",
+        "scripts/ops/ci_gate.py",
+        "Release Discipline"
+      ],
+      "source_paths": [
+        {
+          "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "5e31d771f26303f5612938a1e0393816c679170a",
+          "sha256": "ef4c72178e8f36cb04e943be24bc75a0ec3ba53153f82a01019210af5fe4f051"
+        },
+        {
+          "path": "scripts/engine/nexus_cli.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+          "sha256": "2d210c963cb685d7f2b4d5a04b5ea519ad3df5b42f1384a9d795bdcebc3b629b"
+        },
+        {
+          "path": "scripts/ops/ci_gate.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "06_Ops/Ops - CI Failure Playbook.md",
+      "roles": [
+        "freshness_contract",
+        "required_authority"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "7bbfee59a43740e538cb6eae672fd9397daac0e1049d873f1d071a00143624bf",
+      "source_of_truth": "scripts/ops/ci_gate.py",
+      "required_markers": [
+        "scripts/ops/incident_rca_adapter.py",
+        "scripts/ops/ci_gate.py"
+      ],
+      "source_paths": [
+        {
+          "path": "scripts/ops/ci_gate.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+        },
+        {
+          "path": "scripts/ops/incident_rca_adapter.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "8f20350751aa1901c5d35fd7bf58f6ba297adee0",
+          "sha256": "7875a717bd66c3fb69e694f7ae662051f6001252d6033a72d7c4c2617d750a34"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "roles": [
+        "code_symbol_mapping",
+        "freshness_contract"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "cd4d9078d6d3be55e7aa2d5917ef26b4f8c84e639a2fc4ffb67c91cdd65a886c",
+      "source_of_truth": "scripts/ops/ci_gate.py",
+      "required_markers": [
+        "scripts/ops/ci_gate.py",
+        "TRU-101",
+        "Promotion"
+      ],
+      "source_paths": [
+        {
+          "path": "scripts/ops/check_wiki_governance_closure.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "951ccb21fefbb127739db8fe68116528c97493a9",
+          "sha256": "b44f70f858c1d07e63f84051f1cc6c2db268c73a7d875513e2d676e69020bc68"
+        },
+        {
+          "path": "scripts/ops/ci_gate.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+        },
+        {
+          "path": "scripts/ops/wiki_coverage_audit.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "93fca8e048d2c676a71b4e10ae941290f36dec59",
+          "sha256": "60abfba0c1ab5e9b45650bc850c50d72930415caa9a7e9970bf14c7041a1ce23"
+        },
+        {
+          "path": "scripts/ops/wiki_drift_audit.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+          "sha256": "2ee759a03dc3aa4d3a2ade2e6832caae9cbe8932a5ad83da85ab6e3eab5a9fd7"
+        },
+        {
+          "path": "scripts/ops/wiki_linter.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "e532792e2dc65daa62b5d10a891a76f9df6242e3",
+          "sha256": "b5cb1f5b697bd34f82d6ce2ba17328559e4c640e9568866c227d6a7c3915aa21"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "06_Ops/Ops - Truth Claims Register.md",
+      "roles": [
+        "freshness_contract",
+        "required_authority"
+      ],
+      "classification": "current_verified",
+      "owner": "agent",
+      "exists": true,
+      "content_sha256": "8614647e8ba4d1d285c28d1c2a0ebc01f513d654a450c3f95066fa87776ec45c",
+      "source_of_truth": "repo-root",
+      "required_markers": [
+        "scripts/ops/wiki_truth_claims_check.py",
+        "scripts/ops/ci_gate.py"
+      ],
+      "source_paths": [
+        {
+          "path": "MUSE-NEXUS-Engine-Specification-v22-Eternal.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "5e31d771f26303f5612938a1e0393816c679170a",
+          "sha256": "ef4c72178e8f36cb04e943be24bc75a0ec3ba53153f82a01019210af5fe4f051"
+        },
+        {
+          "path": "scripts/ops/ci_gate.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+          "sha256": "a2e071087ed6e56e374e030650ac515a1764643152d3afe69acf02c9e77a76e0"
+        },
+        {
+          "path": "scripts/ops/wiki_truth_claims_check.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+          "sha256": "e97369d47ce7297d0db649c6c48677d2ee4fd1b19214772539f7eb6bfb017fea"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "99_Schema/WIKI_GOVERNANCE_CHARTER.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "human",
+      "exists": true,
+      "content_sha256": "10b116a6d281154a071c89b99bbf9135c280eb1759ad0d1d58c282a14f47a889",
+      "source_of_truth": "",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "AGENTS.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "990f83199dadce0d93eeecf6fc2d6b36398e8627",
+          "sha256": "9c3bac4acbfa0585e7f1c49954361b6f3783ef9f44304dd6ef508a74c998b71c"
+        },
+        {
+          "path": "MUSE_PROTO.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "24c362f7a3418f0b5f4733068591b05610088c24",
+          "sha256": "47206277f2894b0f2e949d1f35bf36bfa25c967d4b061013314c2f96fbce051a"
+        },
+        {
+          "path": "scripts/ops/check_wiki_governance_closure.py",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "951ccb21fefbb127739db8fe68116528c97493a9",
+          "sha256": "b44f70f858c1d07e63f84051f1cc6c2db268c73a7d875513e2d676e69020bc68"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "README.md",
+      "roles": [
+        "canonical",
+        "freshness_contract"
+      ],
+      "classification": "current_needs_review",
+      "owner": "nexus-core",
+      "exists": true,
+      "content_sha256": "1fe0e109b7cdb585b31132bcb7f1cfa6fd61dffa3e07d0fd2ea6aabdbeb7a66d",
+      "source_of_truth": "repository evidence and current runtime reports",
+      "required_markers": [],
+      "source_paths": [
+        {
+          "path": "README.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "bae0916292934a0ccc8d49a32d23f898df97f103",
+          "sha256": "522d6a98e89a140e383bf21f7238c5ed0b4c3baf1db13191de5191905d3f0823"
+        },
+        {
+          "path": "nexus_wiki_vault/00_Home/CURRENT_STATE.md",
+          "exists": true,
+          "kind": "file",
+          "source_commit": "28d701b235bce64a59b7623b273debabc5232340",
+          "sha256": "11ef910a8c306f566b576582162ade289e90942d64cbd63216a74b3094a45c2c"
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "symbols": [
+    {
+      "path": "scripts/engine/nexus_cli.py",
+      "exists": true,
+      "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
+      "symbols": [
+        {
+          "name": "nexus",
+          "exists": true
+        },
+        {
+          "name": "top_status",
+          "exists": true
+        },
+        {
+          "name": "top_run",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "path": "scripts/ops/check_wiki_governance_closure.py",
+      "exists": true,
+      "source_commit": "951ccb21fefbb127739db8fe68116528c97493a9",
+      "symbols": [
+        {
+          "name": "main",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "path": "scripts/ops/ci_gate.py",
+      "exists": true,
+      "source_commit": "b829aa7b02988638a8d38f9e906bc83f36453ef0",
+      "symbols": [
+        {
+          "name": "main",
+          "exists": true
+        },
+        {
+          "name": "run_dry_run",
+          "exists": true
+        },
+        {
+          "name": "run_wiki_sync_check",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "path": "scripts/ops/wiki_coverage_audit.py",
+      "exists": true,
+      "source_commit": "93fca8e048d2c676a71b4e10ae941290f36dec59",
+      "symbols": [
+        {
+          "name": "run_audit",
+          "exists": true
+        },
+        {
+          "name": "formal_mapping_report",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "path": "scripts/ops/wiki_drift_audit.py",
+      "exists": true,
+      "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+      "symbols": [
+        {
+          "name": "run_drift_audit",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "path": "scripts/ops/wiki_truth_claims_check.py",
+      "exists": true,
+      "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+      "symbols": [
+        {
+          "name": "run_checks",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "path": "src/governance/transition_engine.rs",
+      "exists": true,
+      "source_commit": "b350cd29b4973bfa4c6298057e072f0f69fbb347",
+      "symbols": [
+        {
+          "name": "TransitionEngine::can_transition",
+          "exists": true
+        }
+      ]
+    }
+  ],
+  "verification_commands": [
+    {
+      "command": [
+        "python3",
+        "scripts/engine/nexus_cli.py",
+        "--help"
+      ],
+      "passed": true,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ops/ci_gate.py",
+        "--help"
+      ],
+      "passed": true,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ops/build_wiki_agent_index.py",
+        "--check"
+      ],
+      "passed": true,
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ops/classify_wiki_unresolved_links.py",
+        "--check"
+      ],
+      "passed": true,
+      "exit_code": 0
+    }
+  ],
+  "verified_tests": [
+    {
+      "path": "tests/ops/test_wiki_content_freshness_audit.py",
+      "exists": true
+    },
+    {
+      "path": "tests/ops/test_wiki_closure_gates.py",
+      "exists": true
+    },
+    {
+      "path": "tests/ops/test_wiki_coverage_policy.py",
+      "exists": true
+    },
+    {
+      "path": "tests/ops/test_build_wiki_agent_index.py",
+      "exists": true
+    },
+    {
+      "path": "tests/ops/test_classify_wiki_unresolved_links.py",
+      "exists": true
+    },
+    {
+      "path": "tests/ops/test_wiki_committed_reproducibility.py",
+      "exists": true
+    }
+  ],
+  "lifecycle_checks": [
+    {
+      "path": "00_Home/Agent Onboarding - Command Pack.md",
+      "classification": "superseded",
+      "superseded_by": "00_Home/AGENT_BOOTSTRAP.md",
+      "successor_classification": "current"
+    },
+    {
+      "path": "00_Home/Agent Onboarding - Implementation Map.md",
+      "classification": "mixed_needs_review"
+    },
+    {
+      "path": "00_Home/Agent_Context_Strategy_Guide.md",
+      "classification": "historical"
+    },
+    {
+      "path": "00_Home/CLI Surface Quickstart.md",
+      "classification": "mixed_needs_review"
+    },
+    {
+      "path": "00_Home/README_Agent.md",
+      "classification": "superseded",
+      "superseded_by": "00_Home/AGENT_BOOTSTRAP.md",
+      "successor_classification": "current"
+    },
+    {
+      "path": "00_Home/README_Contributor.md",
+      "classification": "mixed_needs_review"
+    },
+    {
+      "path": "00_Home/Root_README_Summary.md",
+      "classification": "historical"
+    },
+    {
+      "path": "01_System/MUSE_PROTO.md",
+      "classification": "mixed_needs_review"
+    }
+  ],
+  "summary": {
+    "page_count": 19,
+    "classification_counts": {
+      "current_needs_review": 12,
+      "current_verified": 7
+    },
+    "source_path_count": 53,
+    "missing_source_path_count": 0,
+    "symbol_error_count": 0,
+    "verification_command_failures": 0,
+    "missing_verification_tests": 0,
+    "lifecycle_error_count": 0,
+    "error_count": 0
+  },
+  "source_fingerprint": "e68ac4ee9ae2c99b0380be90554fc1709fa0bf92cc69d52bf139cabb335fb211"
+}

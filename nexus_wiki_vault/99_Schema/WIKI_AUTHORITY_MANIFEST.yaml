@@ -331,6 +331,111 @@ unresolved_link_governance:
       policy: unsupported-syntax-v1
       gate: fail_closed
 
+content_freshness:
+  schema: nexus.wiki.content-freshness.v1
+  owner: wiki-governance
+  generator: scripts/ops/wiki_content_freshness_audit.py
+  output: 99_Schema/generated/content-freshness-audit.json
+  required_fields:
+    - source_commit
+    - source_paths
+    - verified_tests
+    - owner
+    - classification
+  classification_policy:
+    current_verified: live_source_and_contract_verified
+    current_needs_review: live_source_present_manual_content_review_remaining
+    historical: retained_for_traceability_not_current_authority
+    superseded: successor_required_and_not_current_authority
+    unsupported_claim: fail_closed_until_claim_is_resolved_or_downgraded
+  page_overrides:
+    README.md:
+      classification: current_needs_review
+      source_paths: [README.md, nexus_wiki_vault/00_Home/CURRENT_STATE.md]
+    00_Home/CURRENT_STATE.md:
+      classification: current_needs_review
+      source_paths: [scripts/engine/nexus_cli.py, nexus/core/, nexus/services/]
+    00_Home/System Overview.md:
+      classification: current_needs_review
+      source_paths: [MUSE-NEXUS-Engine-Specification-v22-Eternal.md, nexus/core/, nexus/services/]
+    01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md:
+      classification: current_needs_review
+      owner: nexus-architecture
+      source_paths: [MUSE-NEXUS-Engine-Specification-v22-Eternal.md, src/governance/transition_engine.rs, nexus/core/, nexus/engine/, nexus/services/]
+      required_markers: ["Rust Governance Kernel", "P → X → D → R → A → C", "Fail-Closed"]
+    00_Home/AGENT_BOOTSTRAP.md:
+      classification: current_needs_review
+      source_paths: [AGENTS.md, MUSE_PROTO.md, scripts/ops/check_wiki_governance_closure.py]
+    00_Home/PARTNER_ONBOARDING.md:
+      classification: current_needs_review
+      source_paths: [README.md, nexus_wiki_vault/00_Home/CURRENT_STATE.md]
+    01_System/CLAIM_TAXONOMY.md:
+      classification: current_needs_review
+      source_paths: [scripts/ops/wiki_truth_claims_check.py, scripts/ops/ci_gate.py]
+    99_Schema/WIKI_GOVERNANCE_CHARTER.md:
+      classification: current_needs_review
+      source_paths: [AGENTS.md, MUSE_PROTO.md, scripts/ops/check_wiki_governance_closure.py]
+    00_Home/Wiki Index and Coverage Map.md:
+      classification: current_needs_review
+      source_paths: [scripts/ops/build_wiki_agent_index.py, scripts/ops/wiki_coverage_audit.py]
+    00_Home/TASK_ROUTER.md:
+      classification: current_needs_review
+      source_paths: [scripts/engine/nexus_cli.py, nexus/services/]
+    00_Home/SYSTEM_MAP.md:
+      classification: current_needs_review
+      source_paths: [nexus/core/, nexus/engine/, nexus/services/]
+    00_Home/GLOSSARY.md:
+      classification: current_needs_review
+      source_paths: [nexus/core/, nexus/services/, scripts/engine/nexus_cli.py]
+    03_Flows/Flow - PXDRAC Runtime.md:
+      classification: current_verified
+      source_paths: [src/governance/transition_engine.rs, scripts/engine/nexus_cli.py, MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+      required_markers: ["TransitionEngine", "P -> X -> D -> R -> A -> C", "Fail-Closed"]
+    06_Ops/Ops - Acceptance and Release.md:
+      classification: current_verified
+      source_paths: [scripts/engine/nexus_cli.py, scripts/ops/ci_gate.py, MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+      required_markers: ["scripts/engine/nexus_cli.py", "scripts/ops/ci_gate.py", "Release Discipline"]
+    06_Ops/Ops - Truth Claims Register.md:
+      classification: current_verified
+      source_paths: [scripts/ops/wiki_truth_claims_check.py, scripts/ops/ci_gate.py, MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+      required_markers: ["scripts/ops/wiki_truth_claims_check.py", "scripts/ops/ci_gate.py"]
+    06_Ops/Ops - CI Failure Playbook.md:
+      classification: current_verified
+      source_paths: [scripts/ops/incident_rca_adapter.py, scripts/ops/ci_gate.py]
+      required_markers: ["scripts/ops/incident_rca_adapter.py", "scripts/ops/ci_gate.py"]
+    05_Protocols/Protocol - CLI Surface.md:
+      classification: current_verified
+      source_paths: [scripts/engine/nexus_cli.py, MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+      required_markers: ["scripts/engine/nexus_cli.py", "Protocol - CLI Surface"]
+    02_Modules/Module - Runtime Services.md:
+      classification: current_verified
+      source_paths: [nexus/services/, scripts/engine/nexus_cli.py]
+      required_markers: ["nexus/services/", "scripts/engine/nexus_cli.py"]
+    06_Ops/Ops - CI/CD Promotion Gate.md:
+      classification: current_verified
+      source_paths: [scripts/ops/ci_gate.py, scripts/ops/wiki_linter.py, scripts/ops/wiki_drift_audit.py, scripts/ops/wiki_coverage_audit.py, scripts/ops/check_wiki_governance_closure.py]
+      required_markers: ["scripts/ops/ci_gate.py", "TRU-101", "Promotion"]
+  symbol_contracts:
+    src/governance/transition_engine.rs: [TransitionEngine::can_transition]
+    scripts/engine/nexus_cli.py: [nexus, top_status, top_run]
+    scripts/ops/ci_gate.py: [main, run_dry_run, run_wiki_sync_check]
+    scripts/ops/wiki_truth_claims_check.py: [run_checks]
+    scripts/ops/wiki_coverage_audit.py: [run_audit, formal_mapping_report]
+    scripts/ops/wiki_drift_audit.py: [run_drift_audit]
+    scripts/ops/check_wiki_governance_closure.py: [main]
+  verification_tests:
+    - tests/ops/test_wiki_content_freshness_audit.py
+    - tests/ops/test_wiki_closure_gates.py
+    - tests/ops/test_wiki_coverage_policy.py
+    - tests/ops/test_build_wiki_agent_index.py
+    - tests/ops/test_classify_wiki_unresolved_links.py
+    - tests/ops/test_wiki_committed_reproducibility.py
+  verification_commands:
+    - [python3, scripts/engine/nexus_cli.py, --help]
+    - [python3, scripts/ops/ci_gate.py, --help]
+    - [python3, scripts/ops/build_wiki_agent_index.py, --check]
+    - [python3, scripts/ops/classify_wiki_unresolved_links.py, --check]
+
 generated_retrieval_layer:
   schema: nexus.wiki.agent-index.v1
   authority: derived_non_authoritative
