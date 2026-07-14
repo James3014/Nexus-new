@@ -258,7 +258,7 @@ def calculate_metrics(results: list[dict], group: str) -> dict:
         "total_cost": round(total_cost, 4)
     }
 
-def main():
+def main(output_file=None):
     results = []
     groups = ["A", "B", "C", "D", "E"]
     
@@ -270,7 +270,7 @@ def main():
     for group in groups:
         metrics_summary[group] = calculate_metrics(results, group)
         
-    output_path = Path("/Users/jameschen/Workspace/nexus/docs/reports/local_problem_solving_diff_report.md")
+    output_path = Path(output_file) if output_file else None
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     content = []

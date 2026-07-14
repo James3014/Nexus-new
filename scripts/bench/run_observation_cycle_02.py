@@ -189,7 +189,7 @@ def run_simulation() -> list[dict]:
         
     return results
 
-def main():
+def main(output_file=None):
     clean_log()
     results = run_simulation()
     
@@ -244,7 +244,10 @@ def main():
         verdict = "restrict"
         incidents.append("If 7B/14B Deliberation used outside whitelist, then restrict: Whitelist violation.")
         
-    output_path = Path("/Users/jameschen/Workspace/nexus/docs/reports/limited_mount_observation_cycle_02.md")
+    output_path = Path(output_file) if output_file else None
+    if output_path is None:
+        print("Error: --output required")
+        return
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     content = []

@@ -11,7 +11,7 @@ from pathlib import Path
 def main():
     failures_path = Path(".nexus/metrics/s2t_shadow_eval_failures.jsonl")
     report_json_path = Path(".nexus/metrics/s2t_failure_taxonomy_report.json")
-    report_md_path = Path("docs/reports/S2T_3B_V1_FAILURE_ANALYSIS_2026-06-13.md")
+    report_md_path = Path(output_file) if output_file else None
 
     if not failures_path.exists():
         print(f"❌ Failures file not found: {failures_path}")

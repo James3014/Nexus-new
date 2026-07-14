@@ -17,7 +17,7 @@ from typing import Any
 NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
 WORKSPACE = NEXUS_ROOT / ".nexus/workspaces/astropy"
 T14_RECEIPT_DIR = NEXUS_ROOT / ".nexus/reports/local_heal/astropy__astropy-13236__T1_4_V1"
-REPORT_DIR = NEXUS_ROOT / "docs/reports"
+REPORT_DIR = None  # No default docs/reports
 PYTHON_EXEC = str(NEXUS_ROOT / ".venv_astropy/bin/python")
 
 TARGET_FILE = "astropy/table/table.py"

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
 WORKSPACE = NEXUS_ROOT / ".nexus/workspaces/astropy"
-REPORT_DIR = NEXUS_ROOT / "docs/reports"
+REPORT_DIR = None  # No default docs/reports
 PYTHON_EXEC = str(NEXUS_ROOT / ".venv_astropy/bin/python")
 
 TARGET_FILE = "astropy/modeling/separable.py"

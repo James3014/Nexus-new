@@ -194,7 +194,10 @@ def run_simulation() -> list[dict]:
         
     return results
 
-def main():
+def main(output_file=None):
+    if output_file is None:
+        print("Error: --output required")
+        return
     clean_log()
     results = run_simulation()
     
@@ -264,7 +267,10 @@ def main():
         # 3B 決策一致且具解決率提升，維持 limited assist
         pass
         
-    output_path = Path("/Users/jameschen/Workspace/nexus/docs/reports/limited_mount_observation_cycle_01.md")
+    output_path = Path(output_file)
+    if output_path is None:
+        print("Error: --output required")
+        return
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     content = []
@@ -341,7 +347,7 @@ def main():
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(content))
         
-    print(f"✅ Observation report successfully written to {output_path}")
+    print(f"Report written to {output_path}")
 
 if __name__ == "__main__":
     main()
