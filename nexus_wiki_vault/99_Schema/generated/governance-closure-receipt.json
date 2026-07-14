@@ -1,0 +1,45 @@
+{
+  "schema": "nexus.wiki.governance-closure-receipt.v1",
+  "authority": "derived_non_authoritative",
+  "status": "closed",
+  "checks": [
+    {
+      "name": "committed_tree_reproducibility",
+      "description": "Committed-tree reproducibility gate",
+      "passed": true
+    },
+    {
+      "name": "classifier_determinism",
+      "description": "Unresolved-link classifier determinism",
+      "passed": true
+    },
+    {
+      "name": "link_repair_receipt",
+      "description": "Link repair receipt verification",
+      "passed": true
+    },
+    {
+      "name": "compiler_tests",
+      "description": "Compiler test suite",
+      "passed": true
+    },
+    {
+      "name": "reproducibility_tests",
+      "description": "Reproducibility test suite",
+      "passed": true
+    },
+    {
+      "name": "classifier_tests",
+      "description": "Classifier test suite",
+      "passed": true
+    },
+    {
+      "name": "repair_tests",
+      "description": "Repair test suite",
+      "passed": true
+    }
+  ],
+  "total_checks": 7,
+  "passed_checks": 7,
+  "failed_checks": 0
+}
