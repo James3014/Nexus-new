@@ -1,0 +1,101 @@
+# Nexus Wiki Agent Retrieval Entry
+Authority source:
+- 99_Schema/WIKI_AUTHORITY_MANIFEST.yaml
+Rules:
+- Generated files are derived and non-authoritative.
+- Current truth must be verified against canonical pages and repository evidence.
+- Version numbers and words such as FINAL or SEALED do not establish authority.
+- Do not perform full-corpus reading when targeted retrieval is sufficient.
+
+## Canonical Pages
+
+- canonical_key: entry
+  title: Nexus Wiki Root Entry
+  path: README.md
+  authority: navigation
+  classification: current
+  summary: Nexus is an AI Agent governance operating system that enforces a physical-integrity P-X-D-R-A-C lifecycle for AI swarms.
+
+- canonical_key: current_state
+  title: Nexus Current State
+  path: 00_Home/CURRENT_STATE.md
+  authority: operational
+  classification: current
+
+- canonical_key: system_overview
+  title: System Overview
+  path: 00_Home/System Overview.md
+  authority: explanatory
+  classification: unclassified
+  summary: 系統總覽頁定義 Nexus 的治理作業模型、核心角色入口與三大任務主線，作為全域導航與信任錨點。
+
+- canonical_key: architecture
+  title: Nexus System Architecture & Lifecycle Blueprint (v24.0)
+  path: 01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md
+  authority: normative
+  classification: unclassified
+  summary: > [!abstract] 核心意圖
+
+- canonical_key: agent_bootstrap
+  title: Agent Bootstrap
+  path: 00_Home/AGENT_BOOTSTRAP.md
+  authority: operational
+  classification: current
+  summary: This is the canonical Agent startup sequence. All Agents entering the Nexus workspace must follow this sequence.
+
+- canonical_key: partner_onboarding
+  title: Partner Onboarding
+  path: 00_Home/PARTNER_ONBOARDING.md
+  authority: operational
+  classification: current
+  summary: Audience: new human engineer, technical collaborator, reviewer, future maintainer.
+
+- canonical_key: claims
+  title: Claim Taxonomy
+  path: 01_System/CLAIM_TAXONOMY.md
+  authority: normative
+  classification: current
+  summary: This page defines evidence thresholds for every claim level in Nexus. No claim may be made at a level higher than the available evidence supports.
+
+- canonical_key: wiki_governance
+  title: 🛡️ Nexus Wiki Governance Charter (結構憲法)
+  path: 99_Schema/WIKI_GOVERNANCE_CHARTER.md
+  authority: normative
+  classification: unclassified
+  summary: **[VERSION: v1.0 | STATUS: STRUCTURE_FROZEN]**
+
+- canonical_key: wiki_index
+  title: Wiki Index and Coverage Map
+  path: 00_Home/Wiki Index and Coverage Map.md
+  authority: navigation
+  classification: active
+  summary: 這是 Nexus Wiki 的主索引與 coverage 對位頁，提供入口、任務主線與目錄對位的整體導航。
+
+- canonical_key: task_router
+  title: Task Router
+  path: 00_Home/TASK_ROUTER.md
+  authority: operational
+  classification: current
+  summary: Navigate Nexus by task type rather than by directory. For each task class, this page tells you what to read first, where the code lives, and what evidence is required. Every code entry has been physically verified.
+
+- canonical_key: system_map
+  title: System Map
+  path: 00_Home/SYSTEM_MAP.md
+  authority: operational
+  classification: current
+  summary: The main components of Nexus, their responsibilities, authority levels, and known limitations. Every code path in this page has been physically verified against the repository.
+
+- canonical_key: glossary
+  title: Glossary
+  path: 00_Home/GLOSSARY.md
+  authority: normative
+  classification: current
+  summary: Canonical definitions for key Nexus terms. Each entry states what the term means, what it is NOT the same as, where it comes from, and any legacy aliases.
+
+## Generated Artifacts
+- 99_Schema/generated/agent-index.json
+- 99_Schema/generated/llms.txt
+- 99_Schema/generated/wikilink-graph.json
+
+## Warning
+Generated artifacts are derived and non-authoritative. They do not establish architectural truth.

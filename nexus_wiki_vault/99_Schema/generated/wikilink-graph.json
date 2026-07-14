@@ -1,0 +1,3972 @@
+{
+  "schema": "nexus.wiki.wikilink-graph.v1",
+  "authority": "derived_non_authoritative",
+  "source_fingerprint": "5b33c04f8f176673e81ac3e7206364117c6bd01c1e235c042804d7b73791d4af",
+  "nodes": [
+    {
+      "id": "page:README.md",
+      "path": "README.md",
+      "title": "Nexus Wiki Root Entry",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "navigation"
+    },
+    {
+      "id": "page:00_Home/CURRENT_STATE.md",
+      "path": "00_Home/CURRENT_STATE.md",
+      "title": "Nexus Current State",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "operational"
+    },
+    {
+      "id": "page:00_Home/System Overview.md",
+      "path": "00_Home/System Overview.md",
+      "title": "System Overview",
+      "classification": "unclassified",
+      "is_canonical": true,
+      "authority": "explanatory"
+    },
+    {
+      "id": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "path": "01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "title": "Nexus System Architecture & Lifecycle Blueprint (v24.0)",
+      "classification": "unclassified",
+      "is_canonical": true,
+      "authority": "normative"
+    },
+    {
+      "id": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "path": "00_Home/AGENT_BOOTSTRAP.md",
+      "title": "Agent Bootstrap",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "operational"
+    },
+    {
+      "id": "page:00_Home/PARTNER_ONBOARDING.md",
+      "path": "00_Home/PARTNER_ONBOARDING.md",
+      "title": "Partner Onboarding",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "operational"
+    },
+    {
+      "id": "page:01_System/CLAIM_TAXONOMY.md",
+      "path": "01_System/CLAIM_TAXONOMY.md",
+      "title": "Claim Taxonomy",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "normative"
+    },
+    {
+      "id": "page:99_Schema/WIKI_GOVERNANCE_CHARTER.md",
+      "path": "99_Schema/WIKI_GOVERNANCE_CHARTER.md",
+      "title": "🛡️ Nexus Wiki Governance Charter (結構憲法)",
+      "classification": "unclassified",
+      "is_canonical": true,
+      "authority": "normative"
+    },
+    {
+      "id": "page:00_Home/Wiki Index and Coverage Map.md",
+      "path": "00_Home/Wiki Index and Coverage Map.md",
+      "title": "Wiki Index and Coverage Map",
+      "classification": "active",
+      "is_canonical": true,
+      "authority": "navigation"
+    },
+    {
+      "id": "page:00_Home/TASK_ROUTER.md",
+      "path": "00_Home/TASK_ROUTER.md",
+      "title": "Task Router",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "operational"
+    },
+    {
+      "id": "page:00_Home/SYSTEM_MAP.md",
+      "path": "00_Home/SYSTEM_MAP.md",
+      "title": "System Map",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "operational"
+    },
+    {
+      "id": "page:00_Home/GLOSSARY.md",
+      "path": "00_Home/GLOSSARY.md",
+      "title": "Glossary",
+      "classification": "current",
+      "is_canonical": true,
+      "authority": "normative"
+    },
+    {
+      "id": "page:00_Home/Agent Boot Sequence.md",
+      "path": "00_Home/Agent Boot Sequence.md",
+      "title": "Agent Boot Sequence",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Agent Mastery - 90 Percent Path.md",
+      "path": "00_Home/Agent Mastery - 90 Percent Path.md",
+      "title": "Agent Mastery - 90 Percent Path",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "path": "00_Home/Agent Onboarding - Command Pack.md",
+      "title": "Agent Onboarding - Command Pack",
+      "classification": "superseded",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Agent Onboarding - Implementation Map.md",
+      "path": "00_Home/Agent Onboarding - Implementation Map.md",
+      "title": "Agent [Onboarding](Agent Onboarding - Command Pack.md) - Implementation Map",
+      "classification": "mixed_needs_review",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Agent_Context_Bootstrapping.md",
+      "path": "00_Home/Agent_Context_Bootstrapping.md",
+      "title": "Agent_Context_Bootstrapping",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Agent_Context_Strategy_Guide.md",
+      "path": "00_Home/Agent_Context_Strategy_Guide.md",
+      "title": "Agent_Context_Strategy_Guide",
+      "classification": "historical",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/CLI Surface Quickstart.md",
+      "path": "00_Home/CLI Surface Quickstart.md",
+      "title": "CLI Surface [[quickstart|Quickstart]]",
+      "classification": "mixed_needs_review",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/README_Agent.md",
+      "path": "00_Home/README_Agent.md",
+      "title": "README Agent",
+      "classification": "superseded",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/README_Contributor.md",
+      "path": "00_Home/README_Contributor.md",
+      "title": "README Contributor",
+      "classification": "mixed_needs_review",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/README_Investor.md",
+      "path": "00_Home/README_Investor.md",
+      "title": "README Investor",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/README_Product.md",
+      "path": "00_Home/README_Product.md",
+      "title": "README Product",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Root_README_Summary.md",
+      "path": "00_Home/Root_README_Summary.md",
+      "title": "Root_README_Summary",
+      "classification": "historical",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Home/Vault Topology.md",
+      "path": "00_Home/Vault Topology.md",
+      "title": "Vault Topology：知識庫架構拓撲",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Product/Investor Deck.md",
+      "path": "00_Product/Investor Deck.md",
+      "title": "Investor Deck",
+      "classification": "draft",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Product/Nexus_Evolution_History_v9_to_v28.md",
+      "path": "00_Product/Nexus_Evolution_History_v9_to_v28.md",
+      "title": "Nexus Evolution History (v9 to v28)",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:00_Product/User Stories.md",
+      "path": "00_Product/User Stories.md",
+      "title": "Nexus User Stories",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_Specs/Spec - Nexus L1-L7 Realization.md",
+      "path": "01_Specs/Spec - Nexus L1-L7 Realization.md",
+      "title": "Spec - Nexus L1-L7 Realization",
+      "classification": "draft",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/16_CAPABILITY_SPEC_MATRIX.md",
+      "path": "01_System/16_CAPABILITY_SPEC_MATRIX.md",
+      "title": "16_CAPABILITY_SPEC_MATRIX",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/2026-03-19_Nexus_Automated_Executor_Spec.md",
+      "path": "01_System/2026-03-19_Nexus_Automated_Executor_Spec.md",
+      "title": "2026-03-19_Nexus_Automated_Executor_Spec",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR-042_MSA_Physical_Hallucination_Interlock.md",
+      "path": "01_System/ADR-042_MSA_Physical_Hallucination_Interlock.md",
+      "title": "ADR-042 - MSA Physical Hallucination Interlock",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P10-P19-regression-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P10-P19-regression-lessons.md",
+      "title": "ADR-2026-05-06-P10-P19-regression-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P105-P116-route-tactical-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P105-P116-route-tactical-lessons.md",
+      "title": "ADR-2026-05-06-P105-P116-route-tactical-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P131-P185-tactical-route-quality-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P131-P185-tactical-route-quality-lessons.md",
+      "title": "ADR-2026-05-06-P131-P185-tactical-route-quality-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P17-P25-openseeker-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P17-P25-openseeker-lessons.md",
+      "title": "ADR-2026-05-06-P17-P25-openseeker-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P61-P75-flash-token-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P61-P75-flash-token-lessons.md",
+      "title": "ADR-2026-05-06-P61-P75-flash-token-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P76-public-delivery-cost-gates.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P76-public-delivery-cost-gates.md",
+      "title": "ADR-2026-05-06-P76-public-delivery-cost-gates",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-P81-P84-s2t-contract-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-P81-P84-s2t-contract-lessons.md",
+      "title": "ADR-2026-05-06-P81-P84-s2t-contract-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-audit-cli-and-event-strict-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-audit-cli-and-event-strict-lessons.md",
+      "title": "ADR-2026-05-06-audit-cli-and-event-strict-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-brain-governance-artifact-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-brain-governance-artifact-lessons.md",
+      "title": "ADR-2026-05-06-brain-governance-artifact-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-composed-audit-accepted-path-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-composed-audit-accepted-path-lessons.md",
+      "title": "ADR-2026-05-06-composed-audit-accepted-path-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-core-runtime-closure-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-core-runtime-closure-lessons.md",
+      "title": "ADR-2026-05-06-core-runtime-closure-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-event-contract-gate-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-event-contract-gate-lessons.md",
+      "title": "ADR-2026-05-06-event-contract-gate-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-event-contract-raw-policy-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-event-contract-raw-policy-lessons.md",
+      "title": "ADR-2026-05-06-event-contract-raw-policy-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-flash-preflight-sandbox-cache-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-flash-preflight-sandbox-cache-lessons.md",
+      "title": "ADR-2026-05-06-flash-preflight-sandbox-cache-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-healing-remote-ingress-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-healing-remote-ingress-lessons.md",
+      "title": "ADR-2026-05-06-healing-remote-ingress-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-pipeline-d-composition-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-pipeline-d-composition-lessons.md",
+      "title": "ADR-2026-05-06-pipeline-d-composition-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-preflash-dry-run-artifact-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-preflash-dry-run-artifact-lessons.md",
+      "title": "ADR-2026-05-06-preflash-dry-run-artifact-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-preflash-smoke-test-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-preflash-smoke-test-lessons.md",
+      "title": "ADR-2026-05-06-preflash-smoke-test-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-preflash-strict-event-contract-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-preflash-strict-event-contract-lessons.md",
+      "title": "ADR-2026-05-06-preflash-strict-event-contract-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-runtime-candidate-replan-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-runtime-candidate-replan-lessons.md",
+      "title": "ADR-2026-05-06-runtime-candidate-replan-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-runtime-route-reconcile.md",
+      "path": "01_System/ADR/ADR-2026-05-06-runtime-route-reconcile.md",
+      "title": "ADR-2026-05-06-runtime-route-reconcile",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-storage-tenant-read-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-storage-tenant-read-lessons.md",
+      "title": "ADR-2026-05-06-storage-tenant-read-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-ultra-review-delete-diff-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-ultra-review-delete-diff-lessons.md",
+      "title": "ADR-2026-05-06-ultra-review-delete-diff-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-v26-blackboard-handshake-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-v26-blackboard-handshake-lessons.md",
+      "title": "ADR-2026-05-06-v26-blackboard-handshake-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-06-wiki-closure-gate-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-06-wiki-closure-gate-lessons.md",
+      "title": "ADR-2026-05-06-wiki-closure-gate-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-always-on-auto-lane-findings.md",
+      "path": "01_System/ADR/ADR-2026-05-07-always-on-auto-lane-findings.md",
+      "title": "ADR-2026-05-07-always-on-auto-lane-findings",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-always-on-force-flow-contract-lesson.md",
+      "path": "01_System/ADR/ADR-2026-05-07-always-on-force-flow-contract-lesson.md",
+      "title": "ADR-2026-05-07-always-on-force-flow-contract-lesson",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-benchmark-contract-route-pollution-lesson.md",
+      "path": "01_System/ADR/ADR-2026-05-07-benchmark-contract-route-pollution-lesson.md",
+      "title": "ADR-2026-05-07-benchmark-contract-route-pollution-lesson",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-gemini-loop0-same-model-contract-lesson.md",
+      "path": "01_System/ADR/ADR-2026-05-07-gemini-loop0-same-model-contract-lesson.md",
+      "title": "ADR-2026-05-07-gemini-loop0-same-model-contract-lesson",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-hidden-route-cost-truth-lesson.md",
+      "path": "01_System/ADR/ADR-2026-05-07-hidden-route-cost-truth-lesson.md",
+      "title": "ADR-2026-05-07-hidden-route-cost-truth-lesson",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-learning-export-wrapper-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-07-learning-export-wrapper-lessons.md",
+      "title": "ADR-2026-05-07-learning-export-wrapper-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-loop2-planner-seam-mismatch-lesson.md",
+      "path": "01_System/ADR/ADR-2026-05-07-loop2-planner-seam-mismatch-lesson.md",
+      "title": "ADR-2026-05-07-loop2-planner-seam-mismatch-lesson",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-route-ab-infra-invalid-lesson.md",
+      "path": "01_System/ADR/ADR-2026-05-07-route-ab-infra-invalid-lesson.md",
+      "title": "ADR-2026-05-07-route-ab-infra-invalid-lesson",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-route-signal-cost-tuning-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-07-route-signal-cost-tuning-lessons.md",
+      "title": "ADR-2026-05-07-route-signal-cost-tuning-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-teacher-student-gap-matrix.md",
+      "path": "01_System/ADR/ADR-2026-05-07-teacher-student-gap-matrix.md",
+      "title": "ADR-2026-05-07-teacher-student-gap-matrix",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-07-teacher-student-sweep-plan.md",
+      "path": "01_System/ADR/ADR-2026-05-07-teacher-student-sweep-plan.md",
+      "title": "ADR-2026-05-07-teacher-student-sweep-plan",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-08-lite-route-preflight-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-08-lite-route-preflight-lessons.md",
+      "title": "ADR-2026-05-08-lite-route-preflight-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-08-public-credibility-benchmark-lanes.md",
+      "path": "01_System/ADR/ADR-2026-05-08-public-credibility-benchmark-lanes.md",
+      "title": "ADR-2026-05-08-public-credibility-benchmark-lanes",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-08-route-cost-local-preflight-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-08-route-cost-local-preflight-lessons.md",
+      "title": "ADR-2026-05-08-route-cost-local-preflight-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-08-route-cost-measurement-lessons.md",
+      "path": "01_System/ADR/ADR-2026-05-08-route-cost-measurement-lessons.md",
+      "title": "ADR-2026-05-08-route-cost-measurement-lessons",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-08-route-oracle-receipt-contract.md",
+      "path": "01_System/ADR/ADR-2026-05-08-route-oracle-receipt-contract.md",
+      "title": "ADR-2026-05-08-route-oracle-receipt-contract",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-05-14-nexus-wearing-gate-stabilization.md",
+      "path": "01_System/ADR/ADR-2026-05-14-nexus-wearing-gate-stabilization.md",
+      "title": "ADR-2026-05-14-nexus-wearing-gate-stabilization",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-06-19-search-to-ast-rewriter.md",
+      "path": "01_System/ADR/ADR-2026-06-19-search-to-ast-rewriter.md",
+      "title": "ADR-2026-06-19-search-to-ast-rewriter",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "path": "01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "title": "Phase 8 Hybrid Repair Armor — CapabilityPlanner Downstream Enforcement 邊界",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "path": "01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "title": "6 條重複造輪子防呆原則 — Phase 8 規劃永久規範",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "path": "01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "title": "PAW Compiler Seam — 在 fuzzy_spec_registry 補 runtime，不新建 paw_compiler_seam",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/ADR/ADR-2026-07-11-n30r-v21-latency-profiling-spec-gen-opt.md",
+      "path": "01_System/ADR/ADR-2026-07-11-n30r-v21-latency-profiling-spec-gen-opt.md",
+      "title": "ADR-2026-07-11-n30r-v21-latency-profiling-spec-gen-opt",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Code_Ownership_Matrix.md",
+      "path": "01_System/Code_Ownership_Matrix.md",
+      "title": "System - Code Ownership Matrix",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Errors_Enum.md",
+      "path": "01_System/Errors_Enum.md",
+      "title": "System - Errors Enum",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Evolution/LEARNING_EVOLUTION_MANIFESTO.md",
+      "path": "01_System/Evolution/LEARNING_EVOLUTION_MANIFESTO.md",
+      "title": "LEARNING_EVOLUTION_MANIFESTO",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Exit_Code_Registry.md",
+      "path": "01_System/Exit_Code_Registry.md",
+      "title": "System - Exit Code Registry",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Governance_L5.7_Two_Plane_Four_Contract_Architecture.md",
+      "path": "01_System/Governance_L5.7_Two_Plane_Four_Contract_Architecture.md",
+      "title": "Governance_L5.7_Two_Plane_Four_Contract_Architecture",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Identity_Vault.md",
+      "path": "01_System/Identity_Vault.md",
+      "title": "Identity Vault",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/MUSE_PROTO.md",
+      "path": "01_System/MUSE_PROTO.md",
+      "title": "MUSE_PROTO",
+      "classification": "mixed_needs_review",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/NEXUS_LOCAL_MODEL_ARMOR_WIRING_PLAN_v1_1.md",
+      "path": "01_System/NEXUS_LOCAL_MODEL_ARMOR_WIRING_PLAN_v1_1.md",
+      "title": "NEXUS_LOCAL_MODEL_ARMOR_WIRING_PLAN_v1_1",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Nexus Glossary.md",
+      "path": "01_System/Nexus Glossary.md",
+      "title": "Nexus Glossary",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Nexus v24.0 Agent Handover & Truth Protocol.md",
+      "path": "01_System/Nexus v24.0 Agent Handover & Truth Protocol.md",
+      "title": "Nexus v24 Handover and Truth Protocol",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Supreme_Master_Loop_Spec.md",
+      "path": "01_System/Supreme_Master_Loop_Spec.md",
+      "title": "Supreme Master Loop Specification",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/Swarm_MultiNode.md",
+      "path": "01_System/Swarm_MultiNode.md",
+      "title": "System - Swarm Multi-Node",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/System - Component Maturity Map.md",
+      "path": "01_System/System - Component Maturity Map.md",
+      "title": "System Component Maturity Map",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/System - Next Questions for Human.md",
+      "path": "01_System/System - Next Questions for Human.md",
+      "title": "System - Next Questions for Human",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/System - Physical Topology.md",
+      "path": "01_System/System - Physical Topology.md",
+      "title": "System - Physical [Topology](../00_Home/Vault Topology.md)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/System - Unknowns and Conflicts.md",
+      "path": "01_System/System - Unknowns and Conflicts.md",
+      "title": "System - Unknowns and Conflicts",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/System Relationship and Dependency Graph.md",
+      "path": "01_System/System Relationship and Dependency Graph.md",
+      "title": "System - Relationship & Dependency Graph",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:01_System/nexus-policy-extraction-pack.md",
+      "path": "01_System/nexus-policy-extraction-pack.md",
+      "title": "nexus-policy-extraction-pack",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Fleet Command System.md",
+      "path": "02_Modules/Fleet Command System.md",
+      "title": "Fleet Command System",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Advanced Core Intelligence.md",
+      "path": "02_Modules/Module - Advanced Core Intelligence.md",
+      "title": "Module - Advanced Core Intelligence",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - CLI Commands Service.md",
+      "path": "02_Modules/Module - CLI Commands Service.md",
+      "title": "Module - [CLI Commands](../05_Protocols/Protocol - CLI Surface.md) Service",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Capability Matrix.md",
+      "path": "02_Modules/Module - Capability Matrix.md",
+      "title": "Module - Capability Matrix",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "path": "02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "title": "[Module - Core Orchestrator](Module - Core Orchestrator.md) Deep Dive",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Core Orchestrator.md",
+      "path": "02_Modules/Module - Core Orchestrator.md",
+      "title": "Module - Core Orchestrator",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Domain Services and Adapters.md",
+      "path": "02_Modules/Module - Domain Services and Adapters.md",
+      "title": "Module - Domain Services & Engine Registry",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "path": "02_Modules/Module - Dual Phase Diagnosis.md",
+      "title": "Module - Dual Phase Diagnosis",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Engine Service Registry.md",
+      "path": "02_Modules/Module - Engine Service Registry.md",
+      "title": "Module - Engine Service Registry",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Guard and Gate Control.md",
+      "path": "02_Modules/Module - Guard and Gate Control.md",
+      "title": "Module - Guard and Gate Control",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "path": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "title": "Module - Implementation Responsibility Matrix",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "path": "02_Modules/Module - Intelligence and Context Core.md",
+      "title": "Module - Intelligence and Context Core",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "path": "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "title": "Module - Intelligence and Logic - Remaining Core.md)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "path": "02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "title": "Module - Memory Pipeline Deep Dive",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Memory Repository.md",
+      "path": "02_Modules/Module - Memory Repository.md",
+      "title": "Module - Memory Repository",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Metadata Collectors.md",
+      "path": "02_Modules/Module - Metadata Collectors.md",
+      "title": "Module - Metadata Collectors",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Nexus Desk Interface.md",
+      "path": "02_Modules/Module - Nexus Desk Interface.md",
+      "title": "Module - Nexus Desk Interface",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Platform Core Registry.md",
+      "path": "02_Modules/Module - Platform Core Registry.md",
+      "title": "Module - Platform Core Registry",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "path": "02_Modules/Module - Policy and Learning Governance.md",
+      "title": "Module - Policy and Learning Governance",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Runtime Services.md",
+      "path": "02_Modules/Module - Runtime Services.md",
+      "title": "Module - Runtime Services",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "path": "02_Modules/Module - Security and Tool Guard Registry.md",
+      "title": "Module - Security and Tool Guard Registry",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "path": "02_Modules/Module - Skill Memory Closed Loop.md",
+      "title": "Module - Skill Memory Closed Loop",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - State Contracts.md",
+      "path": "02_Modules/Module - State Contracts.md",
+      "title": "Module - State Contracts",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "path": "02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "title": "Module - State Lifecycle and Snapshotting",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "path": "02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "title": "Module - [Task](../Reference/task.md) Scheduling and Swarm Adapters",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/NEXUS_LOCAL_MODEL_ARMOR_ISSUES_v1.md",
+      "path": "02_Modules/NEXUS_LOCAL_MODEL_ARMOR_ISSUES_v1.md",
+      "title": "NEXUS_LOCAL_MODEL_ARMOR_ISSUES_v1",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Recovery_Rule_Registry_v1.md",
+      "path": "02_Modules/Recovery_Rule_Registry_v1.md",
+      "title": "Recovery_Rule_Registry_v1",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Research_Flow_Leaf_Architecture.md",
+      "path": "02_Modules/Research_Flow_Leaf_Architecture.md",
+      "title": "Research Flow Leaf Modules Architecture",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/Router_Decision_Flow.md",
+      "path": "02_Modules/Router_Decision_Flow.md",
+      "title": "Module - Router Decision Flow",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:02_Modules/nexus_能力盤點_2026-02-20後新增.md",
+      "path": "02_Modules/nexus_能力盤點_2026-02-20後新增.md",
+      "title": "nexus_能力盤點_2026-02-20後新增",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:03_Flows/Capability_Routing_And_AB_Evolution.md",
+      "path": "03_Flows/Capability_Routing_And_AB_Evolution.md",
+      "title": "Capability_Routing_And_AB_Evolution",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:03_Flows/Flow - AI-DD QA Automation.md",
+      "path": "03_Flows/Flow - AI-DD QA Automation.md",
+      "title": "Flow - AI-DD QA Automation",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:03_Flows/Flow - PXDRAC Runtime.md",
+      "path": "03_Flows/Flow - PXDRAC Runtime.md",
+      "title": "Flow - PXDRAC Runtime (Hybrid v24.0)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:03_Flows/Flow - Recursive Auto-Repair.md",
+      "path": "03_Flows/Flow - Recursive Auto-Repair.md",
+      "title": "Flow - Recursive Auto-Repair",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:03_Flows/HEEP_Blocker_Queue_Swarm_Feedback_Loop.md",
+      "path": "03_Flows/HEEP_Blocker_Queue_Swarm_Feedback_Loop.md",
+      "title": "HEEP Blocker Queue & Swarm Feedback Loop",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:03_Flows/Local_Heal_Architecture_Flow.md",
+      "path": "03_Flows/Local_Heal_Architecture_Flow.md",
+      "title": "Local_Heal_Architecture_Flow",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/ARCHITECTURAL_GAP_ANALYSIS_V24.md",
+      "path": "04_Research/ARCHITECTURAL_GAP_ANALYSIS_V24.md",
+      "title": "ARCHITECTURAL_GAP_ANALYSIS_V24",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/Data_Engineering/NEXUS_FULL_SPECTRUM_DATA_ENGINEERING_ATLAS.md",
+      "path": "04_Research/Data_Engineering/NEXUS_FULL_SPECTRUM_DATA_ENGINEERING_ATLAS.md",
+      "title": "NEXUS_FULL_SPECTRUM_DATA_ENGINEERING_ATLAS",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/MSA_Routing_Architecture.md",
+      "path": "04_Research/MSA_Routing_Architecture.md",
+      "title": "MSA Routing Architecture",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/Meta-Evolution - The 18 Rings Convergence.md",
+      "path": "04_Research/Meta-Evolution - The 18 Rings Convergence.md",
+      "title": "Meta-Evolution - The 18 Rings Convergence",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/Meta-Evolution - The 9 Rings Convergence.md",
+      "path": "04_Research/Meta-Evolution - The 9 Rings Convergence.md",
+      "title": "Meta-Evolution - The 9 Rings Convergence",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/Nexus Combat History Ledger.md",
+      "path": "04_Research/Nexus Combat History Ledger.md",
+      "title": "Nexus Combat History Ledger",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/RESEARCH_STATUS_REPORT.md",
+      "path": "04_Research/RESEARCH_STATUS_REPORT.md",
+      "title": "Research - Status Report (Hardened)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/Research - DeepScientist Integration.md",
+      "path": "04_Research/Research - DeepScientist Integration.md",
+      "title": "Research - DeepScientist Integration",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "path": "04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "title": "SOTA Milestone - Django Death Issue Fix",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_State/NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07.md",
+      "path": "04_State/NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07.md",
+      "title": "NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07",
+      "classification": "current",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06.md",
+      "path": "04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06.md",
+      "title": "NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06",
+      "classification": "current",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_State/State - Lifecycle.md",
+      "path": "04_State/State - Lifecycle.md",
+      "title": "State - Lifecycle",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:04_State/State - Schemas.md",
+      "path": "04_State/State - Schemas.md",
+      "title": "State - Schemas",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Commercial/Go-to-Market.md",
+      "path": "05_Commercial/Go-to-Market.md",
+      "title": "Go-to-Market Strategy",
+      "classification": "draft",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/CLI_Full_Params.md",
+      "path": "05_Protocols/CLI_Full_Params.md",
+      "title": "CLI Full Parameter & Help Map",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Algebraic Reasoning.md",
+      "path": "05_Protocols/Protocol - Algebraic Reasoning.md",
+      "title": "Protocol - Algebraic Reasoning",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "path": "05_Protocols/Protocol - CLI Drift Matrix.md",
+      "title": "Protocol - CLI Drift Matrix",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - CLI Surface.md",
+      "path": "05_Protocols/Protocol - CLI Surface.md",
+      "title": "Protocol - CLI Surface",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Capability Routing.md",
+      "path": "05_Protocols/Protocol - Capability Routing.md",
+      "title": "Protocol - Capability Routing",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Context Hygiene.md",
+      "path": "05_Protocols/Protocol - Context Hygiene.md",
+      "title": "Protocol - Context Hygiene",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Dual-Gate Response.md",
+      "path": "05_Protocols/Protocol - Dual-Gate Response.md",
+      "title": "Protocol - Dual-Gate Response",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Engineering Discipline.md",
+      "path": "05_Protocols/Protocol - Engineering Discipline.md",
+      "title": "Protocol - Engineering Discipline",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Evidence Chain.md",
+      "path": "05_Protocols/Protocol - Evidence Chain.md",
+      "title": "Protocol - Evidence Chain",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Evidence Map.md",
+      "path": "05_Protocols/Protocol - Evidence Map.md",
+      "title": "Protocol - Evidence Map",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "path": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "title": "Protocol - Knowledge Lineage",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
+      "path": "05_Protocols/Protocol - RLM Recursive Learning.md",
+      "title": "Protocol - RLM Recursive Learning",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ecosystem/SDK Quickstart.md",
+      "path": "06_Ecosystem/SDK Quickstart.md",
+      "title": "SDK Quickstart",
+      "classification": "draft",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md",
+      "path": "06_Ops/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md",
+      "title": "2026-03-19_Phantom_Success_Incident_RCA_and_Prevention",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Evidence_Bundle_Format.md",
+      "path": "06_Ops/Evidence_Bundle_Format.md",
+      "title": "Ops - Evidence Bundle Format",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/NEXUS_CODEBASE_MEMORY_GUIDE.md",
+      "path": "06_Ops/NEXUS_CODEBASE_MEMORY_GUIDE.md",
+      "title": "NEXUS_CODEBASE_MEMORY_GUIDE",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/NEXUS_ENFORCED_LAUNCH.md",
+      "path": "06_Ops/NEXUS_ENFORCED_LAUNCH.md",
+      "title": "NEXUS_ENFORCED_LAUNCH",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "path": "06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "title": "NEXUS_PILOT_CLI_QUICKSTART_CN",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+      "path": "06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+      "title": "Nexus v26.0 Governance Hardening Crystal (AOS 135.2)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Acceptance and Release.md",
+      "path": "06_Ops/Ops - Acceptance and Release.md",
+      "title": "Ops - Acceptance and Release",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Agent Capability Boundaries.md",
+      "path": "06_Ops/Ops - Agent Capability Boundaries.md",
+      "title": "Ops - Agent Capability Boundaries",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Architecture Decision Records.md",
+      "path": "06_Ops/Ops - Architecture Decision Records.md",
+      "title": "Ops - Architecture Decision Records",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "path": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "title": "Ops - Artifact Retention and Provenance",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "path": "06_Ops/Ops - CI Failure Playbook.md",
+      "title": "Ops - CI Failure Playbook",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "path": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "title": "Ops - CI/CD Promotion Gate",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Capability Ledger.md",
+      "path": "06_Ops/Ops - Capability Ledger.md",
+      "title": "Ops - Capability Ledger",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "path": "06_Ops/Ops - Closeout Hard Gate.md",
+      "title": "Ops - Closeout Hard Gate",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Governance Changelog.md",
+      "path": "06_Ops/Ops - Governance Changelog.md",
+      "title": "Ops - Governance [[CHANGELOG|Changelog]]",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Governance SLO Dashboard.md",
+      "path": "06_Ops/Ops - Governance SLO Dashboard.md",
+      "title": "Ops - Governance SLO Dashboard",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "path": "06_Ops/Ops - Learning Closure Matrix.md",
+      "title": "Ops - Learning Closure Matrix",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Optimization Proposal Protocol.md",
+      "path": "06_Ops/Ops - Optimization Proposal Protocol.md",
+      "title": "Ops - Optimization Proposal Protocol",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Ownership and Review SLA.md",
+      "path": "06_Ops/Ops - Ownership and Review SLA.md",
+      "title": "Ops - Ownership and Review SLA",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Performance Benchmarks.md",
+      "path": "06_Ops/Ops - Performance Benchmarks.md",
+      "title": "Ops - Performance Benchmarks",
+      "classification": "draft",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "path": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "title": "Ops - Provenance [[exceptions|Exceptions]] and Waivers",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Query Writeback Policy.md",
+      "path": "06_Ops/Ops - Query Writeback Policy.md",
+      "title": "Ops - Query Writeback Policy",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Reference Boundary and Archive Policy.md",
+      "path": "06_Ops/Ops - Reference Boundary and Archive Policy.md",
+      "title": "Ops - Reference Boundary and Archive Policy",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Truth Claims Command Policy.md",
+      "path": "06_Ops/Ops - Truth Claims Command Policy.md",
+      "title": "Ops - [Truth Claims](Ops - Truth Claims Register.md) Command Policy",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Truth Claims Register.md",
+      "path": "06_Ops/Ops - Truth Claims Register.md",
+      "title": "Ops - Truth Claims Register",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Weekly Governance Report.md",
+      "path": "06_Ops/Ops - Weekly Governance Report.md",
+      "title": "Ops - Weekly Governance Report",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Wiki Drift Audit.md",
+      "path": "06_Ops/Ops - Wiki Drift Audit.md",
+      "title": "Ops - Wiki Drift Audit",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Wiki Link Integrity.md",
+      "path": "06_Ops/Ops - Wiki Link Integrity.md",
+      "title": "Ops - Wiki Link Integrity",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "path": "06_Ops/Ops - Wiki Page Type Contracts.md",
+      "title": "Ops - Wiki Page Type Contracts",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Wiki Regression Evals.md",
+      "path": "06_Ops/Ops - Wiki Regression Evals.md",
+      "title": "Ops - Wiki Regression Evals",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+      "path": "06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+      "title": "Ops - Wisdom Layer v22 Architecture",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Ops - Wisdom Layer.md",
+      "path": "06_Ops/Ops - Wisdom Layer.md",
+      "title": "Ops - Wisdom Layer",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Retry_Escalation_and_Handoff_Policy.md",
+      "path": "06_Ops/Retry_Escalation_and_Handoff_Policy.md",
+      "title": "Ops - Retry Escalation and Handoff Policy",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
+      "path": "06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
+      "title": "Audit - mTLS and Service Mesh Gap",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:06_Ops/System_Complexity_Hotspots.md",
+      "path": "06_Ops/System_Complexity_Hotspots.md",
+      "title": "System_Complexity_Hotspots",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:07_Compliance/Compliance_Dashboard.md",
+      "path": "07_Compliance/Compliance_Dashboard.md",
+      "title": "Compliance Dashboard",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:07_Compliance/Current_Compliance_Status.md",
+      "path": "07_Compliance/Current_Compliance_Status.md",
+      "title": "Current Compliance Status",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:07_Compliance/Governance - Capability Gate and Tool Isolation.md",
+      "path": "07_Compliance/Governance - Capability Gate and Tool Isolation.md",
+      "title": "Governance - Capability Gate & Tool Isolation",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "path": "07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "title": "Compliance - Hallucination Guard Scoring Spec",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:07_Compliance/Incident_Trace_Log.md",
+      "path": "07_Compliance/Incident_Trace_Log.md",
+      "title": "Incident Trace Log",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:07_Compliance/Zero-Trust_V2_Mac_Sandbox_Runtime_Protocol.md",
+      "path": "07_Compliance/Zero-Trust_V2_Mac_Sandbox_Runtime_Protocol.md",
+      "title": "Zero-Trust V2 macOS Sandbox Runtime Protocol",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+      "path": "08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+      "title": "Code to Wiki Alignment Matrix",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "path": "08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "title": "Diff - v17.1 vs v22 vs v23",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+      "path": "09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+      "title": "CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/NEXUS_EVOLUTION_HISTORY_v9_to_v28.md",
+      "path": "09_Roadmap/NEXUS_EVOLUTION_HISTORY_v9_to_v28.md",
+      "title": "NEXUS_EVOLUTION_HISTORY_v9_to_v28",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/NEXUS_WORKOS_CODEINTEL_ROADMAP_2026-04-28.md",
+      "path": "09_Roadmap/NEXUS_WORKOS_CODEINTEL_ROADMAP_2026-04-28.md",
+      "title": "NEXUS_WORKOS_CODEINTEL_ROADMAP_2026-04-28",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "path": "09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "title": "Phase 6 - Nexus Hardening",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/Phase 8 - Hybrid Repair Armor.md",
+      "path": "09_Roadmap/Phase 8 - Hybrid Repair Armor.md",
+      "title": "Phase 8 - Hybrid Repair Armor",
+      "classification": "draft",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/nexus-optimization-roadmap.md",
+      "path": "09_Roadmap/nexus-optimization-roadmap.md",
+      "title": "nexus-optimization-roadmap",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/nexus_hybrid_dynamic_route_plan_with_sources_2026-06-22.md",
+      "path": "09_Roadmap/nexus_hybrid_dynamic_route_plan_with_sources_2026-06-22.md",
+      "title": "nexus_hybrid_dynamic_route_plan_with_sources_2026-06-22",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:09_Roadmap/nexus_local_heterogeneous_reattachment_plan_2026-06-22.md",
+      "path": "09_Roadmap/nexus_local_heterogeneous_reattachment_plan_2026-06-22.md",
+      "title": "nexus_local_heterogeneous_reattachment_plan_2026-06-22",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/2026-06-05_Codebase_Macro_Health.md",
+      "path": "10_Analysis_Scans/2026-06-05_Codebase_Macro_Health.md",
+      "title": "2026-06-05_Codebase_Macro_Health",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/2026-06-05_Graphify_Core_Communities.md",
+      "path": "10_Analysis_Scans/2026-06-05_Graphify_Core_Communities.md",
+      "title": "2026-06-05_Graphify_Core_Communities",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/NEXUS_MAY_BENCHMARK_ROUTING_ANALYSIS.md",
+      "path": "10_Analysis_Scans/NEXUS_MAY_BENCHMARK_ROUTING_ANALYSIS.md",
+      "title": "NEXUS_MAY_BENCHMARK_ROUTING_ANALYSIS",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/NEXUS_ROUTING_STATUS_20260629.md",
+      "path": "10_Analysis_Scans/NEXUS_ROUTING_STATUS_20260629.md",
+      "title": "NEXUS_ROUTING_STATUS_20260629",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/codegraph_audit/codegraph_files.md",
+      "path": "10_Analysis_Scans/codegraph_audit/codegraph_files.md",
+      "title": "codegraph_files",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/codegraph_audit/codegraph_status.md",
+      "path": "10_Analysis_Scans/codegraph_audit/codegraph_status.md",
+      "title": "codegraph_status",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/codex_complexity/complexity_optimizer_report.md",
+      "path": "10_Analysis_Scans/codex_complexity/complexity_optimizer_report.md",
+      "title": "complexity_optimizer_report",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/graphify/GRAPH_REPORT.md",
+      "path": "10_Analysis_Scans/graphify/GRAPH_REPORT.md",
+      "title": "GRAPH_REPORT",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/nexus-competitive-reality-check.md",
+      "path": "10_Analysis_Scans/nexus-competitive-reality-check.md",
+      "title": "nexus-competitive-reality-check",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/nexus-route-audit-2026-06-22.md",
+      "path": "10_Analysis_Scans/nexus-route-audit-2026-06-22.md",
+      "title": "nexus-route-audit-2026-06-22",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/nexus_ag1_ag5_local_portfolio_final_report.md",
+      "path": "10_Analysis_Scans/nexus_ag1_ag5_local_portfolio_final_report.md",
+      "title": "nexus_ag1_ag5_local_portfolio_final_report",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/nexus_am3_post_al_capability_reaudit_20260621.md",
+      "path": "10_Analysis_Scans/nexus_am3_post_al_capability_reaudit_20260621.md",
+      "title": "nexus_am3_post_al_capability_reaudit_20260621",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/nexus_local_model_improvement_analysis_2026-06-30.md",
+      "path": "10_Analysis_Scans/nexus_local_model_improvement_analysis_2026-06-30.md",
+      "title": "nexus_local_model_improvement_analysis_2026-06-30",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/nexus_route_alignment_handoff_2026-06-22.md",
+      "path": "10_Analysis_Scans/nexus_route_alignment_handoff_2026-06-22.md",
+      "title": "nexus_route_alignment_handoff_2026-06-22",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "path": "10_Analysis_Scans/refactoring_agent_survival_guide.md",
+      "title": "refactoring_agent_survival_guide",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:10_Analysis_Scans/repomix/repomix_complete.md",
+      "path": "10_Analysis_Scans/repomix/repomix_complete.md",
+      "title": "repomix_complete",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:90_Sources/Source - Coverage Heatmap.md",
+      "path": "90_Sources/Source - Coverage Heatmap.md",
+      "title": "Source - Coverage Heatmap",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "path": "90_Sources/Source - Nexus Anti Registry.md",
+      "title": "Source - Nexus Anti Registry",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:90_Sources/Source - Operational Scripts Index.md",
+      "path": "90_Sources/Source - Operational Scripts Index.md",
+      "title": "Source - Operational Scripts [Index](../90_Sources/Source Index.md)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:90_Sources/Source Index.md",
+      "path": "90_Sources/Source Index.md",
+      "title": "Source [Index](../.nexus/graph/index.md)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/AGENT_SCHEMA.md",
+      "path": "99_Schema/AGENT_SCHEMA.md",
+      "title": "AGENT_SCHEMA",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/DESIGN.md",
+      "path": "99_Schema/DESIGN.md",
+      "title": "DESIGN",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/LATEST_LINT_REPORT.md",
+      "path": "99_Schema/LATEST_LINT_REPORT.md",
+      "title": "LATEST_LINT_REPORT",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/LINT_CHECKLIST.md",
+      "path": "99_Schema/LINT_CHECKLIST.md",
+      "title": "LINT_CHECKLIST",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/Page_Version_Matrix.md",
+      "path": "99_Schema/Page_Version_Matrix.md",
+      "title": "📊 Page_Version_Matrix (v32.8 Sealed)",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/UPDATE_CHECKLIST.md",
+      "path": "99_Schema/UPDATE_CHECKLIST.md",
+      "title": "UPDATE_CHECKLIST",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:99_Schema/WIKI_LINK_HEALTH_REPORT.md",
+      "path": "99_Schema/WIKI_LINK_HEALTH_REPORT.md",
+      "title": "Wiki Link Health Report",
+      "classification": "current",
+      "is_canonical": false,
+      "authority": "operational"
+    },
+    {
+      "id": "page:99_Schema/Wiki_Changelog_Auto.md",
+      "path": "99_Schema/Wiki_Changelog_Auto.md",
+      "title": "Wiki_Changelog_Auto",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:LLM_Wiki/EXCLUDE_RULES.md",
+      "path": "LLM_Wiki/EXCLUDE_RULES.md",
+      "title": "LLM_Wiki EXCLUDE_RULES",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:LLM_Wiki/INGEST_SCOPE_V1.md",
+      "path": "LLM_Wiki/INGEST_SCOPE_V1.md",
+      "title": "LLM_Wiki INGEST_SCOPE_V1",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/QUICKSTART.md",
+      "path": "Reference/QUICKSTART.md",
+      "title": "QUICKSTART",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/README.md",
+      "path": "Reference/README.md",
+      "title": "README",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/Role_Guides/Expert_Guide.md",
+      "path": "Reference/Role_Guides/Expert_Guide.md",
+      "title": "Role Guide - Expert Developer",
+      "classification": "unclassified",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "path": "Reference/docs/00_PROJECT_INDEX.md",
+      "title": "00_PROJECT_INDEX",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/en/README_Product.md",
+      "path": "Reference/en/README_Product.md",
+      "title": "Nexus Product Overview",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/en/SDK_Quickstart.md",
+      "path": "Reference/en/SDK_Quickstart.md",
+      "title": "SDK Quickstart (English)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/nexus_truth_dashboard.md",
+      "path": "Reference/nexus_truth_dashboard.md",
+      "title": "nexus_truth_dashboard",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/program.md",
+      "path": "Reference/program.md",
+      "title": "program",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/task.md",
+      "path": "Reference/task.md",
+      "title": "task",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:Reference/walkthrough.md",
+      "path": "Reference/walkthrough.md",
+      "title": "walkthrough",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:nexus/graph/Community_1.md",
+      "path": "nexus/graph/Community_1.md",
+      "title": "Community Cluster 1",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
+      "id": "page:nexus/graph/index.md",
+      "path": "nexus/graph/index.md",
+      "title": "Knowledge Graph Index",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    }
+  ],
+  "edges": [
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/PARTNER_ONBOARDING.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:01_System/CLAIM_TAXONOMY.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/TASK_ROUTER.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/SYSTEM_MAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/GLOSSARY.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:00_Home/Wiki Index and Coverage Map.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:99_Schema/WIKI_GOVERNANCE_CHARTER.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:README.md",
+      "target": "page:90_Sources/Source Index.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/README_Investor.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/README_Agent.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/README_Contributor.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/PARTNER_ONBOARDING.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/TASK_ROUTER.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/System Overview.md",
+      "target": "page:00_Home/GLOSSARY.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "target": "page:00_Home/PARTNER_ONBOARDING.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/PARTNER_ONBOARDING.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/PARTNER_ONBOARDING.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/PARTNER_ONBOARDING.md",
+      "target": "page:00_Home/Wiki Index and Coverage Map.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/PARTNER_ONBOARDING.md",
+      "target": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Wiki Index and Coverage Map.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/TASK_ROUTER.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/TASK_ROUTER.md",
+      "target": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/TASK_ROUTER.md",
+      "target": "page:00_Home/SYSTEM_MAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/SYSTEM_MAP.md",
+      "target": "page:00_Home/TASK_ROUTER.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/SYSTEM_MAP.md",
+      "target": "page:00_Home/GLOSSARY.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/SYSTEM_MAP.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/SYSTEM_MAP.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Boot Sequence.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Agent Boot Sequence.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Boot Sequence.md",
+      "target": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Boot Sequence.md",
+      "target": "page:00_Home/Agent Onboarding - Implementation Map.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Boot Sequence.md",
+      "target": "page:00_Home/Vault Topology.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Mastery - 90 Percent Path.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Agent Mastery - 90 Percent Path.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Mastery - 90 Percent Path.md",
+      "target": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Mastery - 90 Percent Path.md",
+      "target": "page:00_Home/Agent Onboarding - Implementation Map.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "target": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "target": "page:00_Home/Vault Topology.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Implementation Map.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Implementation Map.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Agent Onboarding - Implementation Map.md",
+      "target": "page:00_Home/Agent Onboarding - Command Pack.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/CLI Surface Quickstart.md",
+      "target": "page:Reference/QUICKSTART.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/CLI Surface Quickstart.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/CLI Surface Quickstart.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/CLI Surface Quickstart.md",
+      "target": "page:00_Home/Vault Topology.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/README_Agent.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/README_Agent.md",
+      "target": "page:00_Home/AGENT_BOOTSTRAP.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/README_Agent.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/README_Contributor.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/README_Contributor.md",
+      "target": "page:00_Home/PARTNER_ONBOARDING.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/README_Investor.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/README_Product.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Root_README_Summary.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Home/Root_README_Summary.md",
+      "target": "page:00_Home/CURRENT_STATE.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Home/Root_README_Summary.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:00_Product/Investor Deck.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:00_Product/User Stories.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_Specs/Spec - Nexus L1-L7 Realization.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "target": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "target": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "target": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/ADR/ADR-2026-07-08-no-duplicate-wheel-guard.md",
+      "target": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "target": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/ADR/ADR-2026-07-08-paw-compiler-seam-fuzzy-bug.md",
+      "target": "page:01_System/ADR/ADR-2026-07-08-capability-planner-downstream-enforcement.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/Code_Ownership_Matrix.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Errors_Enum.md",
+      "target": "page:01_System/Exit_Code_Registry.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Errors_Enum.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Exit_Code_Registry.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Identity_Vault.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/MUSE_PROTO.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/MUSE_PROTO.md",
+      "target": "page:01_System/System - Unknowns and Conflicts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/Nexus Glossary.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Nexus Glossary.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Nexus v24.0 Agent Handover & Truth Protocol.md",
+      "target": "page:01_System/System Relationship and Dependency Graph.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Nexus v24.0 Agent Handover & Truth Protocol.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Supreme_Master_Loop_Spec.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Swarm_MultiNode.md",
+      "target": "page:01_System/System Relationship and Dependency Graph.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/Swarm_MultiNode.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/System - Component Maturity Map.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/System - Next Questions for Human.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/System - Next Questions for Human.md",
+      "target": "page:01_System/System - Unknowns and Conflicts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/System - Physical Topology.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/System - Physical Topology.md",
+      "target": "page:01_System/System - Unknowns and Conflicts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/System - Unknowns and Conflicts.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/System - Unknowns and Conflicts.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:01_System/System - Unknowns and Conflicts.md",
+      "target": "page:01_System/System - Next Questions for Human.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/System Relationship and Dependency Graph.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Fleet Command System.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Advanced Core Intelligence.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Advanced Core Intelligence.md",
+      "target": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Advanced Core Intelligence.md",
+      "target": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Advanced Core Intelligence.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - CLI Commands Service.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - CLI Commands Service.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - CLI Commands Service.md",
+      "target": "page:02_Modules/Module - State Contracts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Capability Matrix.md",
+      "target": "page:05_Protocols/Protocol - Capability Routing.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Capability Matrix.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Capability Matrix.md",
+      "target": "page:05_Protocols/Protocol - Evidence Chain.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "target": "page:02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Core Orchestrator.md",
+      "target": "page:02_Modules/Module - Engine Service Registry.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Core Orchestrator.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Domain Services and Adapters.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Dual Phase Diagnosis.md",
+      "target": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Engine Service Registry.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Guard and Gate Control.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Guard and Gate Control.md",
+      "target": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Guard and Gate Control.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - Guard and Gate Control.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - State Contracts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - Memory Repository.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "target": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "target": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "target": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "target": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Intelligence and Logic - Remaining Core.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "target": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "target": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "target": "page:02_Modules/Module - Memory Repository.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Memory Repository.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Metadata Collectors.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Metadata Collectors.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Nexus Desk Interface.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Nexus Desk Interface.md",
+      "target": "page:02_Modules/Module - Runtime Services.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Nexus Desk Interface.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Platform Core Registry.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Platform Core Registry.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Runtime Services.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Runtime Services.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Runtime Services.md",
+      "target": "page:02_Modules/Module - Memory Repository.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "target": "page:02_Modules/Module - Guard and Gate Control.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Security and Tool Guard Registry.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:02_Modules/Module - Intelligence and Context Core.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:02_Modules/Module - Policy and Learning Governance.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "target": "page:02_Modules/Module - Platform Core Registry.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "target": "page:02_Modules/Module - State Contracts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "target": "page:02_Modules/Module - Implementation Responsibility Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "target": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Router_Decision_Flow.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:03_Flows/Flow - AI-DD QA Automation.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:03_Flows/Flow - PXDRAC Runtime.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:03_Flows/Flow - Recursive Auto-Repair.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/ARCHITECTURAL_GAP_ANALYSIS_V24.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/MSA_Routing_Architecture.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/Meta-Evolution - The 18 Rings Convergence.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/Meta-Evolution - The 9 Rings Convergence.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/Nexus Combat History Ledger.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/RESEARCH_STATUS_REPORT.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/RESEARCH_STATUS_REPORT.md",
+      "target": "page:02_Modules/Module - Advanced Core Intelligence.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/RESEARCH_STATUS_REPORT.md",
+      "target": "page:06_Ops/Ops - Governance Changelog.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/RESEARCH_STATUS_REPORT.md",
+      "target": "page:09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/Research - DeepScientist Integration.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_State/State - Lifecycle.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_State/State - Lifecycle.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_State/State - Schemas.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Commercial/Go-to-Market.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/CLI_Full_Params.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Algebraic Reasoning.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "target": "page:05_Protocols/Protocol - CLI Surface.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - CLI Surface.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - CLI Surface.md",
+      "target": "page:05_Protocols/Protocol - CLI Drift Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Capability Routing.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Capability Routing.md",
+      "target": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Capability Routing.md",
+      "target": "page:05_Protocols/Protocol - Evidence Chain.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Context Hygiene.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Dual-Gate Response.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Engineering Discipline.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Evidence Chain.md",
+      "target": "page:05_Protocols/Protocol - Evidence Map.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Evidence Map.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Evidence Map.md",
+      "target": "page:05_Protocols/Protocol - Evidence Chain.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - Knowledge Lineage.md",
+      "target": "page:05_Protocols/Protocol - Evidence Map.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
+      "target": "page:02_Modules/Module - Core Orchestrator.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
+      "target": "page:05_Protocols/Protocol - Evidence Chain.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ecosystem/SDK Quickstart.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Evidence_Bundle_Format.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Evidence_Bundle_Format.md",
+      "target": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Evidence_Bundle_Format.md",
+      "target": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/NEXUS_ENFORCED_LAUNCH.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "target": "page:Reference/QUICKSTART.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+      "target": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/NEXUS_V25_9_HARDENING_CRYSTAL.md",
+      "target": "page:06_Ops/Ops - Acceptance and Release.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Acceptance and Release.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Agent Capability Boundaries.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Agent Capability Boundaries.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Architecture Decision Records.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Artifact Retention and Provenance.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "target": "page:06_Ops/Ops - Wiki Drift Audit.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "target": "page:06_Ops/Ops - Truth Claims Register.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - CI Failure Playbook.md",
+      "target": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Closeout Hard Gate.md",
+      "target": "page:06_Ops/Ops - Governance Changelog.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Governance Changelog.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Governance SLO Dashboard.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Governance SLO Dashboard.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "target": "page:06_Ops/Ops - Architecture Decision Records.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "target": "page:06_Ops/Ops - Optimization Proposal Protocol.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "target": "page:06_Ops/Ops - Governance SLO Dashboard.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Optimization Proposal Protocol.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Optimization Proposal Protocol.md",
+      "target": "page:06_Ops/Ops - Architecture Decision Records.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Optimization Proposal Protocol.md",
+      "target": "page:06_Ops/Ops - Acceptance and Release.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Optimization Proposal Protocol.md",
+      "target": "page:06_Ops/Ops - Learning Closure Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Ownership and Review SLA.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Ownership and Review SLA.md",
+      "target": "page:06_Ops/Ops - Governance SLO Dashboard.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Performance Benchmarks.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Query Writeback Policy.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Query Writeback Policy.md",
+      "target": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Reference Boundary and Archive Policy.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Reference Boundary and Archive Policy.md",
+      "target": "page:06_Ops/Ops - Governance Changelog.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Truth Claims Command Policy.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Truth Claims Command Policy.md",
+      "target": "page:06_Ops/Ops - Truth Claims Register.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Truth Claims Register.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Truth Claims Register.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Truth Claims Register.md",
+      "target": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Weekly Governance Report.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Weekly Governance Report.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Weekly Governance Report.md",
+      "target": "page:06_Ops/Ops - Governance SLO Dashboard.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Drift Audit.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Link Integrity.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Link Integrity.md",
+      "target": "page:06_Ops/Ops - Wiki Drift Audit.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Page Type Contracts.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Regression Evals.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Regression Evals.md",
+      "target": "page:06_Ops/Ops - CI/CD Promotion Gate.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wiki Regression Evals.md",
+      "target": "page:06_Ops/Ops - Truth Claims Register.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wisdom Layer.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Ops - Wisdom Layer.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Retry_Escalation_and_Handoff_Policy.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:07_Compliance/Compliance_Dashboard.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:07_Compliance/Current_Compliance_Status.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:07_Compliance/Current_Compliance_Status.md",
+      "target": "page:07_Compliance/Incident_Trace_Log.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:07_Compliance/Governance - Capability Gate and Tool Isolation.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "target": "page:07_Compliance/Compliance_Dashboard.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+      "target": "page:07_Compliance/Current_Compliance_Status.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:07_Compliance/Incident_Trace_Log.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:07_Compliance/Incident_Trace_Log.md",
+      "target": "page:07_Compliance/Current_Compliance_Status.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "target": "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:09_Roadmap/Phase 8 - Hybrid Repair Armor.md",
+      "target": "page:09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:09_Roadmap/Phase 8 - Hybrid Repair Armor.md",
+      "target": "page:09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:90_Sources/Source - Coverage Heatmap.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:90_Sources/Source - Coverage Heatmap.md",
+      "target": "page:90_Sources/Source Index.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "target": "page:90_Sources/Source Index.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:90_Sources/Source - Operational Scripts Index.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:90_Sources/Source Index.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:90_Sources/Source Index.md",
+      "target": "page:90_Sources/Source - Nexus Anti Registry.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:99_Schema/AGENT_SCHEMA.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:99_Schema/LATEST_LINT_REPORT.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:99_Schema/LINT_CHECKLIST.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:99_Schema/UPDATE_CHECKLIST.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:LLM_Wiki/EXCLUDE_RULES.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:LLM_Wiki/EXCLUDE_RULES.md",
+      "target": "page:LLM_Wiki/INGEST_SCOPE_V1.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:LLM_Wiki/INGEST_SCOPE_V1.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:LLM_Wiki/INGEST_SCOPE_V1.md",
+      "target": "page:LLM_Wiki/EXCLUDE_RULES.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:Reference/QUICKSTART.md",
+      "target": "page:Reference/QUICKSTART.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/QUICKSTART.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/README.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/Role_Guides/Expert_Guide.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/docs/00_PROJECT_INDEX.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/en/README_Product.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/en/README_Product.md",
+      "target": "page:Reference/en/SDK_Quickstart.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:Reference/en/SDK_Quickstart.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/en/SDK_Quickstart.md",
+      "target": "page:Reference/en/README_Product.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:Reference/nexus_truth_dashboard.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/program.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/task.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/task.md",
+      "target": "page:Reference/nexus_truth_dashboard.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:Reference/walkthrough.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:Reference/walkthrough.md",
+      "target": "page:Reference/task.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:nexus/graph/Community_1.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:nexus/graph/index.md",
+      "target": "page:00_Home/System Overview.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    }
+  ],
+  "unresolved_links": []
+}
