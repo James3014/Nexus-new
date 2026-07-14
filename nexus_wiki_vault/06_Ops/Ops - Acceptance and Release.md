@@ -10,7 +10,7 @@ owner: agent
 related_pages:
 - '[[07_HALLUCINATION_GUARD_AND_HI_AUDIT]]'
 source_of_truth: scripts/engine/nexus_cli.py
-status: hardened
+status: active
 tags:
 - ops
 - release
@@ -27,7 +27,7 @@ version_scope:
 # Ops - Acceptance and Release (v26.2 Hardened)
 
 ## One-sentence summary
-本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [Source: scripts/engine/nexus_cli.py]
+本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [Source: scripts/engine/nexus_cli.py] [Code: scripts/ops/ci_gate.py] [Source: Release Discipline]
 
 ## Role / responsibility
 - 定義 release 的最小化交付門檻與失敗阻斷邏輯。

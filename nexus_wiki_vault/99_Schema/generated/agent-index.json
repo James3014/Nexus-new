@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "48a8704b6a870849fc163df8ef46da05d20971cb066f4707c945bbd610a80c81",
+  "source_fingerprint": "bfaa335ac8bcc8fe3251c368c59548f128e4404dea92c7758105c87663899533",
   "included_page_count": 251,
   "excluded_page_count": 40,
   "canonical_page_count": 12,
@@ -6702,8 +6702,8 @@
       ],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]",
-      "content_sha256": "abe7d7afa18f1defd7eb22af59340d1f5f7441b105a82627dee1bc82ee8d409c",
+      "one_sentence_summary": "本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs] [Code: scripts/engine/nexus_cli.py] [Source: Spec v22]",
+      "content_sha256": "4ce16ac8e1163464696f7d1076f72ba2d0c94efdd2c634e5f2fb76325c3a50d7",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -8592,9 +8592,9 @@
       "path": "06_Ops/Ops - Acceptance and Release.md",
       "title": "Ops - Acceptance and Release",
       "type": "ops",
-      "status": "hardened",
+      "status": "active",
       "lifecycle": "unclassified",
-      "classification": "unclassified",
+      "classification": "active",
       "authority": "",
       "owner": "agent",
       "confidence": "high",
@@ -8614,8 +8614,8 @@
       ],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [Source: scripts/engine/nexus_cli.py]",
-      "content_sha256": "eff0e07e551cbb8858bc2ac2a09f3bed1a9c7c039c4580804b1cf63cd992b85e",
+      "one_sentence_summary": "本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [Source: scripts/engine/nexus_cli.py] [Code: scripts/ops/ci_gate.py] [Source: Release Discipline]",
+      "content_sha256": "45a79516487ce7f09182e64944578d9292ec21b5ee3463b63d78e539cc9b4969",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -8865,8 +8865,8 @@
       "tags": [],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "針對 Nexus [CI Gate](Ops - CI/CD Promotion Gate.md) 常見紅燈案例的故障排除與修復手冊。 [Source: scripts/ops/ci_gate.py] [Code: 00_Home/System Overview.md] [code: incident_rca_adapter.py]",
-      "content_sha256": "1994466923d2bbc1804420ec01f6ab874be20a83bc338744ebe39fa2d9650a7a",
+      "one_sentence_summary": "針對 Nexus [CI Gate](Ops - CI/CD Promotion Gate.md) 常見紅燈案例的故障排除與修復手冊。 [Source: scripts/ops/ci_gate.py] [Code: 00_Home/System Overview.md] [Code: scripts/ops/incident_rca_adapter.py]",
+      "content_sha256": "7bbfee59a43740e538cb6eae672fd9397daac0e1049d873f1d071a00143624bf",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -9319,7 +9319,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁將常見錯誤類型映射到防再發策略與 CI 檢查點，確保「發生一次就學會一次」，形成可驗證的治理閉環。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]",
-      "content_sha256": "ba9b1015c97d9c2fcee53e4636b01205d7215c532663b44dacb18ed31ec13871",
+      "content_sha256": "3b8b7ac583fd89272698dc4519b8ab72035a2d318d7d4f037e55f836506302e8",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -9907,8 +9907,8 @@
       ],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "本頁集中管理所有關於 Nexus 物理狀態的真值聲明 (Truth Claims)，並提供可機器執行的驗證命令。 [Source: 00_Home/System Overview.md] [Code: wiki_truth_claims_check.py]",
-      "content_sha256": "439eb27ddb3c475aa24b8ec3cb51bdb03414f7751c6c055b1da47bdda3916e51",
+      "one_sentence_summary": "本頁集中管理所有關於 Nexus 物理狀態的真值聲明 (Truth Claims)，並提供可機器執行的驗證命令。 [Source: 00_Home/System Overview.md] [Code: scripts/ops/wiki_truth_claims_check.py]",
+      "content_sha256": "8614647e8ba4d1d285c28d1c2a0ebc01f513d654a450c3f95066fa87776ec45c",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -10231,7 +10231,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本文件定義 Nexus Wiki 的頁面類型契約，規定各類型頁面的必要欄位、章節結構與版本控制規範，以確保 Wiki 知識庫的結構化與可稽核性。 [Source: 00_Home/System Overview.md] [Code: ci_gate.py]",
-      "content_sha256": "073006b849b7198c2064eee0cdec260fe6617930d0444253984f0d1416cf7d39",
+      "content_sha256": "20bb477bd006cfb8df34c9f8dbb33cdc9d59fc4a115bbb89f9026c781fc0ab60",
       "outgoing_links": [
         [
           "canonical:architecture",

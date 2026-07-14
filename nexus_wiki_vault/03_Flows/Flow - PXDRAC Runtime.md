@@ -27,7 +27,7 @@ version_scope:
 # Flow - PXDRAC Runtime (Hybrid v24.0)
 
 ## One-sentence summary
-本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]
+本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs] [Code: scripts/engine/nexus_cli.py] [Source: Spec v22]
 
 ## Role / responsibility
 - **物理連續性 (Physical Continuity)**: 由 Rust `TransitionEngine` 確保 P -> X -> D -> R -> A -> C 相位的絕對順序，禁止任何未經授權的跳步。

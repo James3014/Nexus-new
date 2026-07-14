@@ -149,6 +149,59 @@ unresolved_authority_collisions:
     status: unresolved
     reason: "Collector vs policy authority split"
 
+required_authorities:
+  pxdrac_runtime:
+    - label: "[source: Spec v22]"
+      authority_page: "03_Flows/Flow - PXDRAC Runtime.md"
+      authority_classification: active
+      source_evidence:
+        kind: spec_backed
+        source_path: MUSE-NEXUS-Engine-Specification-v22-Eternal.md
+
+  release_governance:
+    - label: "[code: scripts/ops/ci_gate.py]"
+      authority_page: "06_Ops/Ops - Acceptance and Release.md"
+      authority_classification: active
+      source_evidence:
+        kind: code_backed
+        source_path: scripts/ops/ci_gate.py
+    - label: "[source: Release Discipline]"
+      authority_page: "06_Ops/Ops - Acceptance and Release.md"
+      authority_classification: active
+      source_evidence:
+        kind: spec_backed
+        source_path: nexus_wiki_vault/06_Ops/Ops - CI/CD Promotion Gate.md
+
+  truth_claims:
+    - label: "[code: scripts/ops/wiki_truth_claims_check.py]"
+      authority_page: "06_Ops/Ops - Truth Claims Register.md"
+      authority_classification: active
+      source_evidence:
+        kind: code_backed
+        source_path: scripts/ops/wiki_truth_claims_check.py
+
+  incident_response:
+    - label: "[code: scripts/ops/incident_rca_adapter.py]"
+      authority_page: "06_Ops/Ops - CI Failure Playbook.md"
+      authority_classification: active
+      source_evidence:
+        kind: code_backed
+        source_path: scripts/ops/incident_rca_adapter.py
+
+  command_surface:
+    - label: "[code: scripts/engine/nexus_cli.py]"
+      authority_page: "05_Protocols/Protocol - CLI Surface.md"
+      authority_classification: active
+      source_evidence:
+        kind: code_backed
+        source_path: scripts/engine/nexus_cli.py
+    - label: "[source: Protocol - CLI Surface]"
+      authority_page: "05_Protocols/Protocol - CLI Surface.md"
+      authority_classification: active
+      source_evidence:
+        kind: spec_backed
+        source_path: MUSE-NEXUS-Engine-Specification-v22-Eternal.md
+
 generated_retrieval_layer:
   schema: nexus.wiki.agent-index.v1
   authority: derived_non_authoritative

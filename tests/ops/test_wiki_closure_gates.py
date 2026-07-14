@@ -1,5 +1,6 @@
 import importlib
 import json
+from pathlib import Path
 
 
 def test_wiki_coverage_audit_ignores_missing_key_paths(tmp_path, monkeypatch):
@@ -86,3 +87,73 @@ def test_wiki_global_coverage_meets_closure_threshold():
             covered_count += 1
 
     assert covered_count / len(files) >= 0.85
+
+
+def _authority_row(label: str, page: str) -> dict:
+    return {
+        "label": label,
+        "authority_page": page,
+        "authority_classification": "active",
+        "source_evidence": {
+            "kind": "code_backed",
+            "source_path": "scripts/ops/ci_gate.py",
+        },
+    }
+
+
+def test_required_authority_manifest_passes_live_phase3_inventory():
+    audit = importlib.import_module("scripts.ops.wiki_capability_coverage_audit")
+    result = audit.audit_capabilities(stale_days=45)
+
+    assert result["authority_checks"]["status"] == "PASS"
+    assert result["authority_checks"]["required_count"] == 7
+    assert result["authority_checks"]["resolved_count"] == 7
+    assert all(not data["labels_missing"] for data in result["results"].values())
+    assert all(not data["pages_missing"] for data in result["results"].values())
+
+
+def test_duplicate_authority_label_fails_closed(tmp_path: Path, monkeypatch):
+    audit = importlib.import_module("scripts.ops.wiki_capability_coverage_audit")
+    repo = tmp_path / "repo"
+    vault = repo / "nexus_wiki_vault"
+    (repo / "scripts" / "ops").mkdir(parents=True)
+    (repo / "scripts" / "ops" / "ci_gate.py").write_text("def main():\n    return 0\n")
+    first = vault / "01_System" / "First.md"
+    second = vault / "01_System" / "Second.md"
+    first.parent.mkdir(parents=True)
+    first.write_text("---\nstatus: active\nowner: test\n---\n[Code: scripts/ops/ci_gate.py]\n")
+    second.write_text("---\nstatus: active\nowner: test\n---\n[Code: scripts/ops/ci_gate.py]\n")
+    monkeypatch.setattr(audit, "REPO_ROOT", repo)
+    monkeypatch.setattr(audit, "VAULT_ROOT", vault)
+    monkeypatch.setattr(audit, "CAPABILITY_DOMAINS", {"test": {"required_labels": ["[code: scripts/ops/ci_gate.py]"]}})
+
+    result = audit.audit_required_authorities(
+        {"required_authorities": {"test": [
+            _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/First.md"),
+            _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/Second.md"),
+        ]}}
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["duplicate_labels"] == ["[code: scripts/ops/ci_gate.py]"]
+
+
+def test_missing_authority_page_fails_closed(tmp_path: Path, monkeypatch):
+    audit = importlib.import_module("scripts.ops.wiki_capability_coverage_audit")
+    repo = tmp_path / "repo"
+    vault = repo / "nexus_wiki_vault"
+    (repo / "scripts" / "ops").mkdir(parents=True)
+    (repo / "scripts" / "ops" / "ci_gate.py").write_text("def main():\n    return 0\n")
+    vault.mkdir(parents=True)
+    monkeypatch.setattr(audit, "REPO_ROOT", repo)
+    monkeypatch.setattr(audit, "VAULT_ROOT", vault)
+    monkeypatch.setattr(audit, "CAPABILITY_DOMAINS", {"test": {"required_labels": ["[code: scripts/ops/ci_gate.py]"]}})
+
+    result = audit.audit_required_authorities(
+        {"required_authorities": {"test": [
+            _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/Missing.md"),
+        ]}}
+    )
+
+    assert result["status"] == "FAIL"
+    assert "test[0]:missing_authority_page:01_System/Missing.md" in result["missing"]

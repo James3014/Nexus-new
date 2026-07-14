@@ -18,7 +18,7 @@ version_scope: '[v22, v23]'
 # Ops - CI Failure Playbook
 
 ## One-sentence summary
-針對 Nexus [CI Gate](Ops - CI/CD Promotion Gate.md) 常見紅燈案例的故障排除與修復手冊。 [Source: scripts/ops/ci_gate.py] [Code: 00_Home/System Overview.md] [code: incident_rca_adapter.py]
+針對 Nexus [CI Gate](Ops - CI/CD Promotion Gate.md) 常見紅燈案例的故障排除與修復手冊。 [Source: scripts/ops/ci_gate.py] [Code: 00_Home/System Overview.md] [Code: scripts/ops/incident_rca_adapter.py]
 
 ## Role / responsibility
 - **快速響應**: 提供一致性的初階診斷與修復路徑，縮短 Release 阻斷時間。 [Source: scripts/ops/ci_gate.py]

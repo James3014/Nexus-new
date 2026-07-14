@@ -1,7 +1,7 @@
 {
   "schema": "nexus.wiki.wikilink-graph.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "48a8704b6a870849fc163df8ef46da05d20971cb066f4707c945bbd610a80c81",
+  "source_fingerprint": "bfaa335ac8bcc8fe3251c368c59548f128e4404dea92c7758105c87663899533",
   "nodes": [
     {
       "id": "canonical:entry",
@@ -1335,7 +1335,7 @@
       "id": "page:06_Ops/Ops - Acceptance and Release.md",
       "path": "06_Ops/Ops - Acceptance and Release.md",
       "title": "Ops - Acceptance and Release",
-      "classification": "unclassified",
+      "classification": "active",
       "is_canonical": false,
       "authority": ""
     },

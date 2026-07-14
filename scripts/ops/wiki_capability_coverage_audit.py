@@ -4,6 +4,7 @@ import re
 import json
 import argparse
 import datetime
+import sys
 import yaml
 from pathlib import Path
 
@@ -13,37 +14,218 @@ from pathlib import Path
 REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_capability_coverage_report.json"
+AUTHORITY_MANIFEST_PATH = VAULT_ROOT / "99_Schema" / "WIKI_AUTHORITY_MANIFEST.yaml"
+
+CURRENT_AUTHORITY_CLASSIFICATIONS = {"current", "active"}
+LEGACY_PAGE_PREFIXES = (
+    "90_Sources/Archive/",
+    "90_Sources/Legacy_Wiki/",
+    "99_Schema/generated/",
+)
 
 CAPABILITY_DOMAINS = {
     "pxdrac_runtime": {
-        "required_pages": ["Flow - PXDRAC Runtime", "Module - Core Orchestrator Deep Dive"],
-        "required_labels": ["[code: nexus_cli.py]", "[source: Spec v22]"],
+        "required_pages": [
+            "03_Flows/Flow - PXDRAC Runtime.md",
+            "02_Modules/Module - Core Orchestrator Deep Dive.md",
+        ],
+        "required_labels": [
+            "[code: scripts/engine/nexus_cli.py]",
+            "[source: Spec v22]",
+        ],
         "risk_weight": 1.0
     },
     "release_governance": {
-        "required_pages": ["Ops - Acceptance and Release", "Ops - Wiki Page Type Contracts"],
-        "required_labels": ["[code: ci_gate.py]", "[source: Release Discipline]"],
+        "required_pages": [
+            "06_Ops/Ops - Acceptance and Release.md",
+            "06_Ops/Ops - Wiki Page Type Contracts.md",
+        ],
+        "required_labels": [
+            "[code: scripts/ops/ci_gate.py]",
+            "[source: Release Discipline]",
+        ],
         "risk_weight": 0.8
     },
     "truth_claims": {
-        "required_pages": ["Ops - Truth Claims Register", "Ops - Truth Claims Command Policy"],
-        "required_labels": ["[code: wiki_truth_claims_check.py]"],
+        "required_pages": [
+            "06_Ops/Ops - Truth Claims Register.md",
+            "06_Ops/Ops - Truth Claims Command Policy.md",
+        ],
+        "required_labels": [
+            "[code: scripts/ops/wiki_truth_claims_check.py]",
+        ],
         "risk_weight": 0.9
     },
     "incident_response": {
-        "required_pages": ["Ops - CI Failure Playbook", "Module - Dual Phase Diagnosis"],
-        "required_labels": ["[code: incident_rca_adapter.py]"],
+        "required_pages": [
+            "06_Ops/Ops - CI Failure Playbook.md",
+            "02_Modules/Module - Dual Phase Diagnosis.md",
+        ],
+        "required_labels": [
+            "[code: scripts/ops/incident_rca_adapter.py]",
+        ],
         "risk_weight": 0.7
     },
     "command_surface": {
-        "required_pages": ["Protocol - CLI Surface", "Agent Onboarding - Command Pack"],
-        "required_labels": ["[code: nexus_cli.py]", "[source: Protocol - CLI Surface]"],
+        "required_pages": [
+            "05_Protocols/Protocol - CLI Surface.md",
+            "00_Home/Agent Boot Sequence.md",
+        ],
+        "required_labels": [
+            "[code: scripts/engine/nexus_cli.py]",
+            "[source: Protocol - CLI Surface]",
+        ],
         "risk_weight": 0.6
     }
 }
 
 # PROVENANCE_TAG_PATTERN from wiki_linter.py
 PROVENANCE_TAG_PATTERN = re.compile(r"\[(source|code):\s*(.*?)\]|\((source|code):\s*(.*?)\)", re.I)
+LABEL_PATTERN = re.compile(r"\[(source|code):\s*(.*?)\]", re.I)
+
+
+def normalize_label(label):
+    match = LABEL_PATTERN.fullmatch(str(label).strip())
+    if not match:
+        return ""
+    return f"[{match.group(1).lower()}: {match.group(2).strip().lower()}]"
+
+
+def _page_classification(rel_path, frontmatter, manifest):
+    normalized = rel_path.replace("\\", "/")
+    if any(normalized.startswith(prefix) for prefix in LEGACY_PAGE_PREFIXES):
+        return "legacy"
+
+    for entry in manifest.get("known_legacy_entries", []):
+        if str(entry.get("path", "")).replace("\\", "/") == normalized:
+            return str(entry.get("classification", "legacy")).strip().lower()
+
+    lifecycle = str(frontmatter.get("lifecycle", "")).strip().lower()
+    status = str(frontmatter.get("status", "")).strip().lower()
+    if lifecycle in {"current", "active", "superseded", "historical", "draft", "mixed_needs_review", "archive"}:
+        return lifecycle
+    if status in {"current", "active", "superseded", "historical", "draft", "mixed_needs_review", "archive"}:
+        return status
+    return "unclassified"
+
+
+def audit_required_authorities(manifest=None):
+    """Validate one explicit current authority for every required label."""
+    manifest = manifest or {}
+    configured = manifest.get("required_authorities", {})
+    rows = []
+    errors = []
+    duplicate_labels = []
+
+    if not isinstance(configured, dict):
+        return {
+            "status": "FAIL",
+            "required_count": 0,
+            "resolved_count": 0,
+            "missing": ["required_authorities_not_a_mapping"],
+            "duplicate_labels": [],
+            "invalid": [],
+        }
+
+    for domain, entries in configured.items():
+        if not isinstance(entries, list):
+            errors.append(f"{domain}:entries_not_a_list")
+            continue
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                errors.append(f"{domain}[{index}]:entry_not_a_mapping")
+                continue
+            row = dict(entry)
+            row["domain"] = domain
+            row["index"] = index
+            rows.append(row)
+
+    label_rows = {}
+    for row in rows:
+        label = normalize_label(row.get("label", ""))
+        if not label:
+            errors.append(f"{row['domain']}[{row['index']}]:invalid_label")
+            continue
+        label_rows.setdefault(label, []).append(row)
+
+    for label, matching_rows in sorted(label_rows.items()):
+        if len(matching_rows) > 1:
+            duplicate_labels.append(label)
+
+    pages = {}
+    for path in VAULT_ROOT.glob("**/*.md"):
+        rel = str(path.relative_to(VAULT_ROOT)).replace("\\", "/")
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        pages[rel] = (content, parse_frontmatter(content) or {})
+
+    resolved_count = 0
+    for row in rows:
+        prefix = f"{row['domain']}[{row['index']}]"
+        label = normalize_label(row.get("label", ""))
+        authority_page = str(row.get("authority_page", "")).replace("\\", "/")
+        classification = str(row.get("authority_classification", "")).strip().lower()
+        evidence = row.get("source_evidence")
+
+        if not label:
+            continue
+        if authority_page not in pages:
+            errors.append(f"{prefix}:missing_authority_page:{authority_page}")
+            continue
+        content, frontmatter = pages[authority_page]
+        actual_classification = _page_classification(
+            authority_page, frontmatter, manifest
+        )
+        if authority_page.startswith(LEGACY_PAGE_PREFIXES):
+            errors.append(f"{prefix}:legacy_or_generated_authority:{authority_page}")
+        if classification not in CURRENT_AUTHORITY_CLASSIFICATIONS:
+            errors.append(f"{prefix}:invalid_manifest_classification:{classification}")
+        if actual_classification not in CURRENT_AUTHORITY_CLASSIFICATIONS:
+            errors.append(
+                f"{prefix}:page_not_current:{authority_page}:{actual_classification}"
+            )
+        page_labels = {normalize_label(match.group(0)) for match in LABEL_PATTERN.finditer(content)}
+        if label not in page_labels:
+            errors.append(f"{prefix}:label_missing_from_authority_page:{label}")
+
+        if not isinstance(evidence, dict):
+            errors.append(f"{prefix}:source_evidence_not_a_mapping")
+        else:
+            kind = str(evidence.get("kind", "")).strip().lower()
+            source_path = str(evidence.get("source_path", "")).replace("\\", "/")
+            if kind not in {"code_backed", "spec_backed"}:
+                errors.append(f"{prefix}:invalid_source_evidence_kind:{kind}")
+            if not source_path or not (REPO_ROOT / source_path).is_file():
+                errors.append(f"{prefix}:missing_source_evidence:{source_path}")
+            if source_path.startswith((".nexus/", "docs/reports/", "99_Schema/generated/")):
+                errors.append(f"{prefix}:non_authoritative_source_evidence:{source_path}")
+            if kind == "code_backed" and label.startswith("[code:"):
+                label_path = label[len("[code: "):-1]
+                if label_path != source_path.lower():
+                    errors.append(f"{prefix}:code_label_source_mismatch")
+        if not any(error.startswith(f"{prefix}:") for error in errors):
+            resolved_count += 1
+
+    missing_labels = []
+    configured_labels = {
+        normalize_label(label)
+        for config in CAPABILITY_DOMAINS.values()
+        for label in config["required_labels"]
+    }
+    for label in sorted(configured_labels - set(label_rows)):
+        missing_labels.append(f"manifest_missing_required_label:{label}")
+    errors.extend(missing_labels)
+
+    return {
+        "status": "PASS" if not errors and not duplicate_labels else "FAIL",
+        "required_count": len(rows),
+        "resolved_count": resolved_count,
+        "missing": sorted(set(errors)),
+        "duplicate_labels": sorted(duplicate_labels),
+        "invalid": sorted(set(errors)),
+    }
 
 def parse_frontmatter(content):
     if content.startswith("---"):
@@ -58,6 +240,11 @@ def parse_frontmatter(content):
 def audit_capabilities(stale_days=45):
     results = {}
     all_pages = list(VAULT_ROOT.glob("**/*.md"))
+    try:
+        manifest = yaml.safe_load(AUTHORITY_MANIFEST_PATH.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        manifest = {}
+    authority_checks = audit_required_authorities(manifest)
     
     total_weighted_score = 0.0
     total_weight = 0.0
@@ -84,62 +271,48 @@ def audit_capabilities(stale_days=45):
         
         # Check Pages
         for req_page in config["required_pages"]:
-            found = False
-            for p in all_pages:
-                if p.stem == req_page:
-                    found = True
-                    domain_status["pages_found"].append(req_page)
-                    aging_breakdown[domain]["total"] += 1
+            p = VAULT_ROOT / req_page
+            found = p.is_file()
+            if found:
+                domain_status["pages_found"].append(req_page)
+                aging_breakdown[domain]["total"] += 1
+
+                content = p.read_text(encoding="utf-8")
+                frontmatter = parse_frontmatter(content) or {}
                     
-                    content = p.read_text()
-                    frontmatter = parse_frontmatter(content) or {}
-                    
-                    # Owner Check
-                    if not frontmatter.get("owner"):
-                        domain_status["ownership_missing"].append(req_page)
-                        ownership_missing_count += 1
-                        aging_breakdown[domain]["missing_owner"] += 1
-                        
-                    # Stale Check
-                    last_compiled = frontmatter.get("last_compiled")
-                    if isinstance(last_compiled, str):
-                        try:
-                            last_compiled = datetime.datetime.strptime(last_compiled, "%Y-%m-%d").date()
-                        except:
-                            last_compiled = None
-                    
-                    if isinstance(last_compiled, datetime.date):
-                        delta = (today - last_compiled).days
-                        if delta > stale_days:
-                            domain_status["stale_pages"].append({"page": req_page, "days": delta})
-                            stale_count += 1
-                            aging_breakdown[domain]["stale"] += 1
-                    else:
-                        # If no date, consider it stale
-                        domain_status["stale_pages"].append({"page": req_page, "days": -1})
+                # Owner Check
+                if not frontmatter.get("owner"):
+                    domain_status["ownership_missing"].append(req_page)
+                    ownership_missing_count += 1
+                    aging_breakdown[domain]["missing_owner"] += 1
+
+                # Stale Check
+                last_compiled = frontmatter.get("last_compiled")
+                if isinstance(last_compiled, str):
+                    try:
+                        last_compiled = datetime.datetime.strptime(last_compiled, "%Y-%m-%d").date()
+                    except (TypeError, ValueError):
+                        last_compiled = None
+
+                if isinstance(last_compiled, datetime.date):
+                    delta = (today - last_compiled).days
+                    if delta > stale_days:
+                        domain_status["stale_pages"].append({"page": req_page, "days": delta})
                         stale_count += 1
                         aging_breakdown[domain]["stale"] += 1
+                else:
+                    domain_status["stale_pages"].append({"page": req_page, "days": -1})
+                    stale_count += 1
+                    aging_breakdown[domain]["stale"] += 1
 
-                    # Scan for labels in found page
-                    matches = PROVENANCE_TAG_PATTERN.findall(content)
-                    found_in_page = []
-                    for m in matches:
-                        # m is (type1, val1, type2, val2)
-                        label_type = (m[0] or m[2]).lower()
-                        label_val = (m[1] or m[3]).strip().lower()
-                        found_in_page.append(f"[{label_type}: {label_val}]")
-                    
-                    for req_label in config["required_labels"]:
-                        # req_label is like "[code: nexus_cli.py]"
-                        rl_match = re.match(r"\[(source|code):\s*(.*?)\]", req_label, re.I)
-                        if rl_match:
-                            rl_type = rl_match.group(1).lower()
-                            rl_val = rl_match.group(2).strip().lower()
-                            canonical_req = f"[{rl_type}: {rl_val}]"
-                            if canonical_req in found_in_page:
-                                if req_label not in domain_status["labels_found"]:
-                                    domain_status["labels_found"].append(req_label)
-                    break
+                found_in_page = {
+                    normalize_label(match.group(0))
+                    for match in LABEL_PATTERN.finditer(content)
+                }
+                for req_label in config["required_labels"]:
+                    if normalize_label(req_label) in found_in_page:
+                        if req_label not in domain_status["labels_found"]:
+                            domain_status["labels_found"].append(req_label)
             if not found:
                 domain_status["pages_missing"].append(req_page)
         
@@ -163,7 +336,8 @@ def audit_capabilities(stale_days=45):
         "weighted_score": weighted_avg,
         "ownership_missing_count": ownership_missing_count,
         "stale_count": stale_count,
-        "aging_breakdown": aging_breakdown
+        "aging_breakdown": aging_breakdown,
+        "authority_checks": authority_checks,
     }
 
 def main():
@@ -183,6 +357,15 @@ def main():
     print(f"⚖️ Weighted Capability Score: {weighted_score:.2%}")
     print(f"👤 Ownership Missing: {audit_data['ownership_missing_count']}")
     print(f"⏰ Stale Pages: {audit_data['stale_count']}")
+    authority_checks = audit_data["authority_checks"]
+    print(
+        f"🔐 Required Authority Gate: {authority_checks['status']} "
+        f"({authority_checks['resolved_count']}/{authority_checks['required_count']})"
+    )
+    if authority_checks["duplicate_labels"]:
+        print(f"  - Duplicate Authorities: {authority_checks['duplicate_labels']}")
+    if authority_checks["missing"]:
+        print(f"  - Authority Errors: {authority_checks['missing']}")
     
     domain_risk_breakdown = {}
     for domain, data in report.items():
@@ -212,11 +395,20 @@ def main():
                 "ownership_missing_count": audit_data["ownership_missing_count"],
                 "stale_count": audit_data["stale_count"],
                 "domain_risk_breakdown": domain_risk_breakdown,
-                "aging_breakdown": audit_data["aging_breakdown"]
+                "aging_breakdown": audit_data["aging_breakdown"],
+                "authority_checks": authority_checks,
             },
             "details": report
         }, f, indent=2)
     print(f"Report saved to: {output_path}")
+    gate_passed = (
+        authority_checks["status"] == "PASS"
+        and all(
+            not data["pages_missing"] and not data["labels_missing"]
+            for data in report.values()
+        )
+    )
+    return 0 if gate_passed else 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
