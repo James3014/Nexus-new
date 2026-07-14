@@ -1,10 +1,11 @@
 {
   "product_entry": "nexus run",
-  "cli_command": "scripts/engine/nexus_cli.py nexus run --local-assist-policy advisor --online-policy require",
+  "runtime_seam": "cli->command_service->engine",
+  "cli_command": "scripts/engine/nexus_cli.py run \"live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.\" --local-assist-policy advisor --online-policy require",
   "online_policy": "require",
   "selected_provider": "grok",
   "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
-  "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
+  "workspace_revision": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
   "planner_invoked": true,
   "local": {
     "invoked": true,
@@ -43,7 +44,9 @@
   "receipt_complete": true,
   "terminal_status": "SUCCEEDED",
   "formal_workspace_mutated": false,
-  "runtime_seam": "nexus_cli->pipeline_repair->_run_unified_advisor_online->UnifiedRuntime",
-  "log_path": "SCRATCH/grok-goal-live-paired-r2cli/r2_vertical_nexus_run.log",
-  "captured_at": "2026-07-13T23:58:33.549726+00:00"
+  "REAL_LOCAL_ONLINE_VERTICAL_PROVEN": true,
+  "validation_status": "LIVE_PROOF_PASS",
+  "validation_failures": [],
+  "log_path": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/grok-goal-a77d6b4a1ef9/implementer/r2_vertical_nexus_run.log",
+  "captured_at": "2026-07-14T00:06:52.527978+00:00"
 }

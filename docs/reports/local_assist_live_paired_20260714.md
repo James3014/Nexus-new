@@ -51,3 +51,7 @@ Must remain false: proven_*_savings, production_ready, public_claim_allowed, gen
 ## Evidence
 - `.nexus/reports/local_assist_live_paired/live_paired_20260713T2311Z/`
 - Mirror: `docs/reports/local_assist_live_paired_20260714_evidence/`
+
+
+## Atomic vertical runner
+`scripts/ops/run_live_vertical_proof.py` — one CLI invocation → log → pointer → UR receipt → `validate_live_proof` → summary/closeout. SCRATCH implementer path is the audit surface.

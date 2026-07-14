@@ -10,9 +10,6 @@
   "real_local_online_vertical_proven": true,
   "five_task_live_measurement_pipeline_complete": true,
   "selected_provider": "grok",
-  "also_ready": [
-    "agy"
-  ],
   "proven_token_savings": false,
   "proven_time_savings": false,
   "proven_cost_reduction": false,
@@ -21,12 +18,7 @@
   "public_claim_allowed": false,
   "generalized_market_value_proven": false,
   "product_entry_vertical": "nexus run",
-  "vertical_supersedes_ask_unified_claim": true,
-  "git_head": "24c362f7a3418f0b5f4733068591b05610088c24",
-  "updated_at": "2026-07-13T23:59:04Z",
-  "notes": [
-    "R2 vertical proven via product entry: scripts/engine/nexus_cli.py nexus run --local-assist-policy advisor --online-policy require",
-    "Local ollama qwen2.5-coder:7b-instruct invoked+delivered; Online grok invoked+delivered; UR receipt_complete=true",
-    "Prior Gateway.ask_unified-only vertical is superseded as product_entry proof"
-  ]
+  "runtime_seam": "cli->command_service->engine",
+  "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+  "updated_at": "2026-07-14T00:06:52Z"
 }

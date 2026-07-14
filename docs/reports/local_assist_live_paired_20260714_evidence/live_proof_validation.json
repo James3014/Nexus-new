@@ -1,0 +1,25 @@
+{
+  "claim_boundary": {
+    "production_ready": false,
+    "proven_token_savings": false,
+    "public_claim_allowed": false,
+    "real_local_online_continuation_observed": true,
+    "value_measured": false
+  },
+  "evidence": {
+    "external_authorized": true,
+    "formal_workspace_mutated": false,
+    "local_context_forwarded": true,
+    "local_invoked": true,
+    "local_provider_call_count": 0,
+    "online_invoked": true,
+    "online_provider_call_count": 1,
+    "receipt_path": "/Users/jameschen/Workspace/nexus/.nexus/reports/unified_runtime/live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only..json",
+    "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
+    "workspace_revision": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+  },
+  "failures": [],
+  "reason": "local_and_online_invocations_verified",
+  "schema": "nexus.local_assist.live_proof.v1",
+  "status": "LIVE_PROOF_PASS"
+}

@@ -1,10 +1,10 @@
 {
-  "command": ".venv/bin/python -m pytest tests/services/test_online_execution_policy.py tests/services/test_unified_runtime.py tests/ops/test_unified_runtime_scenarios.py tests/engine/test_cli_local_assist_advisor_gate2.py tests/research/test_local_assist_paired_experiment.py tests/services/test_local_assist_service.py -q",
-  "git_head": "24c362f7a3418f0b5f4733068591b05610088c24",
-  "collected": 103,
-  "passed": 103,
+  "command": ".venv/bin/python -m pytest tests/ops/test_live_vertical_proof_runner.py tests/services/test_online_execution_policy.py tests/services/test_unified_runtime.py tests/ops/test_unified_runtime_scenarios.py tests/engine/test_cli_local_assist_advisor_gate2.py tests/research/test_local_assist_paired_experiment.py tests/services/test_local_assist_service.py -q",
+  "git_head": "fca279d41c938e868746b5d88963f258465e812c",
+  "collected": 109,
+  "passed": 109,
   "failed": 0,
-  "log": "SCRATCH/grok-goal-live-paired-r2cli/focused_regression.log",
-  "captured_at": "2026-07-13T23:59:20Z",
-  "result": "PASS"
+  "result": "PASS",
+  "captured_at": "2026-07-14T00:07:27.152890+00:00",
+  "log": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/grok-goal-a77d6b4a1ef9/implementer/focused_regression.log"
 }

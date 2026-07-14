@@ -1,11 +1,11 @@
 {
   "schema": "nexus.unified_runtime.receipt.v1",
   "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
-  "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
+  "workspace_revision": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
   "task_statement_hash": "d54532894cbfc4bed30576751e1c78074aef4992b2045fff6d3bbe1d55cc981a",
   "context_trace": {
     "task_id": "live-vertical-cli-r2e: Bounded advisory only. Formal workspace mutation forbidden. Allowed files stay bounded. Advisory text only.",
-    "workspace_revision": "24c362f7a3418f0b5f4733068591b05610088c24",
+    "workspace_revision": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3",
     "task_statement_hash": "d54532894cbfc4bed30576751e1c78074aef4992b2045fff6d3bbe1d55cc981a",
     "online_prompt_hash": "b3ce86d6354e5aec784d9a4201ac98cc6477f826f111a0bd58b7c59b9f0ac27c",
     "online_payload_hash": "1ac0a71758e9ce73072fec4adc2dcf10882332b6bf1d96bbe1c2a9c8ec1e3710",
@@ -219,7 +219,7 @@
         "qwen2.5-coder:7b-instruct"
       ],
       "local_outputs": {
-        "diagnosis": "**Concise Diagnosis**: The `gate2_live_smoke_task.json` file is within the bounds of allowed modifications for the `live-vertical-cli-r2e` pipeline. However, any formal workspace mutations are strictly forbidden.\n\n**Recommended Files/Symbols**: `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n**Risk Findings**: There are no risk findings related to the current file content or scope of allowed modifications.\n\n**Confidence**: High\n\n**Next Action**: Review and make necessary changes within the bounds of the specified JSON schema for `gate2_live_smoke_task.json`. Ensure that no formal workspace mutations occur.",
+        "diagnosis": "### Concise Diagnosis\n\nThe task requires an advisory on the `gate2_live_smoke_task.json` file within the context of a pipeline named \"live-vertical-cli-r2e\". The scope is limited to bounded advisory, with no formal workspace mutation allowed.\n\n### Recommended Files/Symbols\n- `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n### Risk Findings\n1. **File Mutation Forbidden**: Any modifications to the file are not permitted as per the task constraints.\n2. **Read-Only Mode**: The advisor can only provide advisory text and cannot perform any formal workspace mutations.\n\n### Confidence\nHigh\n\n### Next Action\n1. **Provide Advisory Text**: Review the `gate2_live_smoke_task.json` file for potential improvements or optimizations based on best practices.\n2. **Avoid Formal Workspace Mutations**: Ensure no changes are made to the file during this task.\n\nIf you need further assistance or have specific questions about the advisory text, please let me know!",
         "recommended_next_action": "Online Agent must independently decide and record consumption.",
         "provider_error": ""
       },
@@ -285,14 +285,14 @@
         "invoked": true,
         "output_delivered": true,
         "usage": {},
-        "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
+        "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e / gate2_live_smoke_task.json. Do not mutate workspace. Treat gate2_live_smoke_task.json as the bounded smoke contract: keep payload fields explicit and fail-closed; require live CLI vertical path, timeout, and receipt/evidence hooks to be present and machine-checkable; reject missing verifier, empty expected outcomes, or unscoped file writes. Prefer immutable smoke inputs, deterministic command args, and explicit PASS/FAIL criteria over narrative success claims. Online consumption: accept Local diagnosis (high confidence, mutation forbidden); next step is runtime/operator execution of the existing smoke task under read-only advisory bounds—no patch application, no formal file writes, no plan expansion beyond allowed files.\", \"summary\": \"Bounded advisory APPROVED; no mutation; smoke task stays fail-closed and receipt-backed.\"}\n",
         "gateway_prompt_chars": 478,
-        "gateway_payload_chars": 926,
-        "gateway_total_chars": 1404,
+        "gateway_payload_chars": 1276,
+        "gateway_total_chars": 1754,
         "gateway_timeout_sec": 120,
         "provider_path": "grok"
       },
-      "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
+      "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e / gate2_live_smoke_task.json. Do not mutate workspace. Treat gate2_live_smoke_task.json as the bounded smoke contract: keep payload fields explicit and fail-closed; require live CLI vertical path, timeout, and receipt/evidence hooks to be present and machine-checkable; reject missing verifier, empty expected outcomes, or unscoped file writes. Prefer immutable smoke inputs, deterministic command args, and explicit PASS/FAIL criteria over narrative success claims. Online consumption: accept Local diagnosis (high confidence, mutation forbidden); next step is runtime/operator execution of the existing smoke task under read-only advisory bounds—no patch application, no formal file writes, no plan expansion beyond allowed files.\", \"summary\": \"Bounded advisory APPROVED; no mutation; smoke task stays fail-closed and receipt-backed.\"}\n",
       "usage": {},
       "error": "",
       "evidence_refs": [
@@ -433,7 +433,7 @@
           "qwen2.5-coder:7b-instruct"
         ],
         "local_outputs": {
-          "diagnosis": "**Concise Diagnosis**: The `gate2_live_smoke_task.json` file is within the bounds of allowed modifications for the `live-vertical-cli-r2e` pipeline. However, any formal workspace mutations are strictly forbidden.\n\n**Recommended Files/Symbols**: `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n**Risk Findings**: There are no risk findings related to the current file content or scope of allowed modifications.\n\n**Confidence**: High\n\n**Next Action**: Review and make necessary changes within the bounds of the specified JSON schema for `gate2_live_smoke_task.json`. Ensure that no formal workspace mutations occur.",
+          "diagnosis": "### Concise Diagnosis\n\nThe task requires an advisory on the `gate2_live_smoke_task.json` file within the context of a pipeline named \"live-vertical-cli-r2e\". The scope is limited to bounded advisory, with no formal workspace mutation allowed.\n\n### Recommended Files/Symbols\n- `docs/bench/local_assist/gate2_live_smoke_task.json`\n\n### Risk Findings\n1. **File Mutation Forbidden**: Any modifications to the file are not permitted as per the task constraints.\n2. **Read-Only Mode**: The advisor can only provide advisory text and cannot perform any formal workspace mutations.\n\n### Confidence\nHigh\n\n### Next Action\n1. **Provide Advisory Text**: Review the `gate2_live_smoke_task.json` file for potential improvements or optimizations based on best practices.\n2. **Avoid Formal Workspace Mutations**: Ensure no changes are made to the file during this task.\n\nIf you need further assistance or have specific questions about the advisory text, please let me know!",
           "recommended_next_action": "Online Agent must independently decide and record consumption.",
           "provider_error": ""
         },
@@ -498,14 +498,14 @@
           "invoked": true,
           "output_delivered": true,
           "usage": {},
-          "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
+          "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e / gate2_live_smoke_task.json. Do not mutate workspace. Treat gate2_live_smoke_task.json as the bounded smoke contract: keep payload fields explicit and fail-closed; require live CLI vertical path, timeout, and receipt/evidence hooks to be present and machine-checkable; reject missing verifier, empty expected outcomes, or unscoped file writes. Prefer immutable smoke inputs, deterministic command args, and explicit PASS/FAIL criteria over narrative success claims. Online consumption: accept Local diagnosis (high confidence, mutation forbidden); next step is runtime/operator execution of the existing smoke task under read-only advisory bounds—no patch application, no formal file writes, no plan expansion beyond allowed files.\", \"summary\": \"Bounded advisory APPROVED; no mutation; smoke task stays fail-closed and receipt-backed.\"}\n",
           "gateway_prompt_chars": 478,
-          "gateway_payload_chars": 926,
-          "gateway_total_chars": 1404,
+          "gateway_payload_chars": 1276,
+          "gateway_total_chars": 1754,
           "gateway_timeout_sec": 120,
           "provider_path": "grok"
         },
-        "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e. Consume LOCAL_ASSIST_CONTEXT as-is: scope remains docs/bench/local_assist/gate2_live_smoke_task.json; formal workspace mutation forbidden; no file writes, tool use, or execution plan. Empty PAYLOAD and empty provider_error — do not invent schema edits. Recommended consumption: keep gate2_live_smoke_task.json bounded to its existing JSON contract; any future content change is human/local-owned outside this Online stage. Risk: none recorded by Local; Online adds none. Residual: Online does not verify file contents offline.\", \"summary\": \"APPROVED advisory: no formal mutation; consume Local diagnosis; empty payload; gate2 path stays bounded.\"}\n",
+        "raw_response": "{\"status\": \"APPROVED\", \"patch\": \"Advisory only for live-vertical-cli-r2e / gate2_live_smoke_task.json. Do not mutate workspace. Treat gate2_live_smoke_task.json as the bounded smoke contract: keep payload fields explicit and fail-closed; require live CLI vertical path, timeout, and receipt/evidence hooks to be present and machine-checkable; reject missing verifier, empty expected outcomes, or unscoped file writes. Prefer immutable smoke inputs, deterministic command args, and explicit PASS/FAIL criteria over narrative success claims. Online consumption: accept Local diagnosis (high confidence, mutation forbidden); next step is runtime/operator execution of the existing smoke task under read-only advisory bounds—no patch application, no formal file writes, no plan expansion beyond allowed files.\", \"summary\": \"Bounded advisory APPROVED; no mutation; smoke task stays fail-closed and receipt-backed.\"}\n",
         "usage": {},
         "error": "",
         "evidence_refs": [
