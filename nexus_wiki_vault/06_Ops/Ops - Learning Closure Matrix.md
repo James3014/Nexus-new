@@ -3957,3 +3957,212 @@ version_scope:
 | 2026-07-13 | M3_VERIFIED_CANARY_FAILURE_CLASSIFICATION | FAIL_CLOSED_VERIFIER_EVIDENCE | The first verified-subtask canary wrapper classified a verifier failure as `candidate_not_isolated` because `LocalAssistService` returns overall `FAILED` after an isolated candidate reaches the verifier. | Classify candidate isolation, hash agreement, and verifier terminal status independently. A verifier failure after isolated apply is `verifier_failed`, must remain terminal, and must not trigger fallback or claim promotion. |
 | 2026-07-13 | AGY_ADAPTER_GIT_INDEX_PERMISSION | DELIVERY_TOOLING_BLOCKER | The bounded agy runtime adapter and tests passed, but the scoped commit could not create `.git/index.lock` under the managed sandbox even though no lock file remained. | Treat Git metadata permission failures as delivery blockers: preserve explicit staging, verify lock absence, request the minimum approved commit escalation, and never report a commit until Git confirms it. |
 | 2026-07-14 | DIRTY_SOURCE_GENERATED_ARTIFACT_DRIFT | REPRODUCIBILITY_GAP | Generated retrieval artifacts were built from a dirty worktree containing uncommitted Wiki source changes. The committed HEAD contained different source content, so the checked-in artifacts did not match what a clean committed-tree rebuild would produce. `--check` passed against the dirty tree but the committed tree was drifted. | Generated artifacts must be reproducible from committed Git ref sources, not from uncommitted worktree state. Use `check_wiki_committed_reproducibility.py --check --ref HEAD` as a gate before publication. Dirty-worktree `--write` is not proof of committed reproducibility. |
+
+## 2026-07-13 - locked worktree metadata requires fail-closed process evidence
+
+- **Phenomenon**: Workspace convergence found a missing worktree path still marked `locked initializing`; sandboxed `ps aux` returned `operation not permitted`.
+- **Root Cause**: Filesystem absence and `git worktree prune --dry-run` are insufficient to prove that a locked route-gate sandbox is abandoned when process inspection is unavailable.
+- **Lesson**: Exclude locked entries from metadata pruning until an approved host-level process check and lock-owner review both show they are inactive. Prune only the exact unlocked entries emitted by the dry-run manifest.
+- **Verification**: `git worktree list --porcelain` retained the locked entry; `git worktree prune --dry-run --verbose` listed only three different metadata entries as removable.
+## 2026-07-13 - merged runtime-only worktree retirement requires manifest-matched force
+
+- **Phenomenon**: `git worktree remove` refused both merged-but-dirty retirement candidates because each contained modified files, even though Phase 3 classified every item as runtime ephemera.
+- **Root Cause**: Git worktree removal protects any dirty content, including disposable runtime residue; a normal remove cannot distinguish generated residue from source work.
+- **Lesson**: Retry with `git worktree remove --force` only after a fresh status proves every blocking path exactly matches the approved manifest and no source, test, documentation, untracked, or unknown item exists. Never use force as the first action.
+- **Verification**: `nexus-iron-gate` matched 8 `.DS_Store` runtime items; `n30r-v31-runtime-wiring-closure` matched 2 runtime items; both were removed with `--force`, and `git worktree list --porcelain` fell from 15 to 13 while the locked entry remained.
+
+## 2026-07-13 - unified runtime advisor boundary must not require a local verifier
+
+- **Phenomenon**: A real `CapabilityPlanner` + `LocalAssistService` wiring probe reached Local and Online successfully, but the unified receipt was incorrectly `INCOMPLETE` for `advisor` mode.
+- **Root Cause**: The Local Assist response includes `verifier_status=not_run` for read-only advisor work; the canonical seam treated that as a failed local gate even though the final unified verifier had not yet run.
+- **Lesson**: Distinguish an advisor boundary (`invoked + output_delivered + evidence`) from a candidate's local verifier gate. Advisor `not_run` is valid at the intermediate stage; only the unified verifier and learning stages determine final receipt completion.
+- **Verification**: After the fix, the real Planner + LocalAssistService path with injected provider callbacks produced `planner=SUCCEEDED`, `local=SUCCEEDED`, `online=SUCCEEDED`, `verifier=SUCCEEDED`, `learning=SUCCEEDED`, and `receipt_complete=true`; `public_claim_allowed` remained false.
+
+## 2026-07-13 - uv cache permission is a tooling boundary, not runtime evidence
+
+- **Phenomenon**: `uv run ruff check --fix ...` failed before lint execution with `Operation not permitted` while opening a managed uv cache `.git` path.
+- **Root Cause**: The sandboxed uv wrapper could not access its cache; the project interpreter's bundled ruff remained available.
+- **Lesson**: Classify cache/access failures separately from code lint failures. Retry the same bounded check with the workspace interpreter when available, and do not convert a wrapper failure into a runtime or provider claim.
+- **Verification**: `/Users/jameschen/Workspace/nexus/.venv/bin/ruff check ...` passed for the newly added runtime and test files; focused runtime tests remained green. A NightShift non-Git tier-1 fixture still fails before pytest for the same uv-cache permission reason (`uv run pytest ...`), so it is not runtime evidence.
+
+## 2026-07-13 - NightShift fixture context hub assumption remains pre-existing
+
+- **Phenomenon**: The bounded NightShift regression command stopped at `shift.hub.load_program_rules` because a non-Git temp fixture initializes `hub=None`.
+- **Root Cause**: The fixture assumes an injected ContextHub even though the service intentionally leaves it absent outside a Git workspace.
+- **Lesson**: Keep this fixture failure separate from unified-runtime migration evidence; repair the fixture or inject a hub in a dedicated test task rather than weakening the canonical seam.
+- **Verification**: The canonical runtime and cross-service suite passed `43 passed`; no NightShift production claim was based on the failing fixture.
+
+## 2026-07-13 - Gateway test doubles must accept positional prompt transport
+
+- **Phenomenon**: The first Sprint canonical-consumer test returned `online_exception` because its `ask_structured` lambda accepted only keyword arguments while `BattlesuitGateway.ask_unified` forwards prompt and payload positionally.
+- **Root Cause**: The test double modeled the legacy direct-call signature instead of the actual Gateway transport contract.
+- **Lesson**: Unified caller tests must accept the production adapter's positional prompt/payload plus keyword route metadata; otherwise the failure is a fixture-contract error, not provider or runtime evidence.
+- **Verification**: After correcting the double, the Sprint file passed `62 passed`, including the revisioned-workspace unified-runtime test.
+
+## 2026-07-13 - Sprint lint debt is separate from runtime migration
+
+- **Phenomenon**: The bounded ruff check for Sprint plus the new runtime files still reports two pre-existing unused locals (`effective_timeout` and `is_refactor`) in `sprint_service.py`.
+- **Root Cause**: Existing Sprint implementation carries unrelated lint debt outside the canonical caller seam.
+- **Lesson**: Do not silently widen a runtime migration into cleanup of unrelated research logic; keep the lint findings visible and resolve them in a separate maintenance slice.
+- **Verification**: Python compilation, JSON validation, diff check, and the 62-test Sprint suite passed; only the two pre-existing F841 findings remain.
+
+## 2026-07-13 - Hybrid requests must wrap LocalAssistRequest inside UnifiedRuntimeRequest
+
+- **Phenomenon**: The first actual LocalAssist + Gateway hybrid probe passed a `LocalAssistRequest` directly to `ask_unified`, causing `missing_planner_snapshot` before the shared planner could inject its snapshot.
+- **Root Cause**: `BattlesuitGateway.ask_unified` accepts the canonical `UnifiedRuntimeRequest`; LocalAssistRequest is the nested local-stage payload.
+- **Lesson**: Hybrid callers must preserve the two-level contract: one task-scoped UnifiedRuntimeRequest owns Planner/Online/Receipt, and LocalAssistRequest is passed through `local_request`. Never bypass the canonical planner wrapper.
+- **Verification**: After wrapping correctly, actual `CapabilityPlanner` selected `local_model_executor`, actual `LocalAssistService` with injected provider returned `SUCCEEDED`, Gateway Online returned `SUCCEEDED`, and one receipt reached `receipt_complete=true`; no external provider was invoked.
+
+## 2026-07-13 - Hybrid caller must set both local route and local payload
+
+- **Phenomenon**: The first opt-in Sprint Local Assist test constructed a `LocalAssistRequest` but the unified request omitted `local_enabled` and `local_request`, so the receipt correctly showed `local=NOT_REQUESTED`.
+- **Root Cause**: The caller built the nested local payload and route metadata but did not set the canonical request switches consumed by `UnifiedRuntime`.
+- **Lesson**: Hybrid callers must set both `local_enabled=true` and the nested `local_request`; route labels alone are not execution authority. Verify the receipt stage, not only the request construction.
+- **Verification**: After adding both fields, the Sprint hybrid test passed and the Online prompt contained the injected Local diagnosis; external providers remained uninvoked.
+
+## 2026-07-13 - Provider-neutral edge adapters must preserve task identity
+
+- **Phenomenon**: The first unified provider seam validated provider invocation and output, but a provider, verifier, or learning callback could return evidence for a different task while the outer receipt retained the current task id.
+- **Root Cause**: Stage payloads were treated as observations without an explicit task-identity comparison at Online, Local, verifier, learning, and finalization boundaries.
+- **Lesson**: Every stage may omit a task id only when the enclosing runtime supplies it; when a payload supplies one, it must match the canonical task id or the stage and receipt must fail closed. Provider-specific discovery belongs at the edge through one invoker factory; it must never create a second planner or receipt path.
+- **Verification**: Four registered providers share `build_registered_online_invoker`; explicit Gateway provider selection, cross-task stage rejection, and cross-task finalization rejection pass in the unified-runtime suite (17 passed).
+
+## 2026-07-13 - Gateway lint debt remains separate from provider-edge wiring
+
+- **Phenomenon**: Full-file ruff on `gateway.py` reports pre-existing import ordering and unused imports while the new provider-edge path compiles and its focused tests pass.
+- **Root Cause**: Gateway contains unrelated legacy import debt outside the bounded UnifiedRuntime change.
+- **Lesson**: Keep provider-edge behavior verification separate from broad Gateway cleanup; do not claim a clean Gateway lint result until a dedicated maintenance slice removes the unrelated findings.
+- **Verification**: `py_compile`, unified-runtime tests, and diff checks pass; Gateway ruff remains explicitly residual debt.
+
+## 2026-07-13 - Non-Git NightShift fixtures must use the workspace interpreter
+
+- **Phenomenon**: The bounded M3 suite had one NightShift fixture failure before pytest started because `uv run pytest` attempted to open a managed cache path and returned `Operation not permitted`.
+- **Root Cause**: Non-Git temporary fixtures do not need uv project resolution, while the wrapper's cache access is an unrelated tooling boundary.
+- **Lesson**: Keep Git-backed validation on the repository's uv contract, but run non-Git fixture validation through `sys.executable -m pytest` so cache permissions cannot mask fixture behavior.
+- **Verification**: After the bounded command split, the full M3 suite passed 212 tests; unrelated legacy NightShift ruff findings remain outside this runtime slice.
+
+## 2026-07-13 - Planner selection is not capability invocation
+
+- **Phenomenon**: Unified receipts listed selected capability names but marked every capability `invoked=false`, making a Planner decision easy to misread as execution evidence.
+- **Root Cause**: Capability selection and stage execution are different events; only Local Assist and explicitly declared Online capability consumers have a runtime stage to cite.
+- **Lesson**: Record `delegated_to`, `stage`, `status`, `task_id`, and evidence refs per capability. Use `SELECTED_NOT_EXECUTED` when no runtime executor is observed; never promote Planner selection into capability consumption.
+- **Verification**: Unified-runtime receipts now expose capability-level delegation and task identity; bounded tests cover planner-only and Local-invoked cases.
+
+## 2026-07-13 - Unified caller doubles must honor receipt-path ownership
+
+- **Phenomenon**: The first `content:rewrite` unified-consumer double failed before receipt validation because it wrote to a nested receipt path without creating its parent directory.
+- **Root Cause**: The production `UnifiedRuntime` owns receipt directory creation; the test double modeled only payload shape and omitted that transport contract.
+- **Lesson**: Caller doubles for `ask_unified` must preserve the receipt-path side effect contract or explicitly inject a pre-created path; a fixture filesystem error is not provider or runtime evidence.
+- **Verification**: After aligning the double, the CLI content-rewrite unified-consumer test passed and writes the unified receipt reference into the report.
+
+## 2026-07-13 - Scenario preflight readers must pass file content to JSON parsers
+
+- **Phenomenon**: A post-run preflight inspection raised `AttributeError` because a `Path` object was passed directly to `json.load` instead of an opened file handle.
+- **Root Cause**: The verification helper mixed path-oriented and stream-oriented JSON APIs; the scenario receipt itself was written correctly.
+- **Lesson**: Keep evidence readers explicit: use `json.load(open(path))` or `json.loads(path.read_text())`, then report parser failures separately from runtime/provider failures.
+- **Verification**: The corrected reader confirmed A/B/C all returned `AUTHORIZATION_REQUIRED_NOT_RUN` with zero provider calls; no live invocation occurred.
+
+## 2026-07-13 - Local Ollama daemon absence is an execution eligibility boundary
+
+- **Phenomenon**: The read-only probe to `http://127.0.0.1:11434/api/tags` returned connection refused.
+- **Root Cause**: No Ollama daemon was listening on the local model endpoint; this is machine state, not evidence that the UnifiedRuntime Local stage is broken.
+- **Lesson**: Keep local-provider availability separate from LocalAssist contract evidence. Do not invoke or claim Scenario C until the daemon/model preflight and explicit local-call authorization both pass.
+- **Verification**: No model call was made; the A/B/C harness remains fail-closed with zero provider calls.
+
+## 2026-07-13 - Scenario authorization tests must clear simulated provider grants
+
+- **Phenomenon**: The first D-control test inherited `NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1` from the preceding hybrid assertion and entered the provider path, returning `INCOMPLETE` instead of the expected authorization gate.
+- **Root Cause**: The test reused mutable authorization state across scenarios; a live flag plus environment grant is execution authority by design.
+- **Lesson**: Every fail-closed scenario test must explicitly clear or set all authorization variables immediately before invocation; never rely on test ordering to prevent provider calls.
+- **Verification**: After clearing the grant, D returns `AUTHORIZATION_REQUIRED_NOT_RUN`; the test suite makes no external provider claim.
+
+## 2026-07-13 - Process-list denial is not provider-state evidence
+
+- **Phenomenon**: A post-test `ps` inspection returned `Operation not permitted` under the sandbox.
+- **Root Cause**: Process enumeration is restricted by the execution environment, independent of the UnifiedRuntime or provider result.
+- **Lesson**: Do not infer provider liveness or termination from a denied process listing; rely on the harness receipt, explicit command result, and authorized provider telemetry instead.
+- **Verification**: The deterministic D control receipt recorded `SUCCEEDED`, one `grok`-labeled edge call, and complete Planner/Online/Verifier/Learning stages; no external-live claim was made.
+
+## 2026-07-13 - Split bounded suites when aggregate output loses its terminal summary
+
+- **Phenomenon**: A combined 220-test command stopped emitting output during Sprint before its pytest summary was visible.
+- **Root Cause**: The aggregate invocation exceeded the reliable bounded-output/runtime window; this did not provide an authoritative exit summary.
+- **Lesson**: Treat an incomplete aggregate test transcript as unverified. Re-run the slow slice and the remaining slices separately, then add their authoritative counts rather than inferring completion from partial progress.
+- **Verification**: Sprint completed `63 passed`; the remaining M3 slices completed `157 passed`; compile, JSON validation, and diff checks also passed.
+
+## 2026-07-13 - Live provider wrappers must stay inside the allowed workspace boundary
+
+- **Phenomenon**: A shell glob against an optional service path failed under zsh, and an attempted temporary provider wrapper under `/private/tmp` was rejected by the workspace boundary.
+- **Root Cause**: Optional-path discovery was not quoted, and the live-gate helper was placed outside the task's allowed project paths.
+- **Lesson**: Quote optional globs or use explicit `rg` paths; keep provider-edge helpers in `scripts/ops/` or use an existing CLI invocation, never create out-of-scope temporary files as a workaround.
+- **Verification**: Re-ran bounded discovery with quoted paths; the authorized live receipt captured the actual provider errors without modifying out-of-scope files.
+
+## 2026-07-13 - Ollama endpoint type must match the provider request contract
+
+- **Phenomenon**: The first authorized Local Assist run invoked the installed model but delivered empty output; a direct probe initially reproduced the issue.
+- **Root Cause**: `LocalModelProviderRequest` defaults to generate-style payload parsing, while the probe used an `/api/chat` URL; the model was healthy but the response field did not match the selected API type. A probe also omitted the required `evidence_refs` field on its first attempt.
+- **Lesson**: Keep Ollama URL and `api_type` aligned, and construct provider probes from the full request contract. A model invocation with `model_called=true` is not output evidence until `output_delivered=true` and the receipt closes.
+- **Verification**: `/api/generate` returned `NEXUS_LOCAL_OK`; the corrected A/B/C/D live matrix then recorded Local B/C `SUCCEEDED`, `output_delivered=true`, and complete receipts.
+
+## 2026-07-13 - Provider authentication and CLI config are separate runtime gates
+
+- **Phenomenon**: Gemini headless invocation failed with `IneligibleTierError`; Codex initially failed on a stale model-cache config variant, while the installed OpenAI command exposed only SDK migration subcommands.
+- **Root Cause**: Provider account eligibility and local CLI configuration are external edge state, not UnifiedRuntime planner or receipt failures.
+- **Lesson**: Record provider-specific auth/config failures as edge evidence. A provider-neutral registration proves shared runtime wiring, but not provider availability; use a non-mutating provider-specific recovery mode only when it preserves the same edge contract.
+- **Verification**: Gemini remained fail-closed; Codex succeeded with `--ephemeral --ignore-user-config`; OpenAI was classified as SDK-only rather than a live model CLI.
+
+## 2026-07-13 - Bound jq filters before iterating nested evidence arrays
+
+- **Phenomenon**: A compact post-run `jq` expression attempted to index the numeric result of `length` as if it were an observation object.
+- **Root Cause**: The filter combined `length` and array iteration without a separate expression boundary.
+- **Lesson**: Validate evidence readers with one projection per command or parenthesize the array before mapping; a reporting-reader error must not be confused with a runtime receipt failure.
+- **Verification**: The underlying JSON remained valid and the corrected per-observation projection was used for report alignment.
+
+## 2026-07-13 - Keep zsh report inspections syntactically bounded
+
+- **Phenomenon**: A compact shell loop intended to inspect several report files returned `zsh: === not found` before reading any evidence.
+- **Root Cause**: The inspection command used an unquoted separator-like token in a loop body; the failure was shell syntax, not a report or runtime failure.
+- **Lesson**: Use one explicit `rg`/`jq` projection per report (or quote loop labels) when validating evidence; never infer stale or missing runtime state from a malformed inspection command.
+- **Verification**: Re-ran each JSON/Markdown inspection as separate bounded commands, then validated the patched report set with JSON parsing and focused tests.
+
+## 2026-07-13 - Preserve unknown-provider fail-closed resolution when widening the edge
+
+- **Phenomenon**: After making same-provider Grok/Codex routes use the registered edge, the unknown-provider test fell through to the Gateway authorization guard instead of returning `provider_adapter_resolution_failed`.
+- **Root Cause**: The new branch only entered provider resolution for registered providers, so an unknown route lost the existing fail-closed diagnostic boundary.
+- **Lesson**: When widening a provider edge condition, keep unregistered routes inside the resolver and return an explicit resolution failure; never let an unknown provider silently inherit the configured Gateway transport.
+- **Verification**: The condition was split into an edge-resolution predicate that includes both registered same-provider routes and unknown providers; the focused suite is rerun before accepting the change.
+
+## 2026-07-13 - Scope report patches by entry identifier
+
+- **Phenomenon**: A broad JSON patch intended for the Codex entry matched the earlier Gemini field block and temporarily changed Gemini's status fields.
+- **Root Cause**: Repeated field names were patched without an enclosing `entry_id` anchor.
+- **Lesson**: For repeated report schemas, patch within the named object boundary and immediately query the affected identifiers; never trust a successful patch application as proof that the intended row changed.
+- **Verification**: Gemini was restored to `NOT_PROVEN`, Codex was updated to live-matrix evidence, and both report JSON parsing and diff checks passed.
+
+## 2026-07-13 - Anchor repeated capability rows before status edits
+
+- **Phenomenon**: A repeated-field patch intended for the Memory row first changed Search/Ranking status fields because both rows share the same `online/local/hybrid` keys.
+- **Root Cause**: The patch lacked a capability-name anchor.
+- **Lesson**: Patch repeated capability schema fields only inside the named capability object, then query both the target and neighboring rows before validation.
+- **Verification**: Search/Ranking was restored to contract-only, Memory was changed to injected-hybrid probe-only, and the report parsed successfully.
+
+## 2026-07-13 - Optional LanceDB failure must remain visible in Local memory receipts
+
+- **Phenomenon**: The bounded Local memory edge returned five provenance-backed lessons, while the optional LanceDB backend reported `No module named 'lancedb'`.
+- **Root Cause**: The composite memory adapter intentionally falls back to local JSONL/Findings sources when the vector dependency is unavailable; the fallback is useful but is not vector-backend proof.
+- **Lesson**: Keep backend-level errors in retrieval metadata and claim only the observed Local memory read. Do not upgrade a fallback hit into LanceDB or semantic-search production evidence.
+- **Verification**: `build_local_memory_capability_invoker` produced one task-scoped receipt with `status=ok`, five lessons, `retrieval_sources=[LocalJsonlLessonStore]`, and a visible LanceDB `InfrastructureError` backend receipt.
+
+## 2026-07-13 - Inspect compact report shape before applying evidence patches
+
+- **Phenomenon**: A combined report patch failed because `capability_economics.json` uses compact one-line capability objects rather than the expanded layout assumed by the patch.
+- **Root Cause**: The patch was based on rendered inspection output instead of the file's exact serialized shape.
+- **Lesson**: Query the raw bounded region before editing machine-readable reports; patch exact anchors and validate JSON immediately after.
+- **Verification**: The capability rows were updated with exact one-line anchors, then all affected JSON reports parsed successfully.
+
+## 2026-07-13 - Capability factories must return their callable edge
+
+- **Phenomenon**: The first Prompt Compression executor test failed with `TypeError: 'NoneType' object is not callable`.
+- **Root Cause**: The factory defined its nested invoker but omitted the final `return invoke`, so the Runtime received no callable capability edge.
+- **Lesson**: Every capability factory needs a direct callable-return test before wiring it into Planner execution; a valid function body alone does not prove the edge is constructed.
+- **Verification**: Added the missing return, then reran the focused planner/runtime tests.
