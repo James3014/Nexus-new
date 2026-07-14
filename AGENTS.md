@@ -26,6 +26,7 @@
 - **No recursive evidence artifacts**: Do not create a report solely to document creation of another report, inventory, receipt, or closeout artifact.
 - **Required metadata**: Any admitted persistent document must identify its purpose, authority (`current`, `reference`, or `historical`), owner, status, and the evidence/commit it describes. Claims such as `COMPLETE`, `SEALED`, `PRODUCTION READY`, or `PUBLIC CLAIM ALLOWED` require the corresponding physical gate evidence.
 - **Task-card enforcement**: If a task requests a new artifact, its allowed path and filename must appear in the task's Allowed files. Otherwise return evidence in the final response only.
+- **Legacy authority**: Persistent documents created before the admission policy, or documents lacking artifact_authority metadata, are evidence-only by default. They must not be treated as current authority unless a current manifest, ADR, runbook, code consumer, or task specification explicitly promotes them. Claims in a report do not override physical code, tests, runtime receipts, or newer authoritative contracts.
 
 ## 🛡️ Agent Capability Boundaries
 - **allowed_paths**: Project root, scripts/ops/, nexus_wiki_vault/, docs/

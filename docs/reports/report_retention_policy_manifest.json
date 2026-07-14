@@ -41,5 +41,15 @@
   ],
   "root_retention_keywords": {
     "human_entrypoint": ["SUMMARY", "INDEX", "PLAN", "CURRENT_STATE", "FINALIZATION"]
+  },
+  "legacy_authority": {
+    "missing_metadata_default": "evidence_only",
+    "may_override_current_authority": false,
+    "promotion_requires": [
+      "current_manifest_reference",
+      "current_adr_reference",
+      "runtime_consumer_reference",
+      "explicit_task_promotion"
+    ]
   }
 }

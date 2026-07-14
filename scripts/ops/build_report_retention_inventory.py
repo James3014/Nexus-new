@@ -244,6 +244,50 @@ def _manifest_keep_refs(reports_dir: Path) -> set[str]:
     return refs
 
 
+def _has_admission_metadata(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    if path.suffix == ".md":
+        lines = text.split("\n")
+        if not lines or lines[0].strip() != "---":
+            return False
+        end = -1
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == "---":
+                end = i
+                break
+        if end == -1:
+            return False
+        for line in lines[1:end]:
+            if line.strip().startswith("artifact_authority:"):
+                return True
+        return False
+    if path.suffix == ".json":
+        try:
+            data = json.loads(text)
+            return isinstance(data, dict) and "_artifact_admission" in data
+        except Exception:
+            return False
+    return False
+
+
+def _authority_status(path: Path, retention_class: str) -> str:
+    if retention_class == "historical_preserved":
+        return "historical"
+    if path.name in {
+        "report_area_manifest.json",
+        "report_retention_policy_manifest.json",
+        "NEXUS_REPORT_RETENTION_INVENTORY_2026-05-22.json",
+        "NEXUS_REPORT_RETENTION_PLAN_2026-05-22.md",
+    }:
+        return "current"
+    if _has_admission_metadata(path):
+        return "current"
+    return "evidence_only"
+
+
 def build_inventory(
     *,
     reports_dir: Path = DEFAULT_REPORTS_DIR,
@@ -284,6 +328,7 @@ def build_inventory(
                 "size_bytes": stat.st_size,
                 "report_area": area.value,
                 "retention_class": retention_class,
+                "authority_status": _authority_status(path, retention_class),
                 "reason": reason,
                 "action": "no_move_no_delete_inventory_only",
             }
