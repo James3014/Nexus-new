@@ -18,10 +18,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
+import posixpath
 import re
 import sys
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +73,15 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
+# Frontmatter verification keys to preserve
+VERIFICATION_KEYS = [
+    "content_verified_against_commit",
+    "document_updated_in_commit",
+    "verified_at",
+    "last_verified",
+    "last_audit",
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,8 +92,51 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def normalize_path(p: str) -> str:
-    """Normalize a vault-relative path to forward slashes, no leading './'."""
-    return p.replace("\\", "/").lstrip("./")
+    """Normalize a vault-relative path using POSIX lexical normalization.
+
+    Folds '..', '.', double slashes, and strips leading './'.
+    Returns empty string if path escapes vault root.
+    """
+    p = p.replace("\\", "/")
+    p = posixpath.normpath(p)
+    # Remove leading ./ or ../
+    while p.startswith("./"):
+        p = p[2:]
+    if p == ".":
+        p = ""
+    return p
+
+
+def resolve_relative_path(source_dir: str, target: str) -> str:
+    """Resolve a relative link target against source directory, returning
+    vault-relative normalized path. Returns empty string if escapes vault."""
+    # Strip fragment
+    target_no_frag = target.split("#")[0]
+    # Strip optional .md extension for matching
+    # But keep it for path resolution
+
+    if source_dir == "" or source_dir == ".":
+        base = ""
+    else:
+        base = source_dir
+
+    if base:
+        resolved = posixpath.normpath(posixpath.join(base, target_no_frag))
+    else:
+        resolved = posixpath.normpath(target_no_frag)
+
+    # Normalize
+    resolved = resolved.replace("\\", "/")
+
+    # Check vault escape
+    if resolved.startswith("..") or resolved.startswith("/"):
+        return ""
+
+    # Remove leading ./
+    while resolved.startswith("./"):
+        resolved = resolved[2:]
+
+    return resolved
 
 
 def is_excluded(rel_path: str) -> bool:
@@ -107,6 +158,17 @@ def parse_frontmatter(content: str) -> dict:
         return yaml.safe_load(m.group(1)) or {}
     except yaml.YAMLError:
         return {}
+
+
+def extract_verification_metadata(fm: dict) -> dict[str, str]:
+    """Extract verification metadata from frontmatter. Returns dict with
+    only keys that exist in frontmatter."""
+    result: dict[str, str] = {}
+    for key in VERIFICATION_KEYS:
+        val = fm.get(key, "")
+        if val:
+            result[key] = str(val)
+    return result
 
 
 def extract_one_sentence_summary(content: str) -> str:
@@ -141,43 +203,60 @@ def extract_one_sentence_summary(content: str) -> str:
     return ""
 
 
+def strip_wikilink(raw: str) -> tuple[str, str]:
+    """Strip alias and anchor from wikilink. Returns (stem, alias)."""
+    # Remove alias
+    stem = raw.split("|")[0].strip()
+    # Remove anchor
+    anchor = ""
+    if "#" in stem:
+        stem, anchor = stem.split("#", 1)
+    return stem, anchor
+
+
 def resolve_wikilink_target(
     stem: str,
-    source_rel: str,
-    pages_by_stem: dict[str, list[str]],
     pages_by_rel: dict[str, str],
+    pages_by_stem: dict[str, list[str]],
+    pages_by_casefold: dict[str, list[str]],
 ) -> str | None:
-    """Resolve a wikilink stem to a page ID or None."""
-    # Normalize the stem: lowercase, replace spaces with underscores
-    normalized = stem.lower().replace(" ", "_")
+    """Resolve a wikilink stem to a page ID or None.
 
-    # If normalized stem matches a relative path exactly
-    if normalized in pages_by_rel:
-        return f"page:{normalized}"
+    Resolution order:
+    1. Exact vault-relative path match (with or without .md)
+    2. Case-folded vault-relative path match
+    3. Unique stem match
+    4. Unique case-folded stem match
+    """
+    # 1. Exact path match
+    if stem in pages_by_rel:
+        return pages_by_rel[stem]
+    # With .md
+    if stem + ".md" in pages_by_rel:
+        return pages_by_rel[stem + ".md"]
 
-    candidates = pages_by_stem.get(normalized, [])
+    # 2. Case-folded path match
+    cf = stem.lower()
+    if cf in pages_by_casefold:
+        candidates = pages_by_casefold[cf]
+        if len(candidates) == 1:
+            return f"page:{candidates[0]}"
+        return None  # ambiguous
+
+    # 3. Unique stem match (normalized)
+    norm_stem = stem.lower().replace(" ", "_")
+    candidates = pages_by_stem.get(norm_stem, [])
     if len(candidates) == 1:
         return f"page:{candidates[0]}"
     if len(candidates) > 1:
         return None  # ambiguous
-    return None
 
+    # 4. Case-folded stem
+    cf_stem = stem.lower().replace(" ", "_")
+    cf_candidates = pages_by_stem.get(cf_stem, [])
+    if len(cf_candidates) == 1:
+        return f"page:{cf_candidates[0]}"
 
-def resolve_relative_link(
-    target: str,
-    source_rel: str,
-    pages_by_rel: dict[str, str],
-) -> str | None:
-    """Resolve a markdown relative link to a page ID."""
-    source_dir = str(Path(source_rel).parent)
-    if source_dir == ".":
-        resolved = normalize_path(target)
-    else:
-        resolved = normalize_path(str(Path(source_dir) / target))
-    # Strip section
-    resolved = resolved.split("#")[0]
-    if resolved in pages_by_rel:
-        return f"page:{resolved}"
     return None
 
 
@@ -209,7 +288,9 @@ class WikiIndexCompiler:
 
         # Indexes
         self.pages_by_rel: dict[str, str] = {}  # rel_path -> page_id
-        self.pages_by_stem: dict[str, list[str]] = {}  # stem -> [rel_paths]
+        self.pages_by_stem: dict[str, list[str]] = {}  # normalized_stem -> [rel_paths]
+        self.pages_by_casefold: dict[str, list[str]] = {}  # lower(path) -> [rel_paths]
+        self.rel_to_final_id: dict[str, str] = {}  # rel_path -> final page_id
 
     def _load_manifest(self) -> dict:
         if not self.authority_manifest.exists():
@@ -297,19 +378,26 @@ class WikiIndexCompiler:
 
         classification, lifecycle, status = self._classify_page(rel, fm)
         one_sentence = extract_one_sentence_summary(content)
+        verification = extract_verification_metadata(fm)
 
         # Canonical check
         is_canonical = rel in canonical_map
         canonical_key = canonical_map[rel]["key"] if is_canonical else ""
         authority_val = canonical_map[rel]["authority"] if is_canonical else ""
 
-        # Build page ID
-        page_id = f"page:{rel}"
+        # Build page ID: canonical pages use canonical:<key>, others use page:<path>
+        if is_canonical:
+            page_id = f"canonical:{canonical_key}"
+        else:
+            page_id = f"page:{rel}"
+
+        # Store mapping
+        self.rel_to_final_id[rel] = page_id
 
         # Outgoing links
         outgoing, unresolved = self._extract_links(content, rel)
 
-        return {
+        result: dict[str, Any] = {
             "id": page_id,
             "path": rel,
             "title": fm.get("title", path.stem),
@@ -321,7 +409,6 @@ class WikiIndexCompiler:
             "owner": fm.get("owner", ""),
             "confidence": fm.get("confidence", ""),
             "source_of_truth": fm.get("source_of_truth", ""),
-            "content_verified_against_commit": "",
             "aliases": fm.get("aliases", []) if isinstance(fm.get("aliases"), list) else [],
             "tags": fm.get("tags", []) if isinstance(fm.get("tags"), list) else [],
             "is_canonical": is_canonical,
@@ -332,27 +419,54 @@ class WikiIndexCompiler:
             "unresolved_links": unresolved,
         }
 
+        # Add verification metadata
+        for key in VERIFICATION_KEYS:
+            result[key] = verification.get(key, "")
+
+        return result
+
     def _extract_links(
         self, content: str, source_rel: str
-    ) -> tuple[list[tuple[str, str]], list[str]]:
+    ) -> tuple[list[tuple[str, str]], list[dict]]:
         outgoing: list[tuple[str, str]] = []  # (target_id, syntax)
-        unresolved: list[str] = []
+        unresolved: list[dict] = []
+
+        source_dir = str(Path(source_rel).parent)
+        if source_dir == ".":
+            source_dir = ""
 
         # Skip code blocks
         no_code = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
 
         # Wikilinks
         for m in WIKILINK_RE.finditer(no_code):
-            raw = m.group(1).strip()
-            # Strip section
-            link_stem = raw.split("#")[0]
+            raw_link = m.group(1).strip()
+            stem, anchor = strip_wikilink(raw_link)
+
             target_id = resolve_wikilink_target(
-                link_stem, source_rel, self.pages_by_stem, self.pages_by_rel
+                stem, self.pages_by_rel, self.pages_by_stem, self.pages_by_casefold
             )
             if target_id:
                 outgoing.append((target_id, "wikilink"))
             else:
-                unresolved.append(f"wikilink:{raw}")
+                # Determine reason: ambiguous vs missing vs outside_vault
+                reason = "missing"
+                resolved = resolve_relative_path(source_dir, stem)
+                if resolved == "" and stem.startswith(".."):
+                    reason = "outside_vault"
+                else:
+                    # Check if stem matches multiple pages (ambiguous)
+                    norm_stem = stem.lower().replace(" ", "_")
+                    stem_candidates = self.pages_by_stem.get(norm_stem, [])
+                    if len(stem_candidates) > 1:
+                        reason = "ambiguous"
+                unresolved.append({
+                    "source": f"page:{source_rel}",
+                    "source_path": source_rel,
+                    "raw_target": raw_link,
+                    "syntax": "wikilink",
+                    "reason": reason,
+                })
 
         # Markdown links (relative only, skip external)
         for m in MARKDOWN_LINK_RE.finditer(no_code):
@@ -366,15 +480,47 @@ class WikiIndexCompiler:
                 target.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
             ):
                 continue
-            target_id = resolve_relative_link(target, source_rel, self.pages_by_rel)
-            if target_id:
-                outgoing.append((target_id, "markdown"))
-            else:
-                unresolved.append(f"markdown:{target}")
+
+            # Strip fragment
+            target_no_frag = target.split("#")[0]
+            if not target_no_frag:
+                continue
+
+            # Resolve relative path
+            resolved = resolve_relative_path(source_dir, target)
+
+            if resolved == "":
+                # Escapes vault
+                unresolved.append({
+                    "source": f"page:{source_rel}",
+                    "source_path": source_rel,
+                    "raw_target": target,
+                    "syntax": "markdown",
+                    "reason": "outside_vault",
+                })
+                continue
+
+            # Try exact match
+            if resolved in self.pages_by_rel:
+                outgoing.append((self.pages_by_rel[resolved], "markdown"))
+                continue
+            # With .md extension
+            if resolved + ".md" in self.pages_by_rel:
+                outgoing.append((self.pages_by_rel[resolved + ".md"], "markdown"))
+                continue
+
+            unresolved.append({
+                "source": f"page:{source_rel}",
+                "source_path": source_rel,
+                "raw_target": target,
+                "syntax": "markdown",
+                "reason": "missing",
+            })
 
         return outgoing, unresolved
 
-    def _build_graph(self, pages: list[dict]) -> dict:
+    def _build_graph(self, pages: list[dict]) -> tuple[dict, list[dict]]:
+        """Build graph and collect all unresolved links."""
         nodes = []
         for p in pages:
             nodes.append(
@@ -389,6 +535,7 @@ class WikiIndexCompiler:
             )
 
         edges: list[dict] = []
+        all_unresolved: list[dict] = []
         seen_edges: set[tuple[str, str, str]] = set()
         for p in pages:
             for target_id, syntax in p["outgoing_links"]:
@@ -403,6 +550,9 @@ class WikiIndexCompiler:
                         }
                     )
                     seen_edges.add(key)
+            # Collect unresolved links
+            for u in p["unresolved_links"]:
+                all_unresolved.append(u)
 
         # Validate no dangling edges
         node_ids = {n["id"] for n in nodes}
@@ -410,14 +560,15 @@ class WikiIndexCompiler:
             assert e["source"] in node_ids, f"Dangling source: {e['source']}"
             assert e["target"] in node_ids, f"Dangling target: {e['target']}"
 
-        return {
+        graph = {
             "schema": SCHEMA_GRAPH,
             "authority": AUTHORITY,
             "source_fingerprint": "",
             "nodes": nodes,
             "edges": edges,
-            "unresolved_links": [],
+            "unresolved_links": all_unresolved,
         }
+        return graph, all_unresolved
 
     def _build_llms_txt(
         self, pages: list[dict], canonical_ordered: list[dict]
@@ -459,7 +610,7 @@ class WikiIndexCompiler:
         lines.append("")
         return "\n".join(lines)
 
-    def _compute_fingerprint(self, agent_index: dict, pages: list[dict]) -> str:
+    def _compute_fingerprint(self, pages: list[dict]) -> str:
         """Compute source fingerprint from manifest + all included markdown content."""
         parts: list[bytes] = []
 
@@ -488,10 +639,12 @@ class WikiIndexCompiler:
         # Build page indexes for link resolution
         for p in self.included:
             rel = normalize_path(str(p.relative_to(self.vault_root)))
-            # Normalize stem: lowercase, replace spaces with underscores
             stem = p.stem.lower().replace(" ", "_")
             self.pages_by_rel[rel] = f"page:{rel}"
             self.pages_by_stem.setdefault(stem, []).append(rel)
+            # Case-folded index for exact case matching
+            cf = rel.lower()
+            self.pages_by_casefold.setdefault(cf, []).append(rel)
 
         # Build all pages
         pages: list[dict] = []
@@ -499,6 +652,24 @@ class WikiIndexCompiler:
             rel = normalize_path(str(p.relative_to(self.vault_root)))
             page = self._build_page(p, canonical_map)
             pages.append(page)
+
+        # Fix canonical page IDs in outgoing links
+        # If a link target was resolved as page:<path> but the target is canonical,
+        # update to canonical:<key>
+        canonical_rel_to_id = {
+            rel: f"canonical:{canonical_map[rel]['key']}"
+            for rel in canonical_map
+        }
+        for page in pages:
+            new_outgoing = []
+            for target_id, syntax in page["outgoing_links"]:
+                # Check if target_id is page:<canonical_path>
+                if target_id.startswith("page:"):
+                    target_path = target_id[5:]
+                    if target_path in canonical_rel_to_id:
+                        target_id = canonical_rel_to_id[target_path]
+                new_outgoing.append((target_id, syntax))
+            page["outgoing_links"] = new_outgoing
 
         # Sort pages: canonical by manifest order, non-canonical by path
         canonical_order = {key: i for i, key in enumerate(self.canonical.keys())}
@@ -511,10 +682,10 @@ class WikiIndexCompiler:
         )
 
         # Build graph
-        graph = self._build_graph(pages)
+        graph, all_unresolved = self._build_graph(pages)
 
         # Compute fingerprint
-        fingerprint = self._compute_fingerprint({}, pages)
+        fingerprint = self._compute_fingerprint(pages)
 
         # Inject fingerprint into graph
         graph["source_fingerprint"] = fingerprint

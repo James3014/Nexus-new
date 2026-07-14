@@ -2,6 +2,7 @@
 """Tests for the deterministic wiki agent retrieval index compiler."""
 import json
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ops" / "build_wiki_agent_index.py"
+VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +112,7 @@ def _run_index(tmp_path: Path, manifest: Path, vault: Path, mode: str = "--write
     out_dir.mkdir(parents=True, exist_ok=True)
     return subprocess.run(
         [
-            "uv", "run", "python", str(SCRIPT),
+            sys.executable, str(SCRIPT),
             mode,
             "--vault-root", str(vault),
             "--authority-manifest", str(manifest),
@@ -118,7 +120,6 @@ def _run_index(tmp_path: Path, manifest: Path, vault: Path, mode: str = "--write
         ],
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
         timeout=60,
     )
 
@@ -189,7 +190,6 @@ def test_canonical_authority_order_is_preserved(tmp_path):
     idx = json.loads((out_dir / "agent-index.json").read_text())
     canonical_keys = [p["canonical_key"] for p in idx["pages"] if p["is_canonical"]]
     # z_last should come before a_first per manifest order
-    # Canonical keys use the format canonical:<key>
     assert "a_first" in canonical_keys, f"Expected a_first in {canonical_keys}"
     assert "z_last" in canonical_keys, f"Expected z_last in {canonical_keys}"
     assert canonical_keys.index("z_last") < canonical_keys.index("a_first")
@@ -394,9 +394,10 @@ def test_ambiguous_or_missing_links_are_not_guessed(tmp_path):
     idx = json.loads((out_dir / "agent-index.json").read_text())
     linker = next(p for p in idx["pages"] if p["id"] == "page:linker.md")
     # The wikilink [[Same]] is ambiguous (two pages with stem "Same")
-    assert any("ambiguous" in u.lower() or "Same" in u for u in linker["unresolved_links"])
+    unresolved_reasons = [u["reason"] for u in linker["unresolved_links"]]
+    assert "ambiguous" in unresolved_reasons, f"Expected 'ambiguous' reason in {unresolved_reasons}"
     # The relative link to nonexistent.md is missing
-    assert any("nonexistent" in u.lower() or "missing" in u.lower() for u in linker["unresolved_links"])
+    assert "missing" in unresolved_reasons, f"Expected 'missing' reason in {unresolved_reasons}"
 
 
 def test_graph_has_no_dangling_edges(tmp_path):
@@ -840,3 +841,614 @@ def test_three_files_written(tmp_path):
     assert (out_dir / "agent-index.json").exists()
     assert (out_dir / "llms.txt").exists()
     assert (out_dir / "wikilink-graph.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests (R1-R6)
+# ---------------------------------------------------------------------------
+
+
+def test_relative_parent_segments_are_normalized(tmp_path):
+    """R1: ../ paths must be folded via posixpath.normpath."""
+    vault = tmp_path / "vault"
+    vault.mkdir(parents=True, exist_ok=True)
+    (vault / "README.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: Root
+            type: entry
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # Root
+            ## One-sentence summary
+            Root page.
+            ## Role / responsibility
+            Root.
+            ## Upstream
+            None.
+            ## Downstream
+            None.
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    (vault / "01_System").mkdir(parents=True, exist_ok=True)
+    (vault / "01_System" / "CLAIM_TAXONOMY.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: CLAIM_TAXONOMY
+            type: system
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # CLAIM_TAXONOMY
+            ## One-sentence summary
+            Claims taxonomy.
+            ## Role / responsibility
+            Claims.
+            ## Upstream
+            None.
+            ## Downstream
+            None.
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    (vault / "00_Home").mkdir(parents=True, exist_ok=True)
+    (vault / "00_Home" / "AGENT_BOOTSTRAP.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: AGENT_BOOTSTRAP
+            type: home
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # AGENT_BOOTSTRAP
+            ## One-sentence summary
+            Bootstrap page linking to parent-relative target.
+            ## Role / responsibility
+            Bootstrap.
+            ## Upstream
+            None.
+            ## Downstream
+            [Claims](../01_System/CLAIM_TAXONOMY.md).
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+    # The link from 00_Home/AGENT_BOOTSTRAP.md to ../01_System/CLAIM_TAXONOMY.md
+    # should resolve to 01_System/CLAIM_TAXONOMY.md
+    assert any(
+        e["source"] == "page:00_Home/AGENT_BOOTSTRAP.md"
+        and e["target"] == "page:01_System/CLAIM_TAXONOMY.md"
+        for e in graph["edges"]
+    )
+
+
+def test_relative_parent_segments_outside_vault_are_unresolved(tmp_path):
+    """R1: paths escaping vault root must be outside_vault."""
+    vault = tmp_path / "vault"
+    vault.mkdir(parents=True, exist_ok=True)
+    (vault / "README.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: Root
+            type: entry
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # Root
+            ## One-sentence summary
+            Root.
+            ## Role / responsibility
+            Root.
+            ## Upstream
+            None.
+            ## Downstream
+            None.
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    (vault / "sub").mkdir(parents=True, exist_ok=True)
+    (vault / "sub" / "page.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: Page
+            type: module
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # Page
+            ## One-sentence summary
+            Links to escape.
+            ## Role / responsibility
+            Page.
+            ## Upstream
+            None.
+            ## Downstream
+            [Escape](../../etc/passwd.md).
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    idx = json.loads((out_dir / "agent-index.json").read_text())
+    page = next(p for p in idx["pages"] if p["id"] == "page:sub/page.md")
+    unresolved = [u for u in page["unresolved_links"] if "passwd" in u.get("raw_target", "")]
+    assert len(unresolved) == 1
+    assert unresolved[0]["reason"] == "outside_vault"
+
+
+def test_folder_qualified_wikilink_resolves_with_optional_md(tmp_path):
+    """R2: [[99_Schema/WIKI_GOVERNANCE_CHARTER]] must resolve."""
+    vault = _minimal_vault(tmp_path)
+    (vault / "99_Schema").mkdir(parents=True, exist_ok=True)
+    (vault / "99_Schema" / "WIKI_GOVERNANCE_CHARTER.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: WIKI_GOVERNANCE_CHARTER
+            type: schema
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # WIKI_GOVERNANCE_CHARTER
+            ## One-sentence summary
+            Governance charter.
+            ## Role / responsibility
+            Governance.
+            ## Upstream
+            None.
+            ## Downstream
+            None.
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    (vault / "linker.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: Linker
+            type: module
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # Linker
+            ## One-sentence summary
+            Links to folder-qualified wikilink.
+            ## Role / responsibility
+            Linker.
+            ## Upstream
+            None.
+            ## Downstream
+            [[99_Schema/WIKI_GOVERNANCE_CHARTER]].
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+    assert any(
+        e["source"] == "page:linker.md"
+        and e["target"] == "page:99_Schema/WIKI_GOVERNANCE_CHARTER.md"
+        for e in graph["edges"]
+    )
+
+
+def test_folder_qualified_wikilink_with_anchor_resolves(tmp_path):
+    """R2: [[01_System/SYSTEM_ARCHITECTURE_BLUEPRINT#Section]] must resolve."""
+    vault = _minimal_vault(tmp_path)
+    (vault / "01_System").mkdir(parents=True, exist_ok=True)
+    (vault / "01_System" / "SYSTEM_ARCHITECTURE_BLUEPRINT.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: SYSTEM_ARCHITECTURE_BLUEPRINT
+            type: system
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # SYSTEM_ARCHITECTURE_BLUEPRINT
+            ## One-sentence summary
+            Architecture blueprint.
+            ## Role / responsibility
+            Architecture.
+            ## Upstream
+            None.
+            ## Downstream
+            None.
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    (vault / "linker.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: Linker
+            type: module
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # Linker
+            ## One-sentence summary
+            Links to folder-qualified wikilink with anchor.
+            ## Role / responsibility
+            Linker.
+            ## Upstream
+            None.
+            ## Downstream
+            [[01_System/SYSTEM_ARCHITECTURE_BLUEPRINT#Section]].
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+    assert any(
+        e["source"] == "page:linker.md"
+        and e["target"] == "page:01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md"
+        for e in graph["edges"]
+    )
+
+
+def test_canonical_nodes_use_stable_canonical_ids(tmp_path):
+    """R4: Canonical pages must use canonical:<key> as their ID."""
+    vault = _minimal_vault(tmp_path)
+    manifest = _minimal_manifest(tmp_path, canonical={
+        "current_state": {"path": "00_Home/CURRENT_STATE.md", "authority": "operational"},
+    })
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    idx = json.loads((out_dir / "agent-index.json").read_text())
+    pages_by_id = {p["id"]: p for p in idx["pages"]}
+    assert "canonical:current_state" in pages_by_id, f"Expected canonical:current_state in {list(pages_by_id.keys())}"
+    assert "page:00_Home/CURRENT_STATE.md" not in pages_by_id
+
+
+def test_edges_target_final_canonical_ids(tmp_path):
+    """R4: Edges targeting canonical pages must use canonical:<key>."""
+    vault = _minimal_vault(tmp_path)
+    (vault / "00_Home").mkdir(parents=True, exist_ok=True)
+    (vault / "00_Home" / "CURRENT_STATE.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: CURRENT_STATE
+            type: home
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # CURRENT_STATE
+            ## One-sentence summary
+            Current state.
+            ## Role / responsibility
+            Status.
+            ## Upstream
+            None.
+            ## Downstream
+            None.
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    (vault / "linker.md").write_text(
+        textwrap.dedent("""\
+            ---
+            title: Linker
+            type: module
+            status: active
+            owner: agent
+            confidence: high
+            source_of_truth: compiled-wiki
+            ---
+            # Linker
+            ## One-sentence summary
+            Links to canonical page.
+            ## Role / responsibility
+            Linker.
+            ## Upstream
+            None.
+            ## Downstream
+            [[CURRENT_STATE]].
+            ## Related modules / files
+            None.
+            ## Source notes
+            None.
+            ## Open questions / conflicts
+            None.
+        """),
+        encoding="utf-8",
+    )
+    manifest = _minimal_manifest(tmp_path, canonical={
+        "current_state": {"path": "00_Home/CURRENT_STATE.md", "authority": "operational"},
+    })
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+    # Edge target must be canonical:current_state, not page:00_Home/CURRENT_STATE.md
+    assert any(
+        e["source"] == "page:linker.md" and e["target"] == "canonical:current_state"
+        for e in graph["edges"]
+    ), f"Expected canonical target in {graph['edges']}"
+    # No dangling edge to page:00_Home/CURRENT_STATE.md
+    assert not any(
+        e["target"] == "page:00_Home/CURRENT_STATE.md" for e in graph["edges"]
+    )
+
+
+def test_graph_preserves_all_structured_unresolved_links(tmp_path):
+    """R3: graph unresolved_links must have structured records."""
+    vault = _minimal_vault(tmp_path)
+    _write_file(vault / "page_x.md", textwrap.dedent("""\
+        ---
+        title: Page X
+        type: module
+        status: active
+        owner: agent
+        confidence: high
+        source_of_truth: compiled-wiki
+        ---
+        # Page X
+        ## One-sentence summary
+        Links to nonexistent and ambiguous.
+        ## Role / responsibility
+        X.
+        ## Upstream
+        None.
+        ## Downstream
+        [[Nonexistent]].
+        ## Related modules / files
+        None.
+        ## Source notes
+        None.
+        ## Open questions / conflicts
+        None.
+    """))
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+    assert len(graph["unresolved_links"]) > 0
+    for u in graph["unresolved_links"]:
+        assert "source" in u, f"Missing source in {u}"
+        assert "source_path" in u, f"Missing source_path in {u}"
+        assert "raw_target" in u, f"Missing raw_target in {u}"
+        assert "syntax" in u, f"Missing syntax in {u}"
+        assert "reason" in u, f"Missing reason in {u}"
+        assert u["syntax"] in ("wikilink", "markdown")
+
+
+def test_graph_unresolved_count_matches_agent_index(tmp_path):
+    """R3: graph unresolved count must equal agent index unresolved count."""
+    vault = _minimal_vault(tmp_path)
+    _write_file(vault / "a.md", textwrap.dedent("""\
+        ---
+        title: A
+        type: module
+        status: active
+        owner: agent
+        confidence: high
+        source_of_truth: compiled-wiki
+        ---
+        # A
+        ## One-sentence summary
+        Links to missing.
+        ## Role / responsibility
+        A.
+        ## Upstream
+        None.
+        ## Downstream
+        [[Missing1]], [[Missing2]].
+        ## Related modules / files
+        None.
+        ## Source notes
+        None.
+        ## Open questions / conflicts
+        None.
+    """))
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    idx = json.loads((out_dir / "agent-index.json").read_text())
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+    agent_unresolved = idx["unresolved_link_count"]
+    graph_unresolved = len(graph["unresolved_links"])
+    assert agent_unresolved == graph_unresolved, (
+        f"Mismatch: agent_index={agent_unresolved}, graph={graph_unresolved}"
+    )
+
+
+def test_content_verification_metadata_is_preserved(tmp_path):
+    """R5: Verification metadata from frontmatter must be preserved."""
+    vault = _minimal_vault(tmp_path)
+    _write_file(vault / "verified.md", textwrap.dedent("""\
+        ---
+        title: Verified
+        type: module
+        status: active
+        owner: agent
+        confidence: high
+        source_of_truth: compiled-wiki
+        content_verified_against_commit: abc123
+        document_updated_in_commit: def456
+        verified_at: '2026-07-14'
+        last_verified: '2026-07-13'
+        last_audit: '2026-07-12'
+        ---
+        # Verified
+        ## One-sentence summary
+        Verified page.
+        ## Role / responsibility
+        Verified.
+        ## Upstream
+        None.
+        ## Downstream
+        None.
+        ## Related modules / files
+        None.
+        ## Source notes
+        None.
+        ## Open questions / conflicts
+        None.
+    """))
+    manifest = _minimal_manifest(tmp_path, canonical={})
+    res = _run_index(tmp_path, manifest, vault)
+    assert res.returncode == 0, res.stderr
+    out_dir = tmp_path / "generated"
+    idx = json.loads((out_dir / "agent-index.json").read_text())
+    page = next(p for p in idx["pages"] if p["id"] == "page:verified.md")
+    assert page["content_verified_against_commit"] == "abc123"
+    assert page["document_updated_in_commit"] == "def456"
+    assert page["verified_at"] == "2026-07-14"
+    assert page["last_verified"] == "2026-07-13"
+    assert page["last_audit"] == "2026-07-12"
+
+
+def test_tests_do_not_require_uv_on_subprocess_path(tmp_path):
+    """R6: Tests must use sys.executable, not uv."""
+    import inspect
+    source = inspect.getsource(_run_index)
+    assert "sys.executable" in source, "_run_index must use sys.executable"
+    assert '"uv"' not in source, "_run_index must not reference uv"
+
+
+def test_real_vault_conservatively_resolvable_links(tmp_path):
+    """Real-vault invariant: conservatively resolvable links must not be unresolved."""
+    # Use the real vault
+    manifest_path = VAULT_ROOT / "99_Schema" / "WIKI_AUTHORITY_MANIFEST.yaml"
+    if not manifest_path.exists():
+        pytest.skip("Real vault not available")
+
+    out_dir = tmp_path / "generated"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    res = subprocess.run(
+        [
+            sys.executable, str(SCRIPT),
+            "--write",
+            "--vault-root", str(VAULT_ROOT),
+            "--authority-manifest", str(manifest_path),
+            "--output-dir", str(out_dir),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert res.returncode == 0, res.stderr
+
+    idx = json.loads((out_dir / "agent-index.json").read_text())
+    graph = json.loads((out_dir / "wikilink-graph.json").read_text())
+
+    # Collect all unresolved targets
+    unresolved_targets = set()
+    for u in graph["unresolved_links"]:
+        unresolved_targets.add(u["raw_target"])
+
+    # These links should always resolve in the real vault
+    must_resolve = [
+        "../01_System/CLAIM_TAXONOMY.md",
+        "99_Schema/WIKI_GOVERNANCE_CHARTER",
+        "00_Home/CURRENT_STATE",
+    ]
+    for target in must_resolve:
+        assert target not in unresolved_targets, (
+            f"'{target}' must resolve in real vault but is unresolved"
+        )
+
+    # Check well-formed SYSTEM_ARCHITECTURE_BLUEPRINT links resolve.
+    # Malformed nested wikilinks in source content (e.g. 'Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT')
+    # produce garbage raw_targets that cannot be resolved - these are data quality issues.
+    well_formed_blueprint_unresolved = [
+        u for u in graph["unresolved_links"]
+        if u.get("raw_target", "").strip() in ("SYSTEM_ARCHITECTURE_BLUEPRINT",)
+        or u.get("raw_target", "").startswith("SYSTEM_ARCHITECTURE_BLUEPRINT#")
+    ]
+    assert len(well_formed_blueprint_unresolved) == 0, (
+        f"Well-formed SYSTEM_ARCHITECTURE_BLUEPRINT links should resolve: {well_formed_blueprint_unresolved}"
+    )
