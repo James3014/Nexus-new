@@ -84,3 +84,18 @@ Classification of unresolved Wiki links is derived and non-authoritative. Only p
 ```bash
 classify_wiki_unresolved_links.py --check
 ```
+
+## 8. Link Repair Receipt
+
+Link repairs are applied in frozen deterministic batches. The receipt records what was repaired and must match the inventory's repair_batches.
+
+**Properties:**
+- Repairs are applied only from frozen batches with repairable=true entries.
+- The receipt is non-authoritative and derived.
+- Max 3 batches, max 5 source pages per batch, max 20 edits per batch.
+- Only exact_alias_match and mechanical_path_error categories are repairable.
+
+**Verification contract:**
+```bash
+apply_wiki_link_repairs.py --check
+```
