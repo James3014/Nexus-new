@@ -54,7 +54,7 @@ def _run_command(repo_root: Path, argv: list[str], *, timeout: int = 180) -> dic
     if audit_root and audit_source and repo_root.resolve() == Path(audit_source).resolve():
         execution_root = Path(audit_root)
     env = None
-    if execution_root != repo_root:
+    if audit_root and audit_source and execution_root.resolve() != Path(audit_source).resolve():
         existing_pythonpath = os.environ.get("PYTHONPATH", "").strip()
         env = os.environ.copy()
         env["PYTHONPATH"] = str(execution_root) if not existing_pythonpath else f"{execution_root}{os.pathsep}{existing_pythonpath}"
@@ -360,7 +360,8 @@ def _audit_read_only_environment(repo_root: Path, output_dir: Path):
 
 def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
     with _audit_read_only_environment(repo_root, output_dir):
-        return _run_gate_impl(repo_root, output_dir)
+        execution_root = Path(os.environ["NEXUS_AUDIT_EXECUTION_ROOT"])
+        return _run_gate_impl(execution_root, output_dir)
 
 
 def _run_gate_impl(repo_root: Path, output_dir: Path) -> dict[str, Any]:
