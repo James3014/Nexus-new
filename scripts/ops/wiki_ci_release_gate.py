@@ -48,10 +48,15 @@ def _sha256(path: Path) -> str:
 
 
 def _run_command(repo_root: Path, argv: list[str], *, timeout: int = 180) -> dict[str, Any]:
+    execution_root = repo_root
+    audit_root = os.environ.get("NEXUS_AUDIT_EXECUTION_ROOT", "").strip()
+    audit_source = os.environ.get("NEXUS_AUDIT_SOURCE_ROOT", "").strip()
+    if audit_root and audit_source and repo_root.resolve() == Path(audit_source).resolve():
+        execution_root = Path(audit_root)
     try:
         result = subprocess.run(
             argv,
-            cwd=repo_root,
+            cwd=execution_root,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -315,22 +320,30 @@ def _safe_metric(name: str, function, repo_root: Path) -> tuple[dict[str, Any], 
 
 
 @contextmanager
-def _audit_read_only_environment(output_dir: Path):
+def _audit_read_only_environment(repo_root: Path, output_dir: Path):
     keys = {**AUDIT_READ_ONLY_ENV, "NEXUS_TRUTH_CLAIMS_REPORT_PATH": str(output_dir / "wiki_truth_claims_report.json")}
     previous = {key: os.environ.get(key) for key in keys}
-    try:
-        os.environ.update(keys)
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+    with tempfile.TemporaryDirectory(prefix="nexus-wiki-audit-") as temp_dir:
+        execution_root = Path(temp_dir) / "repo"
+        shutil.copytree(repo_root, execution_root, ignore=_audit_copy_ignore)
+        keys.update({
+            "NEXUS_AUDIT_SOURCE_ROOT": str(repo_root),
+            "NEXUS_AUDIT_EXECUTION_ROOT": str(execution_root),
+        })
+        previous.update({key: os.environ.get(key) for key in keys if key not in previous})
+        try:
+            os.environ.update(keys)
+            yield
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
-    with _audit_read_only_environment(output_dir):
+    with _audit_read_only_environment(repo_root, output_dir):
         return _run_gate_impl(repo_root, output_dir)
 
 
