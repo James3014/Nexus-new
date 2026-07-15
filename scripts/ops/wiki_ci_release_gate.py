@@ -262,14 +262,15 @@ def _truth_claims_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, An
     configured_report_path = os.environ.get("NEXUS_TRUTH_CLAIMS_REPORT_PATH", "").strip()
     report_path = Path(configured_report_path).resolve() if configured_report_path else repo_root / ".nexus" / "reports" / "wiki_truth_claims_report.json"
     report_runner = (
-        "import pathlib, sys; "
+        "import os, pathlib, sys; "
         "from scripts.ops import wiki_truth_claims_check as checker; "
         "checker.REPO_ROOT = pathlib.Path(sys.argv[2]).resolve(); "
         "checker.VAULT_ROOT = checker.REPO_ROOT / 'nexus_wiki_vault'; "
         "checker.REPORT_PATH = pathlib.Path(sys.argv[1]).resolve(); "
         "_run = checker.subprocess.run; "
         "_isolated = pathlib.Path(sys.argv[3]).resolve(); "
-        "checker.subprocess.run = lambda command, *args, **kwargs: _run(command, *args, **(dict(kwargs, cwd=_isolated) if isinstance(command, str) and command.startswith('uv run ') else kwargs)); "
+        "_env = lambda: dict(os.environ, UV_PROJECT_ENVIRONMENT=str(_isolated / '.venv'), VIRTUAL_ENV='', PYTHONPATH=str(_isolated)); "
+        "checker.subprocess.run = lambda command, *args, **kwargs: _run(command, *args, **(dict(kwargs, cwd=_isolated, env=_env()) if isinstance(command, str) and command.startswith('uv run ') else kwargs)); "
         "summary = checker.run_checks(); "
         "raise SystemExit(0 if summary and summary.get('status') == 'PASS' else 1)"
     )
