@@ -92,6 +92,14 @@ class ContextHub:
                 wisdom_vault=self.wisdom_vault
             )
 
+        if deps.wiki_knowledge_agent is not None:
+            self.wiki_knowledge_agent = deps.wiki_knowledge_agent
+        elif strict_deps:
+            self.wiki_knowledge_agent = None
+        else:
+            from nexus.services.wiki_knowledge_agent import WikiKnowledgeAgent
+            self.wiki_knowledge_agent = WikiKnowledgeAgent(self.project_root)
+
     def load_program_rules(self, md_path: str = "program.md") -> str:
         """讀取 AutoResearch 規則文件。"""
         return self._text_store.load_program_rules(md_path)
@@ -202,6 +210,38 @@ class ContextHub:
             logger.error(f"⚠️ [MemoryHook] Injection failed: {e}")
         return {"reminders": [], "total_sources": 0}
 
+    def _retrieve_wiki_context(self, query: str, *, max_results: int = 3) -> Dict[str, Any]:
+        """Read current Wiki context through the fail-closed Knowledge Agent seam."""
+        if self.wiki_knowledge_agent is None:
+            return {
+                "status": "RETURN",
+                "context": "",
+                "selected_sources": [],
+                "source_fingerprint": "",
+                "retrieval_receipt": {
+                    "schema": "nexus.wiki.knowledge-agent-receipt.v1",
+                    "status": "RETURN",
+                    "blockers": ["wiki_runtime_not_configured"],
+                },
+                "blockers": ["wiki_runtime_not_configured"],
+            }
+        try:
+            return self.wiki_knowledge_agent.retrieve(query, max_results=max_results)
+        except Exception as exc:
+            logger.error("wiki_knowledge_runtime_failed: %s", exc)
+            return {
+                "status": "RETURN",
+                "context": "",
+                "selected_sources": [],
+                "source_fingerprint": "",
+                "retrieval_receipt": {
+                    "schema": "nexus.wiki.knowledge-agent-receipt.v1",
+                    "status": "RETURN",
+                    "blockers": ["wiki_runtime_exception"],
+                },
+                "blockers": ["wiki_runtime_exception"],
+            }
+
     def assemble_diag_pack(
         self, violations: List[Dict], summary: str
     ) -> Dict[str, Any]:
@@ -223,6 +263,9 @@ class ContextHub:
             "contract_version": "1.5.2",
             "memory_reminders": self._inject_memory_reminders("D"),
         }
+        wiki_retrieval = self._retrieve_wiki_context(summary, max_results=3)
+        pack["wiki_context"] = wiki_retrieval.get("context", "")
+        pack["wiki_retrieval"] = wiki_retrieval
         pack["recommended_skills"] = self.knowledge_injector.recommend_skills(summary, hotspots[:5]) if self.knowledge_injector else []
         pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(summary, hotspots[:5]) if self.knowledge_injector else ""
         
@@ -465,12 +508,16 @@ class ContextHub:
         # 🧪 TOON 語義壓縮生效
         toon_view = ToonRenderer.render(state)
 
+        wiki_query = str(state.metadata.get("task_description") or state.task_id or "")
+        wiki_retrieval = self._retrieve_wiki_context(wiki_query, max_results=3)
         return {
             "task": state.task_id,
             "plan": plan or {},
             "TOON_SUMMARY": toon_view,
             "memory": memory,
             "rules": self.load_program_rules(),
+            "wiki_context": wiki_retrieval.get("context", ""),
+            "wiki_retrieval": wiki_retrieval,
             "timestamp": datetime.now().isoformat(),
         }
 

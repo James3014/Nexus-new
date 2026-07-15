@@ -30,4 +30,5 @@ class ContextDependencies:
     wisdom_vault: Any | None = None
     belief_engine: Any | None = None
     knowledge_injector: Any | None = None
+    wiki_knowledge_agent: Any | None = None
     prompt_builder: Any | None = None

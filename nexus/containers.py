@@ -14,6 +14,7 @@ from nexus.core.commander import Commander
 from nexus.core.belief_engine import BeliefEngine
 from nexus.core.context_hub import ContextDependencies, ContextHub
 from nexus.core.knowledge_injector import KnowledgeInjector
+from nexus.services.wiki_knowledge_agent import WikiKnowledgeAgent
 from nexus.core.state_io import StateIO
 from nexus.core.router import SkillsRouter
 from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
@@ -120,12 +121,18 @@ class NexusContainer(containers.DeclarativeContainer):
         wisdom_vault=None,
     )
 
+    wiki_knowledge_agent = providers.Singleton(
+        WikiKnowledgeAgent,
+        project_root=project_root,
+    )
+
     context_dependencies = providers.Factory(
         ContextDependencies,
         memory_service=memory_service,
         wisdom_vault=None,
         belief_engine=belief_engine,
         knowledge_injector=knowledge_injector,
+        wiki_knowledge_agent=wiki_knowledge_agent,
         prompt_builder=prompt_builder,
     )
     

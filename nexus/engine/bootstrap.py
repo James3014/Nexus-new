@@ -39,6 +39,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     from nexus.core.belief_engine import BeliefEngine
     from nexus.core.context_hub import ContextDependencies, ContextHub
     from nexus.core.knowledge_injector import KnowledgeInjector
+    from nexus.services.wiki_knowledge_agent import WikiKnowledgeAgent
     from nexus.core.commander import Commander
     from nexus.engine.battle_swarm import BattleSwarm
     from nexus.engine.reflex_loop import ReflexLoop
@@ -62,6 +63,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         mem_palace=mem_palace,
         wisdom_vault=wisdom_vault,
     )
+    wiki_knowledge_agent = WikiKnowledgeAgent(project_root)
     
     context_hub = kwargs.get("context_hub") or ContextHub(
         str(project_root),
@@ -73,6 +75,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
             wisdom_vault=wisdom_vault,
             belief_engine=belief_engine,
             knowledge_injector=knowledge_injector,
+            wiki_knowledge_agent=wiki_knowledge_agent,
             prompt_builder=prompt_builder,
         ),
         strict_deps=True,
