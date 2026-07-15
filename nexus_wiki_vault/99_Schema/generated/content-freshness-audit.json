@@ -2,12 +2,13 @@
   "schema": "nexus.wiki.content-freshness.v1",
   "authority": "derived_non_authoritative",
   "status": "PASS",
-  "source_commit": "0eaf97c9b1464842b45022a77410c20257c67d6ae7c5484066d655cc244804c3",
+  "source_commit": "4453d31f4ba13165e5ab43db0c22db2d75763b2a7addbe5481a09a4f0b88db52",
   "source_commits": [
     "24c362f7a3418f0b5f4733068591b05610088c24",
     "28d701b235bce64a59b7623b273debabc5232340",
     "34c99b7e884b043421d6c2925df95fd5346ae8bc",
     "5e31d771f26303f5612938a1e0393816c679170a",
+    "6fec6324bf5c71ddf57e052ecfd0dadf8f26450b",
     "78e32a11bedcce629e91b183e592030965194249",
     "8f20350751aa1901c5d35fd7bf58f6ba297adee0",
     "93fca8e048d2c676a71b4e10ae941290f36dec59",
@@ -310,7 +311,7 @@
           "path": "scripts/ops/wiki_truth_claims_check.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+          "source_commit": "6fec6324bf5c71ddf57e052ecfd0dadf8f26450b",
           "sha256": "c26d2b3bd42f4583d8cb75507f494e557d32b78df0a9fb03a0582ea972473795"
         }
       ],
@@ -639,7 +640,7 @@
           "path": "scripts/ops/wiki_truth_claims_check.py",
           "exists": true,
           "kind": "file",
-          "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+          "source_commit": "6fec6324bf5c71ddf57e052ecfd0dadf8f26450b",
           "sha256": "c26d2b3bd42f4583d8cb75507f494e557d32b78df0a9fb03a0582ea972473795"
         }
       ],
@@ -792,7 +793,7 @@
     {
       "path": "scripts/ops/wiki_truth_claims_check.py",
       "exists": true,
-      "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
+      "source_commit": "6fec6324bf5c71ddf57e052ecfd0dadf8f26450b",
       "symbols": [
         {
           "name": "run_checks",
@@ -928,5 +929,5 @@
     "lifecycle_error_count": 0,
     "error_count": 0
   },
-  "source_fingerprint": "50759f2d7cd267b4824fecbbb3c204f1d5840ae7ef8a1c8e96a84f124bf520e1"
+  "source_fingerprint": "33d1ae7349974716a11e3d918b9d2b2e0a94873f6755ac5d7bae7800a5972422"
 }
