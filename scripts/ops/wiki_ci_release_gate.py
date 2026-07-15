@@ -40,13 +40,30 @@ def _sha256(path: Path) -> str:
 
 
 def _run_command(repo_root: Path, argv: list[str], *, timeout: int = 180) -> dict[str, Any]:
-    result = subprocess.run(
-        argv,
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": argv,
+            "status": "BLOCK",
+            "exit_code": 124,
+            "stdout": str(exc.stdout or ""),
+            "stderr": f"timeout after {timeout}s",
+        }
+    except OSError as exc:
+        return {
+            "command": argv,
+            "status": "BLOCK",
+            "exit_code": 127,
+            "stdout": "",
+            "stderr": str(exc),
+        }
     return {
         "command": argv,
         "status": "PASS" if result.returncode == 0 else "BLOCK",
@@ -216,6 +233,16 @@ def _runtime_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     )
 
 
+def _safe_metric(name: str, function, repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        return function(repo_root)
+    except Exception as exc:  # fail closed while preserving a machine receipt
+        return (
+            {"name": name, "status": "BLOCK", "reason": f"exception:{type(exc).__name__}"},
+            {"error": str(exc)},
+        )
+
+
 def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     python = sys.executable
@@ -235,11 +262,11 @@ def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
 
     hashes, source_fingerprint, identity_errors = _artifact_identity(repo_root)
     gates.append({"name": "wiki_artifact_identity", "status": "PASS" if not identity_errors else "BLOCK", "reason": ",".join(identity_errors)})
-    authority_gate, authority_metrics = _authority_metrics(repo_root)
-    coverage_gate, coverage_metrics = _coverage_metrics(repo_root)
-    freshness_gate, freshness_metrics = _freshness_metrics(repo_root)
-    links_gate, links_metrics = _current_link_metrics(repo_root)
-    runtime_gate, runtime_metrics = _runtime_metrics(repo_root)
+    authority_gate, authority_metrics = _safe_metric("wiki_required_authority_labels", _authority_metrics, repo_root)
+    coverage_gate, coverage_metrics = _safe_metric("wiki_coverage", _coverage_metrics, repo_root)
+    freshness_gate, freshness_metrics = _safe_metric("wiki_current_authority_source_paths", _freshness_metrics, repo_root)
+    links_gate, links_metrics = _safe_metric("wiki_current_authority_links", _current_link_metrics, repo_root)
+    runtime_gate, runtime_metrics = _safe_metric("knowledge_agent_runtime_integration", _runtime_metrics, repo_root)
     gates.extend([authority_gate, coverage_gate, freshness_gate, links_gate, runtime_gate])
 
     inventory_path = repo_root / GENERATED_DIR / "unresolved-link-inventory.json"
