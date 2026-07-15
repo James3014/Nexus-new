@@ -5,6 +5,9 @@ REPO_ROOT="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
 
 cd "$REPO_ROOT"
 
+echo "== Release Gate: Wiki CI/release governance =="
+uv run python scripts/ops/wiki_ci_release_gate.py --check --output-dir .nexus/reports/wiki-governance
+
 echo "== Release Gate: base ladder =="
 scripts/ops/gate_ladder.sh
 

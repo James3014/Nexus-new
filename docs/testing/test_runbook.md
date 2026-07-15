@@ -26,6 +26,20 @@ Runs the test suite with fail-fast mode enabled.
 
 ## 🛠️ Local Verification Recipes
 
+### Wiki CI, Release, and Operational Gate
+
+Run the same blocking gate locally and before release:
+
+```bash
+uv run python scripts/ops/wiki_ci_release_gate.py --check --output-dir .nexus/reports/wiki-governance
+```
+
+The command emits a commit-bound receipt and evidence file. Critical artifact,
+identity, authority, coverage, current-link, freshness, and Knowledge Agent
+runtime failures return non-zero. Governed legacy or intentional placeholder
+debt is reported as warning data and cannot turn a blocked critical gate into a
+pass.
+
 ### Workflow YAML Check
 Before pushing changes to `.github/workflows/`, verify YAML syntax:
 ```bash

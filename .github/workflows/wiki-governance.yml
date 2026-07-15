@@ -1,0 +1,46 @@
+name: Wiki Governance CI
+
+on:
+  push:
+    branches: [main, master, 'feature/**']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wiki-governance:
+    name: Wiki CI and Release Governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups --all-extras
+        env:
+          UV_SYSTEM_PYTHON: 0
+
+      - name: Run blocking Wiki governance gate
+        run: uv run python scripts/ops/wiki_ci_release_gate.py --check --output-dir .nexus/reports/wiki-governance
+
+      - name: Upload Wiki governance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiki-governance-${{ github.sha }}
+          path: .nexus/reports/wiki-governance/
+          if-no-files-found: error
+          retention-days: 14
