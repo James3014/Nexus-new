@@ -341,10 +341,13 @@ def _audit_read_only_environment(repo_root: Path, output_dir: Path):
         keys.update({
             "NEXUS_AUDIT_SOURCE_ROOT": str(repo_root),
             "NEXUS_AUDIT_EXECUTION_ROOT": str(execution_root),
+            "UV_PROJECT_ENVIRONMENT": str(execution_root / ".venv"),
+            "VIRTUAL_ENV": "",
         })
         previous.update({key: os.environ.get(key) for key in keys if key not in previous})
         try:
             os.environ.update(keys)
+            os.environ.pop("VIRTUAL_ENV", None)
             yield
         finally:
             for key, value in previous.items():
