@@ -53,10 +53,16 @@ def _run_command(repo_root: Path, argv: list[str], *, timeout: int = 180) -> dic
     audit_source = os.environ.get("NEXUS_AUDIT_SOURCE_ROOT", "").strip()
     if audit_root and audit_source and repo_root.resolve() == Path(audit_source).resolve():
         execution_root = Path(audit_root)
+    env = None
+    if execution_root != repo_root:
+        existing_pythonpath = os.environ.get("PYTHONPATH", "").strip()
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(execution_root) if not existing_pythonpath else f"{execution_root}{os.pathsep}{existing_pythonpath}"
     try:
         result = subprocess.run(
             argv,
             cwd=execution_root,
+            env=env,
             capture_output=True,
             text=True,
             timeout=timeout,
