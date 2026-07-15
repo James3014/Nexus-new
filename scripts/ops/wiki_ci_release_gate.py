@@ -12,8 +12,10 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -239,20 +241,34 @@ def _runtime_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     )
 
 
+def _audit_copy_ignore(directory: str, names: list[str]) -> set[str]:
+    ignored = {".git", ".venv", "__pycache__", ".pytest_cache", ".antigravitycli"}
+    ignored.update(name for name in names if (Path(directory) / name).is_symlink())
+    return ignored.intersection(names)
+
+
 def _truth_claims_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     configured_report_path = os.environ.get("NEXUS_TRUTH_CLAIMS_REPORT_PATH", "").strip()
     report_path = Path(configured_report_path).resolve() if configured_report_path else repo_root / ".nexus" / "reports" / "wiki_truth_claims_report.json"
     report_runner = (
         "import pathlib, sys; "
         "from scripts.ops import wiki_truth_claims_check as checker; "
-        "checker.REPORT_PATH = pathlib.Path(sys.argv[1]); "
+        "checker.REPO_ROOT = pathlib.Path(sys.argv[2]).resolve(); "
+        "checker.VAULT_ROOT = checker.REPO_ROOT / 'nexus_wiki_vault'; "
+        "checker.REPORT_PATH = pathlib.Path(sys.argv[1]).resolve(); "
+        "_run = checker.subprocess.run; "
+        "_isolated = pathlib.Path(sys.argv[3]).resolve(); "
+        "checker.subprocess.run = lambda command, *args, **kwargs: _run(command, *args, **(dict(kwargs, cwd=_isolated) if isinstance(command, str) and command.startswith('uv run ') else kwargs)); "
         "summary = checker.run_checks(); "
         "raise SystemExit(0 if summary and summary.get('status') == 'PASS' else 1)"
     )
-    execution = _run_command(
-        repo_root,
-        [sys.executable, "-c", report_runner, str(report_path)],
-    )
+    with tempfile.TemporaryDirectory(prefix="nexus-wiki-truth-") as temp_dir:
+        execution_root = Path(temp_dir) / "repo"
+        shutil.copytree(repo_root, execution_root, ignore=_audit_copy_ignore)
+        execution = _run_command(
+            execution_root,
+            [sys.executable, "-c", report_runner, str(report_path), str(repo_root), str(execution_root)],
+        )
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         summary = report.get("summary") or {}
