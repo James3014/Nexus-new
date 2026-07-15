@@ -1,9 +1,9 @@
 # Unresolved Link Classification Summary
 
-Total unresolved: 313
+Total unresolved: 312
 
 ## Category Counts
 
 - legacy_or_historical: 29
-- missing: 227
+- missing: 226
 - placeholder_or_template: 57

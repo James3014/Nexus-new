@@ -1,8 +1,8 @@
 {
   "schema": "nexus.wiki.unresolved-link-inventory.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "df6e86e18ebca8493426203718bf3c14e1ed2fd0a6baaec4d22bcc27d8fc3de8",
-  "total_unresolved": 313,
+  "source_fingerprint": "c4910d8c29a127ad57d00a4c8cb8a4f38bbcf357e7019c977223b940edc119bf",
+  "total_unresolved": 312,
   "category_counts": {
     "repo_source": 0,
     "excluded_wiki_target": 0,
@@ -11,7 +11,7 @@
     "exact_alias_match": 0,
     "mechanical_path_error": 0,
     "ambiguous": 0,
-    "missing": 227,
+    "missing": 226,
     "unsupported": 0
   },
   "entries": [
@@ -4339,33 +4339,6 @@
       "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
       "source_path": "06_Ops/Ops - Truth Claims Register.md",
       "source_classification": "active",
-      "raw_target": "CHANGELOG",
-      "syntax": "wikilink",
-      "original_reason": "missing",
-      "category": "missing",
-      "evidence": {
-        "candidate_paths": [],
-        "repo_path_exists": false,
-        "exact_alias": "",
-        "mechanical_transform": ""
-      },
-      "repairable": false,
-      "proposed_target": "",
-      "batch_id": "",
-      "governance": {
-        "status": "governed",
-        "disposition": "accepted_missing_debt",
-        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
-        "owner": "wiki-governance",
-        "policy": "missing-link-debt-v1",
-        "category": "missing",
-        "gate": "governed"
-      }
-    },
-    {
-      "source_id": "page:06_Ops/Ops - Truth Claims Register.md",
-      "source_path": "06_Ops/Ops - Truth Claims Register.md",
-      "source_classification": "active",
       "raw_target": "Ops - CI/CD Promotion Gate",
       "syntax": "wikilink",
       "original_reason": "missing",
@@ -8555,15 +8528,15 @@
   },
   "governance_summary": {
     "status": "PASS",
-    "total_entries": 313,
-    "governed_entries": 313,
+    "total_entries": 312,
+    "governed_entries": 312,
     "ungoverned_entries": 0,
     "fail_closed_entries": 0,
     "repairable_count": 0,
     "unreviewed_ambiguous_count": 0,
     "unsupported_undispositioned_count": 0,
     "by_disposition": {
-      "accepted_missing_debt": 227,
+      "accepted_missing_debt": 226,
       "accepted_placeholder_debt": 57,
       "documented_legacy_reference": 29
     },

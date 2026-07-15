@@ -1,7 +1,7 @@
 {
   "schema": "nexus.wiki.wikilink-graph.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "df6e86e18ebca8493426203718bf3c14e1ed2fd0a6baaec4d22bcc27d8fc3de8",
+  "source_fingerprint": "c4910d8c29a127ad57d00a4c8cb8a4f38bbcf357e7019c977223b940edc119bf",
   "nodes": [
     {
       "id": "canonical:entry",
@@ -5129,12 +5129,6 @@
     },
     {
       "source": "page:06_Ops/Ops - Truth Claims Register.md",
-      "target": "page:99_Schema/AGENT_SCHEMA.md",
-      "type": "explicit_link",
-      "syntax": "markdown"
-    },
-    {
-      "source": "page:06_Ops/Ops - Truth Claims Register.md",
       "target": "page:06_Ops/Ops - Provenance Exceptions and Waivers.md",
       "type": "explicit_link",
       "syntax": "markdown"
@@ -5142,12 +5136,6 @@
     {
       "source": "page:06_Ops/Ops - Truth Claims Register.md",
       "target": "page:05_Protocols/Protocol - Knowledge Lineage.md",
-      "type": "explicit_link",
-      "syntax": "markdown"
-    },
-    {
-      "source": "page:06_Ops/Ops - Truth Claims Register.md",
-      "target": "page:Reference/walkthrough.md",
       "type": "explicit_link",
       "syntax": "markdown"
     },
@@ -7104,13 +7092,6 @@
       "source": "page:06_Ops/Ops - Truth Claims Register.md",
       "source_path": "06_Ops/Ops - Truth Claims Register.md",
       "raw_target": "Source [[index",
-      "syntax": "wikilink",
-      "reason": "missing"
-    },
-    {
-      "source": "page:06_Ops/Ops - Truth Claims Register.md",
-      "source_path": "06_Ops/Ops - Truth Claims Register.md",
-      "raw_target": "CHANGELOG",
       "syntax": "wikilink",
       "reason": "missing"
     },

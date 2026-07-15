@@ -44,23 +44,23 @@ version_scope:
 |---|---|---|---|---|---|
 | `C-01` | [CI Gate](Ops - CI/CD Promotion Gate.md) 實體存在於腳本目錄。 | `scripts/ops/ci_gate.py` | `test -f scripts/ops/ci_gate.py` | ✅ | 2026-04-06 |
 | `C-02` | v22.1.1-prod 釋出標籤已封裝。 | `git tags` | `git tag --list 'v22.1.1-prod'` | ✅ | 2026-04-06 |
-| `C-03` | Wiki Linter v1.4 主線硬閘啟用。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
+| `C-03` | Wiki Linter v1.4 主線硬閘啟用。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ❌ | 2026-07-15 |
 | `C-04` | .nexus 狀態目錄具備寫入權限。 | `.nexus/` | `test -w .nexus` | ✅ | 2026-04-06 |
-| `C-05` | Memory [index](../.nexus/graph/index.md) ([LanceDB](../02_Modules/Module - Memory Repository.md)) 實體初始化。 | `.nexus/memory/memory_index.[lancedb](../02_Modules/Module - Memory Repository.md)` | `ls -d .nexus/memory/memory_index.[lancedb](../02_Modules/Module - Memory Repository.md)` | ✅ | 2026-04-06 |
+| `C-05` | Memory [index](../.nexus/graph/index.md) ([LanceDB](../02_Modules/Module - Memory Repository.md)) 未在目前提交樹中初始化。 | `.nexus/memory/memory_index.lancedb` | `git ls-files --error-unmatch .nexus/memory/memory_index.lancedb` | ❌ | 2026-07-15 |
 | `C-06` | CLI 入口 nexus_cli.py 預備。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py` | ✅ | 2026-04-06 |
-| `C-07` | Agent Schema 指導規約存在。 | `99_Schema/[AGENT_SCHEMA](../99_Schema/AGENT_SCHEMA.md).md` | `test -f nexus_wiki_vault/99_Schema/[AGENT_SCHEMA](../99_Schema/AGENT_SCHEMA.md).md` | ✅ | 2026-04-06 |
+| `C-07` | Agent Schema 指導規約存在。 | `nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md` | `test -f nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md` | ✅ | 2026-04-06 |
 | `C-08` | [CI Gate](Ops - CI/CD Promotion Gate.md) Dry-run 鏈路完整通透。 | `scripts/ops/ci_gate.py` | `uv run scripts/ops/ci_gate.py --dry-run` | ✅ | 2026-04-06 |
-| `C-09` | Evidence Chain (manifest) 格式合法。 | `.nexus/swarm/manifest.json` | `test -f .nexus/swarm/manifest.json` | ✅ | 2026-04-06 |
+| `C-09` | Evidence Chain (manifest) 格式合法。 | `.nexus/swarm/manifest.json` | `test -f .nexus/swarm/manifest.json` | ❌ | 2026-07-15 |
 | `C-10` | Pilot CLI v100+ 交付模組存在。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py` | ✅ | 2026-04-06 |
 | `C-11` | v22 核心規格書實體標註。 | `MUSE-NEXUS-Engine-Specification-v22-Eternal.md` | `test -f MUSE-NEXUS-Engine-Specification-v22-Eternal.md` | ✅ | 2026-04-06 |
-| `C-12` | Waiver Registry 必填欄位稽核。 | `06_Ops/[Ops - Provenance Exceptions and Waivers](Ops - Provenance Exceptions and Waivers.md).md` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
-| `C-13` | Knowledge Lineage 節點完整。 | `05_Protocols/[Protocol - Knowledge Lineage](../05_Protocols/Protocol - Knowledge Lineage.md).md` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
+| `C-12` | Waiver Registry 必填欄位稽核。 | `06_Ops/[Ops - Provenance Exceptions and Waivers](Ops - Provenance Exceptions and Waivers.md).md` | `uv run scripts/ops/wiki_linter.py --strict` | ❌ | 2026-07-15 |
+| `C-13` | Knowledge Lineage 節點完整。 | `05_Protocols/[Protocol - Knowledge Lineage](../05_Protocols/Protocol - Knowledge Lineage.md).md` | `uv run scripts/ops/wiki_linter.py --strict` | ❌ | 2026-07-15 |
 | `C-14` | Docker/Helm Lint 0 紅燈準則（模擬）。 | `nexus_swarm/` | `ls nexus_swarm/` | ✅ | 2026-04-06 |
 | `C-15` | Nexus Identity 指紋識別啟用。 | `scripts/ops/ci_gate.py` | `grep "NEXUS IDENTITY" scripts/ops/ci_gate.py` | ✅ | 2026-04-06 |
 | `C-16` | Wiki 覆蓋率 > 85.00% 閾值。 | `.nexus/reports/wiki_coverage_report.json` | `uv run scripts/ops/wiki_coverage_audit.py` | ✅ | 2026-04-06 |
-| `C-17` | 全量 Wiki 頁面具備 0 Orphan 連結。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
+| `C-17` | 全量 Wiki 頁面具備 0 Orphan 連結。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ❌ | 2026-07-15 |
 | `C-18` | PDRAC 循環實體邏輯存在。 | `nexus/core/orchestrator.py` | `grep "NexusOrchestrator" nexus/core/orchestrator.py` | ✅ | 2026-04-06 |
-| `C-19` | 治理變更日誌實體維護中。 | `06_Ops/[Ops - Governance Changelog](../Reference/walkthrough.md).md` | `test -f nexus_wiki_vault/06_Ops/Ops\ -\ Governance\ [[CHANGELOG]].md` | ✅ | 2026-04-06 |
+| `C-19` | 治理變更日誌實體維護中。 | `nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md` | `test -f "nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md"` | ✅ | 2026-07-15 |
 | `C-20` | Fail-Closed 發版規則硬性定義。 | `scripts/ops/ci_gate.py` | `grep "FAIL-CLOSED" scripts/ops/ci_gate.py` | ✅ | 2026-04-06 |
 
 ## Upstream

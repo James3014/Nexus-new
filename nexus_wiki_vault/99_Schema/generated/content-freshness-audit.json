@@ -311,7 +311,7 @@
           "exists": true,
           "kind": "file",
           "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
-          "sha256": "e97369d47ce7297d0db649c6c48677d2ee4fd1b19214772539f7eb6bfb017fea"
+          "sha256": "c26d2b3bd42f4583d8cb75507f494e557d32b78df0a9fb03a0582ea972473795"
         }
       ],
       "errors": []
@@ -614,7 +614,7 @@
       "classification": "current_verified",
       "owner": "agent",
       "exists": true,
-      "content_sha256": "8614647e8ba4d1d285c28d1c2a0ebc01f513d654a450c3f95066fa87776ec45c",
+      "content_sha256": "e5a5b0a3d5a9be199e25675dd9bf6338f10797b96b15745a50e04d087dafab38",
       "source_of_truth": "repo-root",
       "required_markers": [
         "scripts/ops/wiki_truth_claims_check.py",
@@ -640,7 +640,7 @@
           "exists": true,
           "kind": "file",
           "source_commit": "a1a87cd19dc669b2a71e1177049903b7207242cc",
-          "sha256": "e97369d47ce7297d0db649c6c48677d2ee4fd1b19214772539f7eb6bfb017fea"
+          "sha256": "c26d2b3bd42f4583d8cb75507f494e557d32b78df0a9fb03a0582ea972473795"
         }
       ],
       "errors": []
@@ -928,5 +928,5 @@
     "lifecycle_error_count": 0,
     "error_count": 0
   },
-  "source_fingerprint": "7f4429ce84f7bc68f5adeb41c28efb864979fdc6bd8f560ce819ea84868d8786"
+  "source_fingerprint": "50759f2d7cd267b4824fecbbb3c204f1d5840ae7ef8a1c8e96a84f124bf520e1"
 }

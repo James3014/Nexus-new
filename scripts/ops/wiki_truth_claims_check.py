@@ -12,10 +12,11 @@ from pathlib import Path
 REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_truth_claims_report.json"
+COMMAND_TIMEOUT_SECONDS = 180
 
 # Safety Guardrails
 WHITELIST_PREFIXES = [
-    "test ", "ls ", "grep ", "rg ", "git tag --list", 
+    "test ", "ls ", "grep ", "rg ", "git tag --list", "git ls-files",
     "uv run scripts/ops/ci_gate.py --dry-run", 
     "uv run scripts/ops/wiki_linter.py --strict",
     "uv run scripts/ops/wiki_coverage_audit.py"
@@ -59,7 +60,7 @@ def env_pre_flight():
 
 # 🛡️ Truth Policy Constraints (Agent T)
 WHITELIST_PREFIXES = [
-    "test", "ls", "grep", "rg", "git tag --list",
+    "test", "ls", "grep", "rg", "git tag --list", "git ls-files",
     "uv run scripts/ops/wiki_linter.py --strict",
     "uv run scripts/ops/ci_gate.py --dry-run",
     "uv run scripts/ops/wiki_coverage_audit.py",
@@ -100,7 +101,7 @@ def run_checks():
     register_file = VAULT_ROOT / "06_Ops" / "Ops - Truth Claims Register.md"
     if not register_file.exists():
         print("❌ Error: Truth Claims Register missing!")
-        return
+        return {"status": "FAIL", "total_claims": 0, "mismatch_count": 0, "infra_error_count": 1, "policy_violation_count": 0}
 
     content = register_file.read_text()
     # | C-ID | Claim | Evidence | Command | Status | Date |
@@ -126,6 +127,7 @@ def run_checks():
     infra_error_count = 0
     policy_violation_count = 0
     blocked_claim_ids = []
+    environment_claim_ids = []
     results = []
 
     for c_id, claim, wiki_status in claims:
@@ -144,7 +146,14 @@ def run_checks():
         print(f"🧐 Checking {c_id}: {claim}...")
         
         try:
-            res = subprocess.run(claim, shell=True, capture_output=True, text=True, timeout=10, cwd=REPO_ROOT)
+            res = subprocess.run(
+                claim,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=COMMAND_TIMEOUT_SECONDS,
+                cwd=REPO_ROOT,
+            )
             
             # Status Machine Mapping
             actual_status = "MATCH"
@@ -171,6 +180,7 @@ def run_checks():
                     cause_code = "UNKNOWN_INFRA_ERROR"
                     retry_hint = "Review stderr for environmental details"
                 infra_error_count += 1
+                environment_claim_ids.append(c_id)
             
             # 2. Logical Mismatch
             elif wiki_status == "✅" and res.returncode != 0:
@@ -190,11 +200,13 @@ def run_checks():
             })
             
         except subprocess.TimeoutExpired:
-            results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": "Timeout expired (10s)", "wiki_status": wiki_status})
+            results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": f"Timeout expired ({COMMAND_TIMEOUT_SECONDS}s)", "wiki_status": wiki_status})
             infra_error_count += 1
+            environment_claim_ids.append(c_id)
         except Exception as e:
             results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": f"System Error: {str(e)}", "wiki_status": wiki_status})
             infra_error_count += 1
+            environment_claim_ids.append(c_id)
 
     # Report Summary
     summary = {
@@ -202,9 +214,10 @@ def run_checks():
         "infra_error_count": infra_error_count,
         "policy_violation_count": policy_violation_count,
         "blocked_claim_ids": blocked_claim_ids,
+        "environment_claim_ids": environment_claim_ids,
         "total_claims": len(claims),
         "timestamp": datetime.now().isoformat(),
-        "status": "PASS" if (mismatch_count == 0 and policy_violation_count == 0) else "FAIL"
+        "status": "PASS" if (mismatch_count == 0 and infra_error_count == 0 and policy_violation_count == 0) else "FAIL"
     }
     
     output = {"summary": summary, "details": results}
@@ -221,5 +234,8 @@ def run_checks():
         if r["error"]:
             print(f"    [Error]: {r['error']}")
 
+    return summary
+
 if __name__ == "__main__":
-    run_checks()
+    summary = run_checks()
+    raise SystemExit(0 if summary and summary.get("status") == "PASS" else 1)

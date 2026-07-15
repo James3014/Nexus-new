@@ -39,6 +39,10 @@ def test_receipt_has_commit_identity_and_fail_closed_evidence(monkeypatch, tmp_p
         {"name": "knowledge_agent_runtime_integration", "status": "PASS", "reason": ""},
         {"status": "PASS", "blockers": []},
     ))
+    monkeypatch.setattr(gate, "_truth_claims_metrics", lambda root: (
+        {"name": "wiki_truth_claims", "status": "PASS", "reason": ""},
+        {"total_claims": 20, "mismatch_count": 0, "infra_error_count": 0, "policy_violation_count": 0},
+    ))
 
     (repo / gate.GENERATED_DIR / "unresolved-link-inventory.json").write_text(
         json.dumps({"source_fingerprint": fingerprint, "governance_summary": {"disposition_counts": {}}, "category_counts": {}}),
@@ -77,8 +81,31 @@ def test_failed_critical_command_blocks_and_records_reason(monkeypatch, tmp_path
     monkeypatch.setattr(gate, "_freshness_metrics", lambda root: ({"name": "freshness", "status": "PASS", "reason": ""}, {}))
     monkeypatch.setattr(gate, "_current_link_metrics", lambda root: ({"name": "links", "status": "PASS", "reason": ""}, {}))
     monkeypatch.setattr(gate, "_runtime_metrics", lambda root: ({"name": "runtime", "status": "PASS", "reason": ""}, {}))
+    monkeypatch.setattr(gate, "_truth_claims_metrics", lambda root: ({"name": "truth", "status": "PASS", "reason": ""}, {}))
 
     receipt = gate.run_gate(repo, output)
 
     assert receipt["gate_verdict"] == "BLOCK"
     assert any(reason.startswith("wiki_index_deterministic:") for reason in receipt["missing_evidence_reasons"])
+
+
+def test_truth_claims_gate_fails_closed_on_environment_or_mismatch(monkeypatch, tmp_path: Path):
+    repo = tmp_path / "repo"
+    report = repo / ".nexus" / "reports" / "wiki_truth_claims_report.json"
+    report.parent.mkdir(parents=True)
+    report.write_text(json.dumps({"summary": {
+        "status": "FAIL",
+        "total_claims": 20,
+        "mismatch_count": 1,
+        "infra_error_count": 2,
+        "policy_violation_count": 0,
+    }}), encoding="utf-8")
+    monkeypatch.setattr(gate, "_run_command", lambda root, argv, timeout=180: {
+        "command": argv, "status": "BLOCK", "exit_code": 1, "stdout": "", "stderr": "mismatch"
+    })
+
+    gate_result, metrics = gate._truth_claims_metrics(repo)
+
+    assert gate_result["status"] == "BLOCK"
+    assert metrics["mismatch_count"] == 1
+    assert metrics["infra_error_count"] == 2

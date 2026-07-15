@@ -2,11 +2,11 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "df6e86e18ebca8493426203718bf3c14e1ed2fd0a6baaec4d22bcc27d8fc3de8",
+  "source_fingerprint": "c4910d8c29a127ad57d00a4c8cb8a4f38bbcf357e7019c977223b940edc119bf",
   "included_page_count": 251,
   "excluded_page_count": 40,
   "canonical_page_count": 12,
-  "unresolved_link_count": 313,
+  "unresolved_link_count": 312,
   "exclusion_rules": [
     "Dir: .nexus",
     "Dir: .obsidian",
@@ -9848,7 +9848,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁集中管理所有關於 Nexus 物理狀態的真值聲明 (Truth Claims)，並提供可機器執行的驗證命令。 [Source: 00_Home/System Overview.md] [Code: scripts/ops/wiki_truth_claims_check.py]",
-      "content_sha256": "8614647e8ba4d1d285c28d1c2a0ebc01f513d654a450c3f95066fa87776ec45c",
+      "content_sha256": "e5a5b0a3d5a9be199e25675dd9bf6338f10797b96b15745a50e04d087dafab38",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -9879,22 +9879,6 @@
           "markdown"
         ],
         [
-          "page:02_Modules/Module - Memory Repository.md",
-          "markdown"
-        ],
-        [
-          "page:02_Modules/Module - Memory Repository.md",
-          "markdown"
-        ],
-        [
-          "page:99_Schema/AGENT_SCHEMA.md",
-          "markdown"
-        ],
-        [
-          "page:99_Schema/AGENT_SCHEMA.md",
-          "markdown"
-        ],
-        [
           "page:06_Ops/Ops - CI/CD Promotion Gate.md",
           "markdown"
         ],
@@ -9904,10 +9888,6 @@
         ],
         [
           "page:05_Protocols/Protocol - Knowledge Lineage.md",
-          "markdown"
-        ],
-        [
-          "page:Reference/walkthrough.md",
           "markdown"
         ],
         [
@@ -9939,13 +9919,6 @@
           "source": "page:06_Ops/Ops - Truth Claims Register.md",
           "source_path": "06_Ops/Ops - Truth Claims Register.md",
           "raw_target": "Source [[index",
-          "syntax": "wikilink",
-          "reason": "missing"
-        },
-        {
-          "source": "page:06_Ops/Ops - Truth Claims Register.md",
-          "source_path": "06_Ops/Ops - Truth Claims Register.md",
-          "raw_target": "CHANGELOG",
           "syntax": "wikilink",
           "reason": "missing"
         },

@@ -233,6 +233,47 @@ def _runtime_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     )
 
 
+def _truth_claims_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    report_path = repo_root / ".nexus" / "reports" / "wiki_truth_claims_report.json"
+    execution = _run_command(
+        repo_root,
+        [sys.executable, "scripts/ops/wiki_truth_claims_check.py"],
+    )
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        summary = report.get("summary") or {}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return (
+            {"name": "wiki_truth_claims", "status": "BLOCK", "reason": "truth_claims_report_unreadable"},
+            {"error": str(exc), "execution": execution},
+        )
+
+    mismatch_count = int(summary.get("mismatch_count", 0) or 0)
+    infra_error_count = int(summary.get("infra_error_count", 0) or 0)
+    policy_violation_count = int(summary.get("policy_violation_count", 0) or 0)
+    passed = (
+        execution.get("status") == "PASS"
+        and summary.get("status") == "PASS"
+        and mismatch_count == 0
+        and infra_error_count == 0
+        and policy_violation_count == 0
+    )
+    reason = "" if passed else "truth_claims_mismatch_or_environment_failure"
+    return (
+        {"name": "wiki_truth_claims", "status": "PASS" if passed else "BLOCK", "reason": reason},
+        {
+            "total_claims": summary.get("total_claims", 0),
+            "mismatch_count": mismatch_count,
+            "infra_error_count": infra_error_count,
+            "policy_violation_count": policy_violation_count,
+            "blocked_claim_ids": summary.get("blocked_claim_ids", []),
+            "environment_claim_ids": summary.get("environment_claim_ids", []),
+            "report_path": str(report_path.resolve()),
+            "execution": execution,
+        },
+    )
+
+
 def _safe_metric(name: str, function, repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         return function(repo_root)
@@ -267,7 +308,8 @@ def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
     freshness_gate, freshness_metrics = _safe_metric("wiki_current_authority_source_paths", _freshness_metrics, repo_root)
     links_gate, links_metrics = _safe_metric("wiki_current_authority_links", _current_link_metrics, repo_root)
     runtime_gate, runtime_metrics = _safe_metric("knowledge_agent_runtime_integration", _runtime_metrics, repo_root)
-    gates.extend([authority_gate, coverage_gate, freshness_gate, links_gate, runtime_gate])
+    truth_claims_gate, truth_claims_metrics = _safe_metric("wiki_truth_claims", _truth_claims_metrics, repo_root)
+    gates.extend([authority_gate, coverage_gate, freshness_gate, links_gate, runtime_gate, truth_claims_gate])
 
     inventory_path = repo_root / GENERATED_DIR / "unresolved-link-inventory.json"
     try:
@@ -312,6 +354,7 @@ def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
         "unresolved_link_disposition_counts": disposition_counts,
         "unresolved_link_category_counts": category_counts,
         "runtime_integration": runtime_metrics,
+        "truth_claims_metrics": truth_claims_metrics,
         "critical_gates": gates,
         "warnings": warnings,
         "gate_verdict": status,
