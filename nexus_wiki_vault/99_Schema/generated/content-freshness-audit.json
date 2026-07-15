@@ -2,13 +2,13 @@
   "schema": "nexus.wiki.content-freshness.v1",
   "authority": "derived_non_authoritative",
   "status": "PASS",
-  "source_commit": "7108ed87a3a0d965c45d783f0046b0da679ddbbf14ab9aaa246e0cb02d094675",
+  "source_commit": "0eaf97c9b1464842b45022a77410c20257c67d6ae7c5484066d655cc244804c3",
   "source_commits": [
     "24c362f7a3418f0b5f4733068591b05610088c24",
     "28d701b235bce64a59b7623b273debabc5232340",
     "34c99b7e884b043421d6c2925df95fd5346ae8bc",
-    "3c9caab4dc7ef667a4fdb5f2123c75977f51f856",
     "5e31d771f26303f5612938a1e0393816c679170a",
+    "78e32a11bedcce629e91b183e592030965194249",
     "8f20350751aa1901c5d35fd7bf58f6ba297adee0",
     "93fca8e048d2c676a71b4e10ae941290f36dec59",
     "951ccb21fefbb127739db8fe68116528c97493a9",
@@ -75,13 +75,13 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -110,13 +110,13 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -175,19 +175,19 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/engine/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         }
       ],
       "errors": []
@@ -216,13 +216,13 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         }
       ],
       "errors": []
@@ -244,7 +244,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -345,19 +345,19 @@
           "path": "nexus/core/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "3c9caab4dc7ef667a4fdb5f2123c75977f51f856"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/engine/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "src/governance/transition_engine.rs",
@@ -389,7 +389,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "9c823112042b8ba5880e166e6cecf0e86a2ddbf3"
+          "source_commit": "78e32a11bedcce629e91b183e592030965194249"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -928,5 +928,5 @@
     "lifecycle_error_count": 0,
     "error_count": 0
   },
-  "source_fingerprint": "e68ac4ee9ae2c99b0380be90554fc1709fa0bf92cc69d52bf139cabb335fb211"
+  "source_fingerprint": "7f4429ce84f7bc68f5adeb41c28efb864979fdc6bd8f560ce819ea84868d8786"
 }
