@@ -325,7 +325,13 @@ def _audit_read_only_environment(repo_root: Path, output_dir: Path):
     previous = {key: os.environ.get(key) for key in keys}
     with tempfile.TemporaryDirectory(prefix="nexus-wiki-audit-") as temp_dir:
         execution_root = Path(temp_dir) / "repo"
-        shutil.copytree(repo_root, execution_root, ignore=_audit_copy_ignore)
+        if (repo_root / ".git").exists():
+            subprocess.run(
+                ["git", "clone", "--no-local", "--quiet", str(repo_root), str(execution_root)],
+                check=True,
+            )
+        else:
+            shutil.copytree(repo_root, execution_root, ignore=_audit_copy_ignore)
         keys.update({
             "NEXUS_AUDIT_SOURCE_ROOT": str(repo_root),
             "NEXUS_AUDIT_EXECUTION_ROOT": str(execution_root),
