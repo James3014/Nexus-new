@@ -8,8 +8,10 @@ critical gate blocks so CI has machine-readable failure evidence.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +35,10 @@ ARTIFACTS = (
     "content-freshness-audit.json",
     "governance-closure-receipt.json",
 )
+AUDIT_READ_ONLY_ENV = {
+    "NEXUS_AUDIT_READ_ONLY": "1",
+    "NEXUS_LEARN_CLOSURE_WRITEBACK": "0",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -234,10 +240,18 @@ def _runtime_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _truth_claims_metrics(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    report_path = repo_root / ".nexus" / "reports" / "wiki_truth_claims_report.json"
+    configured_report_path = os.environ.get("NEXUS_TRUTH_CLAIMS_REPORT_PATH", "").strip()
+    report_path = Path(configured_report_path).resolve() if configured_report_path else repo_root / ".nexus" / "reports" / "wiki_truth_claims_report.json"
+    report_runner = (
+        "import pathlib, sys; "
+        "from scripts.ops import wiki_truth_claims_check as checker; "
+        "checker.REPORT_PATH = pathlib.Path(sys.argv[1]); "
+        "summary = checker.run_checks(); "
+        "raise SystemExit(0 if summary and summary.get('status') == 'PASS' else 1)"
+    )
     execution = _run_command(
         repo_root,
-        [sys.executable, "scripts/ops/wiki_truth_claims_check.py"],
+        [sys.executable, "-c", report_runner, str(report_path)],
     )
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -284,7 +298,27 @@ def _safe_metric(name: str, function, repo_root: Path) -> tuple[dict[str, Any], 
         )
 
 
+@contextmanager
+def _audit_read_only_environment(output_dir: Path):
+    keys = {**AUDIT_READ_ONLY_ENV, "NEXUS_TRUTH_CLAIMS_REPORT_PATH": str(output_dir / "wiki_truth_claims_report.json")}
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        os.environ.update(keys)
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def run_gate(repo_root: Path, output_dir: Path) -> dict[str, Any]:
+    with _audit_read_only_environment(output_dir):
+        return _run_gate_impl(repo_root, output_dir)
+
+
+def _run_gate_impl(repo_root: Path, output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     python = sys.executable
     commands = [

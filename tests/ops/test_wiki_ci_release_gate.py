@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from scripts.ops import wiki_ci_release_gate as gate
@@ -109,3 +110,40 @@ def test_truth_claims_gate_fails_closed_on_environment_or_mismatch(monkeypatch, 
     assert gate_result["status"] == "BLOCK"
     assert metrics["mismatch_count"] == 1
     assert metrics["infra_error_count"] == 2
+
+
+def test_wiki_ci_release_gate_propagates_audit_read_only_to_truth_claims(monkeypatch, tmp_path: Path):
+    observed = {}
+
+    def fake_impl(_repo, _output):
+        observed["audit"] = os.environ.get("NEXUS_AUDIT_READ_ONLY")
+        observed["writeback"] = os.environ.get("NEXUS_LEARN_CLOSURE_WRITEBACK")
+        return {"gate_verdict": "PASS"}
+
+    monkeypatch.setattr(gate, "_run_gate_impl", fake_impl)
+    monkeypatch.delenv("NEXUS_AUDIT_READ_ONLY", raising=False)
+    monkeypatch.delenv("NEXUS_LEARN_CLOSURE_WRITEBACK", raising=False)
+
+    gate.run_gate(tmp_path, tmp_path / "receipt")
+
+    assert observed == {"audit": "1", "writeback": "0"}
+    assert os.environ.get("NEXUS_AUDIT_READ_ONLY") is None
+    assert os.environ.get("NEXUS_LEARN_CLOSURE_WRITEBACK") is None
+
+
+def test_wiki_ci_release_gate_leaves_repository_status_unchanged(monkeypatch, tmp_path: Path):
+    ledger = tmp_path / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text('{"existing": true}\n', encoding="utf-8")
+    before = ledger.read_bytes()
+
+    def fake_impl(_repo, _output):
+        if os.environ.get("NEXUS_AUDIT_READ_ONLY") != "1":
+            ledger.write_text('{"unexpected": true}\n', encoding="utf-8")
+        return {"gate_verdict": "PASS"}
+
+    monkeypatch.setattr(gate, "_run_gate_impl", fake_impl)
+
+    gate.run_gate(tmp_path, tmp_path / "receipt")
+
+    assert ledger.read_bytes() == before
