@@ -391,15 +391,16 @@ class PipelineRepairMixin:
                         "evidence_refs": [f"learning:{task_id}:world_a_online_only"],
                     }
 
-                receipt = UnifiedRuntime().run(
+                from nexus.services.mainchain_entry import run_mainchain
+
+                receipt = run_mainchain(
                     request,
-                    online_invoker=wrap_mainchain_online_invoker(
-                        _disabled_online_invoker, route=route, force=True
-                    ),
+                    online_invoker=_disabled_online_invoker,
                     capability_invokers=build_mainchain_capability_invokers(codeintel=codeintel),
                     verifier=_v,
                     learning=_learn,
                     receipt_path=receipt_path,
+                    with_nexus_armor=True,
                 )
                 domain, raw, payload = extract_online_stage_payload(
                     receipt.get("online") if isinstance(receipt.get("online"), dict) else {}
@@ -706,15 +707,17 @@ class PipelineRepairMixin:
         )
 
         try:
-            receipt = UnifiedRuntime(local_service=local_service).run(
+            from nexus.services.mainchain_entry import run_mainchain
+
+            receipt = run_mainchain(
                 request,
-                online_invoker=wrap_mainchain_online_invoker(
-                    online_invoker, route=route, force=True, provider="pipeline_repair"
-                ),
+                online_invoker=online_invoker,
+                local_service=local_service,
                 capability_invokers=build_mainchain_capability_invokers(codeintel=codeintel),
                 verifier=response_contract,
                 learning=learning_contract,
                 receipt_path=receipt_path,
+                with_nexus_armor=True,
             )
         except Exception as exc:
             res, raw = online_callable(str(ctx.task_desc or ""))

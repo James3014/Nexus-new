@@ -123,12 +123,10 @@ class DayShiftOptimizer:
         if callable(ask_unified):
             receipt = ask_unified(request, verifier=response_contract, receipt_path=receipt_path)
         else:
-            from nexus.services.unified_runtime import (
-                UnifiedRuntime,
-                build_structured_online_invoker,
-            )
+            from nexus.services.mainchain_entry import run_mainchain
+            from nexus.services.unified_runtime import build_structured_online_invoker
 
-            receipt = UnifiedRuntime().run(
+            receipt = run_mainchain(
                 request,
                 online_invoker=build_structured_online_invoker(
                     self.gateway.ask_structured,
@@ -139,6 +137,7 @@ class DayShiftOptimizer:
                 ),
                 verifier=response_contract,
                 receipt_path=receipt_path,
+                with_nexus_armor=True,
             )
         self.unified_runtime_receipts.append(dict(receipt))
         online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), Mapping) else {}

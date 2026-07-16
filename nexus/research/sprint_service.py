@@ -313,9 +313,10 @@ class LLMCandidateGenerator:
                 receipt_path=receipt_path,
             )
         else:
-            from nexus.services.unified_runtime import UnifiedRuntime, build_structured_online_invoker
+            from nexus.services.mainchain_entry import run_mainchain
+            from nexus.services.unified_runtime import build_structured_online_invoker
 
-            receipt = UnifiedRuntime(local_service=self.local_service if local_request is not None else None).run(
+            receipt = run_mainchain(
                 request,
                 online_invoker=build_structured_online_invoker(
                     self.gateway.ask_structured,
@@ -324,8 +325,10 @@ class LLMCandidateGenerator:
                     output_schema=output_schema,
                     provider="fixture_gateway",
                 ),
+                local_service=self.local_service if local_request is not None else None,
                 verifier=response_contract,
                 receipt_path=receipt_path,
+                with_nexus_armor=True,
             )
         self.last_unified_runtime_receipt = dict(receipt)
         online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), dict) else {}

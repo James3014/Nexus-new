@@ -244,9 +244,10 @@ class AutoResearchNightShift:
                 receipt_path=receipt_path,
             )
         else:
-            from nexus.services.unified_runtime import UnifiedRuntime, build_structured_online_invoker
+            from nexus.services.mainchain_entry import run_mainchain
+            from nexus.services.unified_runtime import build_structured_online_invoker
 
-            receipt = UnifiedRuntime().run(
+            receipt = run_mainchain(
                 request,
                 online_invoker=build_structured_online_invoker(
                     self.gateway.ask_structured,
@@ -257,6 +258,7 @@ class AutoResearchNightShift:
                 ),
                 verifier=response_contract,
                 receipt_path=receipt_path,
+                with_nexus_armor=True,
             )
         online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), Mapping) else {}
         provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)

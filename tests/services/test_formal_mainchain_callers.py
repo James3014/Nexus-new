@@ -30,6 +30,9 @@ FORMAL_CALLER_PATHS: tuple[str, ...] = (
     "scripts/engine/nexus_cli.py",
     "nexus/services/mainchain_entry.py",
     "nexus/services/unified_runtime.py",
+    "nexus/research/sprint_service.py",
+    "nexus/app/nightshift_runner_service.py",
+    "nexus/research/day_shift_optimizer.py",
 )
 
 # Modules that may retain compatibility shims — must still fail closed / not select.
@@ -85,6 +88,8 @@ def _verifier(c: dict[str, Any]) -> dict[str, Any]:
         "task_id": c["task_id"],
         "invoked": True,
         "gate_passed": True,
+        "verifier_status": "pass",
+        "verifier_artifact": f"sha256:verifierartifact{c['task_id'][:8]}0001",
         "evidence_refs": [f"v:{c['task_id']}"],
     }
 
@@ -96,6 +101,69 @@ def _learning(c: dict[str, Any]) -> dict[str, Any]:
         "gate_passed": True,
         "evidence_refs": [f"l:{c['task_id']}"],
     }
+
+
+def test_formal_callers_invoke_mainchain_entry(monkeypatch, tmp_path: Path) -> None:
+    """Runtime proof: Gateway path goes through run_mainchain (not source-token search)."""
+    calls: list[str] = []
+
+    def _fake_run_mainchain(request, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(str(getattr(request, "task_id", "")))
+        return {
+            "schema": "nexus.unified_runtime.receipt.v1",
+            "task_id": getattr(request, "task_id", ""),
+            "planner_decision_id": "fake-pdid-1",
+            "receipt_complete": True,
+            "capability_closure_complete": False,
+            "terminal_status": "SUCCEEDED",
+            "claim_boundary": {"public_claim_allowed": False},
+            "online": {"invoked": True, "status": "SUCCEEDED", "response": {"ok": True}},
+            "public_claim_allowed": False,
+        }
+
+    import nexus.services.mainchain_entry as me
+
+    monkeypatch.setattr(me, "run_mainchain", _fake_run_mainchain)
+
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    from nexus.services.gateway import BattlesuitGateway
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "ask_structured",
+        lambda *_a, **_k: ({"summary": "online"}, "online-response"),
+    )
+    req = UnifiedRuntimeRequest(
+        task_id="gw-mainchain-entry-1",
+        workspace_revision="r",
+        task_statement="scan impact risk codeintel",
+        task_type="codeintel",
+        route={"recommended_flow": "direct", "provider": "gemini"},
+        online_prompt="x",
+        online_payload="y",
+        evidence_refs=("t",),
+    )
+    receipt = gateway.ask_unified(req, verifier=_verifier, learning=_learning)
+    assert "gw-mainchain-entry-1" in calls
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    assert receipt.get("public_claim_allowed") is False
+
+
+def test_sprint_nightshift_dayshift_fallback_uses_run_mainchain() -> None:
+    """Source-surface: fallback paths call run_mainchain, not bare UnifiedRuntime().run."""
+    for rel in (
+        "nexus/research/sprint_service.py",
+        "nexus/app/nightshift_runner_service.py",
+        "nexus/research/day_shift_optimizer.py",
+        "nexus/engine/pipeline_repair.py",
+        "nexus/services/gateway.py",
+    ):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        assert "run_mainchain" in text, rel
+        # Direct alternate runtime entry must not remain as product fallback.
+        assert "UnifiedRuntime().run(" not in text, rel
+        assert "UnifiedRuntime(local_service=" not in text or "run_mainchain" in text, rel
 
 
 def test_formal_caller_sources_import_unified_runtime_or_mainchain() -> None:

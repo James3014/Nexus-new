@@ -668,27 +668,19 @@ class BattlesuitGateway:
                 runtime_online_invoker = gateway_online_invoker
 
         final_online = runtime_online_invoker or gateway_online_invoker
-        if armor_on and final_online is not None:
-            final_online = wrap_mainchain_online_invoker(
-                final_online,
-                route=route,
-                force=True,
-                provider=str(route.get("provider") or binding.provider or "gateway"),
-            )
-        codeintel_payload = getattr(request, "codeintel", {}) or {}
-        final_caps = merge_mainchain_capability_invokers(
-            capability_invokers,
-            codeintel=dict(codeintel_payload) if isinstance(codeintel_payload, Mapping) else {},
-            enable=armor_on,
-        )
+        # Canonical formal entry: MainchainEntry → CapabilityPlanner → UnifiedRuntime.
+        # No direct UnifiedRuntime fallback as an alternate product path.
+        from nexus.services.mainchain_entry import run_mainchain
 
-        return UnifiedRuntime(local_service=local_service).run(
+        return run_mainchain(
             request,
             online_invoker=final_online,
-            capability_invokers=final_caps,
+            local_service=local_service,
+            capability_invokers=capability_invokers,
             verifier=verifier,
             learning=learning,
             receipt_path=receipt_path,
+            with_nexus_armor=bool(armor_on),
         )
 
     def bind_online_execution_decision(self, decision: Any) -> None:
