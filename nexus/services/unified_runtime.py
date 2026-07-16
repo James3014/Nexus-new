@@ -1715,34 +1715,165 @@ class UnifiedRuntime:
 
         receipt_complete = all(_stage_complete(stage) for stage in required_stages)
         outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages)
-        # P4: full wiring closure — every selected *executable* capability must succeed.
-        # skipped / probe / stub / SELECTED_NOT_EXECUTED never count as closed.
+        # P4: full wiring closure — every selected capability must truly succeed.
+        # SKIPPED / SELECTED_NOT_EXECUTED / STUB / FAILED / BLOCKED / invoked=false
+        # / gate_passed=false all block capability_closure_complete.
+        # receipt_complete may still be true when only required stages succeed.
         selected_names = [str(n) for n in plan.selected_capabilities]
         executed_capabilities: list[str] = []
         contributed_capabilities: list[str] = []
         closure_blockers: list[str] = []
+        closure_skipped_count = 0
+        # Materialize local-stage owned capabilities into the closure stage map.
+        closure_stages: dict[str, Any] = dict(capability_results)
+        local_action_for_closure = _local_action_from_request(request.local_request, local_stage)
+        local_phys_for_closure = str(
+            (local_stage.get("response") or {}).get("physical_callable", "")
+            if isinstance(local_stage.get("response"), Mapping)
+            else ""
+        )
+        if "local_model_executor" in selected_names:
+            executor_proven = _local_executor_invoked_proven(
+                action=local_action_for_closure,
+                physical_callable=local_phys_for_closure,
+                local_stage=local_stage,
+            )
+            if not request.local_enabled:
+                closure_stages["local_model_executor"] = {
+                    "status": "SKIPPED",
+                    "skipped": True,
+                    "invoked": False,
+                    "gate_passed": False,
+                    "evidence_present": False,
+                    "skip_reason": "local_route_disabled",
+                    "reason": "local_route_disabled",
+                }
+            elif local_action_for_closure == "advisor":
+                # Advisor uses Provider.generate — selected executor was not executed.
+                closure_stages["local_model_executor"] = {
+                    "status": "SKIPPED",
+                    "skipped": True,
+                    "invoked": False,
+                    "gate_passed": False,
+                    "evidence_present": False,
+                    "skip_reason": "selected_executor_not_invoked_advisor_path",
+                    "reason": "selected_executor_not_invoked_advisor_path",
+                }
+            elif executor_proven and bool(local_stage.get("invoked")) and bool(local_stage.get("gate_passed")):
+                closure_stages["local_model_executor"] = {
+                    "status": "SUCCEEDED",
+                    "skipped": False,
+                    "invoked": True,
+                    "gate_passed": True,
+                    "evidence_present": bool(
+                        local_stage.get("evidence_present")
+                        or local_stage.get("evidence_refs")
+                        or (isinstance(local_stage.get("response"), Mapping)
+                            and local_stage["response"].get("evidence_refs"))
+                    ),
+                    "outcome_contributed": bool(local_stage.get("outcome_contributed")),
+                    "reason": "",
+                }
+            elif bool(local_stage.get("invoked")):
+                closure_stages["local_model_executor"] = {
+                    "status": "SELECTED_NOT_EXECUTED",
+                    "skipped": False,
+                    "invoked": False,
+                    "gate_passed": False,
+                    "evidence_present": False,
+                    "reason": "planner_selected_no_runtime_executor",
+                }
+            else:
+                prior = capability_results.get("local_model_executor") or {}
+                if prior.get("skipped") or str(prior.get("status") or "") == "SKIPPED":
+                    closure_stages["local_model_executor"] = {
+                        "status": "SKIPPED",
+                        "skipped": True,
+                        "invoked": False,
+                        "gate_passed": False,
+                        "evidence_present": False,
+                        "skip_reason": str(
+                            prior.get("skip_reason") or prior.get("reason") or "delegated_to_local_stage"
+                        ),
+                        "reason": str(
+                            prior.get("skip_reason") or prior.get("reason") or "delegated_to_local_stage"
+                        ),
+                    }
+                else:
+                    closure_stages["local_model_executor"] = {
+                        "status": "SELECTED_NOT_EXECUTED",
+                        "skipped": False,
+                        "invoked": False,
+                        "gate_passed": False,
+                        "evidence_present": False,
+                        "reason": "planner_selected_no_runtime_executor",
+                    }
+
+        _terminal_statuses = {
+            "SKIPPED",
+            "SELECTED_NOT_EXECUTED",
+            "STUB_INVOKED",
+            "FAILED",
+            "BLOCKED",
+        }
         for cap_name in selected_names:
-            cap_stage = capability_results.get(cap_name) or {}
-            status = str(cap_stage.get("status") or "")
-            if status == "SKIPPED" or cap_stage.get("skipped"):
-                # Policy skip is not executable for this task — omit from closure set.
+            cap_stage = closure_stages.get(cap_name) or {}
+            resp = cap_stage.get("response") if isinstance(cap_stage.get("response"), Mapping) else {}
+            stage_status = str(cap_stage.get("status") or "")
+            resp_status = str(resp.get("status") or "") if isinstance(resp, Mapping) else ""
+            resp_status_u = resp_status.upper()
+            # Prefer invoker-declared terminal status over normalized stage label.
+            if resp_status_u in _terminal_statuses:
+                status = resp_status_u
+            else:
+                status = stage_status.upper() if stage_status.upper() in _terminal_statuses else stage_status
+            reason = str(
+                cap_stage.get("skip_reason")
+                or cap_stage.get("reason")
+                or (resp.get("skip_reason") if isinstance(resp, Mapping) else "")
+                or (resp.get("reason") if isinstance(resp, Mapping) else "")
+                or ""
+            )
+            skipped_flag = bool(cap_stage.get("skipped")) or status == "SKIPPED"
+            if not skipped_flag and isinstance(resp, Mapping):
+                skipped_flag = bool(resp.get("skipped")) or str(resp.get("status") or "").upper() == "SKIPPED"
+            stub_flag = bool(cap_stage.get("stub")) or (
+                isinstance(resp, Mapping) and bool(resp.get("stub"))
+            )
+
+            if skipped_flag or status == "SKIPPED":
+                closure_skipped_count += 1
+                closure_blockers.append(
+                    f"{cap_name}:SKIPPED:{reason or 'skipped'}"
+                )
                 continue
-            if status in {"SELECTED_NOT_EXECUTED", "STUB_INVOKED"} or bool(cap_stage.get("stub")):
-                closure_blockers.append(f"{cap_name}:{status or 'stub'}")
+            if status in _terminal_statuses or stub_flag:
+                label = status or ("STUB_INVOKED" if stub_flag else "incomplete")
+                closure_blockers.append(
+                    f"{cap_name}:{label}:{reason or label}"
+                )
                 continue
-            if (
-                isinstance(cap_stage.get("response"), dict)
-                and cap_stage["response"].get("stub")
-            ):
-                closure_blockers.append(f"{cap_name}:stub_response")
+            if not bool(cap_stage.get("invoked")):
+                closure_blockers.append(
+                    f"{cap_name}:{status or 'SELECTED_NOT_EXECUTED'}:invoked=false"
+                )
+                continue
+            if not bool(cap_stage.get("gate_passed")):
+                closure_blockers.append(
+                    f"{cap_name}:{status or 'FAILED'}:gate_passed=false"
+                )
                 continue
             if not _stage_complete(cap_stage):
-                closure_blockers.append(f"{cap_name}:incomplete")
+                closure_blockers.append(
+                    f"{cap_name}:{status or 'incomplete'}:{reason or 'incomplete'}"
+                )
                 continue
             executed_capabilities.append(cap_name)
             if bool(cap_stage.get("outcome_contributed")):
                 contributed_capabilities.append(cap_name)
         capability_closure_complete = not closure_blockers and bool(selected_names)
+        closure_selected_count = len(selected_names)
+        closure_executed_count = len(executed_capabilities)
         # Real consumed evidence IDs from Local/Online consumer records only.
         # Prefer IDs actually injected into Local context / with_nexus prompt lineage.
         consumed_evidence_ids: list[str] = []
@@ -1765,6 +1896,13 @@ class UnifiedRuntime:
             ec = local_resp.get("evidence_consumption")
             if isinstance(ec, Mapping):
                 _append_consumed(ec.get("consumed_evidence_ids"))
+            # LocalAssistResponse nests consumption under local_outputs.
+            local_outputs = local_resp.get("local_outputs")
+            if isinstance(local_outputs, Mapping):
+                _append_consumed(local_outputs.get("consumed_evidence_ids"))
+                ec_nested = local_outputs.get("evidence_consumption")
+                if isinstance(ec_nested, Mapping):
+                    _append_consumed(ec_nested.get("consumed_evidence_ids"))
 
         online_resp = (
             online_stage.get("response")
@@ -2163,6 +2301,9 @@ class UnifiedRuntime:
             "receipt_complete": receipt_complete,
             "capability_closure_complete": capability_closure_complete,
             "capability_closure_blockers": closure_blockers,
+            "closure_selected_count": closure_selected_count,
+            "closure_executed_count": closure_executed_count,
+            "closure_skipped_count": closure_skipped_count,
             "selected_capabilities": selected_names,
             "executed_capabilities": executed_capabilities,
             "consumed_evidence_ids": consumed_evidence_ids,

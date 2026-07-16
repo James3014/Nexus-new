@@ -533,9 +533,22 @@ def build_codeintel_preflight_invoker(
     return invoke
 
 
+def _verifier_field(verifier: Mapping[str, Any], key: str, default: Any = "") -> Any:
+    """Read verifier field from stage dict or nested response payload."""
+    if key in verifier and verifier.get(key) not in (None, ""):
+        return verifier.get(key)
+    v_resp = verifier.get("response") if isinstance(verifier.get("response"), Mapping) else {}
+    if isinstance(v_resp, Mapping) and key in v_resp and v_resp.get(key) not in (None, ""):
+        return v_resp.get(key)
+    return default
+
+
 def _postflight_proof_fields(context: Mapping[str, Any]) -> dict[str, Any]:
-    """Collect source/artifact/candidate/applied/verifier proof from context."""
-    task_id = str(context.get("task_id") or "")
+    """Collect source/artifact/candidate/applied/verifier proof from context.
+
+    Never invent proof from evidence_refs, bundle_hash, or task_statement fallback.
+    """
+    context_task_id = str(context.get("task_id") or "")
     verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
     online = context.get("online") if isinstance(context.get("online"), Mapping) else {}
     local = context.get("local") if isinstance(context.get("local"), Mapping) else {}
@@ -547,11 +560,14 @@ def _postflight_proof_fields(context: Mapping[str, Any]) -> dict[str, Any]:
         bundle = planner.get("capability_evidence_bundle") if isinstance(planner, Mapping) else {}
     bundle = bundle if isinstance(bundle, Mapping) else {}
 
-    source_hash = str(
+    # Sealed bundle / explicit context source only — no task_statement hash fallback.
+    sealed_source_hash = str(
         context.get("source_hash")
         or bundle.get("source_hash")
         or ""
-    )
+    ).strip()
+    verifier_source_hash = str(_verifier_field(verifier, "source_hash", "") or "").strip()
+    verifier_task_id = str(_verifier_field(verifier, "task_id", "") or "").strip()
     artifact_hash = str(
         context.get("artifact_hash")
         or online_resp.get("artifact_hash")
@@ -576,61 +592,49 @@ def _postflight_proof_fields(context: Mapping[str, Any]) -> dict[str, Any]:
         or online_resp.get("applied_hash")
         or ""
     )
-    v_resp = (
-        verifier.get("response") if isinstance(verifier.get("response"), Mapping) else {}
-    )
-    # Explicit only — never promote evidence_refs to verifier_artifact,
-    # never invent verifier_status from invoked+gate_passed.
+    # Explicit only — never promote evidence_refs / bundle_hash to verifier_artifact.
     verifier_artifact = str(
-        verifier.get("verifier_artifact")
-        or v_resp.get("verifier_artifact")
-        or ""
+        _verifier_field(verifier, "verifier_artifact", "") or ""
     ).strip()
     verifier_status = str(
-        verifier.get("verifier_status")
-        or v_resp.get("verifier_status")
-        or ""
+        _verifier_field(verifier, "verifier_status", "") or ""
     ).strip()
     if not _looks_like_verifier_artifact(verifier_artifact):
         verifier_artifact = ""
-    if not source_hash:
-        # Fall back to task_statement hash when sealed bundle absent
-        task_statement = str(context.get("task_statement") or "")
-        if task_statement:
-            source_hash = hashlib.sha256(task_statement.encode("utf-8")).hexdigest()
+    verifier_invoked = bool(_verifier_field(verifier, "invoked", False))
+    # Stage-level gate_passed may differ from payload; prefer explicit payload then stage.
+    verifier_gate_passed = bool(
+        _verifier_field(verifier, "gate_passed", verifier.get("gate_passed", False))
+    )
 
     return {
-        "task_id": task_id,
-        "source_hash": source_hash,
+        "task_id": context_task_id,
+        "verifier_task_id": verifier_task_id,
+        "source_hash": sealed_source_hash,
+        "verifier_source_hash": verifier_source_hash,
         "artifact_hash": artifact_hash,
         "candidate_hash": candidate_hash,
         "applied_hash": applied_hash,
         "verifier_artifact": verifier_artifact,
         "verifier_status": verifier_status,
+        "verifier_invoked": verifier_invoked,
+        "verifier_gate_passed": verifier_gate_passed,
         "online_invoked": bool(online.get("invoked")),
         "bundle_hash": str(bundle.get("bundle_hash") or ""),
-        "context_task_id": task_id,
+        "context_task_id": context_task_id,
     }
 
 
 def _looks_like_verifier_artifact(value: str) -> bool:
-    """True only for explicit artifact identity/hash — not evidence_refs or bundle envelope."""
+    """True only for sha256:<64 hex> or bare 64-hex — never length/prefix fallbacks."""
     v = str(value or "").strip()
     if not v:
         return False
     lower = v.lower()
-    # Reject bare evidence refs / synthetic bundle ids
-    if lower.startswith(("verifier:", "capability:", "blocker:", "runtime:", "online:", "learning:", "bundle:")):
-        return False
-    if lower in {"pass", "passed", "ok", "succeeded", "success", "fail", "failed"}:
-        return False
-    # Accept hash-like or explicit artifact identifiers
-    if lower.startswith(("sha256:", "hash:", "artifact:", "artifact_hash:")):
-        return True
-    hexish = lower.replace("-", "").replace("_", "")
-    if len(hexish) >= 16 and all(c in "0123456789abcdef" for c in hexish):
-        return True
-    return len(v) >= 24
+    if lower.startswith("sha256:"):
+        hexpart = lower[7:]
+        return len(hexpart) == 64 and all(c in "0123456789abcdef" for c in hexpart)
+    return len(lower) == 64 and all(c in "0123456789abcdef" for c in lower)
 
 
 def evaluate_postflight_gate(
@@ -639,41 +643,54 @@ def evaluate_postflight_gate(
 ) -> dict[str, Any]:
     """Fail-closed postflight evaluation — Online call alone never PASSes claim/delivery.
 
-    artifact_gate is never unconditional PASS. Requires source_hash, explicit
-    verifier_status, real verifier_artifact identity/hash (not evidence_refs),
-    and task_id binding. bundle_hash alone is never a delivery artifact.
+    Requires simultaneous binding of:
+    - verifier.invoked=true
+    - verifier.gate_passed=true
+    - verifier_status explicit pass
+    - verifier task_id == context task_id
+    - verifier source_hash == sealed bundle source_hash
+    - verifier artifact hash format valid (sha256:64hex or 64hex)
+
+    verifier_status fail/blocked fails all three gates. bundle_hash / evidence_refs
+    / task_statement never substitute for missing proof.
     """
     proof = _postflight_proof_fields(context)
     blockers: list[str] = []
     expected_task = str(context.get("task_id") or "")
-    if proof["task_id"] and expected_task and proof["task_id"] != expected_task:
+    v_status = str(proof.get("verifier_status") or "").lower().strip()
+    v_task = str(proof.get("verifier_task_id") or "").strip()
+    sealed_source = str(proof.get("source_hash") or "").strip()
+    v_source = str(proof.get("verifier_source_hash") or "").strip()
+
+    # Invocation + gate_passed required for any postflight pass.
+    if not bool(proof.get("verifier_invoked")):
+        blockers.append("verifier_not_invoked")
+    if not bool(proof.get("verifier_gate_passed")):
+        blockers.append("verifier_gate_passed_false")
+
+    # Status must be explicit pass for gates to pass; fail/blocked block all three.
+    if v_status in {"fail", "failed", "blocked"}:
+        blockers.append("verifier_status_fail")
+    elif v_status not in {"pass", "passed", "ok", "succeeded"}:
+        if not v_status:
+            blockers.append("missing_verifier_status")
+        else:
+            blockers.append("verifier_status_not_explicit")
+
+    # Task binding — verifier must declare task_id matching context.
+    if not v_task:
+        blockers.append("missing_verifier_task_id")
+    elif expected_task and v_task != expected_task:
         blockers.append("task_id_mismatch")
-    if not proof["source_hash"]:
+
+    # Source binding — sealed bundle source vs verifier-declared source.
+    if not sealed_source:
         blockers.append("missing_source_hash")
-    if not proof["verifier_status"]:
-        blockers.append("missing_verifier_status")
-    # Verifier must have run; status must be explicit (not inferred from invoked+gate).
-    verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
-    if not bool(verifier.get("invoked")) and str(proof["verifier_status"]).lower() not in {
-        "pass",
-        "passed",
-        "ok",
-        "succeeded",
-    }:
-        # Allow explicit verifier_status without stage invoked flag only when present
-        # and stage was never attached — still require artifact proof below.
-        if not proof["verifier_status"]:
-            blockers.append("verifier_not_invoked")
-    if str(proof["verifier_status"]).lower() not in {
-        "pass",
-        "passed",
-        "ok",
-        "succeeded",
-        "fail",
-        "failed",
-        "blocked",
-    }:
-        blockers.append("verifier_status_not_explicit")
+    if not v_source:
+        blockers.append("missing_verifier_source_hash")
+    elif sealed_source and v_source != sealed_source:
+        blockers.append("source_hash_mismatch")
+
     if not proof["verifier_artifact"]:
         blockers.append("missing_verifier_artifact")
 
@@ -688,7 +705,7 @@ def evaluate_postflight_gate(
             blockers.append("claim_missing_source_or_verifier")
         if not proof["verifier_artifact"]:
             blockers.append("claim_missing_verifier_artifact")
-        if str(proof["verifier_status"]).lower() in {"fail", "failed", "blocked"}:
+        if v_status in {"fail", "failed", "blocked"}:
             blockers.append("claim_blocked_by_verifier")
     elif name == "delivery_gate":
         if not proof["online_invoked"]:
@@ -712,6 +729,8 @@ def evaluate_postflight_gate(
             blockers.append("delivery_missing_verifier")
         if not proof["verifier_artifact"]:
             blockers.append("delivery_missing_verifier_artifact")
+        if v_status in {"fail", "failed", "blocked"}:
+            blockers.append("delivery_blocked_by_verifier")
 
     gate_passed = not blockers
     return {

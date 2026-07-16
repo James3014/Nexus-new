@@ -5,6 +5,7 @@ Does not introduce routes, planners, or parallel runtimes.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,14 @@ from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
     normalize_online_invoker_payload,
 )
+
+# Valid bound artifact: sha256: + 64 hex (no length-based fallback).
+VALID_VERIFIER_ARTIFACT = "sha256:" + ("ab" * 32)
+VALID_SOURCE_HASH = hashlib.sha256(b"sealed-source-v1").hexdigest()
+
+
+def _valid_artifact(seed: str = "verifier") -> str:
+    return "sha256:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
 
 class _Planner:
@@ -78,14 +87,24 @@ def _online(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _verifier_explicit(c: dict[str, Any]) -> dict[str, Any]:
+    bundle = c.get("capability_evidence_bundle") if isinstance(c.get("capability_evidence_bundle"), dict) else {}
+    src = str(c.get("source_hash") or bundle.get("source_hash") or VALID_SOURCE_HASH)
     return {
         "task_id": c["task_id"],
         "invoked": True,
         "gate_passed": True,
         "verifier_status": "pass",
-        "verifier_artifact": "sha256:explicitverifierartifact00000001",
+        "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+        "source_hash": src,
         "evidence_refs": [f"v:{c['task_id']}"],
     }
+
+
+def _all_postflight_fail(context: dict[str, Any]) -> None:
+    for name in ("artifact_gate", "claim_gate", "delivery_gate"):
+        verdict = evaluate_postflight_gate(name, context)
+        assert verdict["gate_passed"] is False, (name, verdict.get("blockers"))
+        assert verdict["public_claim_allowed"] is False
 
 
 def _learning(c: dict[str, Any]) -> dict[str, Any]:
@@ -381,10 +400,12 @@ def test_p1_every_f_wired_ok_has_production_invoke_or_local_stage() -> None:
             "online": {"invoked": True},
             "source_hash": "src_hash_for_f_probe_0001",
             "verifier": {
+                "task_id": f"f-{name}",
                 "invoked": True,
                 "gate_passed": True,
                 "verifier_status": "pass",
-                "verifier_artifact": f"sha256:fprobeartifact{name[:8]}0001",
+                "verifier_artifact": _valid_artifact(f"fprobe-{name}"),
+                "source_hash": "src_hash_for_f_probe_0001",
             },
             "capability_evidence_bundle": {
                 "source_hash": "src_hash_for_f_probe_0001",
@@ -665,3 +686,811 @@ def test_p4_matrix_uses_tmp_workspace_only(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(Path(__file__).resolve().parents[2])
     after = writeback.read_bytes() if writeback.exists() else b""
     assert after == before
+
+
+# ─── Phase A: verifier proof binding ─────────────────────────────────────────
+
+
+def _bound_verifier_context(**overrides: Any) -> dict[str, Any]:
+    base = {
+        "task_id": "bind-task-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True, "status": "SUCCEEDED"},
+        "verifier": {
+            "task_id": "bind-task-1",
+            "invoked": True,
+            "gate_passed": True,
+            "verifier_status": "pass",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "c" * 64,
+        },
+    }
+    base.update(overrides)
+    if "verifier" in overrides and isinstance(overrides["verifier"], dict):
+        v = dict(base["verifier"]) if isinstance(base.get("verifier"), dict) else {}
+        # re-merge carefully when only partial verifier override intended
+        pass
+    return base
+
+
+def test_long_arbitrary_verifier_artifact_rejected() -> None:
+    context = {
+        "task_id": "long-art-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "long-art-1",
+            "invoked": True,
+            "gate_passed": True,
+            "verifier_status": "pass",
+            # Arbitrary long string — must NOT be accepted as artifact hash.
+            "verifier_artifact": "x" * 48,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    _all_postflight_fail(context)
+
+
+def test_cross_task_verifier_artifact_rejected() -> None:
+    context = {
+        "task_id": "task-A",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "task-B",  # different task
+            "invoked": True,
+            "gate_passed": True,
+            "verifier_status": "pass",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    _all_postflight_fail(context)
+
+
+def test_verifier_not_invoked_cannot_pass() -> None:
+    context = {
+        "task_id": "ni-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "ni-1",
+            "invoked": False,
+            "gate_passed": True,
+            "verifier_status": "pass",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    _all_postflight_fail(context)
+
+
+def test_verifier_gate_passed_false_cannot_pass() -> None:
+    context = {
+        "task_id": "gp-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "gp-1",
+            "invoked": True,
+            "gate_passed": False,
+            "verifier_status": "pass",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    _all_postflight_fail(context)
+
+
+def test_verifier_fail_status_blocks_all_postflight_gates() -> None:
+    context = {
+        "task_id": "fail-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "fail-1",
+            "invoked": True,
+            "gate_passed": True,
+            "verifier_status": "fail",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    _all_postflight_fail(context)
+
+
+def test_verifier_source_hash_mismatch_rejected() -> None:
+    other = hashlib.sha256(b"other-source").hexdigest()
+    context = {
+        "task_id": "src-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "src-1",
+            "invoked": True,
+            "gate_passed": True,
+            "verifier_status": "pass",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": other,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    _all_postflight_fail(context)
+
+
+def test_valid_bound_sha256_verifier_proof_passes() -> None:
+    context = {
+        "task_id": "ok-1",
+        "source_hash": VALID_SOURCE_HASH,
+        "online": {"invoked": True},
+        "verifier": {
+            "task_id": "ok-1",
+            "invoked": True,
+            "gate_passed": True,
+            "verifier_status": "pass",
+            "verifier_artifact": VALID_VERIFIER_ARTIFACT,
+            "source_hash": VALID_SOURCE_HASH,
+        },
+        "capability_evidence_bundle": {
+            "source_hash": VALID_SOURCE_HASH,
+            "bundle_hash": "d" * 64,
+        },
+    }
+    for name in ("artifact_gate", "claim_gate", "delivery_gate"):
+        verdict = evaluate_postflight_gate(name, context)
+        assert verdict["gate_passed"] is True, (name, verdict.get("blockers"))
+        assert verdict["public_claim_allowed"] is False
+
+
+# ─── Phase B: SKIPPED blocks capability closure ──────────────────────────────
+
+
+def _cap_ok(name: str, task_id: str) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "invoked": True,
+        "gate_passed": True,
+        "status": "SUCCEEDED",
+        "evidence_refs": [f"capability:{name}:{task_id}:real"],
+        "evidence_ids": [f"capability:{name}:{task_id}:real"],
+        "physical_callable": f"test:{name}",
+        "telemetry": {"token_usage": 0, "model_calls": 0},
+        "outcome_contributed": True,
+    }
+
+
+def test_selected_skipped_blocks_capability_closure() -> None:
+    planner = _Planner(
+        selected=["codeintel", "research", "artifact_gate", "claim_gate", "delivery_gate"],
+        required=["codeintel"],
+    )
+
+    def research(ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": False,
+            "gate_passed": False,
+            "status": "SKIPPED",
+            "skipped": True,
+            "skip_reason": "not_implemented",
+            "evidence_refs": [],
+            "physical_callable": "",
+            "telemetry": {"token_usage": 0, "model_calls": 0},
+        }
+
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        UnifiedRuntimeRequest(
+            task_id="skip-close-1",
+            workspace_revision="wr",
+            task_statement="selected research skipped must block closure",
+            task_type="repair",
+            route={"recommended_flow": "direct", "provider": "gemini"},
+            online_prompt="x",
+            online_payload="y",
+            evidence_refs=("t",),
+        ),
+        online_invoker=_online,
+        capability_invokers={
+            "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
+            "research": research,
+        },
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+    assert receipt["receipt_complete"] is True
+    research_stage = (receipt.get("capability_results") or {}).get("research") or {}
+    assert (
+        str(research_stage.get("status") or "") == "SKIPPED"
+        or research_stage.get("skipped")
+    )
+    assert receipt.get("capability_closure_complete") is False
+    blockers = list(receipt.get("capability_closure_blockers") or [])
+    assert blockers, "expected non-empty capability_closure_blockers"
+    assert any("research" in b and "SKIPPED" in b for b in blockers)
+    assert int(receipt.get("closure_skipped_count") or 0) >= 1
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+
+
+def test_selected_escalated_capability_blocks_closure() -> None:
+    planner = _Planner(
+        selected=["codeintel", "swarm_multi_agent", "artifact_gate", "claim_gate", "delivery_gate"],
+        required=["codeintel"],
+    )
+
+    def escalate(ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": False,
+            "gate_passed": False,
+            "status": "SKIPPED",
+            "skipped": True,
+            "skip_reason": "E_escalate_ok:missing_engine",
+            "evidence_refs": [],
+            "physical_callable": "",
+            "telemetry": {"token_usage": 0, "model_calls": 0},
+        }
+
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        UnifiedRuntimeRequest(
+            task_id="esc-close-1",
+            workspace_revision="wr",
+            task_statement="escalated selected capability blocks closure",
+            task_type="repair",
+            route={"recommended_flow": "direct", "provider": "gemini"},
+            online_prompt="x",
+            online_payload="y",
+            evidence_refs=("t",),
+        ),
+        online_invoker=_online,
+        capability_invokers={
+            "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
+            "swarm_multi_agent": escalate,
+        },
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+    assert receipt.get("capability_closure_complete") is False
+    blockers = list(receipt.get("capability_closure_blockers") or [])
+    assert any("swarm_multi_agent" in b for b in blockers)
+
+
+def test_selected_not_executed_blocks_closure() -> None:
+    planner = _Planner(
+        selected=["codeintel", "belief", "artifact_gate", "claim_gate", "delivery_gate"],
+        required=["codeintel"],
+    )
+
+    def not_exec(ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": False,
+            "gate_passed": False,
+            "status": "SELECTED_NOT_EXECUTED",
+            "evidence_refs": [],
+            "physical_callable": "",
+            "telemetry": {"token_usage": 0, "model_calls": 0},
+        }
+
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        UnifiedRuntimeRequest(
+            task_id="sne-close-1",
+            workspace_revision="wr",
+            task_statement="selected not executed blocks closure",
+            task_type="repair",
+            route={"recommended_flow": "direct", "provider": "gemini"},
+            online_prompt="x",
+            online_payload="y",
+            evidence_refs=("t",),
+        ),
+        online_invoker=_online,
+        capability_invokers={
+            "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
+            "belief": not_exec,
+        },
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+    assert receipt.get("capability_closure_complete") is False
+    blockers = list(receipt.get("capability_closure_blockers") or [])
+    assert any("belief" in b and "SELECTED_NOT_EXECUTED" in b for b in blockers)
+
+
+def test_all_selected_executed_allows_closure() -> None:
+    planner = _Planner(
+        selected=["codeintel", "memory", "belief", "artifact_gate", "claim_gate", "delivery_gate"],
+        required=["codeintel"],
+    )
+    invokers = {
+        name: (lambda n: (lambda c: _cap_ok(n, c["task_id"])))(name)
+        for name in ("codeintel", "memory", "belief")
+    }
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        UnifiedRuntimeRequest(
+            task_id="all-close-1",
+            workspace_revision="wr",
+            task_statement="all selected executed allows closure",
+            task_type="repair",
+            route={"recommended_flow": "direct", "provider": "gemini"},
+            online_prompt="x",
+            online_payload="y",
+            evidence_refs=("t",),
+        ),
+        online_invoker=_online,
+        capability_invokers=invokers,
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+    assert receipt["receipt_complete"] is True
+    assert receipt.get("capability_closure_complete") is True
+    assert list(receipt.get("capability_closure_blockers") or []) == []
+    assert int(receipt.get("closure_selected_count") or 0) == 6
+    assert int(receipt.get("closure_executed_count") or 0) == 6
+    assert int(receipt.get("closure_skipped_count") or 0) == 0
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+
+
+def test_receipt_complete_does_not_imply_capability_closure() -> None:
+    planner = _Planner(
+        selected=["codeintel", "research", "artifact_gate", "claim_gate", "delivery_gate"],
+        required=["codeintel"],
+    )
+
+    def research(ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": False,
+            "gate_passed": False,
+            "status": "SKIPPED",
+            "skipped": True,
+            "skip_reason": "not_implemented",
+            "evidence_refs": [],
+            "telemetry": {"token_usage": 0, "model_calls": 0},
+        }
+
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        UnifiedRuntimeRequest(
+            task_id="rc-ne-cc-1",
+            workspace_revision="wr",
+            task_statement="receipt complete does not imply closure",
+            task_type="repair",
+            route={"recommended_flow": "direct", "provider": "gemini"},
+            online_prompt="x",
+            online_payload="y",
+            evidence_refs=("t",),
+        ),
+        online_invoker=_online,
+        capability_invokers={
+            "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
+            "research": research,
+        },
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+    assert receipt["receipt_complete"] is True
+    assert receipt.get("capability_closure_complete") is False
+    assert list(receipt.get("capability_closure_blockers") or [])
+
+
+# ─── Phase C: Local real prompt evidence consumption ─────────────────────────
+
+
+def _local_bundle(task_id: str) -> dict[str, Any]:
+    return {
+        "schema": "nexus.capability_evidence_bundle.v1",
+        "task_id": task_id,
+        "bundle_hash": hashlib.sha256(f"bundle-{task_id}".encode()).hexdigest(),
+        "baseline_hash": hashlib.sha256(f"base-{task_id}".encode()).hexdigest(),
+        "planner_decision_id": f"pd-{task_id}",
+        "source_hash": VALID_SOURCE_HASH,
+        "selected_capabilities": ["codeintel", "memory", "belief", "repair_loop"],
+        "evidence_ids": [
+            f"capability:codeintel:{task_id}:real",
+            f"capability:memory:{task_id}:real",
+            f"capability:belief:{task_id}:real",
+            f"capability:repair_loop:{task_id}:fail",
+        ],
+        "entries": [
+            {
+                "name": "codeintel",
+                "status": "REAL_INVOKED",
+                "success": True,
+                "invoked_real": True,
+                "evidence_ids": [f"capability:codeintel:{task_id}:real"],
+                "evidence_refs": [f"capability:codeintel:{task_id}:real"],
+                "physical_callable": "test:codeintel",
+            },
+            {
+                "name": "memory",
+                "status": "REAL_INVOKED",
+                "success": True,
+                "invoked_real": True,
+                "evidence_ids": [f"capability:memory:{task_id}:real"],
+                "evidence_refs": [f"capability:memory:{task_id}:real"],
+                "physical_callable": "test:memory",
+            },
+            {
+                "name": "belief",
+                "status": "REAL_INVOKED",
+                "success": True,
+                "invoked_real": True,
+                "evidence_ids": [f"capability:belief:{task_id}:real"],
+                "evidence_refs": [f"capability:belief:{task_id}:real"],
+                "physical_callable": "test:belief",
+            },
+            {
+                "name": "repair_loop",
+                "status": "INVOKED_NOT_SUCCESS",
+                "success": False,
+                "invoked_real": False,
+                "evidence_ids": [f"capability:repair_loop:{task_id}:fail"],
+                "evidence_refs": [f"capability:repair_loop:{task_id}:fail"],
+                "physical_callable": "test:repair_loop",
+            },
+            {
+                "name": "research",
+                "status": "REAL_INVOKED",
+                "success": True,
+                "invoked_real": True,
+                "evidence_ids": [f"capability:research:{task_id}:unselected"],
+                "evidence_refs": [f"capability:research:{task_id}:unselected"],
+                "physical_callable": "test:research",
+            },
+        ],
+    }
+
+
+def _local_assist_request(tmp_path: Path, task_id: str, *, action: str = "advisor"):
+    from nexus.services.local_assist_service import LocalAssistRequest
+
+    bundle = _local_bundle(task_id)
+    snapshot = {
+        "route_truth_source": "CapabilityPlanner",
+        "execution_topology": "single_local_model",
+        "protocol_mode": "unified_diff",
+        "model_call_allowed": True,
+        "executor_provider": "ollama",
+        "executor_model": "qwen2.5-coder:7b",
+        "capability_evidence_bundle": bundle,
+        "bundle_hash": bundle["bundle_hash"],
+        "baseline_hash": bundle["baseline_hash"],
+        "planner_decision_id": bundle["planner_decision_id"],
+        "selected_capabilities": ["codeintel", "memory", "belief", "local_model_executor"],
+        "local_consumable_capabilities": ["codeintel", "memory", "belief", "local_model_executor"],
+    }
+    return LocalAssistRequest(
+        schema="nexus.local_assist.request.v1",
+        task_id=task_id,
+        parent_task_id="parent-1",
+        workspace_root=str(tmp_path),
+        workspace_revision="wr",
+        task_statement="diagnose with shared capability evidence",
+        action=action,
+        allowed_files=("target.py",),
+        target_file="target.py",
+        target_symbol="target",
+        evidence_refs=("tests/services/test_mainchain_false_green_gates.py",),
+        risk_budget="low",
+        time_budget=10.0,
+        requested_role="advisor" if action == "advisor" else "candidate",
+        mutation_policy="isolated_only",
+        planner_snapshot=snapshot,
+    )
+
+
+def test_local_enabled_prompt_contains_real_evidence_ids(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    captured: dict[str, str] = {}
+
+    def _gen(req: Any) -> str:
+        captured["prompt"] = str(getattr(req, "prompt", "") or "")
+        return "diagnosis: ok"
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    task_id = "loc-ev-1"
+    req = _local_assist_request(tmp_path, task_id)
+    response = LocalAssistService(provider=InjectedLocalModelProvider(_gen)).handle(req)
+    assert response.local_model_invoked is True
+    prompt = captured.get("prompt") or ""
+    assert "capability:codeintel:loc-ev-1:real" in prompt
+    assert "capability:memory:loc-ev-1:real" in prompt
+    assert "capability:belief:loc-ev-1:real" in prompt
+    assert "NEXUS_CAPABILITY_EVIDENCE" in prompt
+
+
+def test_local_consumed_ids_equal_ids_serialized_into_prompt(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    captured: dict[str, str] = {}
+
+    def _gen(req: Any) -> str:
+        captured["prompt"] = str(getattr(req, "prompt", "") or "")
+        return "diagnosis: ok"
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    task_id = "loc-eq-1"
+    req = _local_assist_request(tmp_path, task_id)
+    response = LocalAssistService(provider=InjectedLocalModelProvider(_gen)).handle(req)
+    prompt = captured.get("prompt") or ""
+    consumed = list(
+        (response.local_outputs.get("evidence_consumption") or {}).get("consumed_evidence_ids")
+        or response.local_outputs.get("consumed_evidence_ids")
+        or []
+    )
+    assert consumed, "expected non-empty consumed_evidence_ids"
+    for eid in consumed:
+        assert eid in prompt, (eid, prompt[:200])
+    # receipt ids must be a subset of prompt-serialized IDs
+    assert set(consumed).issubset({eid for eid in consumed if eid in prompt})
+
+
+def test_local_does_not_consume_unselected_capability(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    captured: dict[str, str] = {}
+
+    def _gen(req: Any) -> str:
+        captured["prompt"] = str(getattr(req, "prompt", "") or "")
+        return "diagnosis: ok"
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    task_id = "loc-unsel-1"
+    req = _local_assist_request(tmp_path, task_id)
+    response = LocalAssistService(provider=InjectedLocalModelProvider(_gen)).handle(req)
+    prompt = captured.get("prompt") or ""
+    consumed = list(
+        (response.local_outputs.get("evidence_consumption") or {}).get("consumed_evidence_ids") or []
+    )
+    assert f"capability:research:{task_id}:unselected" not in prompt
+    assert f"capability:research:{task_id}:unselected" not in consumed
+
+
+def test_local_does_not_consume_failed_bundle_entry(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    captured: dict[str, str] = {}
+
+    def _gen(req: Any) -> str:
+        captured["prompt"] = str(getattr(req, "prompt", "") or "")
+        return "diagnosis: ok"
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    task_id = "loc-fail-1"
+    req = _local_assist_request(tmp_path, task_id)
+    # Include repair_loop in local consumable so failure filtering is tested.
+    snap = dict(req.planner_snapshot)
+    snap["local_consumable_capabilities"] = [
+        "codeintel",
+        "memory",
+        "belief",
+        "repair_loop",
+        "local_model_executor",
+    ]
+    req = req.__class__(**{**req.__dict__, "planner_snapshot": snap})
+    response = LocalAssistService(provider=InjectedLocalModelProvider(_gen)).handle(req)
+    prompt = captured.get("prompt") or ""
+    consumed = list(
+        (response.local_outputs.get("evidence_consumption") or {}).get("consumed_evidence_ids") or []
+    )
+    fail_id = f"capability:repair_loop:{task_id}:fail"
+    assert fail_id not in prompt
+    assert fail_id not in consumed
+
+
+def test_local_empty_prompt_evidence_means_not_consumed(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    captured: dict[str, str] = {}
+
+    def _gen(req: Any) -> str:
+        captured["prompt"] = str(getattr(req, "prompt", "") or "")
+        return "diagnosis: ok"
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    task_id = "loc-empty-1"
+    req = _local_assist_request(tmp_path, task_id)
+    snap = dict(req.planner_snapshot)
+    # Empty bundle entries ⇒ no prompt evidence ⇒ not consumed.
+    snap["capability_evidence_bundle"] = {
+        "bundle_hash": "e" * 64,
+        "baseline_hash": "f" * 64,
+        "planner_decision_id": "pd-empty",
+        "entries": [],
+        "evidence_ids": [],
+        "selected_capabilities": ["codeintel"],
+    }
+    req = req.__class__(**{**req.__dict__, "planner_snapshot": snap})
+    response = LocalAssistService(provider=InjectedLocalModelProvider(_gen)).handle(req)
+    prompt = captured.get("prompt") or ""
+    assert "NEXUS_CAPABILITY_EVIDENCE" not in prompt
+    ec = response.local_outputs.get("evidence_consumption") or {}
+    assert ec.get("capability_consumed") is False
+    assert list(ec.get("consumed_evidence_ids") or []) == []
+
+
+def test_local_and_online_share_root_bundle_hash(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+    from nexus.services.mainchain_entry import run_mainchain
+
+    planner = _Planner(
+        selected=[
+            "codeintel",
+            "memory",
+            "belief",
+            "local_model_executor",
+            "artifact_gate",
+            "claim_gate",
+            "delivery_gate",
+        ],
+        required=["codeintel"],
+    )
+    captured_local: dict[str, str] = {}
+
+    def _gen(req: Any) -> str:
+        captured_local["prompt"] = str(getattr(req, "prompt", "") or "")
+        return "diagnosis: shared hash path"
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    local_request = LocalAssistRequest(
+        schema="nexus.local_assist.request.v1",
+        task_id="share-hash-1",
+        parent_task_id="p1",
+        workspace_root=str(tmp_path),
+        workspace_revision="wr",
+        task_statement="local and online share root bundle hash",
+        action="advisor",
+        allowed_files=("target.py",),
+        target_file="target.py",
+        target_symbol="target",
+        evidence_refs=("t",),
+        requested_role="advisor",
+        mutation_policy="isolated_only",
+        time_budget=10.0,
+        planner_snapshot={
+            "route_truth_source": "CapabilityPlanner",
+            "execution_topology": "single_local_model",
+            "protocol_mode": "unified_diff",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+        },
+    )
+    receipt = run_mainchain(
+        UnifiedRuntimeRequest(
+            task_id="share-hash-1",
+            workspace_revision="wr",
+            task_statement="local and online share root bundle hash",
+            task_type="repair",
+            route={
+                "recommended_flow": "hybrid",
+                "provider": "gemini",
+                "injected_transport": True,
+                "workspace_root": str(tmp_path),
+            },
+            online_prompt="return ok",
+            online_payload="payload",
+            local_enabled=True,
+            local_request=local_request,
+            evidence_refs=("t",),
+            codeintel={"scan_report_present": True, "risk_score": 1},
+        ),
+        online_invoker=_online,
+        planner=planner,
+        local_service=LocalAssistService(provider=InjectedLocalModelProvider(_gen)),
+        capability_invokers={
+            "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
+            "memory": lambda c: _cap_ok("memory", c["task_id"]),
+            "belief": lambda c: _cap_ok("belief", c["task_id"]),
+        },
+        verifier=_verifier_explicit,
+        learning=_learning,
+        with_nexus_armor=True,
+    )
+    bundle = receipt.get("capability_evidence_bundle") or {}
+    root_hash = str(bundle.get("bundle_hash") or "")
+    assert root_hash
+    # Online with_nexus lineage must share the same root hash.
+    online = receipt.get("online") or {}
+    online_resp = online.get("response") if isinstance(online.get("response"), dict) else {}
+    with_nexus = online_resp.get("with_nexus") if isinstance(online_resp, dict) else {}
+    lineage = with_nexus.get("lineage") if isinstance(with_nexus, dict) else {}
+    online_hash = str(
+        (lineage or {}).get("bundle_hash")
+        or (with_nexus or {}).get("bundle_hash")
+        or ""
+    )
+    # Local consumption must report same root hash when evidence was injected.
+    local = receipt.get("local") or {}
+    local_resp = local.get("response") if isinstance(local.get("response"), dict) else {}
+    local_outputs = local_resp.get("local_outputs") if isinstance(local_resp, dict) else {}
+    ec = local_outputs.get("evidence_consumption") if isinstance(local_outputs, dict) else {}
+    local_hash = str((ec or {}).get("bundle_hash") or "")
+    if online_hash:
+        assert online_hash == root_hash
+    if local_hash:
+        assert local_hash == root_hash
+    # Prompt must contain real evidence IDs when local ran.
+    if captured_local.get("prompt"):
+        assert "capability:codeintel:share-hash-1:real" in captured_local["prompt"]
+
+
+def test_local_candidate_executor_receives_capability_evidence_context(tmp_path: Path) -> None:
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutorResponse
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+
+    seen: dict[str, Any] = {}
+
+    def fake_executor(request: Any, **_kwargs: Any) -> LocalModelExecutorResponse:
+        seen["problem_statement"] = str(getattr(request, "problem_statement", "") or "")
+        rc = getattr(request, "route_context", {}) or {}
+        seen["route_context"] = dict(rc) if isinstance(rc, dict) else {}
+        receipt_ctx = getattr(request, "receipt_context", {}) or {}
+        seen["receipt_context"] = dict(receipt_ctx) if isinstance(receipt_ctx, dict) else {}
+        return LocalModelExecutorResponse(
+            invoked=True,
+            local_model_called=True,
+            candidate_patch="",
+            candidate_hash="empty",
+            reasoning_summary="no_candidate",
+            raw_model_metadata={},
+            provider="injected",
+            model_name="qwen2.5-coder:7b",
+            error="no_candidate",
+            timeout=False,
+            evidence_refs=("t",),
+        )
+
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+    task_id = "loc-cand-1"
+    req = _local_assist_request(tmp_path, task_id, action="candidate")
+    LocalAssistService(
+        provider=InjectedLocalModelProvider(lambda _: "unused"),
+        executor_runner=fake_executor,
+    ).handle(req)
+    problem = seen.get("problem_statement") or ""
+    assert "capability:codeintel:loc-cand-1:real" in problem
+    assert "NEXUS_CAPABILITY_EVIDENCE" in problem
+    rc = seen.get("route_context") or {}
+    assert rc.get("capability_evidence_context") or rc.get("consumed_evidence_ids")
+    ids = list(rc.get("consumed_evidence_ids") or (seen.get("receipt_context") or {}).get("consumed_evidence_ids") or [])
+    assert any("codeintel" in i for i in ids)
+    assert f"capability:research:{task_id}:unselected" not in ids

@@ -60,6 +60,125 @@ def _hash_json(value: Mapping[str, Any]) -> str:
     return _hash_text(json.dumps(value, sort_keys=True, ensure_ascii=False, default=str))
 
 
+# Local-consumable capabilities that may inject compact evidence into provider prompts.
+_LOCAL_CONSUMABLE_CAPS = frozenset(
+    {
+        "local_model_executor",
+        "memory",
+        "codeintel",
+        "belief",
+        "semantic_searcher",
+        "lancedb",
+        "repair_loop",
+        "sandbox",
+    }
+)
+
+
+def build_local_compact_evidence(
+    *,
+    bundle: Mapping[str, Any] | None,
+    selected_local_capabilities: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Build compact evidence for Local provider prompt injection.
+
+    Only Planner-selected local-consumable capabilities with success/invoked_real
+    entries are included. Returns prompt section text and the exact IDs serialized.
+    """
+    b = dict(bundle) if isinstance(bundle, Mapping) else {}
+    if not b:
+        return {
+            "prompt_section": "",
+            "consumed_evidence_ids": [],
+            "selected_capabilities_used": [],
+            "compact": {},
+            "bundle_hash": "",
+            "baseline_hash": "",
+            "planner_decision_id": "",
+        }
+    selected = [str(x) for x in (selected_local_capabilities or ()) if str(x)]
+    if not selected:
+        selected = [
+            str(n)
+            for n in (b.get("selected_capabilities") or ())
+            if str(n) in _LOCAL_CONSUMABLE_CAPS
+        ]
+    local_set = {str(x) for x in selected if str(x) in _LOCAL_CONSUMABLE_CAPS or str(x)}
+    # Prefer explicit local-consumable intersection.
+    local_set = {x for x in local_set if x in _LOCAL_CONSUMABLE_CAPS} or {
+        x for x in selected if x in _LOCAL_CONSUMABLE_CAPS
+    }
+
+    entries_out: list[dict[str, Any]] = []
+    consumed_ids: list[str] = []
+    caps_used: list[str] = []
+    seen_ids: set[str] = set()
+
+    for ent in b.get("entries") or []:
+        if not isinstance(ent, Mapping):
+            continue
+        ename = str(ent.get("name") or "")
+        if local_set and ename not in local_set:
+            continue
+        if not bool(ent.get("success") or ent.get("invoked_real")):
+            continue
+        eids = [
+            str(x).strip()
+            for x in (ent.get("evidence_ids") or ent.get("evidence_refs") or [])
+            if str(x).strip() and not str(x).startswith("bundle:")
+        ]
+        if not eids:
+            continue
+        summary = (
+            f"status={ent.get('status') or 'SUCCEEDED'};"
+            f"physical={str(ent.get('physical_callable') or '')[:80]}"
+        )
+        entries_out.append(
+            {
+                "name": ename,
+                "status": str(ent.get("status") or ""),
+                "success": True,
+                "invoked_real": bool(ent.get("invoked_real") or ent.get("success")),
+                "outcome_summary": summary,
+                "evidence_ids": eids[:8],
+            }
+        )
+        if ename not in caps_used:
+            caps_used.append(ename)
+        for eid in eids:
+            if eid not in seen_ids:
+                seen_ids.add(eid)
+                consumed_ids.append(eid)
+
+    compact = {
+        "schema": "nexus.local_capability_evidence.v1",
+        "bundle_hash": str(b.get("bundle_hash") or ""),
+        "baseline_hash": str(b.get("baseline_hash") or ""),
+        "planner_decision_id": str(b.get("planner_decision_id") or ""),
+        "task_id": str(b.get("task_id") or ""),
+        "selected_capabilities_used": list(caps_used),
+        "entries": entries_out[:16],
+        "evidence_ids": list(consumed_ids)[:32],
+        "public_claim_allowed": False,
+    }
+    prompt_section = ""
+    if entries_out and consumed_ids:
+        prompt_section = (
+            "[NEXUS_CAPABILITY_EVIDENCE]\n"
+            + json.dumps(compact, ensure_ascii=False, sort_keys=True, default=str)
+            + "\n"
+        )
+    return {
+        "prompt_section": prompt_section,
+        "consumed_evidence_ids": list(consumed_ids),
+        "selected_capabilities_used": list(caps_used),
+        "compact": compact if entries_out else {},
+        "bundle_hash": str(b.get("bundle_hash") or ""),
+        "baseline_hash": str(b.get("baseline_hash") or ""),
+        "planner_decision_id": str(b.get("planner_decision_id") or ""),
+    }
+
+
 def _recount_unified_diff(diff_text: str) -> str:
     """Repair inconsistent hunk counts without changing patch payload lines."""
     lines = diff_text.splitlines()
@@ -403,13 +522,45 @@ class LocalAssistService:
             report_path.write_text(json.dumps(response.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
             return response
 
+        # Assemble Local-consumable evidence BEFORE any provider/executor call.
+        # consumed_evidence_ids are only IDs actually serialized into the prompt.
+        _snap_selected = planner_snapshot.get("local_consumable_capabilities") or planner_snapshot.get(
+            "selected_capabilities"
+        )
+        if isinstance(_snap_selected, (list, tuple)) and _snap_selected:
+            _local_selected = [str(x) for x in _snap_selected]
+        else:
+            _local_selected = ["local_model_executor"]
+        _bundle = (
+            planner_snapshot.get("capability_evidence_bundle")
+            if isinstance(planner_snapshot.get("capability_evidence_bundle"), dict)
+            else {}
+        )
+        _local_evidence = build_local_compact_evidence(
+            bundle=_bundle if isinstance(_bundle, Mapping) else {},
+            selected_local_capabilities=_local_selected,
+        )
+        _prompt_evidence_section = str(_local_evidence.get("prompt_section") or "")
+        _assembled_consumed_ids: list[str] = list(_local_evidence.get("consumed_evidence_ids") or [])
+        _assembled_caps_used: list[str] = list(_local_evidence.get("selected_capabilities_used") or [])
+        _bundle_hash = str(
+            _local_evidence.get("bundle_hash")
+            or (_bundle.get("bundle_hash") if isinstance(_bundle, Mapping) else "")
+            or planner_snapshot.get("bundle_hash")
+            or ""
+        )
+
         try:
             if request.action == "advisor":
                 # Advisor identity: LocalModelProvider.generate only — never claim executor INVOKED.
                 physical_callable = "LocalModelProvider.generate"
+                advisor_prompt = self._advisor_prompt(
+                    request,
+                    capability_evidence_section=_prompt_evidence_section,
+                )
                 provider_request = LocalModelProviderRequest(
                     task_id=request.task_id,
-                    prompt=self._advisor_prompt(request),
+                    prompt=advisor_prompt,
                     evidence_refs=request.evidence_refs,
                     model_name=resolved_model,
                     timeout_sec=request.time_budget,
@@ -427,33 +578,32 @@ class LocalAssistService:
                     "diagnosis": provider_response.output_text,
                     "recommended_next_action": "Online Agent must independently decide and record consumption.",
                     "provider_error": provider_response.error,
+                    "capability_evidence_injected": bool(_prompt_evidence_section),
+                    "prompt_serialized_evidence_ids": list(_assembled_consumed_ids),
                 }
                 if not local_model_invoked:
                     fallback_reason = provider_response.error or "provider_not_invoked"
             else:
                 # Candidate / verified-subtask identity: LocalModelExecutor.run only.
                 physical_callable = "LocalModelExecutor.run"
-                # Planner-selected Local-consumable set (never hard-coded sole local_model_executor).
-                _snap_selected = planner_snapshot.get("local_consumable_capabilities") or planner_snapshot.get("selected_capabilities")
-                if isinstance(_snap_selected, (list, tuple)) and _snap_selected:
-                    _local_selected = tuple(str(x) for x in _snap_selected)
-                else:
-                    _local_selected = ("local_model_executor",)
-                _bundle = planner_snapshot.get("capability_evidence_bundle") if isinstance(planner_snapshot.get("capability_evidence_bundle"), dict) else {}
-                _bundle_hash = str(_bundle.get("bundle_hash") or planner_snapshot.get("bundle_hash") or "")
-                _evidence_ids = list(_bundle.get("evidence_ids") or [])
+                # Inject compact evidence into problem_statement AND route_context so the
+                # executor path sees the same IDs that will be recorded as consumed.
+                _problem = request.task_statement
+                if _prompt_evidence_section:
+                    _problem = f"{request.task_statement}\n\n{_prompt_evidence_section}"
                 executor_request = LocalModelExecutorRequest(
                     task_id=request.task_id,
-                    problem_statement=request.task_statement,
+                    problem_statement=_problem,
                     repo_root=request.workspace_root,
                     target_file=request.target_file,
-                    selected_capabilities=_local_selected,
+                    selected_capabilities=tuple(_local_selected),
                     evidence_refs=request.evidence_refs,
                     receipt_context={
                         "parent_task_id": request.parent_task_id,
                         "bundle_hash": _bundle_hash,
-                        "consumed_evidence_ids": list(_evidence_ids),
-                        "selected_capabilities": list(_local_selected),
+                        "consumed_evidence_ids": list(_assembled_consumed_ids),
+                        "selected_capabilities": list(_assembled_caps_used or _local_selected),
+                        "selected_capabilities_used": list(_assembled_caps_used),
                     },
                     route_context={
                         "signal_snapshot": planner_snapshot,
@@ -462,6 +612,10 @@ class LocalAssistService:
                         "verifier_command": list(request.verifier_command),
                         "capability_evidence_bundle": _bundle,
                         "bundle_hash": _bundle_hash,
+                        "capability_evidence_context": dict(_local_evidence.get("compact") or {}),
+                        "capability_evidence_prompt_section": _prompt_evidence_section,
+                        "consumed_evidence_ids": list(_assembled_consumed_ids),
+                        "selected_capabilities_used": list(_assembled_caps_used),
                     },
                     model_name=resolved_model,
                     dry_run=False,
@@ -601,73 +755,57 @@ class LocalAssistService:
         local_outputs["concise_summary"] = verified_artifact["concise_summary"]
         local_outputs["verified_artifact"] = verified_artifact
 
-        # Shared evidence consumption proof (P3) — empty ids ⇒ not consumed.
+        # Shared evidence consumption proof (P3) — only IDs actually serialized into
+        # the Local provider/executor prompt at assembly time. Never reverse-infer
+        # from the full sealed bundle after the model call.
         try:
             from nexus.services.capability_evidence_bundle import record_consumption
-            _ev_bundle = planner_snapshot.get("capability_evidence_bundle") if isinstance(planner_snapshot.get("capability_evidence_bundle"), dict) else {}
-            # Only evidence IDs from successful entries that Local can consume.
-            # Never synthesize bundle:<hash> as consumption proof.
-            _consumed_ids: list[str] = []
-            _local_selected = list(
-                planner_snapshot.get("local_consumable_capabilities")
-                or ()
-            )
-            # Capabilities without a Local consumer must not appear as used.
-            if not _local_selected:
-                _local_selected = [
-                    n
-                    for n in (planner_snapshot.get("selected_capabilities") or ())
-                    if str(n) in {
-                        "local_model_executor",
-                        "memory",
-                        "codeintel",
-                        "belief",
-                        "semantic_searcher",
-                        "lancedb",
-                        "repair_loop",
-                        "sandbox",
-                    }
-                ]
-            if isinstance(_ev_bundle, dict) and local_model_invoked:
-                local_set = {str(x) for x in _local_selected}
-                for ent in _ev_bundle.get("entries") or []:
-                    if not isinstance(ent, dict):
-                        continue
-                    ename = str(ent.get("name") or "")
-                    if local_set and ename not in local_set:
-                        continue
-                    if not bool(ent.get("success") or ent.get("invoked_real")):
-                        continue
-                    for eid in ent.get("evidence_ids") or ent.get("evidence_refs") or []:
-                        s = str(eid).strip()
-                        if s and not s.startswith("bundle:"):
-                            _consumed_ids.append(s)
-                # Deduplicate while preserving order
-                _seen: set[str] = set()
-                _deduped: list[str] = []
-                for s in _consumed_ids:
-                    if s not in _seen:
-                        _seen.add(s)
-                        _deduped.append(s)
-                _consumed_ids = _deduped
+            _ev_bundle = _bundle if isinstance(_bundle, Mapping) else {}
+            # Empty prompt evidence section ⇒ not consumed, even if model was called.
+            _ids_for_record = list(_assembled_consumed_ids) if (
+                local_model_invoked and _prompt_evidence_section and _assembled_consumed_ids
+            ) else []
+            _caps_for_record = list(_assembled_caps_used) if _ids_for_record else []
             _consumption = record_consumption(
                 bundle=_ev_bundle if _ev_bundle else {"bundle_hash": "", "selected_capabilities": []},
                 consumer="Local",
-                consumed_evidence_ids=_consumed_ids if local_model_invoked else [],
-                selected_capabilities=_local_selected,
+                consumed_evidence_ids=_ids_for_record,
+                selected_capabilities=_caps_for_record,
                 physical_callable=physical_callable,
             )
+            _consumption = {
+                **_consumption,
+                "selected_capabilities_used": list(_caps_for_record),
+                "prompt_evidence_injected": bool(_prompt_evidence_section and _ids_for_record),
+                "bundle_hash": str(
+                    _consumption.get("bundle_hash") or _bundle_hash or ""
+                ),
+                "baseline_hash": str(
+                    _local_evidence.get("baseline_hash")
+                    or (_ev_bundle.get("baseline_hash") if isinstance(_ev_bundle, Mapping) else "")
+                    or ""
+                ),
+                "planner_decision_id": str(
+                    _local_evidence.get("planner_decision_id")
+                    or (_ev_bundle.get("planner_decision_id") if isinstance(_ev_bundle, Mapping) else "")
+                    or planner_snapshot.get("planner_decision_id")
+                    or ""
+                ),
+            }
         except Exception:
             _consumption = {
-                "bundle_hash": str(planner_snapshot.get("bundle_hash") or ""),
+                "bundle_hash": str(planner_snapshot.get("bundle_hash") or _bundle_hash or ""),
                 "consumed_evidence_ids": [],
-                "selected_capabilities": list(planner_snapshot.get("selected_capabilities") or []),
+                "selected_capabilities": [],
+                "selected_capabilities_used": [],
                 "physical_callable": physical_callable,
                 "consumer_input_hash": "",
                 "capability_consumed": False,
                 "public_claim_allowed": False,
+                "prompt_evidence_injected": False,
             }
         local_outputs["evidence_consumption"] = _consumption
+        local_outputs["consumed_evidence_ids"] = list(_consumption.get("consumed_evidence_ids") or [])
 
         claim_boundary = {
             "registry_known": True,
@@ -763,8 +901,12 @@ class LocalAssistService:
         return response
 
     @staticmethod
-    def _advisor_prompt(request: LocalAssistRequest) -> str:
-        return (
+    def _advisor_prompt(
+        request: LocalAssistRequest,
+        *,
+        capability_evidence_section: str = "",
+    ) -> str:
+        base = (
             "You are Nexus Local Assist in advisor mode. Read-only diagnosis only.\n"
             f"Task: {request.task_statement}\n"
             f"Allowed files: {', '.join(request.allowed_files)}\n"
@@ -772,6 +914,10 @@ class LocalAssistService:
             f"Evidence refs: {', '.join(request.evidence_refs)}\n"
             "Return concise diagnosis, recommended files/symbols, risk findings, confidence, and next action."
         )
+        section = str(capability_evidence_section or "").strip()
+        if section:
+            return f"{base}\n\n{section}"
+        return base
 
     def _isolate_candidate(
         self,

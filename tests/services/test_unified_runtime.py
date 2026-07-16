@@ -80,13 +80,19 @@ def _online(_: dict) -> dict:
     }
 
 
-def _verifier(_: dict) -> dict:
+def _verifier(context: dict) -> dict:
+    bundle = context.get("capability_evidence_bundle") if isinstance(context.get("capability_evidence_bundle"), dict) else {}
+    src = str(context.get("source_hash") or bundle.get("source_hash") or "")
+    task_id = str(context.get("task_id") or "")
     return {
         "status": "SUCCEEDED",
+        "task_id": task_id,
         "invoked": True,
         "gate_passed": True,
         "verifier_status": "pass",
-        "verifier_artifact": "sha256:testdeterministicverifierartifact01",
+        # Must be sha256: + 64 hex (or bare 64 hex) — length fallbacks rejected.
+        "verifier_artifact": "sha256:" + ("ab" * 32),
+        "source_hash": src,
         "evidence": "deterministic verifier",
         "evidence_refs": ["verifier:test:pass"],
     }
