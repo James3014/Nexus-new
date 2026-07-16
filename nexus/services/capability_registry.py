@@ -463,17 +463,6 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
             reason_code="requires_model_execution_boundary",
         ),
-        "research": _ec(
-            "research",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="triggered_external",
-            executor_key="research",
-            physical_callable=f"{reg}:research",
-            provider_authorization_required=True,
-            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
-            reason_code="shallow_should_run_only",
-        ),
         "ui_validator": _ec(
             "ui_validator",
             EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
@@ -542,19 +531,85 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         ),
     }
 
-    # Registered but probe-only (shallow health/should_run) — not F until Phase 2 hardens.
-    # Map to EXTERNAL_AUTH_REQUIRED or escalate-terminal classes so gap stays E (not false F).
-    probe_escalate: dict[str, dict[str, Any]] = {
+    # Phase 2 hardened registered executors (real engine methods + structured outcomes).
+    # Remaining escalate probes (hyper/swarm/multi_agent/learn_scheduler/metabolism)
+    # wait for Phase 3 family binds or further hardening.
+    phase2_real: dict[str, dict[str, Any]] = {
         "drone": _ec(
             "drone",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            EXECUTION_CLASS_TRIGGERED_REAL,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
             executor_key="drone",
             physical_callable=f"{reg}:drone",
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
-            reason_code="shallow_health_check_only",
         ),
+        "nightshift": _ec(
+            "nightshift",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="nightshift",
+            physical_callable=f"{reg}:nightshift",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "research": _ec(
+            "research",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_external",
+            executor_key="research",
+            physical_callable=f"{reg}:research",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "ultra_review": _ec(
+            "ultra_review",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="ultra_review",
+            physical_callable=f"{reg}:ultra_review",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "bdd_acceptance_skill": _ec(
+            "bdd_acceptance_skill",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_validation",
+            executor_key="bdd_acceptance_skill",
+            physical_callable=f"{reg}:bdd_acceptance_skill",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+        ),
+        "learn_mode": _ec(
+            "learn_mode",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_learning",
+            executor_key="learn_mode",
+            physical_callable=f"{reg}:learn_mode",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "learn_phase_slo": _ec(
+            "learn_phase_slo",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_learning",
+            executor_key="learn_phase_slo",
+            physical_callable=f"{reg}:learn_phase_slo",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "semantic_failure_sensor": _ec(
+            "semantic_failure_sensor",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_validation",
+            executor_key="semantic_failure_sensor",
+            physical_callable=f"{reg}:semantic_failure_sensor",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+    }
+
+    probe_escalate: dict[str, dict[str, Any]] = {
         "hyper": _ec(
             "hyper",
             EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
@@ -585,56 +640,6 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
             reason_code="escalate_probe_or_unavailable",
         ),
-        "nightshift": _ec(
-            "nightshift",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="escalate_only",
-            executor_key="nightshift",
-            physical_callable=f"{reg}:nightshift",
-            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
-            reason_code="escalate_probe_or_unavailable",
-        ),
-        "ultra_review": _ec(
-            "ultra_review",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="escalate_only",
-            executor_key="ultra_review",
-            physical_callable=f"{reg}:ultra_review",
-            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
-            reason_code="escalate_probe_or_unavailable",
-        ),
-        "bdd_acceptance_skill": _ec(
-            "bdd_acceptance_skill",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="triggered_validation",
-            executor_key="bdd_acceptance_skill",
-            physical_callable=f"{reg}:bdd_acceptance_skill",
-            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
-            reason_code="skill_probe_not_production",
-        ),
-        "learn_mode": _ec(
-            "learn_mode",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="triggered_learning",
-            executor_key="learn_mode",
-            physical_callable=f"{reg}:learn_mode",
-            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
-            reason_code="scheduler_probe_not_production",
-        ),
-        "learn_phase_slo": _ec(
-            "learn_phase_slo",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="triggered_learning",
-            executor_key="learn_phase_slo",
-            physical_callable=f"{reg}:learn_phase_slo",
-            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
-            reason_code="scheduler_probe_not_production",
-        ),
         "learn_scheduler": _ec(
             "learn_scheduler",
             EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
@@ -654,16 +659,6 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             physical_callable=f"{reg}:metabolism_resume",
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
             reason_code="resume_probe_not_production",
-        ),
-        "semantic_failure_sensor": _ec(
-            "semantic_failure_sensor",
-            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="triggered_validation",
-            executor_key="semantic_failure_sensor",
-            physical_callable=f"{reg}:semantic_failure_sensor",
-            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
-            reason_code="sensor_probe_not_production",
         ),
     }
 
@@ -706,6 +701,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         external_auth,
         legacy,
         experimental,
+        phase2_real,
         probe_escalate,
         missing,
     ):

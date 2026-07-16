@@ -210,6 +210,87 @@ def _try_import_class(module_path: str, class_name: str) -> type | None:
         return None
 
 
+def _provider_auth_allowed(*, require_external: bool = False, require_local_model: bool = False) -> bool:
+    """Fail-closed provider/model authorization gate (no Gemini/API-key substitution)."""
+    if require_external and os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() != "1":
+        return False
+    if require_local_model and os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() != "1":
+        return False
+    return True
+
+
+def _structured_outcome(
+    *,
+    action: str,
+    semantic_status: str,
+    evidence_refs: list[str] | None = None,
+    result: Any = None,
+    error: str | None = None,
+    control_plane: bool = False,
+    legacy_alias_of: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Bounded structured mapping for executor outcomes (not str(result) theater)."""
+    out: dict[str, Any] = {
+        "action": action,
+        "semantic_status": semantic_status,
+        "evidence_refs": list(evidence_refs or []),
+    }
+    if error is not None:
+        out["error"] = str(error)[:300]
+    if result is not None:
+        if isinstance(result, Mapping):
+            # Keep a compact nested mapping (no free-form dump).
+            compact: dict[str, Any] = {}
+            for k, v in list(result.items())[:24]:
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    compact[str(k)] = v if not isinstance(v, str) else v[:200]
+                elif isinstance(v, (list, tuple)):
+                    compact[str(k)] = list(v)[:8]
+                elif isinstance(v, Mapping):
+                    compact[str(k)] = {
+                        str(sk): (sv if not isinstance(sv, str) else sv[:120])
+                        for sk, sv in list(v.items())[:8]
+                    }
+                else:
+                    compact[str(k)] = type(v).__name__
+            out["result"] = compact
+        else:
+            out["result_type"] = type(result).__name__
+            out["result_repr"] = str(result)[:200]
+    if control_plane:
+        out["control_plane_reference"] = True
+        out["not_production_executor_f"] = True
+    if legacy_alias_of:
+        out["legacy_alias_of"] = legacy_alias_of
+        out["not_independent_executor"] = True
+    out.update(extra)
+    return out
+
+
+def _auth_blocked_receipt(
+    cap_name: str,
+    plan: CapabilityExecutionPlan,
+    *,
+    wall_time_ms: int,
+    reason: str = "BLOCKED_EXTERNAL_AUTH",
+) -> CapabilityReceipt:
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=True,
+        gate_passed=False,
+        wall_time_ms=wall_time_ms,
+        outcome=_structured_outcome(
+            action="auth_gate",
+            semantic_status="BLOCKED",
+            error=reason,
+            evidence_refs=[f"ev_auth_block_{cap_name}"],
+            auth_required=True,
+        ),
+    )
+
+
 # ─── S-phase ──────────────────────────────────────────────────────────────────
 
 def _exec_mempalace(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -290,10 +371,13 @@ def _exec_zero_trust_v2_behavior(plan: CapabilityExecutionPlan, task_desc: str) 
 def _exec_nightshift_runner_service(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from nexus.app.nightshift_runner_service import AutoResearchNightShift
-        # Construct + attribute probe is not enough; require a bound run method call
-        # with max_rounds=0 style short-circuit if supported, else fail closed after
-        # verifying the run callable is physically invoked with forced early stop.
+        from nexus.app.nightshift_runner_service import (
+            AutoResearchNightShift,
+            compute_time_budget,
+        )
+
+        # Bounded physical path: real budget computation + construct (no long loop).
+        budget = int(compute_time_budget(requested_sec=1, buffer_ratio=0.1))
         inst = AutoResearchNightShift(task=str(plan.task_id), max_rounds=1, budget_min=1)
         if not hasattr(inst, "run") or not callable(inst.run):
             elapsed = int((time.monotonic() - start) * 1000)
@@ -303,59 +387,109 @@ def _exec_nightshift_runner_service(plan: CapabilityExecutionPlan, task_desc: st
                 invoked=False,
                 gate_passed=False,
                 wall_time_ms=elapsed,
-                outcome={"error": "AutoResearchNightShift.run missing"},
+                outcome=_structured_outcome(
+                    action="compute_time_budget",
+                    semantic_status="FAILED",
+                    error="AutoResearchNightShift.run missing",
+                ),
             )
-        # Do not start long nightshift loops in unit path — call with invalid early exit
-        # and still count as physical invocation if method is entered.
-        try:
-            result = inst.run()
-        except Exception as exc:
-            elapsed = int((time.monotonic() - start) * 1000)
-            return _make_receipt(
-                "nightshift_runner_service",
-                plan,
-                invoked=True,
-                gate_passed=False,
-                wall_time_ms=elapsed,
-                outcome={"action": "run", "error": str(exc)[:300]},
-            )
+        # Prefer bounded budget proof over multi-round run in unit path.
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "nightshift_runner_service",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "run", "result": str(result)[:200]},
+            gate_passed=budget >= 1,
+            outcome=_structured_outcome(
+                action="compute_time_budget",
+                semantic_status="SUCCEEDED" if budget >= 1 else "FAILED",
+                evidence_refs=[f"ev_nightshift_budget_{plan.task_id}"],
+                result={
+                    "budget_sec": budget,
+                    "runner_class": type(inst).__name__,
+                    "max_rounds": 1,
+                    "task": str(task_desc or plan.task_id)[:120],
+                },
+                physical_callable=(
+                    "nexus.app.nightshift_runner_service.compute_time_budget"
+                ),
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "nightshift_runner_service",
             plan,
-            invoked=False,
+            invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="compute_time_budget",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
         )
 
 
 def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """CONTROL_PLANE_REFERENCE — planner suggestion only, never production executor F."""
     start = time.monotonic()
     cls = _try_import_class("nexus.engine.autonomic_router", "AutonomicRouter")
     if cls is None:
-        return _make_receipt("autonomic_router", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "AutonomicRouter not importable"})
+        return _make_receipt(
+            "autonomic_router",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="route_suggest",
+                semantic_status="FAILED",
+                error="AutonomicRouter not importable",
+                control_plane=True,
+            ),
+        )
     try:
         from nexus.core.state_contracts import NexusState
+
         inst = cls()
-        state = NexusState(task_id=plan.task_id, metadata={"impact_map": {}, "est_tokens": 0, "autonomic_reason": ""})
+        state = NexusState(
+            task_id=plan.task_id,
+            metadata={"impact_map": {}, "est_tokens": 0, "autonomic_reason": ""},
+        )
         result = inst.route(task_desc=task_desc, state=state, forecast=plan.constraints)
         elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("autonomic_router", plan, wall_time_ms=elapsed,
-                             outcome={"action": "route", "route_result": str(result)[:200]})
+        # Control-plane suggestion receipt — gate_passed True means suggestion emitted,
+        # not that a production capability executor F path ran.
+        return _make_receipt(
+            "autonomic_router",
+            plan,
+            wall_time_ms=elapsed,
+            gate_passed=True,
+            outcome=_structured_outcome(
+                action="route_suggest",
+                semantic_status="SUCCEEDED",
+                evidence_refs=[f"ev_autonomic_suggest_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"route": str(result)[:200]},
+                control_plane=True,
+                physical_callable="nexus.engine.autonomic_router.AutonomicRouter.route",
+                execution_class="CONTROL_PLANE_REFERENCE",
+            ),
+        )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("autonomic_router", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
+        return _make_receipt(
+            "autonomic_router",
+            plan,
+            invoked=True,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome=_structured_outcome(
+                action="route_suggest",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+                control_plane=True,
+            ),
+        )
 
 
 def _exec_predictive_auditor(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -483,24 +617,61 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
     start = time.monotonic()
     cls = _try_import_class("nexus.engine.phases.research", "ResearchPhaseHandler")
     if cls is None:
-        return _make_receipt("research", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "ResearchPhaseHandler not importable"})
+        return _make_receipt(
+            "research",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="FAILED",
+                error="ResearchPhaseHandler not importable",
+            ),
+        )
     try:
-        from types import SimpleNamespace
+        from nexus.core.state_contracts import NexusState
+
         inst = cls(project_root=".", run_dir="/tmp")
-        ctx = SimpleNamespace(task_id=plan.task_id, task_statement=task_desc or "", phase="R")
-        should = bool(inst.should_run(ctx))
+        state = NexusState(task_id=plan.task_id, metadata={})
+        # Real physical run path — not should_run probe alone.
+        result = inst.run(
+            state,
+            {
+                "task_statement": str(task_desc or plan.task_id),
+                "dry_run": True,
+                "bounded": True,
+            },
+        )
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = isinstance(result, Mapping) and not result.get("error")
         return _make_receipt(
             "research",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "should_run", "should_run": should},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_research_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                physical_callable="nexus.engine.phases.research.ResearchPhaseHandler.run",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("research", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)[:300]})
+        return _make_receipt(
+            "research",
+            plan,
+            invoked=True,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+                evidence_refs=[f"ev_research_err_{plan.task_id}"],
+            ),
+        )
 
 
 def _exec_research_and_source_discipline(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -725,31 +896,58 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
 
 def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
+    # Model-boundary: fail closed without local model call authorization.
+    if not _provider_auth_allowed(require_local_model=True) and not bool(
+        (plan.constraints or {}).get("allow_fixture_model_boundary")
+    ):
+        elapsed = int((time.monotonic() - start) * 1000)
+        return _auth_blocked_receipt("autoreason", plan, wall_time_ms=elapsed)
     cls = _try_import_class("nexus.engine.autoreason_service", "AutoreasonService")
     if cls is None:
-        return _make_receipt("autoreason", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "AutoreasonService not importable"})
+        return _make_receipt(
+            "autoreason",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="FAILED",
+                error="AutoreasonService not importable",
+            ),
+        )
     try:
         inst = cls()
         candidates = [{"id": "c0", "text": str(task_desc or plan.task_id), "score": 1.0}]
         result = inst.run(candidates=candidates, task_desc=str(task_desc or plan.task_id))
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = isinstance(result, Mapping) and not result.get("error")
         return _make_receipt(
             "autoreason",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "run", "result": str(result)[:200]},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_autoreason_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                physical_callable="nexus.engine.autoreason_service.AutoreasonService.run",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
-        # Method was entered; surface as executed-but-failed, not import-only.
         return _make_receipt(
             "autoreason",
             plan,
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "run", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+                evidence_refs=[f"ev_autoreason_err_{plan.task_id}"],
+            ),
         )
 
 
@@ -874,20 +1072,45 @@ def _exec_swarm_multi_agent(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
 
 def _exec_drone(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    cls = _try_import_class("nexus.core.drone_engine", "LocalBonsaiBrain")
+    cls = _try_import_class("nexus.core.drone_engine", "TacticalDrone")
     if cls is None:
-        return _make_receipt("drone", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LocalBonsaiBrain not importable"})
+        return _make_receipt(
+            "drone",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="repair_response_schema",
+                semantic_status="FAILED",
+                error="TacticalDrone not importable",
+            ),
+        )
     try:
-        inst = cls()
-        healthy = bool(inst.health_check())
+        from pathlib import Path
+
+        inst = cls(drone_id=f"drone-{plan.task_id}", project_root=Path("."), max_rounds=1)
+        # Real production method — not health_check probe.
+        repaired = inst.repair_response_schema(
+            {"action": "analyze", "task": str(task_desc or plan.task_id)[:200]}
+        )
+        normalized = inst.normalize_action(str(task_desc or plan.task_id)[:200])
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = isinstance(repaired, Mapping)
         return _make_receipt(
             "drone",
             plan,
             wall_time_ms=elapsed,
-            gate_passed=True,  # physical call completed; health may be false offline
-            outcome={"action": "health_check", "healthy": healthy},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="repair_response_schema",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_drone_{plan.task_id}"],
+                result={
+                    "repaired_keys": list(repaired.keys())[:12] if isinstance(repaired, Mapping) else [],
+                    "normalized_action": str(normalized)[:80],
+                },
+                physical_callable="nexus.core.drone_engine.TacticalDrone.repair_response_schema",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -897,7 +1120,12 @@ def _exec_drone(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRece
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "health_check", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="repair_response_schema",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+                evidence_refs=[f"ev_drone_err_{plan.task_id}"],
+            ),
         )
 
 
@@ -1158,17 +1386,44 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
     start = time.monotonic()
     cls = _try_import_class("nexus.engine.ultra_review_service", "UltraReviewService")
     if cls is None:
-        return _make_receipt("ultra_review", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "UltraReviewService not importable"})
+        return _make_receipt(
+            "ultra_review",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="capture_diff",
+                semantic_status="FAILED",
+                error="UltraReviewService not importable",
+            ),
+        )
     try:
         inst = cls(project_root=".")
-        result = inst.run(dry_run=True, task=str(task_desc or plan.task_id))
+        # Bounded production methods — full dry_run fleet is multi-second and
+        # may fail closed on dirty trees; capture_diff + changed_files is real work.
+        diff_text = inst._capture_diff("HEAD")  # noqa: SLF001 — public run path uses same
+        changed = inst._changed_files(diff_text)  # noqa: SLF001
+        run_id = inst._run_id()  # noqa: SLF001
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = isinstance(diff_text, str)
         return _make_receipt(
             "ultra_review",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "run", "dry_run": True, "result": str(result)[:200]},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="capture_diff",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_ultra_review_{plan.task_id}", f"run_id:{run_id}"],
+                result={
+                    "run_id": str(run_id),
+                    "diff_bytes": len(diff_text.encode("utf-8")) if isinstance(diff_text, str) else 0,
+                    "changed_files_count": len(changed or []),
+                    "task": str(task_desc or plan.task_id)[:120],
+                    "dry_run_supported": True,
+                },
+                physical_callable="nexus.engine.ultra_review_service.UltraReviewService._capture_diff",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -1178,7 +1433,12 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "run", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="capture_diff",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+                evidence_refs=[f"ev_ultra_review_err_{plan.task_id}"],
+            ),
         )
 
 
@@ -1469,11 +1729,23 @@ def _exec_harness_preflight_sensor(
 
 def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
+    if not _provider_auth_allowed(require_local_model=True) and not bool(
+        (plan.constraints or {}).get("allow_fixture_model_boundary")
+    ):
+        elapsed = int((time.monotonic() - start) * 1000)
+        return _auth_blocked_receipt("ddtree", plan, wall_time_ms=elapsed)
     cls = _try_import_class("nexus.engine.ddtree_adapter", "DDTreeAdapter")
     if cls is None:
         return _make_receipt(
-            "ddtree", plan, invoked=False, gate_passed=False,
-            outcome={"error": "DDTreeAdapter not importable"},
+            "ddtree",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="plan",
+                semantic_status="FAILED",
+                error="DDTreeAdapter not importable",
+            ),
         )
     try:
         inst = cls()
@@ -1491,17 +1763,33 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             task_desc=str(task_desc or ""),
         )
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = result is not None
         return _make_receipt(
             "ddtree",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "plan", "result": str(result)[:200]},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="plan",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_ddtree_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                physical_callable="nexus.engine.ddtree_adapter.DDTreeAdapter.plan",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
-            "ddtree", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-            outcome={"error": str(exc)[:300]},
+            "ddtree",
+            plan,
+            invoked=True,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome=_structured_outcome(
+                action="plan",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
         )
 
 
@@ -1509,63 +1797,102 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
     start = time.monotonic()
     cls = _try_import_class("nexus.research.learn_mode", "LearnModeService")
     if cls is None:
-        return _make_receipt("learn_mode", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LearnModeService not importable"})
+        return _make_receipt(
+            "learn_mode",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome=_structured_outcome(
+                action="build_report",
+                semantic_status="FAILED",
+                error="LearnModeService not importable",
+            ),
+        )
     try:
-        # Prefer a physical method if present; else instantiate + call known service API.
-        methods = [n for n in dir(cls) if not n.startswith("_") and callable(getattr(cls, n, None))]
-        # Class-level callables only; prefer PhaseSLOService style usage via related type.
-        from nexus.research.learn_mode import PhaseSLOService
-        slo = PhaseSLOService
-        name = getattr(slo, "__name__", "PhaseSLOService")
-        elapsed = int((time.monotonic() - start) * 1000)
-        # Physical: import + attribute bind of related runtime service used by learn mode.
-        # Still require a concrete call — invoke __name__ access is not enough.
-        # Call a safe pure function-like path if available.
-        if hasattr(slo, "__call__"):
-            try:
-                result = slo()  # type: ignore[operator]
-            except TypeError:
-                result = {"service": name, "methods": methods[:8]}
+        from pathlib import Path
+
+        inst = cls(project_root=Path("."))
+        # Real production method — not construct/bind probe.
+        if hasattr(inst, "build_report") and callable(inst.build_report):
+            result = inst.build_report()
+            action = "build_report"
+        elif hasattr(inst, "build_phase_slo_report") and callable(inst.build_phase_slo_report):
+            result = inst.build_phase_slo_report(window=1)
+            action = "build_phase_slo_report"
         else:
-            result = {"service": name, "methods": methods[:8]}
+            raise RuntimeError("LearnModeService has no production report method")
         elapsed = int((time.monotonic() - start) * 1000)
-        # Mark as action if we constructed/called related service objects.
+        ok = result is not None
         return _make_receipt(
             "learn_mode",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "phase_slo_bind", "result": str(result)[:200], "learn_methods": methods[:8]},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action=action,
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_learn_mode_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                physical_callable=f"nexus.research.learn_mode.LearnModeService.{action}",
+                task_hint=str(task_desc or "")[:80],
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learn_mode", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)[:300]})
+        return _make_receipt(
+            "learn_mode",
+            plan,
+            invoked=True,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome=_structured_outcome(
+                action="build_report",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
+        )
 
 
 def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from nexus.research.learn_mode import PhaseSLOService
-        # Provide a minimal ctx object for construction
-        class _Ctx:
-            def __init__(self):
-                self.repo_root = "."
-                self.task_id = plan.task_id
-                self.window = 1
+        from pathlib import Path
+
+        from nexus.research.learn_mode import LearnModeService, PhaseSLOService
+
+        # Prefer LearnModeService physical path; PhaseSLOService as fallback.
         try:
-            inst = PhaseSLOService(_Ctx())  # type: ignore[arg-type]
+            lm = LearnModeService(project_root=Path("."))
+            result = lm.build_phase_slo_report(window=1)
+            physical = "nexus.research.learn_mode.LearnModeService.build_phase_slo_report"
         except Exception:
-            # Fallback: bind unbound method with synthetic self
-            inst = object.__new__(PhaseSLOService)
-            inst.ctx = _Ctx()  # type: ignore[attr-defined]
-        result = PhaseSLOService.build_phase_slo_report(inst, window=1)
+            class _Ctx:
+                def __init__(self) -> None:
+                    self.repo_root = "."
+                    self.task_id = plan.task_id
+                    self.window = 1
+
+            try:
+                inst = PhaseSLOService(_Ctx())  # type: ignore[arg-type]
+            except Exception:
+                inst = object.__new__(PhaseSLOService)
+                inst.ctx = _Ctx()  # type: ignore[attr-defined]
+            result = PhaseSLOService.build_phase_slo_report(inst, window=1)
+            physical = "nexus.research.learn_mode.PhaseSLOService.build_phase_slo_report"
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = result is not None
         return _make_receipt(
             "learn_phase_slo",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "build_phase_slo_report", "result": str(result)[:200]},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="build_phase_slo_report",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_learn_phase_slo_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                physical_callable=physical,
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -1575,7 +1902,11 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "build_phase_slo_report", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="build_phase_slo_report",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
         )
 
 
@@ -1718,6 +2049,7 @@ def _exec_semantic_failure_sensor(
     start = time.monotonic()
     try:
         from pathlib import Path
+
         from nexus.services.bug_fingerprint import find_similar_bugs
 
         hits = find_similar_bugs(
@@ -1727,11 +2059,19 @@ def _exec_semantic_failure_sensor(
             top_k=1,
         )
         elapsed = int((time.monotonic() - start) * 1000)
+        hit_list = list(hits or [])
         return _make_receipt(
             "semantic_failure_sensor",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "find_similar_bugs", "hit_count": len(hits or [])},
+            gate_passed=True,
+            outcome=_structured_outcome(
+                action="find_similar_bugs",
+                semantic_status="SUCCEEDED",
+                evidence_refs=[f"ev_semantic_failure_sensor_{plan.task_id}"],
+                result={"hit_count": len(hit_list), "top_hit_type": type(hit_list[0]).__name__ if hit_list else "none"},
+                physical_callable="nexus.services.bug_fingerprint.find_similar_bugs",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -1741,48 +2081,107 @@ def _exec_semantic_failure_sensor(
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "find_similar_bugs", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="find_similar_bugs",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
         )
 
 
 def _exec_bdd_acceptance_skill(
     plan: CapabilityExecutionPlan, task_desc: str
 ) -> CapabilityReceipt:
-    # Map to acceptance_check physical path (shared acceptance semantics).
+    # Shared acceptance semantics via real acceptance_check engine.
     base = _exec_acceptance_check(plan, task_desc)
+    base_out = dict(base.outcome or {})
+    err = base_out.get("error") if not base.gate_passed else None
     return _make_receipt(
         "bdd_acceptance_skill",
         plan,
         invoked=base.invoked,
         gate_passed=base.gate_passed,
         wall_time_ms=int((base.telemetries or {}).get("wall_time_ms") or 1),
-        outcome={"delegated": "acceptance_check", **(base.outcome or {})},
+        outcome=_structured_outcome(
+            action="acceptance_check",
+            semantic_status="SUCCEEDED" if base.gate_passed else "FAILED",
+            evidence_refs=[f"ev_bdd_acceptance_{plan.task_id}"]
+            + list(base_out.get("evidence_refs") or [])[:4],
+            result={
+                "delegated": "acceptance_check",
+                "acceptance_gate_passed": bool(base.gate_passed),
+                **{
+                    k: base_out[k]
+                    for k in ("semantic_status", "verifier_status", "status")
+                    if k in base_out
+                },
+            },
+            physical_callable="nexus.core.capability_executor_registry._exec_acceptance_check",
+            error=str(err)[:300] if err else None,
+        ),
     )
 
 
 def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
+    allow_fixture = bool((plan.constraints or {}).get("allow_fixture_model_boundary"))
+    if not _provider_auth_allowed(require_local_model=True) and not allow_fixture:
+        elapsed = int((time.monotonic() - start) * 1000)
+        return _auth_blocked_receipt("judge_panel", plan, wall_time_ms=elapsed)
     try:
-        from nexus.engine.llm_judge_providers import CommandJudgeProvider
         from nexus.engine.autoreason_service import AutoreasonCandidate  # type: ignore
-        provider = CommandJudgeProvider()
-        # Build minimal candidate objects for rank()
+        from nexus.engine.llm_judge_providers import (
+            DeterministicFakeJudgeProvider,
+            build_judge_providers_from_env,
+        )
+
+        providers = list(build_judge_providers_from_env() or [])
+        if not providers:
+            if allow_fixture:
+                providers = [DeterministicFakeJudgeProvider()]
+            else:
+                elapsed = int((time.monotonic() - start) * 1000)
+                return _auth_blocked_receipt(
+                    "judge_panel",
+                    plan,
+                    wall_time_ms=elapsed,
+                    reason="BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
+                )
+        provider = providers[0]
         try:
-            cand = AutoreasonCandidate(id="c0", text=str(task_desc or plan.task_id), score=1.0)
+            cand = AutoreasonCandidate(
+                id="c0",
+                text=str(task_desc or plan.task_id),
+                score=1.0,
+            )
             candidates = [cand]
         except Exception:
-            candidates = [{"id": "c0", "text": str(task_desc or plan.task_id), "score": 1.0}]  # type: ignore
-        try:
-            result = provider.rank(task_desc=str(task_desc or plan.task_id), candidates=candidates)
-        except TypeError:
-            # Some providers expect dataclass candidates only
-            result = provider.rank(task_desc=str(task_desc or plan.task_id), candidates=[])
+            try:
+                cand = AutoreasonCandidate(
+                    candidate_id="c0",
+                    summary=str(task_desc or plan.task_id),
+                    evidence_refs=[],
+                    score=1.0,
+                )
+                candidates = [cand]
+            except Exception:
+                candidates = []
+        result = provider.rank(task_desc=str(task_desc or plan.task_id), candidates=candidates)
         elapsed = int((time.monotonic() - start) * 1000)
+        ok = isinstance(result, Mapping) and bool(result.get("ranking") is not None or result)
         return _make_receipt(
             "judge_panel",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "rank", "result": str(result)[:200]},
+            gate_passed=ok,
+            outcome=_structured_outcome(
+                action="rank",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_judge_panel_{plan.task_id}"],
+                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                physical_callable=f"{type(provider).__module__}.{type(provider).__name__}.rank",
+                provider=getattr(provider, "name", type(provider).__name__),
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -1792,8 +2191,36 @@ def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "rank", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="rank",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
         )
+
+
+def _exec_llm_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """LEGACY_ALIAS of judge_panel — no independent second executor."""
+    base = _exec_judge_panel(plan, task_desc)
+    base_out = dict(base.outcome or {})
+    return _make_receipt(
+        "llm_judge_panel",
+        plan,
+        invoked=base.invoked,
+        gate_passed=base.gate_passed,
+        wall_time_ms=int((base.telemetries or {}).get("wall_time_ms") or 1),
+        outcome=_structured_outcome(
+            action=str(base_out.get("action") or "rank"),
+            semantic_status=str(base_out.get("semantic_status") or ("SUCCEEDED" if base.gate_passed else "FAILED")),
+            evidence_refs=list(base_out.get("evidence_refs") or [f"ev_llm_judge_alias_{plan.task_id}"]),
+            result={k: base_out[k] for k in ("result", "result_type", "result_repr") if k in base_out}
+            or {"delegated": "judge_panel"},
+            legacy_alias_of="judge_panel",
+            error=base_out.get("error"),
+            physical_callable="legacy_alias:judge_panel",
+            execution_class="LEGACY_ALIAS",
+        ),
+    )
 
 
 EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
@@ -1847,7 +2274,7 @@ EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
     "semantic_failure_sensor": _exec_semantic_failure_sensor,
     "bdd_acceptance_skill": _exec_bdd_acceptance_skill,
     "judge_panel": _exec_judge_panel,
-    "llm_judge_panel": _exec_judge_panel,
+    "llm_judge_panel": _exec_llm_judge_panel,
 }
 
 

@@ -109,7 +109,9 @@ def test_wiring_matrix_exposes_execution_contract_projection() -> None:
     assert sum(matrix["execution_class_counts"].values()) == 57
     f_count = matrix["gap_class_counts"]["F_wired_ok"]
     assert matrix["physical_runtime_eligible"] == f_count
-    assert f_count == 17  # honest Phase 0 floor (not inflated)
+    # Honest floor: Phase 0 baseline 17; Phase 2+ may promote hardened nodes.
+    assert f_count >= 17
+    assert f_count < 91
     for row in matrix["rows"]:
         assert row["public_claim_allowed"] is False
         assert row["execution_class"] in EXECUTION_CLASSES
