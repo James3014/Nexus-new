@@ -1497,6 +1497,143 @@ def test_local_candidate_executor_receives_capability_evidence_context(tmp_path:
     assert f"capability:research:{task_id}:unselected" not in ids
 
 
+# ─── P0 semantic-success seal ────────────────────────────────────────────────
+
+
+def test_production_belief_assess_confidence_numeric_no_error() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    ex = get_executor("belief")
+    assert ex is not None
+    plan = CapabilityExecutionPlan(
+        plan_id="belief-ok",
+        task_id="belief-task-1",
+        phases=["R"],
+        constraints={"assumption": "repo compiles"},
+    )
+    receipt = ex(plan, "repo compiles")
+    assert receipt.invoked is True
+    assert receipt.gate_passed is True
+    outcome = dict(receipt.outcome or {})
+    assert outcome.get("action") == "assess_confidence"
+    conf = outcome.get("confidence")
+    assert isinstance(conf, (int, float))
+    assert 0.0 <= float(conf) <= 1.0
+    assert not outcome.get("error")
+    assert "no_evaluate" not in str(outcome).lower()
+    assert outcome.get("task_id") == "belief-task-1" or outcome.get("assumption")
+
+
+def test_production_belief_monkeypatch_api_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nexus.core import belief_engine as be
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    def _boom(self, task_id: str, assumption: str = "") -> float:  # type: ignore[no-untyped-def]
+        raise RuntimeError("forced_belief_api_fail")
+
+    monkeypatch.setattr(be.BeliefEngine, "assess_confidence", _boom)
+    monkeypatch.setattr(be.BeliefEngine, "get_confidence", _boom)
+    ex = get_executor("belief")
+    plan = CapabilityExecutionPlan(
+        plan_id="belief-fail",
+        task_id="belief-task-fail",
+        phases=["R"],
+        constraints={},
+    )
+    receipt = ex(plan, "assumption")
+    assert receipt.gate_passed is False
+    assert receipt.invoked is False or bool((receipt.outcome or {}).get("error"))
+    assert "no_evaluate" not in str(receipt.outcome or {}).lower() or receipt.gate_passed is False
+
+
+def test_acceptance_check_unverified_not_success() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    ex = get_executor("acceptance_check")
+    assert ex is not None
+    plan = CapabilityExecutionPlan(
+        plan_id="acc-unv",
+        task_id="acc-1",
+        phases=["R"],
+        constraints={"semantic_status": "UNVERIFIED"},
+    )
+    receipt = ex(plan, "task statement")
+    assert receipt.gate_passed is False
+    outcome = dict(receipt.outcome or {})
+    assert str(outcome.get("semantic_status") or "").upper() == "UNVERIFIED"
+
+
+def test_acceptance_check_verified_can_succeed() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    ex = get_executor("acceptance_check")
+    plan = CapabilityExecutionPlan(
+        plan_id="acc-v",
+        task_id="acc-2",
+        phases=["R"],
+        constraints={"semantic_status": "VERIFIED"},
+    )
+    receipt = ex(plan, "task statement")
+    assert receipt.invoked is True
+    assert receipt.gate_passed is True
+    assert str((receipt.outcome or {}).get("semantic_status") or "").upper() == "VERIFIED"
+
+
+def test_claim_gate_registry_has_no_synthetic_theater() -> None:
+    """Production registry claim_gate must not hardcode abc123 / owner_approved theater."""
+    import inspect
+
+    from nexus.core import capability_executor_registry as cer
+
+    src = inspect.getsource(cer._exec_claim_gate)
+    # Ban hard-coded synthetic *assignments* (docstrings may mention policies).
+    assert 'source_hash="abc123"' not in src
+    assert "source_hash='abc123'" not in src
+    assert "owner_approved=True" not in src
+    assert "candidate_hash_matches_applied=True" not in src
+    assert "--- a/file.py" not in src
+    # Without real context: fail closed.
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+
+    plan = CapabilityExecutionPlan(plan_id="cg", task_id="cg1", phases=["R"], constraints={})
+    receipt = cer._exec_claim_gate(plan, "claim")
+    assert receipt.gate_passed is False
+    assert receipt.invoked is False or bool((receipt.outcome or {}).get("error"))
+
+
+def test_semantic_success_guard_rejects_error_and_unverified() -> None:
+    from nexus.core.capability_executor_registry import apply_semantic_success_guard
+
+    inv, gate, out = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "x", "error": "no_evaluate"},
+    )
+    assert gate is False
+    inv2, gate2, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "decide_completion", "semantic_status": "UNVERIFIED"},
+    )
+    assert gate2 is False
+    inv3, gate3, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "ok", "passed": False},
+    )
+    assert gate3 is False
+    inv4, gate4, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "assess_confidence", "confidence": 0.7},
+    )
+    assert inv4 is True and gate4 is True
+
+
 # ─── Phase A: bounded consumer_payload ───────────────────────────────────────
 
 
@@ -2135,7 +2272,7 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
         cp = entry.get("consumer_payload") or {}
         fields = cp.get("fields") or {}
         assert fields.get("action"), (cap, fields)
-        assert fields.get("result") is not None or fields.get("hit_count") is not None or fields.get("evidence_id"), (
+        assert fields.get("result") is not None or fields.get("hit_count") is not None or fields.get("evidence_id") or fields.get("confidence") is not None, (
             cap,
             fields,
         )
@@ -2145,6 +2282,16 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
         assert action in online_prompt, (cap, action, online_prompt[:500])
         assert f"{cap}:payload" in local_prompt or f"{cap}:result" in local_prompt
         assert f"{cap}:payload" in online_prompt or f"{cap}:result" in online_prompt
+        assert "no_evaluate" not in str(fields).lower()
+        assert not fields.get("error"), (cap, fields)
+
+    # P0-A: belief must be real assess_confidence with numeric confidence.
+    belief_entry = next(e for e in (bundle.get("entries") or []) if e.get("name") == "belief")
+    belief_fields = (belief_entry.get("consumer_payload") or {}).get("fields") or {}
+    assert belief_fields.get("action") == "assess_confidence", belief_fields
+    conf = belief_fields.get("confidence")
+    assert isinstance(conf, (int, float)), belief_fields
+    assert 0.0 <= float(conf) <= 1.0, conf
 
     assert lineage.get("capability_payload_consumed") is True
     assert (ec or {}).get("capability_payload_consumed") is True

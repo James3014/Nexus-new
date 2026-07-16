@@ -77,6 +77,35 @@ def test_catalog_union_accounted_and_historical_classified() -> None:
     assert catalog["alias_validation"]["ok"] is True
 
 
+def test_production_f_executors_have_no_synthetic_claim_theater() -> None:
+    """Registry production executors must not hardcode synthetic claim proofs."""
+    import inspect
+
+    from nexus.core import capability_executor_registry as cer
+    from nexus.services.capability_registry import WIRED_REAL, classify_gap
+
+    # claim_gate body: no synthetic theater *assignments*
+    src = inspect.getsource(cer._exec_claim_gate)
+    for banned in (
+        'source_hash="abc123"',
+        "source_hash='abc123'",
+        "owner_approved=True",
+        "candidate_hash_matches_applied=True",
+        "--- a/file.py",
+        "sha256:testdeterministic",
+    ):
+        assert banned not in src, banned
+
+    # belief must not wrap no_evaluate as success path
+    belief_src = inspect.getsource(cer._exec_belief)
+    assert "no_evaluate" not in belief_src or "error" in belief_src
+    assert "assess_confidence" in belief_src
+
+    # Every F_wired_ok name still classifies honestly
+    for name in sorted(WIRED_REAL):
+        assert classify_gap(name) == "F_wired_ok", name
+
+
 def test_runtime_eligible_gap_classes_zero_abcd() -> None:
     """Final Gate bar for runtime-eligible production/beta rows."""
     root = Path(__file__).resolve().parents[2]

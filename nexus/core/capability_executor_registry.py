@@ -65,6 +65,69 @@ def _is_shallow_outcome(outcome: Mapping[str, Any] | None) -> bool:
     return any(bool(outcome.get(k)) for k in _SHALLOW_SUCCESS_KEYS)
 
 
+# Explicit success / failure semantic_status values (structured field, not string scan).
+_SEMANTIC_SUCCESS_STATUSES = frozenset(
+    {
+        "VERIFIED",
+        "ACCEPTED",
+        "COMPLETE",
+        "COMPLETED",
+        "PASSED",
+        "PASS",
+        "SUCCEEDED",
+        "SUCCESS",
+        "OK",
+    }
+)
+_SEMANTIC_FAIL_STATUSES = frozenset(
+    {
+        "UNVERIFIED",
+        "BLOCKED",
+        "FAILED",
+        "ERROR",
+        "FAIL",
+        "REJECTED",
+        "INCOMPLETE",
+    }
+)
+
+
+def apply_semantic_success_guard(
+    *,
+    invoked: bool,
+    gate_passed: bool,
+    outcome: Mapping[str, Any] | None,
+) -> tuple[bool, bool, dict[str, Any]]:
+    """Fail closed when structured outcome fields contradict success.
+
+    Does not rely on fuzzy free-text scanning. Structured fields checked:
+    - non-empty ``error``
+    - ``semantic_status`` in UNVERIFIED/BLOCKED/FAILED/ERROR
+    - ``passed is False`` / ``ok is False``
+    """
+    out: dict[str, Any] = dict(outcome or {})
+    if not invoked:
+        return False, False, out
+
+    err = out.get("error")
+    if err not in (None, "", [], {}):
+        return invoked, False, out
+
+    semantic = str(out.get("semantic_status") or "").strip().upper()
+    if semantic in _SEMANTIC_FAIL_STATUSES:
+        return invoked, False, out
+    # If semantic_status is present and not an explicit success, fail closed.
+    if semantic and semantic not in _SEMANTIC_SUCCESS_STATUSES:
+        return invoked, False, out
+
+    if out.get("passed") is False:
+        return invoked, False, out
+    if out.get("ok") is False:
+        return invoked, False, out
+
+    return invoked, bool(gate_passed), out
+
+
 def _make_receipt(
     cap_name: str,
     plan: CapabilityExecutionPlan,
@@ -87,6 +150,12 @@ def _make_receipt(
             "error": "import_construct_not_execution",
             "detail": "physical method call required; import/construct alone is insufficient",
         }
+    # Structured semantic-success guard (error / semantic_status / passed / ok).
+    invoked, gate_passed, out = apply_semantic_success_guard(
+        invoked=invoked,
+        gate_passed=gate_passed,
+        outcome=out,
+    )
     if not out:
         out = {"phase_executed": "", "timestamp": datetime.now(timezone.utc).isoformat()}
     evidence_id = f"ev_cap_{cap_name}_{os.urandom(4).hex()}"
@@ -540,39 +609,91 @@ def _exec_reflex_loop(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
 # ─── D-phase ──────────────────────────────────────────────────────────────────
 
 def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Production belief: call real BeliefEngine.assess_confidence only.
+
+    Never invent confidence from digests, never call missing ``evaluate``,
+    never wrap ``no_evaluate`` / error as SUCCEEDED.
+    """
     start = time.monotonic()
     try:
         from nexus.core.belief_engine import BeliefEngine
+
         inst = BeliefEngine()
-        payload = dict(plan.constraints or {})
-        payload.setdefault("task_id", plan.task_id)
-        payload.setdefault("statement", task_desc or "")
-        if hasattr(inst, "evaluate"):
-            result = inst.evaluate(payload)
-        else:
-            result = {"confidence": 0.0, "error": "no_evaluate"}
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "belief",
-            plan,
-            wall_time_ms=elapsed,
-            outcome={"action": "evaluate", "result": str(result)[:200]},
+        assumption = str(
+            (plan.constraints or {}).get("assumption")
+            or (plan.constraints or {}).get("statement")
+            or task_desc
+            or plan.task_id
+            or ""
         )
-    except ModuleNotFoundError as exc:
-        # Telemetry dependency may be absent; still run a pure task-linked evaluate.
-        import hashlib
+        task_id = str(plan.task_id or "")
+        # Prefer assess_confidence; fall back to get_confidence only if present.
+        if hasattr(inst, "assess_confidence") and callable(getattr(inst, "assess_confidence")):
+            raw = inst.assess_confidence(task_id, assumption)
+            action = "assess_confidence"
+        elif hasattr(inst, "get_confidence") and callable(getattr(inst, "get_confidence")):
+            raw = inst.get_confidence(task_id, assumption)
+            action = "assess_confidence"  # report canonical action name
+        else:
+            elapsed = int((time.monotonic() - start) * 1000)
+            return _make_receipt(
+                "belief",
+                plan,
+                invoked=False,
+                gate_passed=False,
+                wall_time_ms=elapsed,
+                outcome={
+                    "action": "assess_confidence",
+                    "error": "no_supported_belief_api",
+                    "task_id": task_id,
+                    "assumption": assumption[:200],
+                },
+            )
+        try:
+            confidence = float(raw)
+        except (TypeError, ValueError):
+            elapsed = int((time.monotonic() - start) * 1000)
+            return _make_receipt(
+                "belief",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=elapsed,
+                outcome={
+                    "action": "assess_confidence",
+                    "error": "confidence_not_numeric",
+                    "raw": str(raw)[:120],
+                    "task_id": task_id,
+                    "assumption": assumption[:200],
+                },
+            )
+        if confidence != confidence:  # NaN
+            elapsed = int((time.monotonic() - start) * 1000)
+            return _make_receipt(
+                "belief",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=elapsed,
+                outcome={
+                    "action": "assess_confidence",
+                    "error": "confidence_nan",
+                    "task_id": task_id,
+                    "assumption": assumption[:200],
+                },
+            )
+        confidence = max(0.0, min(1.0, confidence))
         elapsed = int((time.monotonic() - start) * 1000)
-        digest = hashlib.sha256(f"{plan.task_id}:{task_desc}".encode("utf-8")).hexdigest()
-        confidence = int(digest[:8], 16) / 0xFFFFFFFF
         return _make_receipt(
             "belief",
             plan,
             wall_time_ms=elapsed,
             outcome={
-                "action": "evaluate",
+                "action": "assess_confidence",
                 "confidence": confidence,
-                "task_linked_hash": digest,
-                "engine_error": str(exc)[:120],
+                "task_id": task_id,
+                "assumption": assumption[:200],
+                "result": f"confidence={confidence}",
             },
         )
     except Exception as exc:
@@ -855,33 +976,101 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
 
 
 def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Registry claim_gate is NOT a synthetic proof factory.
+
+    Mainchain production claim/delivery/artifact gates run via strict postflight
+    evaluators. This registry path only executes when real claim context is
+    supplied on plan.constraints — never invents hashes, patches, or approvals.
+    """
     start = time.monotonic()
     fn = _try_import_class("nexus.services.local_heal.claim_delivery_gate", "validate_context_claim_delivery")
     if fn is None:
-        return _make_receipt("claim_gate", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "validate_context_claim_delivery not importable"})
+        return _make_receipt(
+            "claim_gate",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            outcome={
+                "action": "validate_context_claim_delivery",
+                "error": "validate_context_claim_delivery not importable",
+            },
+        )
+    constraints = dict(plan.constraints or {})
+    # Require real claim context — no synthetic theater.
+    required = ("source_hash", "candidate_target_file")
+    missing = [k for k in required if not str(constraints.get(k) or "").strip()]
+    if missing:
+        elapsed = int((time.monotonic() - start) * 1000)
+        return _make_receipt(
+            "claim_gate",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome={
+                "action": "validate_context_claim_delivery",
+                "error": "missing_real_claim_context",
+                "missing_fields": missing,
+                "note": "mainchain production claim_gate is postflight-owned",
+            },
+        )
     try:
         from types import SimpleNamespace
-        ctx = SimpleNamespace()
-        ctx.op = SimpleNamespace(
-            solve_eligible=True,
-            failure_reason="",
-            evaluation_report="verification_report.md",
-            source_hash="abc123",
-            final_patch="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-foo\n+bar",
-            owner_approved=True,
-            candidate_hash_matches_applied=True,
-            candidate_target_file="file.py",
-            route_context={"candidate_hash_matches_applied": True},
+
+        # Only forward caller-supplied fields — never invent approvals/hashes/patches.
+        op = SimpleNamespace(
+            solve_eligible=bool(constraints.get("solve_eligible", False)),
+            failure_reason=str(constraints.get("failure_reason") or ""),
+            evaluation_report=str(constraints.get("evaluation_report") or ""),
+            source_hash=str(constraints.get("source_hash") or ""),
+            final_patch=str(constraints.get("final_patch") or ""),
+            owner_approved=bool(constraints.get("owner_approved", False)),
+            candidate_hash_matches_applied=bool(
+                constraints.get("candidate_hash_matches_applied", False)
+            ),
+            candidate_target_file=str(constraints.get("candidate_target_file") or ""),
+            route_context=dict(constraints.get("route_context") or {})
+            if isinstance(constraints.get("route_context"), Mapping)
+            else {},
         )
+        ctx = SimpleNamespace(op=op)
         result = fn(ctx)
         elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("claim_gate", plan, wall_time_ms=elapsed,
-                             outcome={"result": str(result)[:200]})
+        # Interpret structured result when available.
+        passed = None
+        if isinstance(result, Mapping):
+            if "passed" in result:
+                passed = bool(result.get("passed"))
+            elif "ok" in result:
+                passed = bool(result.get("ok"))
+            elif "gate_passed" in result:
+                passed = bool(result.get("gate_passed"))
+        gate_ok = True if passed is None else bool(passed)
+        return _make_receipt(
+            "claim_gate",
+            plan,
+            wall_time_ms=elapsed,
+            gate_passed=gate_ok,
+            outcome={
+                "action": "validate_context_claim_delivery",
+                "result": str(result)[:200],
+                "passed": passed,
+                "task_id": plan.task_id,
+            },
+        )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("claim_gate", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
+        return _make_receipt(
+            "claim_gate",
+            plan,
+            invoked=True,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome={
+                "action": "validate_context_claim_delivery",
+                "error": str(exc)[:300],
+            },
+        )
 
 
 def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -1310,42 +1499,71 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
 
 
 def _exec_acceptance_check(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Semantic-success gated acceptance — object return alone is never success.
+
+    Only VERIFIED / ACCEPTED / COMPLETE (and aliases) set gate_passed=true.
+    UNVERIFIED / BLOCKED / FAILED / ERROR fail closed.
+    """
     start = time.monotonic()
     try:
         mod = importlib.import_module("nexus.engine.completion_enforcer")
         decide = getattr(mod, "decide_completion", None)
+        constraints = dict(plan.constraints or {})
+        # Do not invent VERIFIED evidence. Default semantic_status is UNVERIFIED
+        # unless caller supplies an explicit status on constraints/payload.
         payload = {
             "task_id": plan.task_id,
             "statement": task_desc,
-            "status": "SUCCEEDED",
-            "evidence_refs": [f"acceptance:{plan.task_id}"],
+            "status": str(constraints.get("status") or "INCOMPLETE"),
+            "semantic_status": str(
+                constraints.get("semantic_status")
+                or constraints.get("completion_status")
+                or "UNVERIFIED"
+            ),
+            "evidence_refs": list(
+                constraints.get("evidence_refs")
+                or [f"acceptance:{plan.task_id}"]
+            ),
         }
-        if callable(decide):
-            result = decide(payload)
+        if not callable(decide):
             elapsed = int((time.monotonic() - start) * 1000)
             return _make_receipt(
                 "acceptance_check",
                 plan,
+                invoked=False,
+                gate_passed=False,
                 wall_time_ms=elapsed,
                 outcome={
                     "action": "decide_completion",
-                    "result": str(result)[:200],
-                    "semantic_status": str(getattr(result, "semantic_status", "")),
+                    "error": "decide_completion_not_callable",
                 },
             )
-        symbols = [n for n in dir(mod) if not n.startswith("_")][:12]
+        result = decide(payload)
         elapsed = int((time.monotonic() - start) * 1000)
+        semantic = str(getattr(result, "semantic_status", "") or "").strip().upper()
+        success = semantic in _SEMANTIC_SUCCESS_STATUSES
         return _make_receipt(
             "acceptance_check",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "resolve_module", "symbols": symbols},
+            gate_passed=success,
+            outcome={
+                "action": "decide_completion",
+                "result": str(result)[:200],
+                "semantic_status": semantic or "UNVERIFIED",
+                "passed": success,
+                "task_id": plan.task_id,
+            },
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
-            "acceptance_check", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-            outcome={"error": str(exc)[:300]},
+            "acceptance_check",
+            plan,
+            invoked=False,
+            gate_passed=False,
+            wall_time_ms=elapsed,
+            outcome={"action": "decide_completion", "error": str(exc)[:300]},
         )
 
 
