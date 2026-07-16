@@ -915,6 +915,92 @@ WIRED_STUB: frozenset[str] = frozenset()
 
 CapabilityInvoker = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
+# ── Local / Online consumer projection (derived from execution contract) ──
+LOCAL_MODE_EXECUTE_HERE = "EXECUTE_HERE"
+LOCAL_MODE_CONSUME_SHARED_EVIDENCE = "CONSUME_SHARED_EVIDENCE"
+LOCAL_MODE_CONTROLLED_BY_POSTFLIGHT = "CONTROLLED_BY_POSTFLIGHT"
+LOCAL_MODE_EXTERNAL_NOT_LOCAL = "EXTERNAL_NOT_LOCAL"
+
+LOCAL_EXECUTION_MODES = frozenset(
+    {
+        LOCAL_MODE_EXECUTE_HERE,
+        LOCAL_MODE_CONSUME_SHARED_EVIDENCE,
+        LOCAL_MODE_CONTROLLED_BY_POSTFLIGHT,
+        LOCAL_MODE_EXTERNAL_NOT_LOCAL,
+    }
+)
+
+
+def project_local_execution_mode(name: str) -> str:
+    """Project a planner capability onto Local consumer mode (contract-derived)."""
+    c = PLANNER_EXECUTION_CONTRACTS.get(str(name or "").strip())
+    if c is None:
+        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+    ec = str(c.get("execution_class") or "")
+    effect = str(c.get("consumer_effect") or "")
+    if ec == EXECUTION_CLASS_STAGE_OWNED_REAL and name == "local_model_executor":
+        return LOCAL_MODE_EXECUTE_HERE
+    if effect == CONSUMER_EFFECT_POSTFLIGHT_GATE or name in {
+        "artifact_gate",
+        "claim_gate",
+        "delivery_gate",
+    }:
+        return LOCAL_MODE_CONTROLLED_BY_POSTFLIGHT
+    if ec == EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED and bool(
+        c.get("provider_authorization_required")
+    ):
+        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+    if ec in {
+        EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+        EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+        EXECUTION_CLASS_LEGACY_ALIAS,
+        EXECUTION_CLASS_MISSING_ENGINE,
+    }:
+        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+    if effect == CONSUMER_EFFECT_PROMPT_EVIDENCE:
+        return LOCAL_MODE_CONSUME_SHARED_EVIDENCE
+    if effect == CONSUMER_EFFECT_EXECUTION_CONTROL:
+        return LOCAL_MODE_EXECUTE_HERE
+    if effect == CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT:
+        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+    if ec in REAL_EXECUTION_CLASSES:
+        return LOCAL_MODE_CONSUME_SHARED_EVIDENCE
+    return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+
+
+def project_online_execution_mode(name: str) -> str:
+    """Online uses the same contract projection vocabulary as Local."""
+    return project_local_execution_mode(name)
+
+
+def build_local_online_contract_projection() -> dict[str, Any]:
+    """Full 57-node Local/Online projection derived from PLANNER_EXECUTION_CONTRACTS."""
+    rows: list[dict[str, Any]] = []
+    for name in list_execution_contract_ids():
+        c = PLANNER_EXECUTION_CONTRACTS[name]
+        local_mode = project_local_execution_mode(name)
+        rows.append(
+            {
+                "canonical_id": name,
+                "execution_class": c["execution_class"],
+                "consumer_effect": c["consumer_effect"],
+                "local_mode": local_mode,
+                "online_mode": project_online_execution_mode(name),
+                "public_claim_allowed": False,
+            }
+        )
+    mode_counts = {m: 0 for m in sorted(LOCAL_EXECUTION_MODES)}
+    for row in rows:
+        mode_counts[str(row["local_mode"])] = mode_counts.get(str(row["local_mode"]), 0) + 1
+    return {
+        "schema": "nexus.local_online_contract_projection.v1",
+        "source": "PLANNER_EXECUTION_CONTRACTS",
+        "planner_contract_count": len(rows),
+        "local_mode_counts": mode_counts,
+        "independent_local_truth": False,
+        "rows": rows,
+    }
+
 
 def list_planner_capability_names() -> tuple[str, ...]:
     nodes = default_capability_nodes()

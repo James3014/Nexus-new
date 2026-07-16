@@ -1,7 +1,8 @@
-"""C2: Local model capability executor registry.
+"""Local model capability executor registry (dispatch helper — not authority).
 
-Provides fail-closed dispatch for selected capabilities.
-No selected capability can silently become metadata-only.
+Authority for execution class / Local mode is PLANNER_EXECUTION_CONTRACTS in
+``nexus.services.capability_registry``. This registry only dispatches local
+helpers and must not invent independent wiring truth.
 """
 from __future__ import annotations
 

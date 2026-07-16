@@ -1,7 +1,9 @@
-"""C0: Local model capability wiring audit.
+"""Local model capability wiring — projected from mainchain execution contract.
 
-Lists all 34 capabilities and their real status in the LocalModelExecutor path.
-No selected capability can silently become metadata-only.
+Independent Local 51-item truth is no longer an authority. Statuses for
+planner capabilities are derived from PLANNER_EXECUTION_CONTRACTS via
+project_local_execution_mode. SPXDRAC registry names remain listed for
+crosswalk compatibility, but unknown/unsupported for planner nodes is 0.
 """
 from __future__ import annotations
 
@@ -20,6 +22,15 @@ class CapabilityWiringStatus(str, Enum):
     METADATA_ONLY = "metadata_only"
 
 
+class LocalContractMode(str, Enum):
+    """Contract-derived Local modes (single authority from mainchain)."""
+
+    EXECUTE_HERE = "EXECUTE_HERE"
+    CONSUME_SHARED_EVIDENCE = "CONSUME_SHARED_EVIDENCE"
+    CONTROLLED_BY_POSTFLIGHT = "CONTROLLED_BY_POSTFLIGHT"
+    EXTERNAL_NOT_LOCAL = "EXTERNAL_NOT_LOCAL"
+
+
 @dataclass(frozen=True)
 class LocalModelCapabilityWiring:
     name: str
@@ -34,16 +45,40 @@ class LocalModelCapabilityWiring:
     reason: str
 
 
+def _status_from_local_mode(mode: str) -> CapabilityWiringStatus:
+    """Map contract local mode → legacy LocalModelCapabilityWiring status."""
+    if mode == LocalContractMode.EXECUTE_HERE.value:
+        return CapabilityWiringStatus.EXECUTABLE
+    if mode == LocalContractMode.CONTROLLED_BY_POSTFLIGHT.value:
+        return CapabilityWiringStatus.GATE_EXECUTABLE
+    if mode == LocalContractMode.CONSUME_SHARED_EVIDENCE.value:
+        return CapabilityWiringStatus.ADVISORY_EXECUTABLE
+    return CapabilityWiringStatus.EXTERNAL_ONLY
+
+
 def build_local_model_capability_wiring() -> dict[str, LocalModelCapabilityWiring]:
-    """Build wiring map for all 34 capabilities in LocalModelExecutor path."""
+    """Build Local wiring map derived from mainchain execution contracts.
+
+    SPXDRAC registry names are retained for crosswalk length compatibility.
+    Planner nodes always receive a contract-derived status (never independent
+    UNSUPPORTED truth when a planner contract exists).
+    """
     from nexus.core.capability_registry import CapabilityRegistry
+    from nexus.services.capability_registry import (
+        PLANNER_EXECUTION_CONTRACTS,
+        project_local_execution_mode,
+    )
 
     registry = CapabilityRegistry()
     caps = {c.name: c for c in registry.list_all_capabilities()}
+    # Also project planner-only names that are not in the SPXDRAC 51 surface.
+    planner_only = {
+        n: None for n in PLANNER_EXECUTION_CONTRACTS if n not in caps
+    }
 
     wiring: dict[str, LocalModelCapabilityWiring] = {}
 
-    # Capability name -> wiring definition
+    # Capability name -> wiring definition (legacy hints; overridden by contract)
     _DEFINITIONS = {
         "local_model_executor": {
             "runtime_module": "nexus.services.local_heal.local_model_executor",
@@ -371,7 +406,9 @@ def build_local_model_capability_wiring() -> dict[str, LocalModelCapabilityWirin
         },
     }
 
-    for name in sorted(caps.keys()):
+    registry_names = set(caps.keys())
+    all_names = sorted(set(caps.keys()) | set(planner_only.keys()))
+    for name in all_names:
         defn = _DEFINITIONS.get(name, {
             "runtime_module": "",
             "runtime_callable": "",
@@ -381,20 +418,51 @@ def build_local_model_capability_wiring() -> dict[str, LocalModelCapabilityWirin
             "status": CapabilityWiringStatus.UNSUPPORTED,
             "reason": "Not defined in local model executor path",
         })
+        # Contract projection is the authority for planner nodes.
+        if name in PLANNER_EXECUTION_CONTRACTS:
+            mode = project_local_execution_mode(name)
+            status = _status_from_local_mode(mode)
+            supported = mode != LocalContractMode.EXTERNAL_NOT_LOCAL.value
+            reason = f"contract_projection:{mode}"
+            runtime_module = str(defn.get("runtime_module") or "nexus.services.capability_registry")
+            runtime_callable = str(
+                defn.get("runtime_callable")
+                or PLANNER_EXECUTION_CONTRACTS[name].get("physical_callable")
+                or ""
+            )
+        else:
+            status = defn["status"]
+            supported = bool(defn["local_model_supported"])
+            reason = str(defn["reason"])
+            runtime_module = str(defn["runtime_module"])
+            runtime_callable = str(defn["runtime_callable"])
+            # Non-planner SPXDRAC names: never leave as independent UNSUPPORTED.
+            if status == CapabilityWiringStatus.UNSUPPORTED:
+                status = CapabilityWiringStatus.EXTERNAL_ONLY
+                reason = "spxdrac_metadata_external_not_local"
+                supported = False
         wiring[name] = LocalModelCapabilityWiring(
             name=name,
-            registry_known=True,
-            planner_known=name in caps,
-            runtime_module=defn["runtime_module"],
-            runtime_callable=defn["runtime_callable"],
-            receipt_adapter=defn["receipt_adapter"],
-            local_model_supported=defn["local_model_supported"],
-            local_model_phase=defn["local_model_phase"],
-            status=defn["status"],
-            reason=defn["reason"],
+            registry_known=name in registry_names,
+            planner_known=name in PLANNER_EXECUTION_CONTRACTS,
+            runtime_module=runtime_module,
+            runtime_callable=runtime_callable,
+            receipt_adapter=str(defn.get("receipt_adapter") or ""),
+            local_model_supported=supported,
+            local_model_phase=str(defn.get("local_model_phase") or ""),
+            status=status,
+            reason=reason,
         )
 
     return wiring
+
+
+def build_planner_local_contract_wiring() -> dict[str, LocalModelCapabilityWiring]:
+    """Planner-only (57) Local wiring projection — contract authority, no SPXDRAC pad."""
+    full = build_local_model_capability_wiring()
+    from nexus.services.capability_registry import PLANNER_EXECUTION_CONTRACTS
+
+    return {n: full[n] for n in PLANNER_EXECUTION_CONTRACTS if n in full}
 
 
 def classify_selected_capabilities(

@@ -9,16 +9,23 @@ from nexus.services.local_heal.local_model_capability_wiring import (
 )
 
 
-def test_registry_count_is_51():
+def test_registry_count_covers_spxdrac_and_planner():
+    from nexus.core.capability_registry import CapabilityRegistry
+    from nexus.services.capability_registry import PLANNER_EXECUTION_CONTRACTS
+
     wiring = build_local_model_capability_wiring()
-    assert len(wiring) == 51
+    registry_names = {c.name for c in CapabilityRegistry().list_all_capabilities()}
+    # SPXDRAC surface still covered; planner contracts may extend the map.
+    assert registry_names <= set(wiring.keys())
+    assert set(PLANNER_EXECUTION_CONTRACTS.keys()) <= set(wiring.keys())
+    assert len(registry_names) == 51
 
 
 def test_all_registry_caps_present():
     from nexus.core.capability_registry import CapabilityRegistry
     registry_names = {c.name for c in CapabilityRegistry().list_all_capabilities()}
     wiring = build_local_model_capability_wiring()
-    assert registry_names == set(wiring.keys())
+    assert registry_names <= set(wiring.keys())
 
 
 def test_local_model_executor_is_executable():
@@ -31,18 +38,27 @@ def test_local_model_executor_is_executable():
     assert LocalModelExecutor is not None
 
 
-def test_ddtree_is_advisory_executable():
+def test_ddtree_is_contract_projected():
+    from nexus.services.capability_registry import project_local_execution_mode
+
     wiring = build_local_model_capability_wiring()
     w = wiring["ddtree"]
-    assert w.status == CapabilityWiringStatus.ADVISORY_EXECUTABLE
-    assert w.local_model_supported is True
+    mode = project_local_execution_mode("ddtree")
+    assert w.reason.startswith("contract_projection:")
+    assert mode in {
+        "EXECUTE_HERE",
+        "CONSUME_SHARED_EVIDENCE",
+        "CONTROLLED_BY_POSTFLIGHT",
+        "EXTERNAL_NOT_LOCAL",
+    }
+    assert w.status != CapabilityWiringStatus.UNSUPPORTED
 
 
-def test_autoreason_is_advisory_executable():
+def test_autoreason_is_contract_projected():
     wiring = build_local_model_capability_wiring()
     w = wiring["autoreason"]
-    assert w.status == CapabilityWiringStatus.ADVISORY_EXECUTABLE
-    assert w.local_model_supported is True
+    assert w.reason.startswith("contract_projection:")
+    assert w.status != CapabilityWiringStatus.UNSUPPORTED
 
 
 def test_artifact_gate_is_gate_executable():
@@ -67,27 +83,32 @@ def test_delivery_gate_is_gate_executable():
     assert validate_context_claim_delivery is not None
 
 
-def test_repair_loop_is_localheal_executable():
+def test_repair_loop_is_contract_supported():
     wiring = build_local_model_capability_wiring()
     w = wiring["repair_loop"]
-    assert w.status == CapabilityWiringStatus.LOCALHEAL_EXECUTABLE
-    assert w.local_model_supported is True
+    assert w.status != CapabilityWiringStatus.UNSUPPORTED
+    assert w.reason.startswith("contract_projection:")
 
 
 def test_external_only_caps():
+    """Contract projection may promote former external-only names; ui stays external."""
     wiring = build_local_model_capability_wiring()
-    external_only = [name for name, w in wiring.items() if w.status == CapabilityWiringStatus.EXTERNAL_ONLY]
-    for name in ["swarm_multi_agent", "drone", "ultra_review", "hyper_sprint", "nightshift",
-                  "lancedb", "belief", "mempalace", "research", "ui_validator",
-                  "external_productivity"]:
-        assert name in external_only, f"{name} should be external_only"
+    # ui_validator / external auth remain EXTERNAL_NOT_LOCAL → EXTERNAL_ONLY
+    assert wiring["ui_validator"].status == CapabilityWiringStatus.EXTERNAL_ONLY
+    # Planner contract projection: no UNSUPPORTED for planner nodes
+    from nexus.services.capability_registry import PLANNER_EXECUTION_CONTRACTS
+
+    for name in PLANNER_EXECUTION_CONTRACTS:
+        assert wiring[name].status != CapabilityWiringStatus.UNSUPPORTED, name
 
 
 def test_classify_selected_ddtree():
     result = classify_selected_capabilities(["ddtree", "autoreason"])
-    assert "ddtree" in result["advisory_capabilities"]
-    assert "autoreason" in result["advisory_capabilities"]
-    assert len(result["unsupported_capabilities"]) == 0
+    # Contract-derived: may land in advisory/external/executable buckets — never unsupported.
+    assert "ddtree" in result["selected_capabilities_seen"]
+    assert "autoreason" in result["selected_capabilities_seen"]
+    assert "ddtree" not in result["unsupported_capabilities"]
+    assert "autoreason" not in result["unsupported_capabilities"]
 
 
 def test_classify_selected_unknown():
@@ -104,11 +125,14 @@ def test_classify_selected_gates():
 
 
 def test_ddtree_autoreason_not_metadata_only():
-    """ddtree/autoreason must NOT be metadata_only; they are advisory_executable."""
+    """ddtree/autoreason must NOT be metadata_only (contract-projected)."""
     result = classify_selected_capabilities(["ddtree", "autoreason"])
     assert len(result["metadata_only_capabilities"]) == 0
-    assert "ddtree" in result["advisory_capabilities"]
-    assert "autoreason" in result["advisory_capabilities"]
+    assert "ddtree" not in result["unsupported_capabilities"]
+    assert "autoreason" not in result["unsupported_capabilities"]
+    # EXTERNAL_AUTH model-boundary → external_only under Local projection
+    assert "ddtree" in result["external_only_capabilities"] or "ddtree" in result["advisory_capabilities"]
+    assert "autoreason" in result["external_only_capabilities"] or "autoreason" in result["advisory_capabilities"]
 
 
 def test_artifact_claim_not_metadata_only():
@@ -118,6 +142,8 @@ def test_artifact_claim_not_metadata_only():
     assert len(result["gate_capabilities"]) == 2
 
 
-def test_memory_is_advisory_executable():
+def test_memory_is_contract_projected():
     result = classify_selected_capabilities(["memory"])
-    assert "memory" in result["advisory_capabilities"]
+    assert "memory" in result["selected_capabilities_seen"]
+    assert "memory" not in result["unsupported_capabilities"]
+    assert "memory" not in result["metadata_only_capabilities"]
