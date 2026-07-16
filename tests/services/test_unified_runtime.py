@@ -81,11 +81,25 @@ def _online(_: dict) -> dict:
 
 
 def _verifier(_: dict) -> dict:
-    return {"status": "pass", "evidence": "deterministic verifier", "evidence_refs": ["verifier:test:pass"]}
+    return {
+        "status": "SUCCEEDED",
+        "invoked": True,
+        "gate_passed": True,
+        "verifier_status": "pass",
+        "verifier_artifact": "sha256:testdeterministicverifierartifact01",
+        "evidence": "deterministic verifier",
+        "evidence_refs": ["verifier:test:pass"],
+    }
 
 
 def _learning(_: dict) -> dict:
-    return {"status": "pass", "evidence": "learning closure", "evidence_refs": ["learning:test:recorded"]}
+    return {
+        "status": "SUCCEEDED",
+        "invoked": True,
+        "gate_passed": True,
+        "evidence": "learning closure",
+        "evidence_refs": ["learning:test:recorded"],
+    }
 
 
 def test_runtime_calls_one_planner_and_emits_one_receipt() -> None:

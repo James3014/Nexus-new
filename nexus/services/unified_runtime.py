@@ -1439,10 +1439,104 @@ class UnifiedRuntime:
         )
         sealed_verdict = _verify_evidence_bundle(evidence_bundle)
         if not sealed_verdict.get("ok"):
-            # Fail closed: do not hand a broken seal to Local/Online.
-            evidence_bundle = dict(evidence_bundle)
-            evidence_bundle["seal_verify"] = sealed_verdict
+            # Fail closed: do NOT mutate sealed bundle with seal_verify;
+            # do NOT call Local/Online; terminal BLOCKED.
+            stages["shared_capability_evidence"] = _stage(
+                "shared_capability_evidence",
+                status="BLOCKED",
+                invoked=True,
+                evidence_present=True,
+                gate_passed=False,
+                evidence_refs=["runtime:evidence_bundle:seal_failed"],
+                reason="capability_evidence_seal_failed",
+                blockers=list(sealed_verdict.get("blockers") or []),
+                baseline_hash=str(evidence_bundle.get("baseline_hash") or ""),
+                bundle_hash=str(evidence_bundle.get("bundle_hash") or ""),
+            )
+            stages["local"] = _stage(
+                "local",
+                status="NOT_REQUESTED",
+                reason="blocked_by_evidence_seal",
+                invoked=False,
+                gate_passed=False,
+            )
+            stages["online"] = _stage(
+                "online",
+                status="NOT_REQUESTED",
+                reason="blocked_by_evidence_seal",
+                invoked=False,
+                gate_passed=False,
+            )
+            stages["verifier"] = _stage(
+                "verifier",
+                status="NOT_REQUESTED",
+                reason="blocked_by_evidence_seal",
+                invoked=False,
+                gate_passed=False,
+            )
+            stages["learning"] = _stage(
+                "learning",
+                status="NOT_REQUESTED",
+                reason="blocked_by_evidence_seal",
+                invoked=False,
+                gate_passed=False,
+            )
+            claim_boundary = {
+                "task_identity_shared": True,
+                "planner_shared": planner_stage["invoked"],
+                "local_online_continuation": False,
+                "receipt_complete": False,
+                "capability_closure_complete": False,
+                "outcome_contributed": False,
+                "value_measured": False,
+                "public_claim_allowed": False,
+            }
+            blocked_receipt = {
+                "schema": RECEIPT_SCHEMA,
+                "task_id": request.task_id,
+                "workspace_revision": request.workspace_revision,
+                "planner_decision_id": planner_decision_id,
+                "planner": planner_stage,
+                "capabilities": [],
+                "capability_results": capability_results,
+                "local": stages["local"],
+                "online": stages["online"],
+                "verifier": stages["verifier"],
+                "learning": stages["learning"],
+                "stages": list(stages.values()),
+                "evidence_refs": sorted(
+                    {
+                        *list(request.evidence_refs),
+                        "runtime:evidence_bundle:seal_failed",
+                    }
+                ),
+                "receipt_complete": False,
+                "capability_closure_complete": False,
+                "terminal_status": "BLOCKED",
+                "claim_boundary": claim_boundary,
+                "capability_evidence_bundle": evidence_bundle,
+                "seal_verify": sealed_verdict,
+                "selection_authority": "CapabilityPlanner",
+                "local_call_count": 0,
+                "online_call_count": 0,
+                "selected_capabilities": list(plan.selected_capabilities),
+                "executed_capabilities": [],
+                "consumed_evidence_ids": [],
+                "contributed_capabilities": [],
+                "public_claim_allowed": False,
+            }
+            if receipt_path is not None:
+                path = Path(receipt_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                blocked_receipt["receipt_path"] = str(path)
+                path.write_text(
+                    json.dumps(blocked_receipt, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            return blocked_receipt
+
         # Full read-only consumer view — same root bundle_hash for Local and Online.
+        # seal_verify is never written into the sealed body.
         evidence_consumer = _evidence_consumer_view(evidence_bundle)
         plan_payload["capability_evidence_bundle"] = evidence_consumer
         # LocalAssist planner_snapshot reads signal_snapshot — mirror full bundle there.
@@ -1621,6 +1715,61 @@ class UnifiedRuntime:
 
         receipt_complete = all(_stage_complete(stage) for stage in required_stages)
         outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages)
+        # P4: full wiring closure — every selected *executable* capability must succeed.
+        # skipped / probe / stub / SELECTED_NOT_EXECUTED never count as closed.
+        selected_names = [str(n) for n in plan.selected_capabilities]
+        executed_capabilities: list[str] = []
+        contributed_capabilities: list[str] = []
+        closure_blockers: list[str] = []
+        for cap_name in selected_names:
+            cap_stage = capability_results.get(cap_name) or {}
+            status = str(cap_stage.get("status") or "")
+            if status == "SKIPPED" or cap_stage.get("skipped"):
+                # Policy skip is not executable for this task — omit from closure set.
+                continue
+            if status in {"SELECTED_NOT_EXECUTED", "STUB_INVOKED"} or bool(cap_stage.get("stub")):
+                closure_blockers.append(f"{cap_name}:{status or 'stub'}")
+                continue
+            if (
+                isinstance(cap_stage.get("response"), dict)
+                and cap_stage["response"].get("stub")
+            ):
+                closure_blockers.append(f"{cap_name}:stub_response")
+                continue
+            if not _stage_complete(cap_stage):
+                closure_blockers.append(f"{cap_name}:incomplete")
+                continue
+            executed_capabilities.append(cap_name)
+            if bool(cap_stage.get("outcome_contributed")):
+                contributed_capabilities.append(cap_name)
+        capability_closure_complete = not closure_blockers and bool(selected_names)
+        # Real consumed evidence IDs from Local/Online consumer records only.
+        consumed_evidence_ids: list[str] = []
+        for src in (
+            (local_stage.get("response") or {}) if isinstance(local_stage.get("response"), Mapping) else {},
+            (online_stage.get("response") or {}) if isinstance(online_stage.get("response"), Mapping) else {},
+        ):
+            for key in ("consumed_evidence_ids",):
+                for eid in src.get(key) or []:
+                    s = str(eid).strip()
+                    if s and not s.startswith("bundle:") and s not in consumed_evidence_ids:
+                        consumed_evidence_ids.append(s)
+            ec = src.get("evidence_consumption") if isinstance(src.get("evidence_consumption"), Mapping) else {}
+            for eid in ec.get("consumed_evidence_ids") or []:
+                s = str(eid).strip()
+                if s and not s.startswith("bundle:") and s not in consumed_evidence_ids:
+                    consumed_evidence_ids.append(s)
+        # Online lineage may also expose consumed ids
+        online_lineage = (
+            (online_stage.get("response") or {}).get("with_nexus")
+            if isinstance(online_stage.get("response"), Mapping)
+            else None
+        )
+        if isinstance(online_lineage, Mapping):
+            for eid in online_lineage.get("consumed_evidence_ids") or []:
+                s = str(eid).strip()
+                if s and not s.startswith("bundle:") and s not in consumed_evidence_ids:
+                    consumed_evidence_ids.append(s)
         evidence_refs = list(request.evidence_refs)
         for stage in stages.values():
             evidence_refs.extend(stage.get("evidence_refs", []))
@@ -1631,6 +1780,7 @@ class UnifiedRuntime:
             "planner_shared": planner_stage["invoked"],
             "local_online_continuation": bool(request.local_enabled and request.online_enabled and local_stage["invoked"] and online_stage["invoked"]),
             "receipt_complete": receipt_complete,
+            "capability_closure_complete": capability_closure_complete,
             "outcome_contributed": outcome_contributed,
             "value_measured": False,
             "public_claim_allowed": False,
@@ -1979,11 +2129,18 @@ class UnifiedRuntime:
             "stages": list(stages.values()),
             "evidence_refs": sorted(set(evidence_refs)),
             "receipt_complete": receipt_complete,
+            "capability_closure_complete": capability_closure_complete,
+            "capability_closure_blockers": closure_blockers,
+            "selected_capabilities": selected_names,
+            "executed_capabilities": executed_capabilities,
+            "consumed_evidence_ids": consumed_evidence_ids,
+            "contributed_capabilities": contributed_capabilities,
             "terminal_status": "SUCCEEDED" if receipt_complete else "INCOMPLETE",
             "claim_boundary": claim_boundary,
             "capability_coverage": capability_coverage,
             "capability_evidence_bundle": evidence_bundle,
             "selection_authority": "CapabilityPlanner",
+            "public_claim_allowed": False,
             "verified_assist": verified_assist_block,
             "online_safe_local_forward": {
                 "schema": online_safe_forward.get("schema", ""),

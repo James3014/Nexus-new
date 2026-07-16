@@ -305,12 +305,20 @@ def build_online_nexus_context(
     if evidence_compact and evidence_prompt:
         prompt_parts.append(f"\n{NEXUS_EVIDENCE_MARKER}\n{evidence_prompt}\n")
         sections.append(EVIDENCE_SECTION)
-        consumed_evidence_ids = list(evidence_compact.get("evidence_ids") or [])
-        if not consumed_evidence_ids:
-            # At minimum record bundle hash as consumed id when entries had no ids
-            bh = str(evidence_compact.get("bundle_hash") or "")
-            if bh:
-                consumed_evidence_ids = [f"bundle:{bh[:16]}"]
+        # Only IDs actually present in successful entries may be recorded as consumed.
+        # Never synthesize bundle:<hash> as a consumption proof.
+        raw_ids = [str(x) for x in (evidence_compact.get("evidence_ids") or []) if str(x).strip()]
+        entry_ids: list[str] = []
+        for ent in evidence_compact.get("entries") or []:
+            if not isinstance(ent, Mapping):
+                continue
+            if not bool(ent.get("success") or ent.get("invoked_real")):
+                continue
+            for eid in ent.get("evidence_ids") or []:
+                s = str(eid).strip()
+                if s and not s.startswith("bundle:"):
+                    entry_ids.append(s)
+        consumed_evidence_ids = entry_ids or [i for i in raw_ids if not i.startswith("bundle:")]
 
     if source:
         prompt_parts.append(f"\n[CURRENT SOURCE]\n{source}\n")
@@ -571,25 +579,20 @@ def _postflight_proof_fields(context: Mapping[str, Any]) -> dict[str, Any]:
     v_resp = (
         verifier.get("response") if isinstance(verifier.get("response"), Mapping) else {}
     )
+    # Explicit only — never promote evidence_refs to verifier_artifact,
+    # never invent verifier_status from invoked+gate_passed.
     verifier_artifact = str(
         verifier.get("verifier_artifact")
-        or verifier.get("artifact")
         or v_resp.get("verifier_artifact")
         or ""
-    )
+    ).strip()
     verifier_status = str(
         verifier.get("verifier_status")
-        or verifier.get("status")
         or v_resp.get("verifier_status")
-        or v_resp.get("status")
         or ""
-    )
-    if not verifier_status and bool(verifier.get("gate_passed")) and bool(verifier.get("invoked")):
-        verifier_status = "pass"
-    if not verifier_artifact:
-        v_refs = verifier.get("evidence_refs") or []
-        if isinstance(v_refs, (list, tuple)) and v_refs:
-            verifier_artifact = str(v_refs[0])
+    ).strip()
+    if not _looks_like_verifier_artifact(verifier_artifact):
+        verifier_artifact = ""
     if not source_hash:
         # Fall back to task_statement hash when sealed bundle absent
         task_statement = str(context.get("task_statement") or "")
@@ -610,13 +613,35 @@ def _postflight_proof_fields(context: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _looks_like_verifier_artifact(value: str) -> bool:
+    """True only for explicit artifact identity/hash — not evidence_refs or bundle envelope."""
+    v = str(value or "").strip()
+    if not v:
+        return False
+    lower = v.lower()
+    # Reject bare evidence refs / synthetic bundle ids
+    if lower.startswith(("verifier:", "capability:", "blocker:", "runtime:", "online:", "learning:", "bundle:")):
+        return False
+    if lower in {"pass", "passed", "ok", "succeeded", "success", "fail", "failed"}:
+        return False
+    # Accept hash-like or explicit artifact identifiers
+    if lower.startswith(("sha256:", "hash:", "artifact:", "artifact_hash:")):
+        return True
+    hexish = lower.replace("-", "").replace("_", "")
+    if len(hexish) >= 16 and all(c in "0123456789abcdef" for c in hexish):
+        return True
+    return len(v) >= 24
+
+
 def evaluate_postflight_gate(
     name: str,
     context: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Fail-closed postflight evaluation — Online call alone never PASSes claim/delivery.
 
-    artifact_gate is never unconditional PASS.
+    artifact_gate is never unconditional PASS. Requires source_hash, explicit
+    verifier_status, real verifier_artifact identity/hash (not evidence_refs),
+    and task_id binding. bundle_hash alone is never a delivery artifact.
     """
     proof = _postflight_proof_fields(context)
     blockers: list[str] = []
@@ -627,45 +652,66 @@ def evaluate_postflight_gate(
         blockers.append("missing_source_hash")
     if not proof["verifier_status"]:
         blockers.append("missing_verifier_status")
-    # Verifier must have run with some artifact or evidence
+    # Verifier must have run; status must be explicit (not inferred from invoked+gate).
     verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
-    if not bool(verifier.get("invoked")):
-        blockers.append("verifier_not_invoked")
-    if not bool(verifier.get("gate_passed")) and str(proof["verifier_status"]).lower() not in {
+    if not bool(verifier.get("invoked")) and str(proof["verifier_status"]).lower() not in {
         "pass",
         "passed",
         "ok",
         "succeeded",
     }:
-        blockers.append("verifier_not_passed")
+        # Allow explicit verifier_status without stage invoked flag only when present
+        # and stage was never attached — still require artifact proof below.
+        if not proof["verifier_status"]:
+            blockers.append("verifier_not_invoked")
+    if str(proof["verifier_status"]).lower() not in {
+        "pass",
+        "passed",
+        "ok",
+        "succeeded",
+        "fail",
+        "failed",
+        "blocked",
+    }:
+        blockers.append("verifier_status_not_explicit")
+    if not proof["verifier_artifact"]:
+        blockers.append("missing_verifier_artifact")
 
     if name == "artifact_gate":
-        # Never unconditional PASS — need artifact or candidate hash proof.
+        # Never unconditional PASS — need real artifact/candidate OR verified artifact hash.
         if not (proof["artifact_hash"] or proof["candidate_hash"] or proof["verifier_artifact"]):
             blockers.append("missing_artifact_or_candidate_hash")
     elif name == "claim_gate":
         if not proof["online_invoked"]:
             blockers.append("online_not_invoked")
-        # Online called alone is insufficient — need verifier + source
         if not proof["source_hash"] or not proof["verifier_status"]:
             blockers.append("claim_missing_source_or_verifier")
+        if not proof["verifier_artifact"]:
+            blockers.append("claim_missing_verifier_artifact")
         if str(proof["verifier_status"]).lower() in {"fail", "failed", "blocked"}:
             blockers.append("claim_blocked_by_verifier")
     elif name == "delivery_gate":
         if not proof["online_invoked"]:
             blockers.append("online_not_invoked")
-        # Delivery needs lineage proof: applied/candidate/artifact OR verifier artifact
-        # (online-only arms may lack local candidate hashes).
+        # Delivery needs real lineage — NEVER accept bundle_hash alone as artifact.
         if not (
             proof["applied_hash"]
             or proof["candidate_hash"]
             or proof["artifact_hash"]
             or proof["verifier_artifact"]
-            or proof["bundle_hash"]
         ):
             blockers.append("delivery_missing_applied_or_candidate")
+        if proof["bundle_hash"] and not (
+            proof["applied_hash"]
+            or proof["candidate_hash"]
+            or proof["artifact_hash"]
+            or proof["verifier_artifact"]
+        ):
+            blockers.append("delivery_bundle_hash_not_artifact")
         if not proof["verifier_status"]:
             blockers.append("delivery_missing_verifier")
+        if not proof["verifier_artifact"]:
+            blockers.append("delivery_missing_verifier_artifact")
 
     gate_passed = not blockers
     return {

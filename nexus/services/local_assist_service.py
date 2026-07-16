@@ -605,16 +605,51 @@ class LocalAssistService:
         try:
             from nexus.services.capability_evidence_bundle import record_consumption
             _ev_bundle = planner_snapshot.get("capability_evidence_bundle") if isinstance(planner_snapshot.get("capability_evidence_bundle"), dict) else {}
-            _consumed_ids = []
-            if isinstance(_ev_bundle, dict) and _ev_bundle.get("bundle_hash"):
-                _consumed_ids = list(_ev_bundle.get("evidence_ids") or [])
-                if not _consumed_ids and local_model_invoked:
-                    _consumed_ids = [f"bundle:{str(_ev_bundle.get('bundle_hash'))[:16]}"]
+            # Only evidence IDs from successful entries that Local can consume.
+            # Never synthesize bundle:<hash> as consumption proof.
+            _consumed_ids: list[str] = []
             _local_selected = list(
                 planner_snapshot.get("local_consumable_capabilities")
-                or planner_snapshot.get("selected_capabilities")
-                or ("local_model_executor",)
+                or ()
             )
+            # Capabilities without a Local consumer must not appear as used.
+            if not _local_selected:
+                _local_selected = [
+                    n
+                    for n in (planner_snapshot.get("selected_capabilities") or ())
+                    if str(n) in {
+                        "local_model_executor",
+                        "memory",
+                        "codeintel",
+                        "belief",
+                        "semantic_searcher",
+                        "lancedb",
+                        "repair_loop",
+                        "sandbox",
+                    }
+                ]
+            if isinstance(_ev_bundle, dict) and local_model_invoked:
+                local_set = {str(x) for x in _local_selected}
+                for ent in _ev_bundle.get("entries") or []:
+                    if not isinstance(ent, dict):
+                        continue
+                    ename = str(ent.get("name") or "")
+                    if local_set and ename not in local_set:
+                        continue
+                    if not bool(ent.get("success") or ent.get("invoked_real")):
+                        continue
+                    for eid in ent.get("evidence_ids") or ent.get("evidence_refs") or []:
+                        s = str(eid).strip()
+                        if s and not s.startswith("bundle:"):
+                            _consumed_ids.append(s)
+                # Deduplicate while preserving order
+                _seen: set[str] = set()
+                _deduped: list[str] = []
+                for s in _consumed_ids:
+                    if s not in _seen:
+                        _seen.add(s)
+                        _deduped.append(s)
+                _consumed_ids = _deduped
             _consumption = record_consumption(
                 bundle=_ev_bundle if _ev_bundle else {"bundle_hash": "", "selected_capabilities": []},
                 consumer="Local",

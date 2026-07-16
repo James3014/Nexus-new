@@ -368,7 +368,28 @@ def record_consumption(
     Empty consumed_evidence_ids must never mark capability as consumed.
     """
     intact = assert_consumer_bundle_intact(bundle)
-    ids = [str(x) for x in consumed_evidence_ids if str(x).strip()]
+    # Reject empty / synthetic envelope IDs (bundle:<hash> is never real consumption).
+    raw_ids = [str(x).strip() for x in consumed_evidence_ids if str(x).strip()]
+    ids = [i for i in raw_ids if not i.startswith("bundle:")]
+    # When entries exist, every consumed id must trace to a successful entry.
+    entry_id_set: set[str] = set()
+    entries = bundle.get("entries") if isinstance(bundle, Mapping) else None
+    if isinstance(entries, list):
+        for ent in entries:
+            if not isinstance(ent, Mapping):
+                continue
+            if not bool(ent.get("success") or ent.get("invoked_real")):
+                continue
+            for eid in list(ent.get("evidence_ids") or []) + list(ent.get("evidence_refs") or []):
+                s = str(eid).strip()
+                if s:
+                    entry_id_set.add(s)
+        for eid in bundle.get("evidence_ids") or []:
+            s = str(eid).strip()
+            if s:
+                entry_id_set.add(s)
+        if entry_id_set:
+            ids = [i for i in ids if i in entry_id_set]
     selected = [str(x) for x in (selected_capabilities or bundle.get("selected_capabilities") or [])]
     consumer_input = {
         "consumer": str(consumer),
@@ -379,6 +400,7 @@ def record_consumption(
         **(dict(extra) if isinstance(extra, Mapping) else {}),
     }
     consumer_input_hash = _hash_json(consumer_input)
+    # Empty evidence IDs must never mark capability as consumed.
     consumed = bool(ids) and bool(intact.get("ok"))
     return {
         "bundle_hash": str(bundle.get("bundle_hash") or ""),
