@@ -65,40 +65,73 @@ GAP_CLASSES = frozenset(
     }
 )
 
-# L5: never default Online stages — explicit skip when selected without escalate trigger.
-ESCALATE_ONLY: frozenset[str] = frozenset(
+# ── Machine-enforced execution contract (single authority for 57 planner nodes) ──
+# gap_class / WIRED_REAL / ESCALATE_ONLY / PROBE_ONLY are derived views of this table.
+# Do not invent a second registry module.
+
+EXECUTION_CLASS_DEFAULT_REAL = "DEFAULT_REAL"
+EXECUTION_CLASS_TRIGGERED_REAL = "TRIGGERED_REAL"
+EXECUTION_CLASS_STAGE_OWNED_REAL = "STAGE_OWNED_REAL"
+EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED = "EXTERNAL_AUTH_REQUIRED"
+EXECUTION_CLASS_CONTROL_PLANE_REFERENCE = "CONTROL_PLANE_REFERENCE"
+EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED = "EXPERIMENTAL_NOT_PROMOTED"
+EXECUTION_CLASS_LEGACY_ALIAS = "LEGACY_ALIAS"
+EXECUTION_CLASS_MISSING_ENGINE = "MISSING_ENGINE"
+
+EXECUTION_CLASSES = frozenset(
     {
-        "hyper",
-        "nightshift",
-        "swarm",
-        "drone",
-        "multi_agent",
-        "integration_manager",
-        "oracle_shadow",
-        "ultra_review",  # full ultra; dry flags may still appear in guidance
-        "committee",
-        "federation",
-        "metabolism",
-        "stress_test",
-        "ui_validator",
-        "registry_sync",
-        "meta_opt",
-        "research_control_plane",
-        "benchmark",
-        "forecast_gate",
-        "formal_report",
-        "asi_constraint_extractor",
-        "architecture_scout",
-        "external_doc_scout",
-        "xray",
-        "msa_router",
-        "autonomic_router",
-        "direct_mode",
-        "file_lock",
-        "prompt_compression",
-        "learn_scheduler",
-        "swarm_quiet_moment",
+        EXECUTION_CLASS_DEFAULT_REAL,
+        EXECUTION_CLASS_TRIGGERED_REAL,
+        EXECUTION_CLASS_STAGE_OWNED_REAL,
+        EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+        EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+        EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+        EXECUTION_CLASS_LEGACY_ALIAS,
+        EXECUTION_CLASS_MISSING_ENGINE,
     }
+)
+
+REAL_EXECUTION_CLASSES = frozenset(
+    {
+        EXECUTION_CLASS_DEFAULT_REAL,
+        EXECUTION_CLASS_TRIGGERED_REAL,
+        EXECUTION_CLASS_STAGE_OWNED_REAL,
+    }
+)
+
+CONSUMER_EFFECT_PROMPT_EVIDENCE = "PROMPT_EVIDENCE"
+CONSUMER_EFFECT_EXECUTION_CONTROL = "EXECUTION_CONTROL"
+CONSUMER_EFFECT_POSTFLIGHT_GATE = "POSTFLIGHT_GATE"
+CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT = "EXTERNAL_SIDE_EFFECT"
+CONSUMER_EFFECT_NONE = "NONE"
+
+CONSUMER_EFFECTS = frozenset(
+    {
+        CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        CONSUMER_EFFECT_EXECUTION_CONTROL,
+        CONSUMER_EFFECT_POSTFLIGHT_GATE,
+        CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT,
+        CONSUMER_EFFECT_NONE,
+    }
+)
+
+REQUIRED_EXECUTION_CONTRACT_FIELDS: tuple[str, ...] = (
+    "canonical_id",
+    "execution_class",
+    "producer_stage",
+    "trigger_policy",
+    "executor_key",
+    "physical_callable",
+    "required_context_fields",
+    "success_fields",
+    "failure_fields",
+    "consumer_effect",
+    "consumer_targets",
+    "provider_authorization_required",
+    "positive_control_id",
+    "negative_control_id",
+    "public_claim_allowed",
+    "reason_code",
 )
 
 # Handled by Local stage, not a preflight invoker map entry that "runs" Online.
@@ -115,55 +148,672 @@ ONLINE_ARMOR_FLAG_CAPABILITIES: frozenset[str] = frozenset(
     }
 )
 
-# Real production-quality invokers available on mainchain today (honest F).
-# Presence of get_executor alone is NOT enough — must be production engine callable.
-WIRED_REAL: frozenset[str] = frozenset(
-    {
-        "codeintel",
-        "memory",
-        "belief",
-        "lancedb",
-        "semantic_searcher",
-        "repair_loop",
-        "sandbox",
-        "mempalace_gate",
-        "acceptance_check",
-        "artifact_gate",
-        "claim_gate",
-        "delivery_gate",
-        "harness_preflight_sensor",
-        "jit_validation",
-        "plan_quality_gate",
-        "pregate",
-    }
-)
 
-# Registered executors that only probe/health/should_run — not F_wired_ok.
-# Reclassified to E_escalate_ok with explicit reason_code.
-PROBE_ONLY_REASON_CODES: dict[str, str] = {
-    "research": "shallow_should_run_only",
-    "research_route": "shallow_should_run_only",
-    "drone": "shallow_health_check_only",
-    "hyper": "escalate_probe_or_unavailable",
-    "swarm": "escalate_probe_or_unavailable",
-    "multi_agent": "escalate_probe_or_unavailable",
-    "nightshift": "escalate_probe_or_unavailable",
-    "ultra_review": "escalate_probe_or_unavailable",
-    "autonomic_router": "route_probe_not_production_execute",
-    "autoreason": "requires_model_execution_boundary",
-    "ddtree": "requires_model_execution_boundary",
-    "judge_panel": "requires_model_execution_boundary",
-    "llm_judge_panel": "requires_model_execution_boundary",
-    "learn_mode": "scheduler_probe_not_production",
-    "learn_phase_slo": "scheduler_probe_not_production",
-    "learn_scheduler": "scheduler_probe_not_production",
-    "metabolism": "resume_probe_not_production",
-    "bdd_acceptance_skill": "skill_probe_not_production",
-    "semantic_failure_sensor": "sensor_probe_not_production",
-}
+def _ec(
+    canonical_id: str,
+    execution_class: str,
+    *,
+    producer_stage: str,
+    trigger_policy: str,
+    executor_key: str | None,
+    physical_callable: str | None,
+    required_context_fields: tuple[str, ...] = (),
+    success_fields: tuple[str, ...] = ("invoked", "gate_passed", "evidence_refs"),
+    failure_fields: tuple[str, ...] = ("error", "status", "skip_reason"),
+    consumer_effect: str = CONSUMER_EFFECT_PROMPT_EVIDENCE,
+    consumer_targets: tuple[str, ...] = ("online", "local"),
+    provider_authorization_required: bool = False,
+    reason_code: str = "",
+) -> dict[str, Any]:
+    """Build one planner-node execution contract (public_claim_allowed always false)."""
+    if execution_class not in EXECUTION_CLASSES:
+        raise ValueError(f"invalid_execution_class:{canonical_id}:{execution_class}")
+    if consumer_effect not in CONSUMER_EFFECTS:
+        raise ValueError(f"invalid_consumer_effect:{canonical_id}:{consumer_effect}")
+    return {
+        "canonical_id": canonical_id,
+        "execution_class": execution_class,
+        "producer_stage": producer_stage,
+        "trigger_policy": trigger_policy,
+        "executor_key": executor_key,
+        "physical_callable": physical_callable,
+        "required_context_fields": list(required_context_fields),
+        "success_fields": list(success_fields),
+        "failure_fields": list(failure_fields),
+        "consumer_effect": consumer_effect,
+        "consumer_targets": list(consumer_targets),
+        "provider_authorization_required": bool(provider_authorization_required),
+        "positive_control_id": f"pos:{canonical_id}:triggered_real",
+        "negative_control_id": f"neg:{canonical_id}:untriggered_or_missing_evidence",
+        "public_claim_allowed": False,
+        "reason_code": str(reason_code or ""),
+    }
+
+
+def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
+    """Frozen execution contracts for every CapabilityPlanner node (denom=57).
+
+    Phase 0 honesty:
+    - Production physical paths → DEFAULT/TRIGGERED/STAGE_OWNED REAL (gap F)
+    - True missing production engine → MISSING_ENGINE (gap A, not hidden E)
+    - Probe-only / model-boundary / control-plane → terminal non-F classes (gap E)
+    - Experimental / legacy alias → explicit terminal classes
+    """
+    reg = "nexus.core.capability_executor_registry"
+    postflight = "online_nexus_context.evaluate_postflight_gate"
+    local_phys = "local_stage:LocalModelExecutor"
+
+    # Production-physical F paths (honest WIRED_REAL + local stage).
+    real: dict[str, dict[str, Any]] = {
+        "acceptance_check": _ec(
+            "acceptance_check",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="acceptance_check",
+            physical_callable=f"{reg}:acceptance_check",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            consumer_targets=("online", "verifier"),
+        ),
+        "artifact_gate": _ec(
+            "artifact_gate",
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+            producer_stage="OnlinePostflight",
+            trigger_policy="stage_owned_postflight",
+            executor_key="artifact_gate",
+            physical_callable=postflight,
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            consumer_targets=("online", "claim_delivery"),
+        ),
+        "belief": _ec(
+            "belief",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="belief",
+            physical_callable=f"{reg}:belief",
+            required_context_fields=("task_id",),
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "claim_gate": _ec(
+            "claim_gate",
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+            producer_stage="OnlinePostflight",
+            trigger_policy="stage_owned_postflight",
+            executor_key="claim_gate",
+            physical_callable=postflight,
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            consumer_targets=("online", "claim_delivery"),
+        ),
+        "codeintel": _ec(
+            "codeintel",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="codeintel",
+            physical_callable=f"{reg}:codeintel",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "delivery_gate": _ec(
+            "delivery_gate",
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+            producer_stage="OnlinePostflight",
+            trigger_policy="stage_owned_postflight",
+            executor_key="delivery_gate",
+            physical_callable=postflight,
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            consumer_targets=("online", "claim_delivery"),
+        ),
+        "harness_preflight_sensor": _ec(
+            "harness_preflight_sensor",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="harness_preflight_sensor",
+            physical_callable=f"{reg}:harness_preflight_sensor",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "jit_validation": _ec(
+            "jit_validation",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="jit_validation",
+            physical_callable=f"{reg}:jit_validation",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "lancedb": _ec(
+            "lancedb",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="lancedb",
+            physical_callable=f"{reg}:lancedb",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "local_model_executor": _ec(
+            "local_model_executor",
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+            producer_stage="Local",
+            trigger_policy="stage_owned_local",
+            executor_key="local_model_executor",
+            physical_callable=local_phys,
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            consumer_targets=("local",),
+            provider_authorization_required=True,
+        ),
+        "memory": _ec(
+            "memory",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="memory",
+            physical_callable=f"{reg}:memory",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "mempalace_gate": _ec(
+            "mempalace_gate",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="mempalace",
+            physical_callable=f"{reg}:mempalace",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            consumer_targets=("online", "local"),
+        ),
+        "plan_quality_gate": _ec(
+            "plan_quality_gate",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="plan_quality_gate",
+            physical_callable=f"{reg}:plan_quality_gate",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+        ),
+        "pregate": _ec(
+            "pregate",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="pregate",
+            physical_callable=f"{reg}:pregate",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+        ),
+        "repair_loop": _ec(
+            "repair_loop",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_repair",
+            executor_key="repair_loop",
+            physical_callable=f"{reg}:repair_loop",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            consumer_targets=("local", "online"),
+        ),
+        "sandbox": _ec(
+            "sandbox",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_sandbox",
+            executor_key="sandbox_runner",
+            physical_callable=f"{reg}:sandbox_runner",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "semantic_searcher": _ec(
+            "semantic_searcher",
+            EXECUTION_CLASS_DEFAULT_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="default_when_selected",
+            executor_key="semantic_searcher",
+            physical_callable=f"{reg}:semantic_searcher",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+    }
+
+    # Control-plane / routing references (not fake F executors).
+    control: dict[str, dict[str, Any]] = {
+        "autonomic_router": _ec(
+            "autonomic_router",
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+            producer_stage="CapabilityPlanner",
+            trigger_policy="escalate_only",
+            executor_key="autonomic_router",
+            physical_callable=f"{reg}:autonomic_router",
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="route_probe_not_production_execute",
+        ),
+        "direct_mode": _ec(
+            "direct_mode",
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+            producer_stage="CapabilityPlanner",
+            trigger_policy="escalate_only",
+            executor_key="direct_master_loop",
+            physical_callable=None,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="control_plane_reference",
+        ),
+        "msa_router": _ec(
+            "msa_router",
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+            producer_stage="CapabilityPlanner",
+            trigger_policy="escalate_only",
+            executor_key="msa_router",
+            physical_callable=None,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="control_plane_reference",
+        ),
+        "research_control_plane": _ec(
+            "research_control_plane",
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+            producer_stage="CapabilityPlanner",
+            trigger_policy="escalate_only",
+            executor_key="research_control_plane",
+            physical_callable=None,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="control_plane_reference",
+        ),
+        "research_route": _ec(
+            "research_route",
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+            producer_stage="CapabilityPlanner",
+            trigger_policy="escalate_only",
+            executor_key="research",
+            physical_callable=f"{reg}:research",
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="shallow_should_run_only",
+        ),
+    }
+
+    # Model-boundary / external-auth (fail closed without authorization).
+    external_auth: dict[str, dict[str, Any]] = {
+        "autoreason": _ec(
+            "autoreason",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_model_boundary",
+            executor_key="autoreason",
+            physical_callable=f"{reg}:autoreason",
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            reason_code="requires_model_execution_boundary",
+        ),
+        "ddtree": _ec(
+            "ddtree",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_model_boundary",
+            executor_key="ddtree",
+            physical_callable=f"{reg}:ddtree",
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            reason_code="requires_model_execution_boundary",
+        ),
+        "judge_panel": _ec(
+            "judge_panel",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_model_boundary",
+            executor_key="judge_panel",
+            physical_callable=f"{reg}:judge_panel",
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            reason_code="requires_model_execution_boundary",
+        ),
+        "research": _ec(
+            "research",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_external",
+            executor_key="research",
+            physical_callable=f"{reg}:research",
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            reason_code="shallow_should_run_only",
+        ),
+        "ui_validator": _ec(
+            "ui_validator",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="ui_validator",
+            physical_callable=None,
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT,
+            consumer_targets=("online",),
+            reason_code="external_browser_auth_required",
+        ),
+        "external_doc_scout": _ec(
+            "external_doc_scout",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="external_doc_scout",
+            physical_callable=None,
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT,
+            consumer_targets=("online",),
+            reason_code="external_connector_auth_required",
+        ),
+    }
+
+    # Legacy alias surface (no second executor).
+    legacy: dict[str, dict[str, Any]] = {
+        "llm_judge_panel": _ec(
+            "llm_judge_panel",
+            EXECUTION_CLASS_LEGACY_ALIAS,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="legacy_alias_of:judge_panel",
+            executor_key="llm_judge_panel",
+            physical_callable=f"{reg}:llm_judge_panel",
+            provider_authorization_required=True,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="requires_model_execution_boundary",
+        ),
+    }
+
+    # Experimental — not production-promoted.
+    experimental: dict[str, dict[str, Any]] = {
+        "federation": _ec(
+            "federation",
+            EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="federation",
+            physical_callable=None,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="experimental_not_promoted",
+        ),
+        "oracle_shadow": _ec(
+            "oracle_shadow",
+            EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="oracle_shadow",
+            physical_callable=None,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="experimental_not_promoted",
+        ),
+    }
+
+    # Registered but probe-only (shallow health/should_run) — not F until Phase 2 hardens.
+    # Map to EXTERNAL_AUTH_REQUIRED or escalate-terminal classes so gap stays E (not false F).
+    probe_escalate: dict[str, dict[str, Any]] = {
+        "drone": _ec(
+            "drone",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="drone",
+            physical_callable=f"{reg}:drone",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="shallow_health_check_only",
+        ),
+        "hyper": _ec(
+            "hyper",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="hyper_sprint",
+            physical_callable=f"{reg}:hyper_sprint",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="escalate_probe_or_unavailable",
+        ),
+        "swarm": _ec(
+            "swarm",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="swarm_multi_agent",
+            physical_callable=f"{reg}:swarm_multi_agent",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="escalate_probe_or_unavailable",
+        ),
+        "multi_agent": _ec(
+            "multi_agent",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="swarm_multi_agent",
+            physical_callable=f"{reg}:swarm_multi_agent",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="escalate_probe_or_unavailable",
+        ),
+        "nightshift": _ec(
+            "nightshift",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="nightshift",
+            physical_callable=f"{reg}:nightshift",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="escalate_probe_or_unavailable",
+        ),
+        "ultra_review": _ec(
+            "ultra_review",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="ultra_review",
+            physical_callable=f"{reg}:ultra_review",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            reason_code="escalate_probe_or_unavailable",
+        ),
+        "bdd_acceptance_skill": _ec(
+            "bdd_acceptance_skill",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_validation",
+            executor_key="bdd_acceptance_skill",
+            physical_callable=f"{reg}:bdd_acceptance_skill",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            reason_code="skill_probe_not_production",
+        ),
+        "learn_mode": _ec(
+            "learn_mode",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_learning",
+            executor_key="learn_mode",
+            physical_callable=f"{reg}:learn_mode",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="scheduler_probe_not_production",
+        ),
+        "learn_phase_slo": _ec(
+            "learn_phase_slo",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_learning",
+            executor_key="learn_phase_slo",
+            physical_callable=f"{reg}:learn_phase_slo",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="scheduler_probe_not_production",
+        ),
+        "learn_scheduler": _ec(
+            "learn_scheduler",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="learn_scheduler_service",
+            physical_callable=f"{reg}:learn_scheduler_service",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="scheduler_probe_not_production",
+        ),
+        "metabolism": _ec(
+            "metabolism",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="metabolism_resume",
+            physical_callable=f"{reg}:metabolism_resume",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            reason_code="resume_probe_not_production",
+        ),
+        "semantic_failure_sensor": _ec(
+            "semantic_failure_sensor",
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="triggered_validation",
+            executor_key="semantic_failure_sensor",
+            physical_callable=f"{reg}:semantic_failure_sensor",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            reason_code="sensor_probe_not_production",
+        ),
+    }
+
+    # True missing production engines — honest MISSING_ENGINE (gap A, not hidden E).
+    missing_ids = (
+        "architecture_scout",
+        "asi_constraint_extractor",
+        "benchmark",
+        "committee",
+        "file_lock",
+        "forecast_gate",
+        "formal_report",
+        "integration_manager",
+        "meta_opt",
+        "prompt_compression",
+        "registry_sync",
+        "stress_test",
+        "swarm_quiet_moment",
+        "xray",
+    )
+    missing: dict[str, dict[str, Any]] = {}
+    for mid in missing_ids:
+        ek = EXECUTOR_REGISTRY_ALIASES.get(mid, mid)
+        missing[mid] = _ec(
+            mid,
+            EXECUTION_CLASS_MISSING_ENGINE,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key=ek,
+            physical_callable=None,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
+            reason_code="missing_production_engine",
+        )
+
+    contracts: dict[str, dict[str, Any]] = {}
+    for part in (
+        real,
+        control,
+        external_auth,
+        legacy,
+        experimental,
+        probe_escalate,
+        missing,
+    ):
+        overlap = set(contracts) & set(part)
+        if overlap:
+            raise ValueError(f"duplicate_execution_contract:{sorted(overlap)}")
+        contracts.update(part)
+    return contracts
+
+
+# Frozen at import: sole execution-contract authority for planner nodes.
+PLANNER_EXECUTION_CONTRACTS: dict[str, dict[str, Any]] = _build_planner_execution_contracts()
+
+
+def get_execution_contract(name: str) -> dict[str, Any] | None:
+    """Return a copy of the execution contract for a planner node, or None."""
+    key = str(name or "").strip()
+    row = PLANNER_EXECUTION_CONTRACTS.get(key)
+    return dict(row) if row is not None else None
+
+
+def list_execution_contract_ids() -> tuple[str, ...]:
+    return tuple(sorted(PLANNER_EXECUTION_CONTRACTS.keys()))
+
+
+def gap_class_from_execution_class(execution_class: str) -> str:
+    """Derive legacy gap_class from execution_class (single authority)."""
+    ec = str(execution_class or "").strip()
+    if ec in REAL_EXECUTION_CLASSES:
+        return "F_wired_ok"
+    if ec == EXECUTION_CLASS_MISSING_ENGINE:
+        return "A_missing_invoker"
+    if ec in {
+        EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+        EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+        EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+        EXECUTION_CLASS_LEGACY_ALIAS,
+    }:
+        return "E_escalate_ok"
+    return "A_missing_invoker"
+
+
+def _derive_wired_real() -> frozenset[str]:
+    """Production-physical F set excluding Local-stage-owned nodes."""
+    out: set[str] = set()
+    for name, c in PLANNER_EXECUTION_CONTRACTS.items():
+        if c["execution_class"] not in REAL_EXECUTION_CLASSES:
+            continue
+        if name in LOCAL_STAGE_CAPABILITIES:
+            continue
+        out.add(name)
+    return frozenset(out)
+
+
+def _derive_escalate_only() -> frozenset[str]:
+    """Names that use escalate-gated mainchain handlers (derived view)."""
+    out: set[str] = set()
+    for name, c in PLANNER_EXECUTION_CONTRACTS.items():
+        if c["execution_class"] in REAL_EXECUTION_CLASSES:
+            continue
+        if c["execution_class"] == EXECUTION_CLASS_LEGACY_ALIAS:
+            continue
+        # Escalate / non-default path for non-F nodes.
+        policy = str(c.get("trigger_policy") or "")
+        if policy.startswith("escalate") or c["execution_class"] in {
+            EXECUTION_CLASS_MISSING_ENGINE,
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+            EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+        }:
+            # Exclude pure model-armor flag names that are not escalate-listed historically
+            # unless trigger is escalate_only or they were probe escalate.
+            if name in {"autoreason", "ddtree", "judge_panel"} and "escalate" not in policy:
+                # Still escalate-gated via PROBE_ONLY path.
+                out.add(name)
+                continue
+            out.add(name)
+    return frozenset(out)
+
+
+def _derive_probe_only_reason_codes() -> dict[str, str]:
+    """Probe/shallow reason codes derived from contracts (legacy view)."""
+    out: dict[str, str] = {}
+    for name, c in PLANNER_EXECUTION_CONTRACTS.items():
+        rc = str(c.get("reason_code") or "")
+        if not rc:
+            continue
+        # Only retain historical probe-style reasons (not pure missing_engine).
+        if rc in {
+            "missing_production_engine",
+            "control_plane_reference",
+            "experimental_not_promoted",
+            "external_browser_auth_required",
+            "external_connector_auth_required",
+        }:
+            continue
+        if c["execution_class"] in REAL_EXECUTION_CLASSES:
+            continue
+        out[name] = rc
+    return out
+
+
+# Derived views — not independent truth sources.
+WIRED_REAL: frozenset[str] = _derive_wired_real()
+ESCALATE_ONLY: frozenset[str] = _derive_escalate_only()
+PROBE_ONLY_REASON_CODES: dict[str, str] = _derive_probe_only_reason_codes()
 
 # Historical stub set retained for documentation only.
-# Any name that has a physical get_executor is F-wired and is NOT treated as stub.
 # Empty means: no residual structural-stub-only production path on mainchain.
 WIRED_STUB: frozenset[str] = frozenset()
 
@@ -205,33 +855,27 @@ def _has_physical_executor(name: str) -> bool:
 
 
 def classify_gap(name: str) -> str:
-    """Closed enum gap_class for F0 matrix — honest, no reclass cheat.
+    """Closed enum gap_class for F0 matrix — derived from execution contract.
 
-    F: production physical engine callable (not probe/health/should_run alone)
-    B: structural stub only (no physical executor)
-    C: online armor flag only (no physical executor)
-    E: escalate-only / probe-only reclassified path (trigger-gated)
-    A: missing invoker entirely
+    F: DEFAULT_REAL / TRIGGERED_REAL / STAGE_OWNED_REAL
+    E: EXTERNAL_AUTH_REQUIRED / CONTROL_PLANE_REFERENCE /
+       EXPERIMENTAL_NOT_PROMOTED / LEGACY_ALIAS
+    A: MISSING_ENGINE (honest — not hidden as E_escalate_ok)
+    B/C: residual structural paths only when no contract
     """
     key = str(name or "").strip()
-    # local_model_executor is owned by Local stage (physical LocalModelExecutor),
-    # not the preflight invoker map — still F when Local can execute it.
+    contract = PLANNER_EXECUTION_CONTRACTS.get(key)
+    if contract is not None:
+        return gap_class_from_execution_class(str(contract["execution_class"]))
+    # Fallback for non-planner names (catalog union extras): never claim F.
     if key in LOCAL_STAGE_CAPABILITIES:
         return "F_wired_ok"
-    if key in PROBE_ONLY_REASON_CODES:
-        return "E_escalate_ok"
-    if key in WIRED_REAL:
-        return "F_wired_ok"
-    # get_executor alone is insufficient for F — must be in WIRED_REAL production set.
-    if key in ESCALATE_ONLY or key == "llm_judge_panel":
-        return "E_escalate_ok"
-    if _has_physical_executor(key):
-        # Registered but not audited as production → escalate/probe class.
-        return "E_escalate_ok"
     if key in ONLINE_ARMOR_FLAG_CAPABILITIES:
         return "C_not_in_prompt"
     if key in WIRED_STUB:
         return "B_stub_only"
+    if _has_physical_executor(key):
+        return "E_escalate_ok"
     return "A_missing_invoker"
 
 
@@ -242,25 +886,44 @@ def physical_runtime_eligible_count() -> int:
 
 
 def build_wiring_matrix() -> dict[str, Any]:
-    """F0: machine-readable inventory of all planner capability nodes."""
+    """F0: machine-readable inventory of all planner capability nodes.
+
+    gap_class and physical hints are derived from PLANNER_EXECUTION_CONTRACTS.
+    """
     names = list_planner_capability_names()
     rows: list[dict[str, Any]] = []
     for name in names:
         meta = _node_meta(name)
+        contract = PLANNER_EXECUTION_CONTRACTS.get(name) or {}
         gap = classify_gap(name)
-        escalate = name in ESCALATE_ONLY or name in PROBE_ONLY_REASON_CODES
+        execution_class = str(contract.get("execution_class") or EXECUTION_CLASS_MISSING_ENGINE)
+        escalate = (
+            name in ESCALATE_ONLY
+            or name in PROBE_ONLY_REASON_CODES
+            or execution_class
+            in {
+                EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+                EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
+                EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
+                EXECUTION_CLASS_MISSING_ENGINE,
+            }
+        )
         has_exec = _has_physical_executor(name)
-        reason_code = str(PROBE_ONLY_REASON_CODES.get(name) or "")
-        physical_hint = f"capability_registry:pending:{name}"
+        reason_code = str(
+            contract.get("reason_code")
+            or PROBE_ONLY_REASON_CODES.get(name)
+            or ""
+        )
+        physical_hint = str(
+            contract.get("physical_callable")
+            or f"capability_registry:pending:{name}"
+        )
         if name in LOCAL_STAGE_CAPABILITIES:
             handler = "local_stage"
             has_invoker = True
             feeds_online = True
-            # Physical path is LocalModelExecutor on Local stage, not preflight skip.
             physical_hint = "local_stage:LocalModelExecutor"
         elif name in {"artifact_gate", "claim_gate", "delivery_gate"} and gap == "F_wired_ok":
-            # Mainchain production path is strict postflight evaluator — not registry
-            # claim theater. Catalog must point at online_nexus_context.evaluate_postflight_gate.
             handler = "postflight_evaluator"
             has_invoker = True
             feeds_online = True
@@ -269,35 +932,49 @@ def build_wiring_matrix() -> dict[str, Any]:
             handler = "real_invoker"
             has_invoker = True
             feeds_online = True
-            physical_hint = f"capability_executor_registry:{name}"
+            if not physical_hint or physical_hint.startswith("capability_registry:pending"):
+                physical_hint = f"capability_executor_registry:{name}"
         elif name in WIRED_STUB and not has_exec:
             handler = "stub_invoker"
             has_invoker = True
-            feeds_online = True  # compact may be thin
+            feeds_online = True
             physical_hint = f"capability_registry:stub_invoker:{name}"
         elif name in ONLINE_ARMOR_FLAG_CAPABILITIES and not has_exec and gap != "E_escalate_ok":
             handler = "online_armor_flags"
-            has_invoker = True  # explicit skip/flag path
+            has_invoker = True
             feeds_online = False
             physical_hint = f"capability_registry:online_armor_flags:{name}"
+        elif gap == "A_missing_invoker" or execution_class == EXECUTION_CLASS_MISSING_ENGINE:
+            handler = "explicit_skip"
+            has_invoker = True
+            feeds_online = False
+            if not reason_code:
+                reason_code = "missing_production_engine"
+            physical_hint = f"capability_registry:missing_engine:{name}"
         elif escalate or gap == "E_escalate_ok":
-            handler = "escalate_only_skip" if not (has_exec and name in WIRED_REAL) else "real_invoker_escalate_gated"
+            handler = (
+                "escalate_only_skip"
+                if not (has_exec and name in WIRED_REAL)
+                else "real_invoker_escalate_gated"
+            )
             has_invoker = True
             feeds_online = bool(has_exec and name in WIRED_REAL)
             if not reason_code and name not in WIRED_REAL:
                 reason_code = "no_production_engine_callable"
-            physical_hint = f"capability_registry:{handler}:{name}"
+            physical_hint = (
+                str(contract.get("physical_callable") or "")
+                or f"capability_registry:{handler}:{name}"
+            )
         else:
             handler = "explicit_skip"
-            has_invoker = True  # F1 always installs skip
+            has_invoker = True
             feeds_online = False
-            gap = "A_missing_invoker" if gap == "A_missing_invoker" else gap
             physical_hint = f"capability_registry:explicit_skip:{name}"
 
-        # After F1 every name has a handler (real/stub/skip) — A means not deep-wired.
         rows.append(
             {
                 "name": name,
+                "canonical_id": name,
                 "maturity": meta["maturity"],
                 "category": meta["category"],
                 "default_state": meta["default_state"],
@@ -306,6 +983,16 @@ def build_wiring_matrix() -> dict[str, Any]:
                 "feeds_online_compact": feeds_online,
                 "escalate_only": escalate or name in ESCALATE_ONLY,
                 "gap_class": gap if gap in GAP_CLASSES else "A_missing_invoker",
+                "execution_class": execution_class,
+                "consumer_effect": str(
+                    contract.get("consumer_effect") or CONSUMER_EFFECT_NONE
+                ),
+                "producer_stage": str(contract.get("producer_stage") or ""),
+                "trigger_policy": str(contract.get("trigger_policy") or ""),
+                "provider_authorization_required": bool(
+                    contract.get("provider_authorization_required")
+                ),
+                "public_claim_allowed": False,
                 "reason_code": reason_code,
                 "physical_callable_hint": physical_hint,
             }
@@ -315,12 +1002,20 @@ def build_wiring_matrix() -> dict[str, Any]:
     for row in rows:
         counts[str(row["gap_class"])] = counts.get(str(row["gap_class"]), 0) + 1
     physical_eligible = sum(1 for row in rows if row["gap_class"] == "F_wired_ok")
+    ec_counts: dict[str, int] = {e: 0 for e in sorted(EXECUTION_CLASSES)}
+    for row in rows:
+        ec = str(row.get("execution_class") or "")
+        if ec in ec_counts:
+            ec_counts[ec] += 1
 
     return {
         "schema": "nexus.capability_wiring_matrix.v1",
         "source": "nexus.engine.capability_planner.default_capability_nodes",
+        "contract_source": "nexus.services.capability_registry.PLANNER_EXECUTION_CONTRACTS",
         "node_count": len(rows),
+        "contract_count": len(PLANNER_EXECUTION_CONTRACTS),
         "gap_class_counts": counts,
+        "execution_class_counts": ec_counts,
         "physical_runtime_eligible": physical_eligible,
         "routing_surface_changed": False,
         "new_topology_introduced": False,

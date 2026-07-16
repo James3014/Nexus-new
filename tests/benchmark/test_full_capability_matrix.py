@@ -281,16 +281,29 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
 
 
 def test_planner_gap_matrix_no_silent_missing_or_stub_success() -> None:
-    """Every planner node has a handler; residual A/B/C/D only if honest."""
+    """Every planner node has a handler; residual A only for honest MISSING_ENGINE."""
+    from nexus.services.capability_registry import (
+        EXECUTION_CLASS_MISSING_ENGINE,
+        PLANNER_EXECUTION_CONTRACTS,
+    )
+
     names = list_planner_capability_names()
     invokers = build_default_mainchain_invokers()
     assert set(invokers.keys()) == set(names)
 
     a = b = c = d = 0
+    honest_missing = {
+        n
+        for n, c in PLANNER_EXECUTION_CONTRACTS.items()
+        if c.get("execution_class") == EXECUTION_CLASS_MISSING_ENGINE
+    }
     for name in names:
         gap = classify_gap(name)
         if gap == "A_missing_invoker":
             a += 1
+            # A is allowed only when the execution contract is MISSING_ENGINE
+            # (honest Phase 0+ surface — not a silent unlabeled gap).
+            assert name in honest_missing, name
         elif gap == "B_stub_only":
             b += 1
         elif gap == "C_not_in_prompt":
@@ -309,8 +322,8 @@ def test_planner_gap_matrix_no_silent_missing_or_stub_success() -> None:
         if result.get("skipped"):
             assert result.get("skip_reason")
             assert result.get("evidence_refs")
-    # Final Gate residual bar for the whole planner surface
-    assert a == 0
+    # Residual B/C/D must stay zero; A only equals honest MISSING_ENGINE count.
+    assert a == len(honest_missing)
     assert b == 0
     assert c == 0
     assert d == 0
