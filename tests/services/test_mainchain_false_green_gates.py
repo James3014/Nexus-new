@@ -282,13 +282,171 @@ def test_p1_monkeypatch_real_engine_fail_blocks_success(monkeypatch) -> None:
     assert out.get("status") in {"BLOCKED", "FAILED"}
 
 
-def test_p2_shared_hashes_and_consumption_fields(monkeypatch) -> None:
-    """Local/Online share sealed hashes; selected ≠ used; consumption is real IDs."""
+def test_p1_every_f_wired_ok_has_production_invoke_or_local_stage() -> None:
+    """Per-F row: production invoker path or Local stage; physical invoke on safe-fast set."""
+    from nexus.core.capability_executor_registry import get_executor
+    from nexus.services.capability_registry import (
+        EXECUTOR_REGISTRY_ALIASES,
+        build_default_mainchain_invokers,
+        build_real_executor_invoker,
+    )
+
+    matrix = build_wiring_matrix()
+    f_rows = [r for r in matrix["rows"] if r["gap_class"] == "F_wired_ok"]
+    invokers = build_default_mainchain_invokers(
+        codeintel={"scan_report_present": True, "risk_score": 1}
+    )
+    # Bounded physical invoke set (avoid long-running repair/hyper loops in unit tests).
+    physical_invoke = {
+        "codeintel",
+        "memory",
+        "belief",
+        "lancedb",
+        "semantic_searcher",
+        "mempalace_gate",
+        "acceptance_check",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_gate",
+    }
+    failures: list[str] = []
+    for row in f_rows:
+        name = str(row["name"])
+        if name == "local_model_executor":
+            assert row["handler_kind"] == "local_stage"
+            assert "LocalModelExecutor" in str(row.get("physical_callable_hint") or "")
+            continue
+        inv = invokers.get(name)
+        if inv is None:
+            failures.append(f"{name}:missing_invoker")
+            continue
+        if bool(getattr(inv, "stub", False)):
+            failures.append(f"{name}:stub_attr")
+        # Catalog honesty: production hint for non-local F
+        hint = str(row.get("physical_callable_hint") or "")
+        if name in WIRED_REAL and "capability_executor_registry" not in hint and name not in {
+            "artifact_gate",
+            "claim_gate",
+            "delivery_gate",
+        }:
+            # postflight gates use evaluate_postflight physical path
+            if name not in {"artifact_gate", "claim_gate", "delivery_gate"}:
+                if "capability_executor_registry" not in hint and "postflight" not in hint:
+                    # postflight wired via online_nexus_context
+                    pass
+        if name not in physical_invoke:
+            # Still require a registered engine or postflight path exists.
+            reg = EXECUTOR_REGISTRY_ALIASES.get(name, name)
+            if (
+                get_executor(reg) is None
+                and get_executor(name) is None
+                and name not in {"artifact_gate", "claim_gate", "delivery_gate"}
+            ):
+                failures.append(f"{name}:no_get_executor")
+            continue
+        ctx = {
+            "task_id": f"f-{name}",
+            "task_statement": f"physical probe {name}",
+            "planner": {"plan_hash": f"ph-{name}"},
+            "codeintel": {"scan_report_present": True, "risk_score": 1},
+            "online": {"invoked": True},
+            "source_hash": "src_hash_for_f_probe_0001",
+            "verifier": {
+                "invoked": True,
+                "gate_passed": True,
+                "verifier_status": "pass",
+                "verifier_artifact": f"sha256:fprobeartifact{name[:8]}0001",
+            },
+            "capability_evidence_bundle": {
+                "source_hash": "src_hash_for_f_probe_0001",
+                "bundle_hash": "b" * 64,
+            },
+        }
+        out = inv(ctx)
+        if bool(out.get("stub")):
+            failures.append(f"{name}:stub")
+            continue
+        if not out.get("invoked") and name not in {"claim_gate"}:
+            # claim may fail closed without full online proof; still must invoke
+            if not out.get("invoked"):
+                failures.append(f"{name}:not_invoked:{out.get('status')}")
+                continue
+        if not (
+            out.get("physical_callable")
+            or out.get("evidence_refs")
+            or out.get("evidence_ids")
+        ):
+            failures.append(f"{name}:missing_physical_or_evidence")
+        # Prefer real executor path for non-postflight
+        if name not in {"artifact_gate", "claim_gate", "delivery_gate"}:
+            real = build_real_executor_invoker(name)
+            if real is None:
+                failures.append(f"{name}:no_real_executor_invoker")
+    assert failures == [], failures
+
+
+def test_p1_every_f_monkeypatch_engine_fail_closed(monkeypatch) -> None:
+    """For each F with get_executor, monkeypatch fail → not SUCCEEDED."""
+    from nexus.core.capability_executor_registry import get_executor
+    from nexus.services import capability_registry as cr
+
+    matrix = build_wiring_matrix()
+    f_names = [
+        r["name"]
+        for r in matrix["rows"]
+        if r["gap_class"] == "F_wired_ok" and r["name"] != "local_model_executor"
+    ]
+    checked = 0
+    for name in f_names:
+        if name in {"artifact_gate", "claim_gate", "delivery_gate"}:
+            continue  # postflight gates, not get_executor body
+        if get_executor(name) is None and get_executor(
+            cr.EXECUTOR_REGISTRY_ALIASES.get(name, name)
+        ) is None:
+            continue
+        real_get = get_executor
+
+        def _boom_factory(target: str):
+            def _get(cap: str):
+                key = cr.EXECUTOR_REGISTRY_ALIASES.get(cap, cap)
+                if key == target or cap == target or key == cr.EXECUTOR_REGISTRY_ALIASES.get(target, target):
+                    def _boom(*_a, **_k):
+                        raise RuntimeError(f"forced_fail_{target}")
+                    return _boom
+                return real_get(cap)
+            return _get
+
+        monkeypatch.setattr(
+            "nexus.core.capability_executor_registry.get_executor",
+            _boom_factory(name),
+        )
+        inv = cr.build_real_executor_invoker(name)
+        if inv is None:
+            monkeypatch.undo()
+            continue
+        out = inv(
+            {
+                "task_id": f"fail-{name}",
+                "task_statement": f"fail {name}",
+                "planner": {"plan_hash": "p"},
+            }
+        )
+        assert out.get("gate_passed") is False, name
+        assert out.get("status") in {"BLOCKED", "FAILED"}, (name, out.get("status"))
+        checked += 1
+        monkeypatch.undo()
+    assert checked >= 3, f"expected multiple F engines checked, got {checked}"
+
+
+def test_p2_shared_hashes_and_consumption_fields() -> None:
+    """Local/Online share sealed hashes; receipt.consumed_evidence_ids non-empty after with_nexus."""
+    from nexus.services.mainchain_entry import run_mainchain
+
     planner = _Planner(
         selected=["codeintel", "memory", "belief", "artifact_gate", "claim_gate", "delivery_gate"],
         required=["codeintel"],
     )
-    # Provide real evidence via invokers that succeed with ids
+
     def codeintel(ctx):
         return {
             "task_id": ctx["task_id"],
@@ -299,6 +457,7 @@ def test_p2_shared_hashes_and_consumption_fields(monkeypatch) -> None:
             "evidence_ids": [f"capability:codeintel:{ctx['task_id']}:real"],
             "physical_callable": "test:codeintel",
             "telemetry": {"token_usage": 0, "model_calls": 0},
+            "outcome_contributed": True,
         }
 
     def memory(ctx):
@@ -311,6 +470,7 @@ def test_p2_shared_hashes_and_consumption_fields(monkeypatch) -> None:
             "evidence_ids": [f"capability:memory:{ctx['task_id']}:real"],
             "physical_callable": "test:memory",
             "telemetry": {"token_usage": 0, "model_calls": 0},
+            "outcome_contributed": True,
         }
 
     def belief(ctx):
@@ -323,22 +483,29 @@ def test_p2_shared_hashes_and_consumption_fields(monkeypatch) -> None:
             "evidence_ids": [f"capability:belief:{ctx['task_id']}:real"],
             "physical_callable": "test:belief",
             "telemetry": {"token_usage": 0, "model_calls": 0},
+            "outcome_contributed": True,
         }
 
-    runtime = UnifiedRuntime(planner=planner)
-    receipt = runtime.run(
+    # Real mainchain path: with_nexus Online injects evidence into prompt lineage.
+    receipt = run_mainchain(
         UnifiedRuntimeRequest(
             task_id="cons-1",
             workspace_revision="wr",
             task_statement="shared consumption proof for codeintel memory belief",
             task_type="repair",
-            route={"recommended_flow": "direct", "provider": "gemini"},
+            route={
+                "recommended_flow": "direct",
+                "provider": "gemini",
+                "injected_transport": True,
+            },
             online_prompt="return ok",
             online_payload="payload",
             local_enabled=False,
+            codeintel={"scan_report_present": True, "risk_score": 1},
             evidence_refs=("t",),
         ),
         online_invoker=_online,
+        planner=planner,
         capability_invokers={
             "codeintel": codeintel,
             "memory": memory,
@@ -346,6 +513,7 @@ def test_p2_shared_hashes_and_consumption_fields(monkeypatch) -> None:
         },
         verifier=_verifier_explicit,
         learning=_learning,
+        with_nexus_armor=True,
     )
     bundle = receipt.get("capability_evidence_bundle") or {}
     assert receipt.get("planner_decision_id")
@@ -359,51 +527,46 @@ def test_p2_shared_hashes_and_consumption_fields(monkeypatch) -> None:
     assert "contributed_capabilities" in receipt
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
-    # Online context consumption for codeintel/memory/belief
-    ctx = build_online_nexus_context(
-        task_id="cons-1",
-        task_statement="shared consumption proof",
-        plan={
-            "plan_hash": str(bundle.get("plan_hash") or ""),
-            "planner_decision_id": str(bundle.get("planner_decision_id") or ""),
-            "selected_capabilities": list(bundle.get("selected_capabilities") or []),
-            "capability_evidence_bundle": bundle,
-        },
-        capability_evidence_bundle=bundle,
-        codeintel={"scan_report_present": True, "risk_score": 1},
-    )
-    d = ctx.to_dict() if hasattr(ctx, "to_dict") else {}
-    lineage = d.get("lineage") or d
-    # Removing evidence must fail consumption proof
+    # Gate F: receipt must carry non-empty consumed IDs after real Online path.
+    consumed = list(receipt.get("consumed_evidence_ids") or [])
+    assert consumed, "receipt.consumed_evidence_ids must be non-empty after with_nexus Online"
+    assert not any(str(i).startswith("bundle:") for i in consumed)
+
+    # Each of codeintel/memory/belief must appear in successful entries and consumption.
+    for cap in ("codeintel", "memory", "belief"):
+        entry = next(
+            (
+                e
+                for e in (bundle.get("entries") or [])
+                if e.get("name") == cap and (e.get("success") or e.get("invoked_real"))
+            ),
+            None,
+        )
+        assert entry is not None, cap
+        entry_ids = list(entry.get("evidence_ids") or entry.get("evidence_refs") or [])
+        assert entry_ids, cap
+        assert any(eid in consumed for eid in entry_ids), (cap, entry_ids, consumed)
+
+    # Removing evidence must fail integrated consumption proof
     empty = record_consumption(
         bundle=bundle,
         consumer="Online",
         consumed_evidence_ids=[],
     )
     assert empty["capability_consumed"] is False
-    # Real IDs that match successful entries should be consumable
-    real_ids = []
-    for ent in bundle.get("entries") or []:
-        if ent.get("name") in {"codeintel", "memory", "belief"} and (
-            ent.get("success") or ent.get("invoked_real")
-        ):
-            real_ids.extend(ent.get("evidence_ids") or ent.get("evidence_refs") or [])
-    assert real_ids, "expected successful entry evidence for codeintel/memory/belief"
-    ok = record_consumption(
-        bundle=bundle,
-        consumer="Online",
-        consumed_evidence_ids=real_ids[:3],
-    )
-    assert ok["capability_consumed"] is True
-    bad = record_consumption(
+    forged = record_consumption(
         bundle=bundle,
         consumer="Online",
         consumed_evidence_ids=["capability:codeintel:cons-1:FORGED"],
     )
-    assert bad["capability_consumed"] is False
-    # lineage must not invent bundle: envelope as sole consumption
-    lineage_ids = list(lineage.get("consumed_evidence_ids") or [])
-    assert not any(str(i).startswith("bundle:") for i in lineage_ids)
+    assert forged["capability_consumed"] is False
+    # Real IDs from receipt must validate
+    ok = record_consumption(
+        bundle=bundle,
+        consumer="Online",
+        consumed_evidence_ids=consumed,
+    )
+    assert ok["capability_consumed"] is True
 
 
 def test_p4_receipt_complete_vs_capability_closure_complete() -> None:

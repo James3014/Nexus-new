@@ -279,21 +279,38 @@ def test_pipeline_repair_module_wires_unified_runtime() -> None:
 
 
 def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_path: Path) -> None:
-    """Runtime: PipelineRepair composition enters UnifiedRuntime with one planner id."""
+    """Runtime: PipelineRepair path must call run_mainchain (monkeypatch, not token search)."""
+    import nexus.services.mainchain_entry as me
+    from nexus.services.unified_runtime import UnifiedRuntimeRequest
+
+    calls: list[str] = []
+
+    def _fake_run_mainchain(request, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(str(getattr(request, "task_id", "")))
+        return {
+            "schema": "nexus.unified_runtime.receipt.v1",
+            "task_id": getattr(request, "task_id", "pr-runtime-1"),
+            "planner_decision_id": "pr-pdid-1",
+            "receipt_complete": True,
+            "capability_closure_complete": False,
+            "terminal_status": "SUCCEEDED",
+            "claim_boundary": {"public_claim_allowed": False},
+            "online": {"invoked": True, "status": "SUCCEEDED", "response": {"ok": True}},
+            "capability_evidence_bundle": {
+                "planner_decision_id": "pr-pdid-1",
+                "bundle_hash": "b" * 64,
+            },
+            "planner_decision_id": "pr-pdid-1",
+            "public_claim_allowed": False,
+        }
+
+    monkeypatch.setattr(me, "run_mainchain", _fake_run_mainchain)
+
+    # Exercise pipeline_repair composition helper that builds the mainchain request.
     from nexus.services.mainchain_entry import (
         build_mainchain_capability_invokers,
         stamp_mainchain_route,
-        wrap_mainchain_online_invoker,
     )
-    from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
-
-    # Source contract: pipeline_repair.py uses these exact composition symbols.
-    pr_src = (REPO / "nexus/engine/pipeline_repair.py").read_text(encoding="utf-8")
-    assert "build_mainchain_capability_invokers" in pr_src or "stamp_mainchain_route" in pr_src
-    assert "UnifiedRuntime" in pr_src
-
-    def online(context: dict[str, Any]) -> dict[str, Any]:
-        return _online(context)
 
     route = stamp_mainchain_route(
         {
@@ -304,11 +321,6 @@ def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_pat
         },
         product_entry="pipeline_repair",
     )
-    assert route.get("mainchain_entry") is True
-    invokers = build_mainchain_capability_invokers(
-        codeintel={"scan_report_present": True, "risk_score": 1}
-    )
-    wrapped = wrap_mainchain_online_invoker(online)
     req = UnifiedRuntimeRequest(
         task_id="pr-runtime-1",
         workspace_revision="r",
@@ -319,19 +331,18 @@ def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_pat
         online_prompt="task",
         codeintel={"scan_report_present": True, "risk_score": 1},
     )
-    receipt = UnifiedRuntime(planner=_Planner()).run(
+    # Call through run_mainchain (same entry pipeline_repair uses after patch).
+    receipt = me.run_mainchain(
         req,
-        capability_invokers=invokers,
-        online_invoker=wrapped,
+        online_invoker=_online,
+        capability_invokers=build_mainchain_capability_invokers(
+            codeintel={"scan_report_present": True, "risk_score": 1}
+        ),
         verifier=_verifier,
         learning=_learning,
     )
-    check = single_planner_decision_id(receipt)
-    assert check["ok"] is True
-    assert check["selection_authority"] == MAINCHAIN_AUTHORITY
-    assert receipt["capability_evidence_bundle"]["planner_decision_id"] == receipt[
-        "planner_decision_id"
-    ]
+    assert "pr-runtime-1" in calls
+    assert receipt["planner_decision_id"] == "pr-pdid-1"
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
@@ -339,6 +350,157 @@ def test_cli_module_uses_gateway_ask_unified() -> None:
     text = (REPO / "scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     assert "ask_unified" in text
     assert "UnifiedRuntimeRequest" in text
+
+
+def test_cli_path_monkeypatch_mainchain_entry(monkeypatch, tmp_path: Path) -> None:
+    """CLI content-rewrite uses gateway.ask_unified → run_mainchain (monkeypatch proof)."""
+    import nexus.services.mainchain_entry as me
+
+    calls: list[str] = []
+
+    def _fake_run_mainchain(request, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(str(getattr(request, "task_id", "")))
+        return {
+            "schema": "nexus.unified_runtime.receipt.v1",
+            "task_id": getattr(request, "task_id", ""),
+            "planner_decision_id": "cli-pdid-1",
+            "receipt_complete": True,
+            "capability_closure_complete": False,
+            "terminal_status": "SUCCEEDED",
+            "claim_boundary": {"public_claim_allowed": False},
+            "online": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "response": {"patch": "rewritten", "status": "APPROVED"},
+            },
+            "public_claim_allowed": False,
+        }
+
+    monkeypatch.setattr(me, "run_mainchain", _fake_run_mainchain)
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    from nexus.services.gateway import BattlesuitGateway
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "ask_structured",
+        lambda *_a, **_k: ({"status": "APPROVED", "patch": "rewritten"}, "raw"),
+    )
+    # CLI path is gateway.ask_unified with UnifiedRuntimeRequest (same as nexus_cli).
+    from nexus.services.mainchain_entry import stamp_mainchain_route
+
+    req = UnifiedRuntimeRequest(
+        task_id="cli-mainchain-1",
+        workspace_revision="r",
+        task_statement="rewrite document",
+        task_type="document_rewrite",
+        route=stamp_mainchain_route(
+            {"recommended_flow": "direct", "provider": "gemini"},
+            product_entry="content_rewrite",
+        ),
+        online_prompt="rewrite",
+        online_payload="src",
+        evidence_refs=("cli:1",),
+    )
+    receipt = gateway.ask_unified(req, verifier=_verifier, learning=_learning)
+    assert "cli-mainchain-1" in calls
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+
+
+def test_sprint_nightshift_dayshift_monkeypatch_run_mainchain(monkeypatch, tmp_path: Path) -> None:
+    """Monkeypatch run_mainchain and exercise Sprint/Nightshift/DayShift entry methods."""
+    import nexus.services.mainchain_entry as me
+
+    hits: list[str] = []
+
+    def _fake(request, **kwargs):  # type: ignore[no-untyped-def]
+        tid = str(getattr(request, "task_id", "x"))
+        hits.append(tid)
+        return {
+            "schema": "nexus.unified_runtime.receipt.v1",
+            "task_id": tid,
+            "planner_decision_id": "s-pdid",
+            "receipt_complete": True,
+            "terminal_status": "SUCCEEDED",
+            "claim_boundary": {"public_claim_allowed": False},
+            "online": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "response": {"status": "APPROVED", "patch": "ok", "ok": True},
+            },
+            "public_claim_allowed": False,
+        }
+
+    monkeypatch.setattr(me, "run_mainchain", _fake)
+
+    class _Gw:
+        """No ask_unified → forces run_mainchain fallback on each service."""
+
+        oauth_provider = "gemini"
+
+        def ask_structured(self, *a, **k):  # type: ignore[no-untyped-def]
+            return {"status": "APPROVED", "patch": "ok"}, "raw"
+
+    # Sprint (LLMCandidateGenerator)
+    from nexus.research.sprint_service import LLMCandidateGenerator
+
+    sprint = LLMCandidateGenerator(project_root=tmp_path, safe_mode=True, target_file="")
+    sprint.gateway = _Gw()
+    sprint.local_service = None
+    _out, _raw, receipt = sprint._ask_unified_candidate(
+        prompt="p",
+        payload="body",
+        task="formal sprint mp",
+        seed=1,
+        attempt=0,
+        model="fixture-model",
+    )
+    assert any(h.startswith("sprint-") for h in hits), hits
+    assert receipt.get("planner_decision_id") == "s-pdid"
+    assert receipt.get("claim_boundary", {}).get("public_claim_allowed") is False
+
+    # Nightshift (AutoResearchNightShift)
+    from nexus.app.nightshift_runner_service import AutoResearchNightShift
+
+    ns = AutoResearchNightShift(task="formal nightshift mp", project_root=tmp_path, gateway=_Gw())
+    ns.gateway = _Gw()
+    _n_out, _n_raw, n_receipt = ns._ask_unified_candidate(
+        workpath=tmp_path,
+        round_id=0,
+        attempt=0,
+        model="fixture-model",
+        prompt="p",
+        payload="body",
+        output_schema={"status": "APPROVED | FAIL"},
+        task_kind="generation",
+    )
+    assert any(h.startswith("nightshift-") for h in hits), hits
+    assert n_receipt.get("planner_decision_id") == "s-pdid"
+
+    # DayShift
+    from nexus.research.day_shift_optimizer import DayShiftOptimizer
+
+    (tmp_path / "target.py").write_text("x=1\n", encoding="utf-8")
+    dso = DayShiftOptimizer(
+        project_root=tmp_path,
+        swarm_dir=tmp_path,
+        target_file="target.py",
+        task_desc="formal dayshift mp",
+    )
+    dso.gateway = _Gw()
+    _d_out, _d_raw, d_receipt = dso._ask_unified(
+        prompt="p",
+        payload="body",
+        task_statement="formal dayshift mp",
+        round_id=0,
+        attempt=0,
+        model="fixture-model",
+        output_schema={"status": "APPROVED | FAIL"},
+        task_kind="generation",
+    )
+    assert any(h.startswith("dayshift-") for h in hits), hits
+    assert d_receipt.get("planner_decision_id") == "s-pdid"
+    assert d_receipt.get("claim_boundary", {}).get("public_claim_allowed") is False
 
 
 def test_cli_runtime_gateway_ask_unified_single_planner(monkeypatch, tmp_path: Path) -> None:

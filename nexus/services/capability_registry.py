@@ -214,6 +214,8 @@ def classify_gap(name: str) -> str:
     A: missing invoker entirely
     """
     key = str(name or "").strip()
+    # local_model_executor is owned by Local stage (physical LocalModelExecutor),
+    # not the preflight invoker map — still F when Local can execute it.
     if key in LOCAL_STAGE_CAPABILITIES:
         return "F_wired_ok"
     if key in PROBE_ONLY_REASON_CODES:
@@ -249,33 +251,41 @@ def build_wiring_matrix() -> dict[str, Any]:
         escalate = name in ESCALATE_ONLY or name in PROBE_ONLY_REASON_CODES
         has_exec = _has_physical_executor(name)
         reason_code = str(PROBE_ONLY_REASON_CODES.get(name) or "")
+        physical_hint = f"capability_registry:pending:{name}"
         if name in LOCAL_STAGE_CAPABILITIES:
             handler = "local_stage"
             has_invoker = True
             feeds_online = True
+            # Physical path is LocalModelExecutor on Local stage, not preflight skip.
+            physical_hint = "local_stage:LocalModelExecutor"
         elif name in WIRED_REAL and gap == "F_wired_ok":
             handler = "real_invoker"
             has_invoker = True
             feeds_online = True
+            physical_hint = f"capability_executor_registry:{name}"
         elif name in WIRED_STUB and not has_exec:
             handler = "stub_invoker"
             has_invoker = True
             feeds_online = True  # compact may be thin
+            physical_hint = f"capability_registry:stub_invoker:{name}"
         elif name in ONLINE_ARMOR_FLAG_CAPABILITIES and not has_exec and gap != "E_escalate_ok":
             handler = "online_armor_flags"
             has_invoker = True  # explicit skip/flag path
             feeds_online = False
+            physical_hint = f"capability_registry:online_armor_flags:{name}"
         elif escalate or gap == "E_escalate_ok":
             handler = "escalate_only_skip" if not (has_exec and name in WIRED_REAL) else "real_invoker_escalate_gated"
             has_invoker = True
             feeds_online = bool(has_exec and name in WIRED_REAL)
             if not reason_code and name not in WIRED_REAL:
                 reason_code = "no_production_engine_callable"
+            physical_hint = f"capability_registry:{handler}:{name}"
         else:
             handler = "explicit_skip"
             has_invoker = True  # F1 always installs skip
             feeds_online = False
             gap = "A_missing_invoker" if gap == "A_missing_invoker" else gap
+            physical_hint = f"capability_registry:explicit_skip:{name}"
 
         # After F1 every name has a handler (real/stub/skip) — A means not deep-wired.
         rows.append(
@@ -290,11 +300,7 @@ def build_wiring_matrix() -> dict[str, Any]:
                 "escalate_only": escalate or name in ESCALATE_ONLY,
                 "gap_class": gap if gap in GAP_CLASSES else "A_missing_invoker",
                 "reason_code": reason_code,
-                "physical_callable_hint": (
-                    f"capability_executor_registry:{name}"
-                    if gap == "F_wired_ok"
-                    else f"capability_registry:{handler}:{name}"
-                ),
+                "physical_callable_hint": physical_hint,
             }
         )
 
@@ -613,8 +619,26 @@ def build_default_mainchain_invokers(
 
     invokers: dict[str, CapabilityInvoker] = {}
 
-    # Real wired
-    invokers["codeintel"] = build_codeintel_preflight_invoker(codeintel=codeintel)
+    # codeintel: production get_executor when available; preflight compact is NOT F alone.
+    real_codeintel = build_real_executor_invoker("codeintel")
+    preflight_codeintel = build_codeintel_preflight_invoker(codeintel=codeintel)
+    if real_codeintel is not None:
+        def _codeintel_production(context: Mapping[str, Any]) -> Mapping[str, Any]:
+            # Prefer physical engine; merge preflight compact evidence when present.
+            out = dict(real_codeintel(context))
+            try:
+                pf = preflight_codeintel(context)
+                if isinstance(pf, Mapping) and pf.get("evidence"):
+                    resp = dict(out.get("response") or {})
+                    resp["preflight_compact"] = pf.get("evidence")
+                    out["response"] = resp
+            except Exception:
+                pass
+            return out
+
+        invokers["codeintel"] = _codeintel_production
+    else:
+        invokers["codeintel"] = preflight_codeintel
     if include_postflight_gates:
         invokers.update(build_plan_gated_postflight_invokers())
 

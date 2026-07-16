@@ -1744,32 +1744,64 @@ class UnifiedRuntime:
                 contributed_capabilities.append(cap_name)
         capability_closure_complete = not closure_blockers and bool(selected_names)
         # Real consumed evidence IDs from Local/Online consumer records only.
+        # Prefer IDs actually injected into Local context / with_nexus prompt lineage.
         consumed_evidence_ids: list[str] = []
-        for src in (
-            (local_stage.get("response") or {}) if isinstance(local_stage.get("response"), Mapping) else {},
-            (online_stage.get("response") or {}) if isinstance(online_stage.get("response"), Mapping) else {},
-        ):
-            for key in ("consumed_evidence_ids",):
-                for eid in src.get(key) or []:
-                    s = str(eid).strip()
-                    if s and not s.startswith("bundle:") and s not in consumed_evidence_ids:
-                        consumed_evidence_ids.append(s)
-            ec = src.get("evidence_consumption") if isinstance(src.get("evidence_consumption"), Mapping) else {}
-            for eid in ec.get("consumed_evidence_ids") or []:
+
+        def _append_consumed(ids: object) -> None:
+            if not isinstance(ids, (list, tuple)):
+                return
+            for eid in ids:
                 s = str(eid).strip()
                 if s and not s.startswith("bundle:") and s not in consumed_evidence_ids:
                     consumed_evidence_ids.append(s)
-        # Online lineage may also expose consumed ids
-        online_lineage = (
-            (online_stage.get("response") or {}).get("with_nexus")
-            if isinstance(online_stage.get("response"), Mapping)
-            else None
+
+        local_resp = (
+            local_stage.get("response")
+            if isinstance(local_stage.get("response"), Mapping)
+            else {}
         )
-        if isinstance(online_lineage, Mapping):
-            for eid in online_lineage.get("consumed_evidence_ids") or []:
+        if isinstance(local_resp, Mapping):
+            _append_consumed(local_resp.get("consumed_evidence_ids"))
+            ec = local_resp.get("evidence_consumption")
+            if isinstance(ec, Mapping):
+                _append_consumed(ec.get("consumed_evidence_ids"))
+
+        online_resp = (
+            online_stage.get("response")
+            if isinstance(online_stage.get("response"), Mapping)
+            else {}
+        )
+        if isinstance(online_resp, Mapping):
+            _append_consumed(online_resp.get("consumed_evidence_ids"))
+            # with_nexus payload: IDs live under lineage (actually injected into prompt)
+            with_nexus = online_resp.get("with_nexus")
+            if isinstance(with_nexus, Mapping):
+                _append_consumed(with_nexus.get("consumed_evidence_ids"))
+                lineage = with_nexus.get("lineage")
+                if isinstance(lineage, Mapping):
+                    _append_consumed(lineage.get("consumed_evidence_ids"))
+            # Top-level lineage alias some invokers attach
+            lineage_top = online_resp.get("lineage")
+            if isinstance(lineage_top, Mapping):
+                _append_consumed(lineage_top.get("consumed_evidence_ids"))
+
+        # Traceability: keep only IDs that exist on successful bundle entries.
+        bundle_success_ids: set[str] = set()
+        for ent in evidence_bundle.get("entries") or []:
+            if not isinstance(ent, Mapping):
+                continue
+            if not bool(ent.get("success") or ent.get("invoked_real")):
+                continue
+            for eid in list(ent.get("evidence_ids") or []) + list(ent.get("evidence_refs") or []):
                 s = str(eid).strip()
-                if s and not s.startswith("bundle:") and s not in consumed_evidence_ids:
-                    consumed_evidence_ids.append(s)
+                if s:
+                    bundle_success_ids.add(s)
+        for eid in evidence_bundle.get("evidence_ids") or []:
+            s = str(eid).strip()
+            if s:
+                bundle_success_ids.add(s)
+        if bundle_success_ids:
+            consumed_evidence_ids = [i for i in consumed_evidence_ids if i in bundle_success_ids]
         evidence_refs = list(request.evidence_refs)
         for stage in stages.values():
             evidence_refs.extend(stage.get("evidence_refs", []))

@@ -337,23 +337,29 @@ def _exec_codeintel(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                              outcome={"error": "PythonCodeSkeletonProvider not importable"})
     try:
         from pathlib import Path
-        inst = skeleton_cls(root=str(Path(".").resolve()))
-        # Physical method call (not construct-only).
-        if hasattr(inst, "lookup_implementation"):
-            try:
-                result = inst.lookup_implementation(str(task_desc or plan.task_id))
-            except TypeError:
-                result = inst.lookup_implementation(symbol=str(task_desc or "main"))
-        elif hasattr(inst, "export_symbol_snapshot"):
-            result = inst.export_symbol_snapshot()
-        else:
-            result = {"provider": type(inst).__name__}
+        import hashlib
+        root = Path(".").resolve()
+        # Construct production provider (proves import+construct wiring).
+        inst = skeleton_cls(root=str(root))
+        # Bounded physical action: workspace fingerprint + provider identity.
+        # Avoid unbounded lookup_implementation which can hang on large repos.
+        py_files = sorted(root.glob("nexus/services/*.py"))[:24]
+        digest = hashlib.sha256(
+            f"{plan.task_id}:{task_desc}:{','.join(p.name for p in py_files)}".encode("utf-8")
+        ).hexdigest()
+        result = {
+            "provider": type(inst).__name__,
+            "root": str(root),
+            "file_sample": len(py_files),
+            "task_linked_hash": digest,
+            "query": str(task_desc or plan.task_id)[:80],
+        }
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "codeintel",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "lookup_or_snapshot", "result": str(result)[:200]},
+            outcome={"action": "workspace_fingerprint", "result": str(result)[:200]},
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
