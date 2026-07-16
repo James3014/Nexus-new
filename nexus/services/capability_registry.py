@@ -367,8 +367,27 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             telemetry["model_calls"] = 0
         outcome = getattr(receipt, "outcome", None)
         outcome_map = dict(outcome) if isinstance(outcome, Mapping) else {"raw": str(outcome)}
+        # Import/construct-only outcomes are never real success (P4).
+        shallow_keys = {
+            "class_instantiated",
+            "function_found",
+            "symbol_resolved",
+        }
+        shallow_actions = {
+            "resolve_service",
+            "resolve_module",
+            "resolve_providers",
+            "construct",
+            "resolve",
+        }
+        action = str(outcome_map.get("action") or "")
+        is_shallow = (
+            (any(outcome_map.get(k) for k in shallow_keys) and not action)
+            or action in shallow_actions
+            or str(outcome_map.get("error") or "") == "import_construct_not_execution"
+        )
         # Import/construct without invoke must not count as real success
-        if not invoked:
+        if not invoked or is_shallow:
             return {
                 "task_id": task_id,
                 "invoked": False,
@@ -387,6 +406,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                     "capability": name,
                     "registry_key": registry_key,
                     "outcome": outcome_map,
+                    "shallow_rejected": is_shallow,
                 },
             }
         status = "SUCCEEDED" if gate_passed else "FAILED"

@@ -1597,27 +1597,28 @@ class UnifiedRuntime:
             required_stage_names.append("online")
         required_stage_names.extend(("verifier", "learning"))
         required_stages = [stages[name] for name in required_stage_names]
-        # Capability stages: INVOKED must pass; SKIPPED with evidence is coverage-ok (FCM).
-        # Stub / SELECTED_NOT_EXECUTED / evidence-less must NOT force receipt_complete success.
-        for cap_stage in capability_results.values():
+        # Final Gate: only planner.required_capabilities gate receipt_complete.
+        # Optional selected caps may fail without blocking SUCCEEDED.
+        # SKIPPED (policy) is coverage-ok; stub / SELECTED_NOT_EXECUTED on required must block.
+        required_cap_names = {str(n) for n in (plan.required_capabilities or [])}
+        for cap_name, cap_stage in capability_results.items():
+            if str(cap_name) not in required_cap_names:
+                continue
             if str(cap_stage.get("status") or "") == "SKIPPED" or cap_stage.get("skipped"):
                 continue
-            if str(cap_stage.get("status") or "") == "SELECTED_NOT_EXECUTED":
-                continue
-            if bool(cap_stage.get("stub")) or (
-                isinstance(cap_stage.get("response"), dict) and cap_stage["response"].get("stub")
-            ):
-                # stubs do not count toward receipt_complete required set
-                continue
             required_stages.append(cap_stage)
+
         def _stage_complete(stage: object) -> bool:
             if not isinstance(stage, dict):
                 return False
-            if bool(stage.get("stub")):
+            if bool(stage.get("stub")) or (
+                isinstance(stage.get("response"), dict) and stage["response"].get("stub")
+            ):
                 return False
             if str(stage.get("status") or "") in {"SELECTED_NOT_EXECUTED", "STUB_INVOKED"}:
                 return False
             return bool(stage.get("invoked") and stage.get("evidence_present") and stage.get("gate_passed"))
+
         receipt_complete = all(_stage_complete(stage) for stage in required_stages)
         outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages)
         evidence_refs = list(request.evidence_refs)
@@ -2080,9 +2081,18 @@ class UnifiedRuntime:
         required_names.extend(("verifier", "learning"))
         required_stages = [finalized.get(name, {}) for name in required_names]
         capability_results = finalized.get("capability_results", {})
+        planner_stage_data = finalized.get("planner", {})
+        required_cap_names: set[str] = set()
+        if isinstance(planner_stage_data, Mapping):
+            required_cap_names = {
+                str(n) for n in (planner_stage_data.get("required_capabilities") or [])
+            }
         if isinstance(capability_results, Mapping):
-            for stage in capability_results.values():
+            for cap_name, stage in capability_results.items():
                 if not isinstance(stage, Mapping):
+                    continue
+                # Final Gate: optional selected caps do not block receipt_complete.
+                if str(cap_name) not in required_cap_names:
                     continue
                 # FCM: explicit SKIPPED is coverage-ok, not a completion blocker.
                 if str(stage.get("status") or "") == "SKIPPED" or stage.get("skipped"):
@@ -2090,6 +2100,11 @@ class UnifiedRuntime:
                 required_stages.append(stage)
         receipt_complete = all(
             isinstance(stage, Mapping)
+            and not bool(stage.get("stub"))
+            and not (
+                isinstance(stage.get("response"), Mapping) and stage["response"].get("stub")
+            )
+            and str(stage.get("status") or "") not in {"SELECTED_NOT_EXECUTED", "STUB_INVOKED"}
             and bool(stage.get("invoked"))
             and bool(stage.get("evidence_present"))
             and bool(stage.get("gate_passed"))

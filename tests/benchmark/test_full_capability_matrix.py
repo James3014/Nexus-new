@@ -152,6 +152,32 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
                     continue
                 if not str(getattr(receipt, "evidence_id", "") or ""):
                     failures.append(f"{name}:missing_evidence_id")
+                # P4: import/construct alone is never real execution.
+                outcome = getattr(receipt, "outcome", None) or {}
+                if not isinstance(outcome, dict):
+                    outcome = {}
+                action = str(outcome.get("action") or "")
+                shallow_keys = (
+                    "class_instantiated",
+                    "function_found",
+                    "symbol_resolved",
+                )
+                shallow_actions = {
+                    "resolve_service",
+                    "resolve_module",
+                    "resolve_providers",
+                    "construct",
+                    "resolve",
+                }
+                if (
+                    any(outcome.get(k) for k in shallow_keys) and not action
+                ) or action in shallow_actions:
+                    failures.append(f"{name}:shallow_import_only:{outcome}")
+                    continue
+                if not action and not outcome.get("error"):
+                    # Physical probe must name the method/action that ran.
+                    failures.append(f"{name}:missing_physical_action:{outcome}")
+                    continue
 
         # Mainchain invoker must not be structural stub
         inv = invokers.get(name)

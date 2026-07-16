@@ -210,10 +210,114 @@ def test_pipeline_repair_module_wires_unified_runtime() -> None:
     assert "nexus_full_stack" not in text or "pop" in text or "strip" in text
 
 
+def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_path: Path) -> None:
+    """Runtime: PipelineRepair composition enters UnifiedRuntime with one planner id."""
+    from nexus.services.mainchain_entry import (
+        build_mainchain_capability_invokers,
+        stamp_mainchain_route,
+        wrap_mainchain_online_invoker,
+    )
+    from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
+
+    # Source contract: pipeline_repair.py uses these exact composition symbols.
+    pr_src = (REPO / "nexus/engine/pipeline_repair.py").read_text(encoding="utf-8")
+    assert "build_mainchain_capability_invokers" in pr_src or "stamp_mainchain_route" in pr_src
+    assert "UnifiedRuntime" in pr_src
+
+    def online(context: dict[str, Any]) -> dict[str, Any]:
+        return _online(context)
+
+    route = stamp_mainchain_route(
+        {
+            "recommended_flow": "direct",
+            "injected_transport": True,
+            "online_policy": "auto",
+            "mainchain_entry": True,
+        },
+        product_entry="pipeline_repair",
+    )
+    assert route.get("mainchain_entry") is True
+    invokers = build_mainchain_capability_invokers(
+        codeintel={"scan_report_present": True, "risk_score": 1}
+    )
+    wrapped = wrap_mainchain_online_invoker(online)
+    req = UnifiedRuntimeRequest(
+        task_id="pr-runtime-1",
+        workspace_revision="r",
+        task_statement="scan impact risk codeintel",
+        task_type="codeintel",
+        route=route,
+        online_enabled=True,
+        online_prompt="task",
+        codeintel={"scan_report_present": True, "risk_score": 1},
+    )
+    receipt = UnifiedRuntime(planner=_Planner()).run(
+        req,
+        capability_invokers=invokers,
+        online_invoker=wrapped,
+        verifier=_verifier,
+        learning=_learning,
+    )
+    check = single_planner_decision_id(receipt)
+    assert check["ok"] is True
+    assert check["selection_authority"] == MAINCHAIN_AUTHORITY
+    assert receipt["capability_evidence_bundle"]["planner_decision_id"] == receipt[
+        "planner_decision_id"
+    ]
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+
+
 def test_cli_module_uses_gateway_ask_unified() -> None:
     text = (REPO / "scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     assert "ask_unified" in text
     assert "UnifiedRuntimeRequest" in text
+
+
+def test_cli_runtime_gateway_ask_unified_single_planner(monkeypatch, tmp_path: Path) -> None:
+    """Runtime: CLI-equivalent Gateway.ask_unified path shares one planner_decision_id."""
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    from nexus.services.gateway import BattlesuitGateway
+    from nexus.services.mainchain_entry import stamp_mainchain_route
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "ask_structured",
+        lambda *_a, **_k: ({"summary": "online"}, "online-response"),
+    )
+    route = stamp_mainchain_route(
+        {
+            "recommended_flow": "direct",
+            "injected_transport": True,
+            "online_policy": "auto",
+            "mainchain_entry": True,
+            "with_nexus_armor": True,
+        },
+        product_entry="nexus_cli",
+    )
+    req = UnifiedRuntimeRequest(
+        task_id="cli-runtime-1",
+        workspace_revision="r",
+        task_statement="scan impact risk codeintel",
+        task_type="codeintel",
+        route=route,
+        online_enabled=True,
+        online_prompt="task",
+        codeintel={"scan_report_present": True, "risk_score": 2},
+    )
+    receipt = gateway.ask_unified(
+        req,
+        verifier=_verifier,
+        learning=_learning,
+        receipt_path=tmp_path / "cli.json",
+    )
+    check = single_planner_decision_id(receipt)
+    assert check["ok"] is True
+    assert receipt["planner_decision_id"]
+    assert receipt["capability_evidence_bundle"]["planner_decision_id"] == receipt[
+        "planner_decision_id"
+    ]
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
 def test_sprint_nightshift_dayshift_research_entries_if_present() -> None:
