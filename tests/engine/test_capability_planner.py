@@ -485,6 +485,20 @@ def test_default_capability_nodes_cover_full_nexus_capability_registry():
     assert "policy_verdict" in nodes["mempalace_gate"].evidence_outputs
 
 
+def test_capability_planner_selects_explicit_prompt_compression_route():
+    plan = CapabilityPlanner().plan(
+        task_desc="continue a long task with compressed context",
+        task_type="repair",
+        route={
+            "recommended_flow": "hybrid",
+            "prompt_compression": True,
+            "route_features": {"risk_score": 10},
+        },
+    )
+
+    assert "prompt_compression" in plan.selected_capabilities
+
+
 def test_capability_planner_maps_public_governance_task_to_review_and_reasoning():
     plan = CapabilityPlanner().plan(
         task_desc="Refactor a credential scrubber while preserving the governance boundary: never weaken secret redaction.",
@@ -2774,5 +2788,4 @@ def test_capability_planner_local_committee_topology_metadata(monkeypatch):
     assert snapshot.get("execution_topology") == "local_committee_only"
     assert snapshot.get("committee_profile") == "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
     assert snapshot.get("local_committee_enabled") is True
-
 

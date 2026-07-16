@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from nexus.services.local_heal.armor_artifact_storage import resolve_repro_script_dir
+
 
 @dataclass
 class ReplayTask:
@@ -171,9 +173,14 @@ class LinearReplayRunner:
     def _run_repro(
         repro_script: str, python_exe: str, repo_dir: Path
     ) -> tuple[bool, str]:
-        """Run reproduction script."""
+        """Run reproduction script under durable Armor artifact root (not /tmp)."""
+        # Always use Nexus artifact storage for scripts; never /tmp or the task repo tree.
+        script_dir = resolve_repro_script_dir()
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, dir="/tmp"
+            mode="w",
+            suffix=".py",
+            delete=False,
+            dir=str(script_dir),
         ) as f:
             f.write(repro_script)
             script_path = f.name

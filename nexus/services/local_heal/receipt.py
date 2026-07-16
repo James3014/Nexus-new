@@ -5,6 +5,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from nexus.services.local_heal.armor_artifact_storage import (
+    assert_durable_path,
+    default_local_heal_reports_root,
+    load_decision_for_replay,
+    reconstruct_decision_from_receipt,
+)
 from nexus.services.local_heal.memory_trace import MemoryTrace, get_empty_trace
 
 
@@ -708,7 +714,15 @@ def write_repair_receipt(
     report_dir_name = _safe_instance_id(getattr(ctx, "instance_id", ""))
     if run_group:
         report_dir_name = f"{report_dir_name}__{run_group}"
-    report_dir = (reports_root or (_nexus_root() / ".nexus/reports/local_heal")) / report_dir_name
+    # Production default: workspace .nexus/reports/local_heal (or NEXUS_ARMOR_ARTIFACT_ROOT).
+    # Never fall back to OS ephemeral temp for decision receipts.
+    # Explicit reports_root remains injectable for tests/operators (may be a temp fixture).
+    if reports_root is None:
+        resolved_root = default_local_heal_reports_root()
+        assert_durable_path(resolved_root, label="repair_receipt reports_root")
+    else:
+        resolved_root = Path(reports_root)
+    report_dir = resolved_root / report_dir_name
     report_dir.mkdir(parents=True, exist_ok=True)
 
     (report_dir / "repro_evidence.log").write_text(str(getattr(ctx, "repro_evidence", "") or ""), encoding="utf-8")
@@ -728,7 +742,18 @@ def write_repair_receipt(
     abort_receipt_path = report_dir / f"abort_receipt_{getattr(ctx, 'instance_id', '')}.json"
     receipt["abort_receipt_written"] = abort_receipt_path.exists()
     receipt["abort_receipt_path"] = str(abort_receipt_path) if abort_receipt_path.exists() else ""
-    receipt["final_receipt_path"] = str(receipt_path)
+    receipt["final_receipt_path"] = str(receipt_path.resolve())
+    receipt["artifact_storage"] = "nexus_workspace_durable"
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     return receipt_path
+
+
+def replay_repair_decision(receipt_path: Path | str) -> dict[str, Any]:
+    """Replay routing/verifier/ledger decision fields from a stored receipt alone."""
+    return load_decision_for_replay(receipt_path)
+
+
+def decision_surface_from_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    """In-memory reconstruction helper for tests and operator tooling."""
+    return reconstruct_decision_from_receipt(receipt)

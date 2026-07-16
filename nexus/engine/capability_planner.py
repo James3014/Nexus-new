@@ -182,6 +182,19 @@ def default_capability_nodes() -> dict[str, CapabilityNode]:
             evidence_outputs=("panel_votes", "winner", "judge_mode", "judge_report", "gate_verdict"),
         ),
         CapabilityNode(
+            "committee",
+            ("D", "R", "A"),
+            default_state="optional",
+            category="governance",
+            maturity="routed",
+            dependencies=("artifact_gate", "claim_gate"),
+            parallelizable_with=("judge_panel", "codeintel"),
+            cost=5,
+            benefit=5,
+            risk_reduction=5,
+            evidence_outputs=("candidate_count", "winner_found", "verifier_status", "claim_gate_passed"),
+        ),
+        CapabilityNode(
             "llm_judge_panel",
             ("D", "R", "A"),
             category="reasoning",
@@ -259,6 +272,17 @@ def default_capability_nodes() -> dict[str, CapabilityNode]:
             benefit=3,
             risk_reduction=2,
             evidence_outputs=("semantic_hits", "semantic_refs", "relevance"),
+        ),
+        CapabilityNode(
+            "prompt_compression",
+            ("P", "D", "R", "A"),
+            category="context",
+            maturity="production",
+            parallelizable_with=("memory", "semantic_searcher", "codeintel"),
+            cost=1,
+            benefit=3,
+            risk_reduction=2,
+            evidence_outputs=("original_context_chars", "compressed_context_chars", "compression_ratio"),
         ),
         CapabilityNode(
             "asi_constraint_extractor",
@@ -706,6 +730,8 @@ class CapabilityPlanner:
             task_type=task_type,
             enable=enable,
         )
+        if bool(route.get("prompt_compression")):
+            enable("prompt_compression", "route_explicit_prompt_compression")
         apply_tier_policies(
             states=states,
             reasons=reasons,
@@ -771,6 +797,8 @@ class CapabilityPlanner:
         import os
         if os.environ.get("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR") == "1":
             enable("local_model_executor", "env_gate_enabled")
+        elif bool(route.get("local_enabled")):
+            enable("local_model_executor", "unified_runtime_local_route")
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]

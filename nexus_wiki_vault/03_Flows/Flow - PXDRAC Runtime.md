@@ -27,7 +27,7 @@ version_scope:
 # Flow - PXDRAC Runtime (Hybrid v24.0)
 
 ## One-sentence summary
-本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs] [Code: scripts/engine/nexus_cli.py] [Source: Spec v22]
+本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]
 
 ## Role / responsibility
 - **物理連續性 (Physical Continuity)**: 由 Rust `TransitionEngine` 確保 P -> X -> D -> R -> A -> C 相位的絕對順序，禁止任何未經授權的跳步。
@@ -80,6 +80,42 @@ version_scope:
 ## Open questions / conflicts
 - [ ] **Parallel Execution**: 是否允許在複數任務下併發執行 D/R 相位。
 - [ ] **Manual Intervention**: 在 A 相位失敗後是否允許人類手動干預並重新進入 R。
+
+## Repair Phase 路由詳情 (2026-07-13 驗證)
+
+Repair phase (R) 走的是 `select_self_heal_route()`，不是 `LocalModelExecutor`：
+
+```
+RepairPhaseHandler.run(state, context)
+  |
+  +- select_self_heal_route()
+  |   |
+  |   +-- backend_used == "fail-closed"?
+  |   |   +-- YES: try_local_repair() [deterministic, NOT LocalModelExecutor]
+  |   |   +-- NO: _swarm_repair() [proxies to try_local_repair]
+  |   |
+  |   +-- try_local_repair() 行為：
+  |       +- guard: benchmark_run must be truthy
+  |       +- regex match: "fix missing '<module>' import in <file>"
+  |       +- _insert_import() -> write file -> py_compile.verify
+  |       +-- tokens_used = 0 (always)
+  |
+  +-- NEXUS_USE_SURGICAL_REPAIR?
+  |   +-- YES: BattlesuitGateway.surgical_ask() + apply_patch_v2()
+  |
+  +-- failure? -> _research_failure_intel() -> GitHub Issues via UCCRouter
+```
+
+### Repair Routes Summary
+
+| Route | Condition | Handler |
+|-------|-----------|---------|
+| Local repair | `fail-closed` backend | `try_local_repair()` from `nexus.engine.phases.local_repair` |
+| Swarm repair | Normal backend | `_swarm_repair()` -> proxies to `try_local_repair()` |
+| Surgical repair | `NEXUS_USE_SURGICAL_REPAIR=1` + rejected | `BattlesuitGateway.surgical_ask()` + `apply_patch_v2()` |
+| Research intel | After R1 failure | `_research_failure_intel()` -> GitHub Issues via UCCRouter |
+
+**重要澄清**：`try_local_repair()` 是 deterministic benchmark repair，不是 Qwen/Ollama 模型執行。
 
 ---
 [System Overview](../00_Home/System Overview.md)

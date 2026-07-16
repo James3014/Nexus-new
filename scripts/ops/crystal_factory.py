@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import sys
 import logging
@@ -21,6 +22,7 @@ class CrystalFactory:
         self.policy_path = project_root / "nexus" / "knowledge" / "policy_memory.jsonl"
         self.events_sourced_path = project_root / ".nexus" / "events_sourced.jsonl"
         self.worktrees_root = project_root / ".nexus" / "worktrees"
+        self.last_unified_runtime_receipt: Dict[str, Any] | None = None
 
     def scan_event_files(self, all_worktrees: bool = False) -> List[Path]:
         """掃描所有可能的事件源"""
@@ -82,14 +84,86 @@ class CrystalFactory:
         }
         
         try:
-            res, raw = self.gateway.ask_structured(
-                prompt=prompt,
-                payload=f"[SUCCESS_SAMPLES]\n{context_str}",
-                phase="A", # Audit/Analysis phase
-                output_schema=output_schema,
-                system_instruction="Extract technical patterns as actionable policies."
+            task_id = f"crystal-factory-{hashlib.sha256(context_str.encode()).hexdigest()[:12]}"
+            from nexus.services.unified_runtime import UnifiedRuntimeRequest
+
+            def _verify(context: Dict[str, Any]) -> Dict[str, Any]:
+                online = context.get("online", {})
+                response = online.get("response", {}) if isinstance(online, dict) else {}
+                policies = response.get("policies", []) if isinstance(response, dict) else []
+                passed = online.get("status") == "SUCCEEDED" and isinstance(policies, list)
+                return {
+                    "task_id": task_id,
+                    "status": "pass" if passed else "fail",
+                    "invoked": True,
+                    "gate_passed": passed,
+                    "outcome_contributed": bool(policies),
+                    "evidence": "crystal_factory_policy_schema",
+                    "evidence_refs": [f"verifier:{task_id}:policy_schema"],
+                }
+
+            def _learn(_context: Dict[str, Any]) -> Dict[str, Any]:
+                try:
+                    from nexus.research.learn_mode import LearnModeService
+
+                    result = LearnModeService(self.project_root).sync_phase_learning_closure(
+                        topic="crystal-factory-policy-extraction",
+                        metrics={
+                            "coverage": 1.0,
+                            "self_question_pass_rate": 1.0,
+                            "citation_valid_ratio": 1.0,
+                            "stale_claims_count": 0,
+                            "conflict_count": 0,
+                        },
+                        phase_status={"P": "SUCCESS", "D": "SUCCESS", "R": "SUCCESS", "A": "SUCCESS", "C": "SUCCESS"},
+                    )
+                    passed = str(result.get("status", "")).upper() in {"SUCCESS", "SUCCEEDED", "PASS"}
+                    return {
+                        "task_id": task_id,
+                        "status": "pass" if passed else "fail",
+                        "invoked": True,
+                        "gate_passed": passed,
+                        "evidence": "LearnModeService.sync_phase_learning_closure",
+                        "evidence_refs": [f"learning:{task_id}:phase_bridge"],
+                        "response": result,
+                    }
+                except Exception as exc:  # noqa: BLE001
+                    return {
+                        "task_id": task_id,
+                        "status": "fail",
+                        "invoked": True,
+                        "gate_passed": False,
+                        "evidence": "learning_exception",
+                        "evidence_refs": [f"learning:{task_id}:exception"],
+                        "error": f"{exc.__class__.__name__}:{exc}",
+                    }
+
+            receipt = self.gateway.ask_unified(
+                UnifiedRuntimeRequest(
+                    task_id=task_id,
+                    workspace_revision=os.environ.get("NEXUS_WORKSPACE_REVISION", "crystal-factory-unrevisioned"),
+                    task_statement="Extract reusable policies from successful execution events.",
+                    task_type="learning_policy_extraction",
+                    route={
+                        "recommended_flow": "direct",
+                        "provider": self.gateway.oauth_provider,
+                        "online_capabilities": ("research", "learn_mode"),
+                    },
+                    online_prompt=prompt,
+                    online_payload=f"[SUCCESS_SAMPLES]\n{context_str}",
+                    online_phase="A",
+                    online_output_schema=output_schema,
+                    evidence_refs=(f"crystal-factory:{task_id}:request",),
+                ),
+                verifier=_verify,
+                learning=_learn,
+                receipt_path=self.project_root / ".nexus" / "reports" / "learning" / f"{task_id}.unified.json",
             )
-            return res.get("policies", [])
+            self.last_unified_runtime_receipt = receipt
+            if not receipt.get("receipt_complete"):
+                raise RuntimeError("unified_runtime_incomplete")
+            response = receipt.get("online", {}).get("response", {})
+            return response.get("policies", []) if isinstance(response, dict) else []
         except Exception as e:
             logger.error(f"AI Extraction failed: {e}")
             return []

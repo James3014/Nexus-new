@@ -295,6 +295,99 @@ Long-term Learning & Benchmark Systems
 ```
 
 ---
+
+## 16. 三條執行鏈與架構缺口 (2026-07-13 驗證)
+
+> [!important] 架構現狀
+> Nexus 目前存在三條獨立執行路徑，它們各有不同入口、生命週期與用途，尚未整合為單一 runtime。
+
+### 16.1 三條執行鏈全景
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Nexus 系統全景                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
+│  │  世界 A             │  │  世界 B          │  │  世界 C       │  │
+│  │  Agent-Operated     │  │  Benchmark       │  │  Local Armor  │  │
+│  │  Nexus Governance   │  │  A/B Harness     │  │  Executor     │  │
+│  │                     │  │                  │  │               │  │
+│  │  入口:              │  │  入口:           │  │  入口:        │  │
+│  │  enforced.sh        │  │  capability_ab_  │  │  LocalModel   │  │
+│  │  -> gemini CLI      │  │  runner.py       │  │  Executor.run │  │
+│  │  -> nexus CLI       │  │  -> LocalModel   │  │               │  │
+│  │                     │  │  Executor        │  │  實際 caller: │  │
+│  │  用途:              │  │                  │  │  benchmark    │  │
+│  │  日常開發治理        │  │  用途:           │  │  scripts only │  │
+│  │                     │  │  證明 uplift     │  │               │  │
+│  │  已驗證:            │  │                  │  │  已驗證:      │  │
+│  │  governance wearing │  │  已驗證:         │  │  full local   │  │
+│  │                     │  │  Bare vs Nexus   │  │  pipeline     │  │
+│  │  未驗證:            │  │  比較            │  │               │  │
+│  │  runtime local      │  │                  │  │  未驗證:      │  │
+│  │  assist injection   │  │  未驗證:         │  │  日常 CLI     │  │
+│  │                     │  │  作為產品 runtime │  │  dispatch     │  │
+│  └─────────────────────┘  └──────────────────┘  └───────────────┘  │
+│                                                                     │
+│  ──────────────────── 最大缺口 ──────────────────                    │
+│  world A <-> world C 之間沒有 runtime bridge                       │
+│  world B 是驗證儀器，不是產品主線                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 16.2 世界 A：Agent-Operated Nexus（日常治理穿甲）
+
+```
+使用者 -> start_gemini_nexus_enforced.sh -> Gemini CLI -> Agent 自行使用 Nexus CLI
+```
+
+- **已存在**：governance briefing、startup gate、操作規則、agent-facing CLI 工具
+- **未證明**：automatic local assist、local model context injection
+- **Agent 仍然是長任務主控者**
+
+### 16.3 世界 B：Benchmark A/B Harness（能力驗證）
+
+```
+benchmark runner -> with_nexus arm -> CapabilityPlanner -> LocalModelExecutor -> receipt
+benchmark runner -> without_nexus arm -> bare baseline
+```
+
+- **用途**：隔離因果，回答「Nexus 是否提升 solve」
+- **不是產品 runtime**
+
+### 16.4 世界 C：Local Armor / LocalModelExecutor
+
+```
+LocalModelExecutor.run() -> topology dispatch -> candidate/verifier/receipt
+```
+
+- **已存在**：topology、executor、candidate provider、verifier、receipt、ledger
+- **主要 caller**：benchmark scripts，非日常 CLI
+
+### 16.5 核心缺口
+
+| Gap | 描述 | 影響 |
+|-----|------|------|
+| Gap 1 | Canonical CLI 沒有 Executor Dispatch Bridge | 一般 nexus run 不走 LocalModelExecutor |
+| Gap 2 | Online Agent Path 與 Local Armor Path 完全分離 | 日常 Agent 沒有自動 Local Assist |
+| Gap 3 | cloud_with_local_assist 使用 Fake Cloud | Contract 存在但無真實 provider |
+| Gap 4 | Local Assist 沒有 Agent-facing 輸出契約 | 缺少 assist envelope |
+| Gap 5 | 兩個控制模式沒有共同的任務 lineage | 無法追溯 local 貢獻 |
+| Gap 6 | benchmark_run 語義混亂 | 可能造成錯誤路由 |
+| Gap 7 | Local Assist 節省 token/時間沒有入口可量測 | 無法證明 ROI |
+
+### 16.6 系統狀態
+
+```
+Online Agent Wearing       = governance/tool layer proven
+Canonical Nexus CLI        = pipeline exists
+Local Model Armor          = benchmark runtime proven
+Online + Local Hybrid      = NOT WIRED
+Universal execution seam   = MISSING
+```
+
+---
 %% 
 由 Muse-Core Lvl 15 總體架構師於 2026-03-17 完成 Nexus v9 終極藍圖寫入。
 本文件為系統開發與執行的唯一事實來源 (SSoT)。

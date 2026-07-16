@@ -6,8 +6,9 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from typing import Any
+
+from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
 
 
 @dataclass(frozen=True)
@@ -69,11 +70,9 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             mutation_allowed=True,
         )
 
-    if request.work_dir:
-        os.makedirs(request.work_dir, exist_ok=True)
-        tmpdir = tempfile.mkdtemp(dir=request.work_dir)
-    else:
-        tmpdir = tempfile.mkdtemp()
+    # Durable parent by default (.nexus/artifacts/local_armor/workspaces).
+    # When work_dir is set, isolate under that durable/operator-supplied parent.
+    tmpdir = str(make_isolated_workspace(work_dir=request.work_dir or None, prefix="armor-apply-"))
 
     try:
         subprocess.run(["git", "init"], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
