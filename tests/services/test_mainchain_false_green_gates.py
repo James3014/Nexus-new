@@ -255,23 +255,38 @@ def test_p0_bundle_hash_not_delivery_artifact() -> None:
     assert verdict["gate_passed"] is False
 
 
-def test_closure_receipt_structural_gates_if_present() -> None:
-    """Phase 5 ephemeral receipt gates when the receipt file exists."""
+def test_closure_receipt_structural_gates_required() -> None:
+    """Phase 5 receipt is mandatory; generate via family canary builder if absent."""
     import json
     from pathlib import Path
 
-    path = Path("/tmp/nexus_all_capability_closure_receipt.json")
-    if not path.is_file():
-        return
-    receipt = json.loads(path.read_text(encoding="utf-8"))
-    assert receipt["planner_contract_count"] == 57
-    assert receipt["promotable_count"] == 53
-    assert receipt["promotable_missing_engine_count"] == 0
-    assert receipt["probe_only_success_count"] == 0
-    assert receipt["fixture_callable_count"] == 0
-    assert receipt["routing_surface_changed"] is False
-    assert receipt["public_claim_allowed"] is False
+    from tests.services.test_mainchain_family_canary_matrix import (
+        RECEIPT_PATH,
+        RECEIPT_TMP,
+        build_and_write_closure_receipt,
+    )
+
+    receipt = build_and_write_closure_receipt()
+    assert RECEIPT_PATH.is_file()
+    assert RECEIPT_TMP.is_file()
+    loaded = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
+    assert loaded["planner_contract_count"] == 57
+    assert loaded["promotable_count"] == 53
+    assert loaded["promotable_missing_engine_count"] == 0
+    assert loaded["probe_only_success_count"] == 0
+    assert loaded["fixture_callable_count"] == 0
+    assert loaded["routing_surface_changed"] is False
+    assert loaded["public_claim_allowed"] is False
+    assert loaded["structural_closure"] is True
     assert receipt["structural_closure"] is True
+    real_blockers = [
+        b
+        for b in loaded.get("blockers") or []
+        if b.get("promotable")
+        and b.get("execution_class")
+        in {"DEFAULT_REAL", "TRIGGERED_REAL", "STAGE_OWNED_REAL"}
+    ]
+    assert real_blockers == [], real_blockers[:5]
 
 
 def test_p1_f_wired_ok_is_honest_production_set() -> None:

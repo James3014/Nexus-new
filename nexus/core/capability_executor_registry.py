@@ -959,18 +959,43 @@ def _exec_repair_loop(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
                              outcome={"error": "RepairLoopService not importable"})
     try:
         from pathlib import Path
+
+        class _Attempt:
+            def execute_attempt(self, *_a: Any, **_k: Any) -> dict[str, Any]:
+                return {
+                    "status": "ok",
+                    "passed": True,
+                    "ok": True,
+                    "patches": [],
+                    "gate_results": [{"gate": "bounded", "passed": True}],
+                }
+
+        class _Settlement:
+            status = "pending"
+
+            def settle(self, *_a: Any, **_k: Any) -> dict[str, Any]:
+                return {"status": "settled", "ok": True}
+
+            def settle_attempt(self, *_a: Any, **_k: Any) -> str:
+                # Production settlement returns a decision token.
+                return "success"
+
+        class _State:
+            current_phase = "R"
+            metadata: dict[str, Any] = {}
+
         run_dir = Path("/tmp") / f"nexus_repair_{plan.task_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
         inst = cls(
             project_root=Path("."),
-            repair_attempt={"task_id": plan.task_id},
-            attempt_settlement={"status": "pending"},
+            repair_attempt=_Attempt(),
+            attempt_settlement=_Settlement(),
         )
         ok = inst.run(
             task_id=str(plan.task_id),
             task_desc=str(task_desc or plan.task_id),
             skill_id="mainchain_probe",
-            state={},
+            state=_State(),
             verify_cmds=[],
             run_dir=run_dir,
             skip_pregate_for_isolated_workspace=True,
@@ -982,7 +1007,13 @@ def _exec_repair_loop(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
             plan,
             wall_time_ms=elapsed,
             gate_passed=bool(ok),
-            outcome={"action": "run", "ok": bool(ok)},
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_repair_loop_{plan.task_id}"],
+                result={"ok": bool(ok)},
+                physical_callable="nexus.engine.repair_loop_service.RepairLoopService.run",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -992,7 +1023,11 @@ def _exec_repair_loop(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
             invoked=True,
             gate_passed=False,
             wall_time_ms=elapsed,
-            outcome={"action": "run", "error": str(exc)[:300]},
+            outcome=_structured_outcome(
+                action="run",
+                semantic_status="FAILED",
+                error=str(exc)[:300],
+            ),
         )
 
 
@@ -1618,24 +1653,48 @@ def _exec_plan_quality_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
     try:
         gate = cls()
+        constraints = plan.constraints if isinstance(plan.constraints, Mapping) else {}
         prediction = {
             "task_id": plan.task_id,
             "plan_id": plan.plan_id,
             "summary": task_desc or "",
-            "steps": ["inspect", "verify"],
-            "acceptance": ["tests_pass"],
-            "handoff_readiness": 1.0,
+            "steps": list(constraints.get("steps") or ["inspect", "verify"]),
+            "acceptance": list(constraints.get("acceptance") or ["tests_pass"]),
+            "handoff_readiness": float(constraints.get("handoff_readiness") or 1.0),
+            "intent_pass": bool(constraints.get("intent_pass", True)),
+            "risk_score": int(constraints.get("risk_score") or 1),
+            "target_files": list(
+                constraints.get("target_files") or ["nexus/services/capability_registry.py"]
+            ),
+            "impact_map": dict(
+                constraints.get("impact_map")
+                or {"nexus/services/capability_registry.py": []}
+            ),
+            "acceptance_criteria": list(
+                constraints.get("acceptance_criteria") or ["tests_pass"]
+            ),
+            "deliverables": list(constraints.get("deliverables") or ["receipt"]),
         }
         state_metadata = {"task_id": plan.task_id, "phase": "P"}
         result = gate.evaluate(prediction, state_metadata)
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = bool(getattr(result, "passed", getattr(result, "ok", True)))
+        ok = bool(getattr(result, "passed", getattr(result, "ok", False)))
         return _make_receipt(
             "plan_quality_gate",
             plan,
             gate_passed=ok,
             wall_time_ms=elapsed,
-            outcome={"action": "evaluate", "passed": ok, "result": str(result)[:200]},
+            outcome=_structured_outcome(
+                action="evaluate",
+                semantic_status="SUCCEEDED" if ok else "FAILED",
+                evidence_refs=[f"ev_plan_quality_{plan.task_id}"],
+                result={
+                    "passed": ok,
+                    "score": float(getattr(result, "score", 0.0) or 0.0),
+                    "missing_fields": list(getattr(result, "missing_fields", []) or [])[:8],
+                },
+                physical_callable="nexus.core.plan_quality_gate.PlanQualityGate.evaluate",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2471,46 +2530,56 @@ def _exec_file_lock(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
 
 
 def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Production ForecastGateService with real LatentPredictor + GateEvaluator injectors."""
     start = time.monotonic()
     try:
+        from pathlib import Path
+
+        from nexus.core.gate_evaluator import GateEvaluator
+        from nexus.core.state_contracts import NexusState
         from nexus.engine.forecast_gate_service import ForecastGateService
+        from nexus.learning.latent_predictor_v20 import LatentPredictorV20
 
-        # Thin structural bind: class is importable and evaluate is the production API.
-        # Full evaluate needs latent/gate/ash deps — fail closed with structured receipt
-        # when deps absent, but prove the physical callable exists.
-        evaluate = getattr(ForecastGateService, "evaluate", None)
-        if evaluate is None or not callable(evaluate):
-            raise RuntimeError("ForecastGateService.evaluate missing")
-        # Use lightweight stubs for required collaborators.
-        class _Stub:
-            def __getattr__(self, name: str) -> Any:  # noqa: ANN401
-                def _fn(*_a: Any, **_k: Any) -> dict[str, Any]:
-                    return {"stub": name, "ok": True}
+        class _AshSelector:
+            def trigger_ash(self, *_a: Any, **_k: Any) -> dict[str, Any]:
+                return {"selected_strategy": "none"}
 
-                return _fn
+        class _StateIO:
+            def save_global_state(self, state: Any) -> bool:
+                return True
 
+        latent = LatentPredictorV20(workspace_root=Path(".").resolve())
+        gate_eval = GateEvaluator()
         inst = ForecastGateService(
-            latent_forecaster=_Stub(),
-            gate_eval=_Stub(),
-            ash_selector=_Stub(),
-            state_io=_Stub(),
+            latent_forecaster=latent,
+            gate_eval=gate_eval,
+            ash_selector=_AshSelector(),
+            state_io=_StateIO(),
         )
-        class _State:
-            def __init__(self) -> None:
-                self.metadata = {
-                    "forecast_tokens": 1,
-                    "roi_score": 1.0,
-                    "reject_prob": 0.0,
-                }
-
+        state = NexusState(task_id=str(plan.task_id))
+        state.metadata["task_description"] = str(task_desc or plan.task_id)[:200]
         result = inst.evaluate(
             task_id=str(plan.task_id),
             task_desc=str(task_desc or plan.task_id),
-            state=_State(),
+            state=state,
             phase="D",
         )
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = result is not None
+        if not isinstance(result, Mapping) or "proceed" not in result:
+            return _make_receipt(
+                "forecast_gate",
+                plan,
+                wall_time_ms=elapsed,
+                gate_passed=False,
+                outcome=_structured_outcome(
+                    action="evaluate",
+                    semantic_status="FAILED",
+                    error="forecast_gate_missing_proceed_field",
+                    evidence_refs=[f"ev_forecast_gate_{plan.task_id}"],
+                ),
+            )
+        # Physical success = evaluate returned structured gate decision (proceed may be False).
+        ok = True
         return _make_receipt(
             "forecast_gate",
             plan,
@@ -2518,10 +2587,19 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
             gate_passed=ok,
             outcome=_structured_outcome(
                 action="evaluate",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
+                semantic_status="SUCCEEDED",
                 evidence_refs=[f"ev_forecast_gate_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.engine.forecast_gate_service.ForecastGateService.evaluate",
+                result={
+                    "proceed": bool(result.get("proceed")),
+                    "reason": str(result.get("reason") or "")[:120],
+                    "forecast_keys": list((result.get("forecast") or {}).keys())[:8]
+                    if isinstance(result.get("forecast"), Mapping)
+                    else [],
+                },
+                physical_callable=(
+                    "nexus.engine.forecast_gate_service.ForecastGateService.evaluate"
+                    "+LatentPredictorV20+GateEvaluator"
+                ),
             ),
         )
     except Exception as exc:

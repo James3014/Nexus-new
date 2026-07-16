@@ -1458,13 +1458,28 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "route_context",
         }
     )
+    _PLAN_QUALITY_CONSTRAINT_KEYS = frozenset(
+        {
+            "intent_pass",
+            "risk_score",
+            "target_files",
+            "impact_map",
+            "steps",
+            "acceptance",
+            "acceptance_criteria",
+            "deliverables",
+            "handoff_readiness",
+        }
+    )
 
     def _allowlisted_constraints(context: Mapping[str, Any]) -> dict[str, Any]:
         keys: frozenset[str]
-        if name == "acceptance_check":
+        if name in {"acceptance_check", "bdd_acceptance_skill"}:
             keys = _ACCEPTANCE_CONSTRAINT_KEYS
         elif name == "claim_gate":
             keys = _CLAIM_CONSTRAINT_KEYS
+        elif name == "plan_quality_gate":
+            keys = _PLAN_QUALITY_CONSTRAINT_KEYS
         else:
             return {}
         out: dict[str, Any] = {}
@@ -1473,7 +1488,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 out[k] = context.get(k)
         # Nested verifier block (common mainchain shape)
         verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
-        if name == "acceptance_check" and isinstance(verifier, Mapping):
+        if name in {"acceptance_check", "bdd_acceptance_skill"} and isinstance(verifier, Mapping):
             for k in ("verifier_status", "verifier_artifact", "source_hash"):
                 if k not in out and verifier.get(k) not in (None, ""):
                     # map verifier_status from nested verifier dict
@@ -1486,7 +1501,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             if "evidence_refs" not in out and verifier.get("evidence_refs"):
                 out["evidence_refs"] = list(verifier.get("evidence_refs") or [])
         # Top-level source_hash alias
-        if name == "acceptance_check" and "source_hash" not in out and context.get("source_hash"):
+        if name in {"acceptance_check", "bdd_acceptance_skill"} and "source_hash" not in out and context.get("source_hash"):
             out["source_hash"] = context.get("source_hash")
         if name == "claim_gate" and "source_hash" not in out and context.get("source_hash"):
             out["source_hash"] = context.get("source_hash")
