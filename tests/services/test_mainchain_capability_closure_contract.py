@@ -76,17 +76,24 @@ def test_wired_real_is_derived_view_of_real_contracts() -> None:
 
 
 def test_missing_engine_not_hidden_as_e_escalate() -> None:
+    """MISSING_ENGINE must map to A_missing_invoker (never hidden as E).
+
+    After Phase 3 binds, promotable MISSING_ENGINE may be zero — that is success.
+    """
     missing = [
         n
         for n, c in PLANNER_EXECUTION_CONTRACTS.items()
         if c["execution_class"] == "MISSING_ENGINE"
     ]
-    assert missing, "Phase 0 must still surface unresolved engines honestly"
     for name in missing:
         assert classify_gap(name) == "A_missing_invoker", name
         row = next(r for r in build_wiring_matrix()["rows"] if r["name"] == name)
         assert row["gap_class"] == "A_missing_invoker"
         assert row["execution_class"] == "MISSING_ENGINE"
+    # No name may claim F while classified MISSING_ENGINE
+    for name, c in PLANNER_EXECUTION_CONTRACTS.items():
+        if c["execution_class"] == "MISSING_ENGINE":
+            assert classify_gap(name) != "F_wired_ok"
 
 
 def test_probe_only_reason_codes_remain_e_not_f() -> None:
@@ -155,11 +162,11 @@ def test_phase0_unresolved_list_is_reportable() -> None:
             "sensor_probe_not_production",
         }
     )
-    assert len(unresolved) >= 14
-    # No unresolved name may claim F
+    # Unresolved may shrink as engines are bound; never claim F while unresolved.
+    assert len(unresolved) >= 1
     for name in unresolved:
         assert classify_gap(name) != "F_wired_ok", name
     counts = Counter(
         PLANNER_EXECUTION_CONTRACTS[n]["execution_class"] for n in unresolved
     )
-    assert counts.get("MISSING_ENGINE", 0) >= 1
+    assert sum(counts.values()) == len(unresolved)

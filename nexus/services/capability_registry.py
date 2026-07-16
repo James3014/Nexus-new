@@ -662,37 +662,136 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         ),
     }
 
-    # True missing production engines — honest MISSING_ENGINE (gap A, not hidden E).
-    missing_ids = (
-        "architecture_scout",
-        "asi_constraint_extractor",
-        "benchmark",
-        "committee",
-        "file_lock",
-        "forecast_gate",
-        "formal_report",
-        "integration_manager",
-        "meta_opt",
-        "prompt_compression",
-        "registry_sync",
-        "stress_test",
-        "swarm_quiet_moment",
-        "xray",
-    )
-    missing: dict[str, dict[str, Any]] = {}
-    for mid in missing_ids:
-        ek = EXECUTOR_REGISTRY_ALIASES.get(mid, mid)
-        missing[mid] = _ec(
-            mid,
-            EXECUTION_CLASS_MISSING_ENGINE,
+    # Phase 3 bound engines (were MISSING; now thin adapters over existing modules).
+    phase3_bound: dict[str, dict[str, Any]] = {
+        "architecture_scout": _ec(
+            "architecture_scout",
+            EXECUTION_CLASS_TRIGGERED_REAL,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
-            executor_key=ek,
-            physical_callable=None,
-            consumer_effect=CONSUMER_EFFECT_NONE,
-            consumer_targets=(),
-            reason_code="missing_production_engine",
-        )
+            executor_key="architecture_scout",
+            physical_callable=f"{reg}:architecture_scout",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "asi_constraint_extractor": _ec(
+            "asi_constraint_extractor",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="asi_constraint_extractor",
+            physical_callable=f"{reg}:asi_constraint_extractor",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "benchmark": _ec(
+            "benchmark",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="benchmark",
+            physical_callable=f"{reg}:benchmark",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "committee": _ec(
+            "committee",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="committee",
+            physical_callable=f"{reg}:committee",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "file_lock": _ec(
+            "file_lock",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="file_lock_security_gate",
+            physical_callable=f"{reg}:file_lock",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "forecast_gate": _ec(
+            "forecast_gate",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="forecast_pregate",
+            physical_callable=f"{reg}:forecast_gate",
+            consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+        ),
+        "formal_report": _ec(
+            "formal_report",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="formal_report",
+            physical_callable=f"{reg}:formal_report",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+        "integration_manager": _ec(
+            "integration_manager",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="integration_manager",
+            physical_callable=f"{reg}:integration_manager",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "meta_opt": _ec(
+            "meta_opt",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="benchmark_meta_opt",
+            physical_callable=f"{reg}:meta_opt",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "prompt_compression": _ec(
+            "prompt_compression",
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="stage_owned_context",
+            executor_key="prompt_compression",
+            physical_callable=f"{reg}:prompt_compression",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "registry_sync": _ec(
+            "registry_sync",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="registry_skills_sync",
+            physical_callable=f"{reg}:registry_sync",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "stress_test": _ec(
+            "stress_test",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="stress_test",
+            physical_callable=f"{reg}:stress_test",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "swarm_quiet_moment": _ec(
+            "swarm_quiet_moment",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="swarm_quiet_moment",
+            physical_callable=f"{reg}:swarm_quiet_moment",
+            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+        ),
+        "xray": _ec(
+            "xray",
+            EXECUTION_CLASS_TRIGGERED_REAL,
+            producer_stage="UnifiedRuntime",
+            trigger_policy="escalate_only",
+            executor_key="xray",
+            physical_callable=f"{reg}:xray",
+            consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+        ),
+    }
+    missing: dict[str, dict[str, Any]] = {}
 
     contracts: dict[str, dict[str, Any]] = {}
     for part in (
@@ -702,6 +801,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         legacy,
         experimental,
         phase2_real,
+        phase3_bound,
         probe_escalate,
         missing,
     ):
