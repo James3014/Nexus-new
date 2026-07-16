@@ -758,52 +758,42 @@ class LocalAssistService:
         # Shared evidence consumption proof (P3) — only IDs actually serialized into
         # the Local provider/executor prompt at assembly time. Never reverse-infer
         # from the full sealed bundle after the model call.
-        try:
-            from nexus.services.capability_evidence_bundle import record_consumption
-            _ev_bundle = _bundle if isinstance(_bundle, Mapping) else {}
-            # Empty prompt evidence section ⇒ not consumed, even if model was called.
-            _ids_for_record = list(_assembled_consumed_ids) if (
-                local_model_invoked and _prompt_evidence_section and _assembled_consumed_ids
-            ) else []
-            _caps_for_record = list(_assembled_caps_used) if _ids_for_record else []
-            _consumption = record_consumption(
-                bundle=_ev_bundle if _ev_bundle else {"bundle_hash": "", "selected_capabilities": []},
-                consumer="Local",
-                consumed_evidence_ids=_ids_for_record,
-                selected_capabilities=_caps_for_record,
-                physical_callable=physical_callable,
-            )
-            _consumption = {
-                **_consumption,
-                "selected_capabilities_used": list(_caps_for_record),
-                "prompt_evidence_injected": bool(_prompt_evidence_section and _ids_for_record),
-                "bundle_hash": str(
-                    _consumption.get("bundle_hash") or _bundle_hash or ""
-                ),
-                "baseline_hash": str(
-                    _local_evidence.get("baseline_hash")
-                    or (_ev_bundle.get("baseline_hash") if isinstance(_ev_bundle, Mapping) else "")
-                    or ""
-                ),
-                "planner_decision_id": str(
-                    _local_evidence.get("planner_decision_id")
-                    or (_ev_bundle.get("planner_decision_id") if isinstance(_ev_bundle, Mapping) else "")
-                    or planner_snapshot.get("planner_decision_id")
-                    or ""
-                ),
-            }
-        except Exception:
-            _consumption = {
-                "bundle_hash": str(planner_snapshot.get("bundle_hash") or _bundle_hash or ""),
-                "consumed_evidence_ids": [],
-                "selected_capabilities": [],
-                "selected_capabilities_used": [],
-                "physical_callable": physical_callable,
-                "consumer_input_hash": "",
-                "capability_consumed": False,
-                "public_claim_allowed": False,
-                "prompt_evidence_injected": False,
-            }
+        # Fail closed without broad exception swallow: record_consumption is pure
+        # and must surface programming errors rather than fabricate empty success.
+        from nexus.services.capability_evidence_bundle import record_consumption
+
+        _ev_bundle = _bundle if isinstance(_bundle, Mapping) else {}
+        # Empty prompt evidence section ⇒ not consumed, even if model was called.
+        _ids_for_record = list(_assembled_consumed_ids) if (
+            local_model_invoked and _prompt_evidence_section and _assembled_consumed_ids
+        ) else []
+        _caps_for_record = list(_assembled_caps_used) if _ids_for_record else []
+        _consumption = record_consumption(
+            bundle=_ev_bundle if _ev_bundle else {"bundle_hash": "", "selected_capabilities": []},
+            consumer="Local",
+            consumed_evidence_ids=_ids_for_record,
+            selected_capabilities=_caps_for_record,
+            physical_callable=physical_callable,
+        )
+        _consumption = {
+            **_consumption,
+            "selected_capabilities_used": list(_caps_for_record),
+            "prompt_evidence_injected": bool(_prompt_evidence_section and _ids_for_record),
+            "bundle_hash": str(
+                _consumption.get("bundle_hash") or _bundle_hash or ""
+            ),
+            "baseline_hash": str(
+                _local_evidence.get("baseline_hash")
+                or (_ev_bundle.get("baseline_hash") if isinstance(_ev_bundle, Mapping) else "")
+                or ""
+            ),
+            "planner_decision_id": str(
+                _local_evidence.get("planner_decision_id")
+                or (_ev_bundle.get("planner_decision_id") if isinstance(_ev_bundle, Mapping) else "")
+                or planner_snapshot.get("planner_decision_id")
+                or ""
+            ),
+        }
         local_outputs["evidence_consumption"] = _consumption
         local_outputs["consumed_evidence_ids"] = list(_consumption.get("consumed_evidence_ids") or [])
 

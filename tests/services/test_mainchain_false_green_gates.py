@@ -1494,3 +1494,159 @@ def test_local_candidate_executor_receives_capability_evidence_context(tmp_path:
     ids = list(rc.get("consumed_evidence_ids") or (seen.get("receipt_context") or {}).get("consumed_evidence_ids") or [])
     assert any("codeintel" in i for i in ids)
     assert f"capability:research:{task_id}:unselected" not in ids
+
+
+def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reproducible final dynamic canary via production MainchainEntry path.
+
+    Fixture providers + real production classes. Writes receipt to
+    /tmp/nexus_mainchain_final_gate_receipt.json (OBJECTIVE path) and, when
+    NEXUS_IMPLEMENTER_SCRATCH is set, also copies there for audit.
+    """
+    import json
+    import os
+
+    from nexus.services.capability_evidence_bundle import verify_capability_evidence_bundle
+    from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
+    from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+    from nexus.services.mainchain_entry import run_mainchain
+
+    task_id = "final-canary-001"
+    (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
+
+    planner = _Planner(
+        selected=[
+            "codeintel",
+            "memory",
+            "belief",
+            "local_model_executor",
+            "artifact_gate",
+            "claim_gate",
+            "delivery_gate",
+        ],
+        required=["codeintel"],
+    )
+    local_calls = {"n": 0, "prompts": []}
+    online_calls = {"n": 0}
+
+    def local_gen(req: Any) -> str:
+        local_calls["n"] += 1
+        # Executor may pass problem_statement via provider request.prompt on some paths;
+        # capture both for evidence.
+        local_calls["prompts"].append(str(getattr(req, "prompt", "") or ""))
+        return (
+            "--- a/target.py\n+++ b/target.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            " def target():\n"
+            "-    return 1\n"
+            "+    return 2\n"
+        )
+
+    def online(ctx: dict[str, Any]) -> dict[str, Any]:
+        online_calls["n"] += 1
+        return _online(ctx)
+
+    local_request = LocalAssistRequest(
+        schema="nexus.local_assist.request.v1",
+        task_id=task_id,
+        parent_task_id="parent-final",
+        workspace_root=str(tmp_path),
+        workspace_revision="wr-final",
+        task_statement="final canary: wire codeintel memory belief local and gates",
+        action="candidate",
+        allowed_files=("target.py",),
+        target_file="target.py",
+        target_symbol="target",
+        evidence_refs=("canary:final",),
+        requested_role="candidate",
+        mutation_policy="isolated_only",
+        time_budget=30.0,
+        planner_snapshot={
+            "route_truth_source": "CapabilityPlanner",
+            "execution_topology": "single_local_model",
+            "protocol_mode": "unified_diff",
+            "model_call_allowed": True,
+            "executor_provider": "ollama",
+            "executor_model": "qwen2.5-coder:7b",
+        },
+    )
+
+    receipt = run_mainchain(
+        UnifiedRuntimeRequest(
+            task_id=task_id,
+            workspace_revision="wr-final",
+            task_statement="final canary: wire codeintel memory belief local and gates",
+            task_type="repair",
+            route={
+                "recommended_flow": "hybrid",
+                "provider": "gemini",
+                "injected_transport": True,
+                "workspace_root": str(tmp_path),
+            },
+            online_prompt="return ok",
+            online_payload="payload",
+            local_enabled=True,
+            local_request=local_request,
+            online_enabled=True,
+            evidence_refs=("canary:final",),
+            codeintel={"scan_report_present": True, "risk_score": 1},
+        ),
+        online_invoker=online,
+        planner=planner,
+        local_service=LocalAssistService(provider=InjectedLocalModelProvider(local_gen)),
+        capability_invokers={
+            "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
+            "memory": lambda c: _cap_ok("memory", c["task_id"]),
+            "belief": lambda c: _cap_ok("belief", c["task_id"]),
+        },
+        verifier=_verifier_explicit,
+        learning=_learning,
+        with_nexus_armor=True,
+    )
+
+    out_tmp = Path("/tmp/nexus_mainchain_final_gate_receipt.json")
+    out_tmp.write_text(json.dumps(receipt, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    scratch = str(os.environ.get("NEXUS_IMPLEMENTER_SCRATCH") or "").strip()
+    if scratch:
+        scratch_path = Path(scratch)
+        scratch_path.mkdir(parents=True, exist_ok=True)
+        (scratch_path / "nexus_mainchain_final_gate_receipt.json").write_text(
+            out_tmp.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    bundle = receipt.get("capability_evidence_bundle") or {}
+    seal = verify_capability_evidence_bundle(bundle)
+    assert seal.get("ok") is True
+    assert receipt.get("receipt_complete") is True
+    assert receipt.get("capability_closure_complete") is True
+    assert list(receipt.get("capability_closure_blockers") or []) == []
+    assert receipt.get("public_claim_allowed") is False
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    assert receipt.get("planner_decision_id")
+    assert local_calls["n"] >= 1
+    assert online_calls["n"] >= 1
+    consumed = list(receipt.get("consumed_evidence_ids") or [])
+    assert consumed
+    assert any("codeintel" in i for i in consumed)
+    assert any("memory" in i for i in consumed)
+    assert any("belief" in i for i in consumed)
+
+    local = receipt.get("local") or {}
+    local_resp = local.get("response") if isinstance(local.get("response"), dict) else {}
+    local_outputs = local_resp.get("local_outputs") if isinstance(local_resp, dict) else {}
+    ec = local_outputs.get("evidence_consumption") if isinstance(local_outputs, dict) else {}
+    online = receipt.get("online") or {}
+    online_resp = online.get("response") if isinstance(online.get("response"), dict) else {}
+    with_nexus = online_resp.get("with_nexus") if isinstance(online_resp, dict) else {}
+    lineage = with_nexus.get("lineage") if isinstance(with_nexus, dict) else {}
+    root = str(bundle.get("bundle_hash") or "")
+    assert root
+    local_hash = str((ec or {}).get("bundle_hash") or "")
+    online_hash = str((lineage or {}).get("bundle_hash") or (with_nexus or {}).get("bundle_hash") or "")
+    assert local_hash == root
+    assert online_hash == root
+    # Candidate path injects evidence into problem_statement → provider prompt lineage.
+    assert local_resp.get("physical_callable") == "LocalModelExecutor.run"
+    assert local_resp.get("executor_invoked") is True
+    assert out_tmp.is_file()
