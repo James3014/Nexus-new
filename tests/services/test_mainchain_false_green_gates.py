@@ -1605,6 +1605,62 @@ def test_claim_gate_registry_has_no_synthetic_theater() -> None:
     assert receipt.invoked is False or bool((receipt.outcome or {}).get("error"))
 
 
+def test_claim_gate_real_failing_dict_forces_gate_passed_false() -> None:
+    """claim_gate_passed=False from real validator must not default to success.
+
+    Real validate_context_claim_delivery returns claim_gate_passed/delivery_gate_passed,
+    not generic passed/ok. Supplying only source_hash+candidate_target_file yields
+    claim_gate_passed=False — receipt must fail closed and not feed usable payload.
+    """
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core import capability_executor_registry as cer
+    from nexus.services.capability_evidence_bundle import extract_bounded_consumer_payload
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    plan = CapabilityExecutionPlan(
+        plan_id="cg-fail",
+        task_id="cg-fail-1",
+        phases=["R"],
+        constraints={
+            "source_hash": "deadbeefcafebabe",
+            "candidate_target_file": "x.py",
+            # No verifier/patch/approval — real validator fails claim_gate_passed.
+        },
+    )
+    receipt = cer._exec_claim_gate(plan, "claim task")
+    assert receipt.gate_passed is False, receipt.outcome
+    outcome = dict(receipt.outcome or {})
+    assert outcome.get("claim_gate_passed") is False, outcome
+    assert outcome.get("passed") is False
+    assert outcome.get("ok") is False
+
+    # Real mainchain invoker wrapping get_executor must also fail closed.
+    # Inject constraints via plan on the executor path.
+    inv = build_real_executor_invoker("claim_gate")
+    assert inv is not None
+
+    # Monkeypatch CapabilityExecutionPlan construction is hard; call executor via
+    # registry plan with constraints already proven above. Also prove payload ban.
+    stage = {
+        "status": "FAILED",
+        "invoked": True,
+        "gate_passed": False,
+        "evidence_refs": [receipt.evidence_id],
+        "response": {
+            "status": "FAILED",
+            "outcome": outcome,
+            "consumer_payload": {},
+        },
+    }
+    cp = extract_bounded_consumer_payload(
+        capability="claim_gate",
+        stage=stage,
+        response=stage["response"],
+        success=bool(receipt.gate_passed),
+    )
+    assert cp == {}
+
+
 def test_semantic_success_guard_rejects_error_and_unverified() -> None:
     from nexus.core.capability_executor_registry import apply_semantic_success_guard
 

@@ -1036,27 +1036,53 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
         ctx = SimpleNamespace(op=op)
         result = fn(ctx)
         elapsed = int((time.monotonic() - start) * 1000)
-        # Interpret structured result when available.
-        passed = None
+        # Real validate_context_claim_delivery returns claim_gate_passed /
+        # delivery_gate_passed — NOT generic passed/ok/gate_passed. Missing
+        # explicit success fields must fail closed (never default True).
+        claim_passed = None
+        delivery_passed = None
+        generic_passed = None
+        failure_reasons: list[str] = []
         if isinstance(result, Mapping):
+            if "claim_gate_passed" in result:
+                claim_passed = bool(result.get("claim_gate_passed"))
+            if "delivery_gate_passed" in result:
+                delivery_passed = bool(result.get("delivery_gate_passed"))
             if "passed" in result:
-                passed = bool(result.get("passed"))
+                generic_passed = bool(result.get("passed"))
             elif "ok" in result:
-                passed = bool(result.get("ok"))
+                generic_passed = bool(result.get("ok"))
             elif "gate_passed" in result:
-                passed = bool(result.get("gate_passed"))
-        gate_ok = True if passed is None else bool(passed)
+                generic_passed = bool(result.get("gate_passed"))
+            raw_reasons = result.get("failure_reasons")
+            if isinstance(raw_reasons, (list, tuple)):
+                failure_reasons = [str(x) for x in raw_reasons if str(x).strip()]
+        # Prefer claim_gate_passed for this capability; require explicit True.
+        if claim_passed is not None:
+            gate_ok = bool(claim_passed)
+        elif generic_passed is not None:
+            gate_ok = bool(generic_passed)
+        else:
+            gate_ok = False  # fail closed when result shape unknown
+        outcome_map: dict[str, Any] = {
+            "action": "validate_context_claim_delivery",
+            "result": str(result)[:200],
+            "claim_gate_passed": claim_passed,
+            "delivery_gate_passed": delivery_passed,
+            "passed": gate_ok,
+            "task_id": plan.task_id,
+        }
+        if failure_reasons:
+            outcome_map["failure_reasons"] = failure_reasons[:8]
+        if not gate_ok and not outcome_map.get("error"):
+            # Structured fail — keep gate_passed false via passed=False + reasons.
+            outcome_map["ok"] = False
         return _make_receipt(
             "claim_gate",
             plan,
             wall_time_ms=elapsed,
             gate_passed=gate_ok,
-            outcome={
-                "action": "validate_context_claim_delivery",
-                "result": str(result)[:200],
-                "passed": passed,
-                "task_id": plan.task_id,
-            },
+            outcome=outcome_map,
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
