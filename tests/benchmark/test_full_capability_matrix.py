@@ -168,6 +168,15 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
                     "resolve_providers",
                     "construct",
                     "resolve",
+                    "should_run",
+                    "health_check",
+                    "bind",
+                    "cleanup",
+                    "hash_fallback",
+                    "import_success",
+                    "probe",
+                    "fixture",
+                    "deterministic_confidence_probe",
                 }
                 if (
                     any(outcome.get(k) for k in shallow_keys) and not action
@@ -198,11 +207,13 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
                 "gate_passed": True,
                 "evidence_refs": [f"v:m-{name}"],
                 "verifier_status": "pass",
+                "verifier_artifact": f"sha256:matrixverifierartifact{name[:8]}0001",
             },
             "capability_evidence_bundle": {
-                "source_hash": "src",
+                "source_hash": "src_hash_for_matrix_probe_01",
                 "bundle_hash": "bh",
             },
+            "source_hash": "src_hash_for_matrix_probe_01",
             "task_statement": f"probe {name}",
         }
         if name in ESCALATE_ONLY:

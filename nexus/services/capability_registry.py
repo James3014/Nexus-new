@@ -115,15 +115,52 @@ ONLINE_ARMOR_FLAG_CAPABILITIES: frozenset[str] = frozenset(
     }
 )
 
-# Real or structural invokers available on mainchain today (F1).
+# Real production-quality invokers available on mainchain today (honest F).
+# Presence of get_executor alone is NOT enough — must be production engine callable.
 WIRED_REAL: frozenset[str] = frozenset(
     {
         "codeintel",
+        "memory",
+        "belief",
+        "lancedb",
+        "semantic_searcher",
+        "repair_loop",
+        "sandbox",
+        "mempalace_gate",
+        "acceptance_check",
         "artifact_gate",
         "claim_gate",
         "delivery_gate",
+        "harness_preflight_sensor",
+        "jit_validation",
+        "plan_quality_gate",
+        "pregate",
     }
 )
+
+# Registered executors that only probe/health/should_run — not F_wired_ok.
+# Reclassified to E_escalate_ok with explicit reason_code.
+PROBE_ONLY_REASON_CODES: dict[str, str] = {
+    "research": "shallow_should_run_only",
+    "research_route": "shallow_should_run_only",
+    "drone": "shallow_health_check_only",
+    "hyper": "escalate_probe_or_unavailable",
+    "swarm": "escalate_probe_or_unavailable",
+    "multi_agent": "escalate_probe_or_unavailable",
+    "nightshift": "escalate_probe_or_unavailable",
+    "ultra_review": "escalate_probe_or_unavailable",
+    "autonomic_router": "route_probe_not_production_execute",
+    "autoreason": "requires_model_execution_boundary",
+    "ddtree": "requires_model_execution_boundary",
+    "judge_panel": "requires_model_execution_boundary",
+    "llm_judge_panel": "requires_model_execution_boundary",
+    "learn_mode": "scheduler_probe_not_production",
+    "learn_phase_slo": "scheduler_probe_not_production",
+    "learn_scheduler": "scheduler_probe_not_production",
+    "metabolism": "resume_probe_not_production",
+    "bdd_acceptance_skill": "skill_probe_not_production",
+    "semantic_failure_sensor": "sensor_probe_not_production",
+}
 
 # Historical stub set retained for documentation only.
 # Any name that has a physical get_executor is F-wired and is NOT treated as stub.
@@ -170,26 +207,36 @@ def _has_physical_executor(name: str) -> bool:
 def classify_gap(name: str) -> str:
     """Closed enum gap_class for F0 matrix — honest, no reclass cheat.
 
-    F: real mainchain handler or physical get_executor
+    F: production physical engine callable (not probe/health/should_run alone)
     B: structural stub only (no physical executor)
     C: online armor flag only (no physical executor)
-    E: escalate-only policy skip path (trigger-gated)
+    E: escalate-only / probe-only reclassified path (trigger-gated)
     A: missing invoker entirely
     """
     key = str(name or "").strip()
     if key in LOCAL_STAGE_CAPABILITIES:
         return "F_wired_ok"
+    if key in PROBE_ONLY_REASON_CODES:
+        return "E_escalate_ok"
     if key in WIRED_REAL:
         return "F_wired_ok"
-    if _has_physical_executor(key):
-        return "F_wired_ok"
+    # get_executor alone is insufficient for F — must be in WIRED_REAL production set.
     if key in ESCALATE_ONLY or key == "llm_judge_panel":
+        return "E_escalate_ok"
+    if _has_physical_executor(key):
+        # Registered but not audited as production → escalate/probe class.
         return "E_escalate_ok"
     if key in ONLINE_ARMOR_FLAG_CAPABILITIES:
         return "C_not_in_prompt"
     if key in WIRED_STUB:
         return "B_stub_only"
     return "A_missing_invoker"
+
+
+def physical_runtime_eligible_count() -> int:
+    """Honest count of production-physical F_wired_ok capabilities (not forced 91)."""
+    names = list_planner_capability_names()
+    return sum(1 for n in names if classify_gap(n) == "F_wired_ok")
 
 
 def build_wiring_matrix() -> dict[str, Any]:
@@ -199,13 +246,14 @@ def build_wiring_matrix() -> dict[str, Any]:
     for name in names:
         meta = _node_meta(name)
         gap = classify_gap(name)
-        escalate = name in ESCALATE_ONLY
+        escalate = name in ESCALATE_ONLY or name in PROBE_ONLY_REASON_CODES
         has_exec = _has_physical_executor(name)
+        reason_code = str(PROBE_ONLY_REASON_CODES.get(name) or "")
         if name in LOCAL_STAGE_CAPABILITIES:
             handler = "local_stage"
             has_invoker = True
             feeds_online = True
-        elif name in WIRED_REAL or has_exec:
+        elif name in WIRED_REAL and gap == "F_wired_ok":
             handler = "real_invoker"
             has_invoker = True
             feeds_online = True
@@ -213,14 +261,16 @@ def build_wiring_matrix() -> dict[str, Any]:
             handler = "stub_invoker"
             has_invoker = True
             feeds_online = True  # compact may be thin
-        elif name in ONLINE_ARMOR_FLAG_CAPABILITIES and not has_exec:
+        elif name in ONLINE_ARMOR_FLAG_CAPABILITIES and not has_exec and gap != "E_escalate_ok":
             handler = "online_armor_flags"
             has_invoker = True  # explicit skip/flag path
             feeds_online = False
-        elif escalate:
-            handler = "escalate_only_skip" if not has_exec else "real_invoker_escalate_gated"
+        elif escalate or gap == "E_escalate_ok":
+            handler = "escalate_only_skip" if not (has_exec and name in WIRED_REAL) else "real_invoker_escalate_gated"
             has_invoker = True
-            feeds_online = bool(has_exec)
+            feeds_online = bool(has_exec and name in WIRED_REAL)
+            if not reason_code and name not in WIRED_REAL:
+                reason_code = "no_production_engine_callable"
         else:
             handler = "explicit_skip"
             has_invoker = True  # F1 always installs skip
@@ -239,19 +289,26 @@ def build_wiring_matrix() -> dict[str, Any]:
                 "feeds_online_compact": feeds_online,
                 "escalate_only": escalate or name in ESCALATE_ONLY,
                 "gap_class": gap if gap in GAP_CLASSES else "A_missing_invoker",
-                "physical_callable_hint": f"capability_registry:{handler}:{name}",
+                "reason_code": reason_code,
+                "physical_callable_hint": (
+                    f"capability_executor_registry:{name}"
+                    if gap == "F_wired_ok"
+                    else f"capability_registry:{handler}:{name}"
+                ),
             }
         )
 
     counts: dict[str, int] = {g: 0 for g in sorted(GAP_CLASSES)}
     for row in rows:
         counts[str(row["gap_class"])] = counts.get(str(row["gap_class"]), 0) + 1
+    physical_eligible = sum(1 for row in rows if row["gap_class"] == "F_wired_ok")
 
     return {
         "schema": "nexus.capability_wiring_matrix.v1",
         "source": "nexus.engine.capability_planner.default_capability_nodes",
         "node_count": len(rows),
         "gap_class_counts": counts,
+        "physical_runtime_eligible": physical_eligible,
         "routing_surface_changed": False,
         "new_topology_introduced": False,
         "new_route_mode_introduced": False,
@@ -379,6 +436,15 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "resolve_providers",
             "construct",
             "resolve",
+            "should_run",
+            "health_check",
+            "bind",
+            "cleanup",
+            "hash_fallback",
+            "import_success",
+            "probe",
+            "fixture",
+            "deterministic_confidence_probe",
         }
         action = str(outcome_map.get("action") or "")
         is_shallow = (
@@ -562,8 +628,12 @@ def build_default_mainchain_invokers(
             )
             continue
         real = build_real_executor_invoker(name)
-        # Escalation-only: untriggered → policy skip; triggered → real or BLOCKED.
-        if name in ESCALATE_ONLY or name == "llm_judge_panel":
+        # Escalation-only / probe-only reclass: untriggered → policy skip; triggered → real or BLOCKED.
+        if (
+            name in ESCALATE_ONLY
+            or name == "llm_judge_panel"
+            or name in PROBE_ONLY_REASON_CODES
+        ):
             invokers[name] = build_escalate_gated_invoker(name, real_invoker=real)
             continue
         if name in ONLINE_ARMOR_FLAG_CAPABILITIES:

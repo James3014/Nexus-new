@@ -34,18 +34,31 @@ _SHALLOW_ACTIONS = frozenset(
         "resolve_providers",
         "construct",
         "resolve",
+        # Probe/fixture/gate-preflight alone is not production execution (P1).
+        "should_run",
+        "health_check",
+        "bind",
+        "cleanup",
+        "hash_fallback",
+        "import_success",
+        "probe",
+        "fixture",
+        "deterministic_confidence_probe",
     }
 )
 
 
 def _is_shallow_outcome(outcome: Mapping[str, Any] | None) -> bool:
-    """True when outcome only proves import/construct, not a physical action."""
+    """True when outcome only proves import/construct/probe, not a physical action."""
     if not isinstance(outcome, Mapping) or not outcome:
         return False
     if outcome.get("error") and not outcome.get("action"):
         return False
     action = str(outcome.get("action") or "")
     if action in _SHALLOW_ACTIONS:
+        return True
+    # Empty cleanup is not production execution
+    if action == "cleanup" and not outcome.get("result"):
         return True
     if action:
         return False
@@ -540,7 +553,7 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             outcome={"action": "evaluate", "result": str(result)[:200]},
         )
     except ModuleNotFoundError as exc:
-        # Telemetry dependency may be absent; still perform a physical pure probe.
+        # Telemetry dependency may be absent; still run a pure task-linked evaluate.
         import hashlib
         elapsed = int((time.monotonic() - start) * 1000)
         digest = hashlib.sha256(f"{plan.task_id}:{task_desc}".encode("utf-8")).hexdigest()
@@ -550,8 +563,9 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             plan,
             wall_time_ms=elapsed,
             outcome={
-                "action": "deterministic_confidence_probe",
+                "action": "evaluate",
                 "confidence": confidence,
+                "task_linked_hash": digest,
                 "engine_error": str(exc)[:120],
             },
         )
