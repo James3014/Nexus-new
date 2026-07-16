@@ -246,6 +246,9 @@ class LocalAssistResponse:
     agent_consumed: bool = False
     outcome_contributed: bool = False
     value_measured: bool = False
+    # Physical callable identity: advisor → Provider.generate; candidate → Executor.run.
+    physical_callable: str = ""
+    executor_invoked: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -274,6 +277,19 @@ class LocalAssistService:
         request.validate()
         started = time.monotonic()
         planner_snapshot = dict(request.planner_snapshot)
+        from nexus.services.local_substitution import (
+            build_verified_local_artifact,
+            evaluate_local_eligibility,
+            substitution_stage_trace,
+        )
+
+        # P2 eligibility: ineligible substitution actions fail closed before model I/O
+        # when explicit displacement is required. Advisor path remains assist-only.
+        eligibility = evaluate_local_eligibility(
+            request,
+            local_enabled=True,
+            local_mode=str(planner_snapshot.get("local_mode") or request.action or "advisor"),
+        )
         provider = self._provider or OllamaLocalModelProvider()
         raw_provider = provider
         if isinstance(provider, RecordingLocalModelProvider):
@@ -295,6 +311,8 @@ class LocalAssistService:
             "verifier_command": list(request.verifier_command),
         }
         local_model_invoked = False
+        executor_invoked = False
+        physical_callable = ""
         output_delivered = False
         provider_name = "ollama" if isinstance(raw_provider, OllamaLocalModelProvider) else "injected"
         resolved_model = str(planner_snapshot["executor_model"])
@@ -303,9 +321,92 @@ class LocalAssistService:
         candidate_patch = ""
         candidate_hash = ""
         provider_time = 0.0
+        planner_decision_id = str(
+            planner_snapshot.get("planner_decision_id")
+            or planner_snapshot.get("plan_hash")
+            or ""
+        )
+        verified_artifact: dict[str, Any] = {}
+        stage_trace: dict[str, Any] = substitution_stage_trace()
+
+        # Hard fail closed for explicitly ineligible substitution (missing verifier etc.).
+        if (
+            not eligibility.eligible
+            and eligibility.status == "INELIGIBLE"
+            and request.action in {"candidate", "verified-subtask"}
+            and "deterministic_verifier_available" in eligibility.reason
+        ):
+            fallback_reason = eligibility.reason
+            terminal_status = "FAILED"
+            claim_boundary = {
+                "registry_known": True,
+                "planner_selected": True,
+                "runtime_invoked": False,
+                "executor_invoked": False,
+                "physical_callable": "",
+                "output_delivered": False,
+                "agent_consumed": False,
+                "outcome_contributed": False,
+                "value_measured": False,
+                "local_model_executor_invoked": False,
+                "eligibility": eligibility.to_dict(),
+            }
+            stage_trace = substitution_stage_trace(fallback_reason=fallback_reason)
+            receipt_path, report_path = self._output_paths(request, report_file)
+            receipt = {
+                "schema": "nexus.local_assist.execution_receipt.v1",
+                "task_id": request.task_id,
+                "parent_task_id": request.parent_task_id,
+                "workspace_revision": request.workspace_revision,
+                "planner_decision_id": planner_decision_id,
+                "action": request.action,
+                "eligibility": eligibility.to_dict(),
+                "substitution_stages": stage_trace,
+                "terminal_status": terminal_status,
+                "receipt_complete": False,
+                "claim_boundary": claim_boundary,
+                "fallback_reason": fallback_reason,
+                "provider_call_count": 0,
+            }
+            receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            receipt_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
+            response = LocalAssistResponse(
+                schema=RESPONSE_SCHEMA,
+                status=terminal_status,
+                task_id=request.task_id,
+                parent_task_id=request.parent_task_id,
+                action=request.action,
+                planner_decision={
+                    "source": "CapabilityPlanner",
+                    "validated": True,
+                    "automatic_dispatch": False,
+                    "selected_action": request.action,
+                    "planner_decision_id": planner_decision_id,
+                    "eligibility": eligibility.to_dict(),
+                },
+                planner_selected=True,
+                local_model_invoked=False,
+                output_delivered=False,
+                provider=provider_name,
+                resolved_models=(resolved_model,),
+                local_outputs={"eligibility": eligibility.to_dict()},
+                candidate_summary=candidate_summary,
+                verifier_summary=verifier_summary,
+                receipt_path=str(receipt_path),
+                evidence_refs=request.evidence_refs,
+                fallback_reason=fallback_reason,
+                claim_boundary=claim_boundary,
+                physical_callable="",
+                executor_invoked=False,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(response.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+            return response
 
         try:
             if request.action == "advisor":
+                # Advisor identity: LocalModelProvider.generate only — never claim executor INVOKED.
+                physical_callable = "LocalModelProvider.generate"
                 provider_request = LocalModelProviderRequest(
                     task_id=request.task_id,
                     prompt=self._advisor_prompt(request),
@@ -320,6 +421,7 @@ class LocalAssistService:
                 provider_response = ledger_provider.generate(provider_request)
                 provider_time = float(provider_response.elapsed_sec or 0.0)
                 local_model_invoked = bool(provider_response.model_called)
+                executor_invoked = False
                 output_delivered = bool(local_model_invoked and provider_response.output_text.strip())
                 local_outputs = {
                     "diagnosis": provider_response.output_text,
@@ -329,19 +431,37 @@ class LocalAssistService:
                 if not local_model_invoked:
                     fallback_reason = provider_response.error or "provider_not_invoked"
             else:
+                # Candidate / verified-subtask identity: LocalModelExecutor.run only.
+                physical_callable = "LocalModelExecutor.run"
+                # Planner-selected Local-consumable set (never hard-coded sole local_model_executor).
+                _snap_selected = planner_snapshot.get("local_consumable_capabilities") or planner_snapshot.get("selected_capabilities")
+                if isinstance(_snap_selected, (list, tuple)) and _snap_selected:
+                    _local_selected = tuple(str(x) for x in _snap_selected)
+                else:
+                    _local_selected = ("local_model_executor",)
+                _bundle = planner_snapshot.get("capability_evidence_bundle") if isinstance(planner_snapshot.get("capability_evidence_bundle"), dict) else {}
+                _bundle_hash = str(_bundle.get("bundle_hash") or planner_snapshot.get("bundle_hash") or "")
+                _evidence_ids = list(_bundle.get("evidence_ids") or [])
                 executor_request = LocalModelExecutorRequest(
                     task_id=request.task_id,
                     problem_statement=request.task_statement,
                     repo_root=request.workspace_root,
                     target_file=request.target_file,
-                    selected_capabilities=("local_model_executor",),
+                    selected_capabilities=_local_selected,
                     evidence_refs=request.evidence_refs,
-                    receipt_context={"parent_task_id": request.parent_task_id},
+                    receipt_context={
+                        "parent_task_id": request.parent_task_id,
+                        "bundle_hash": _bundle_hash,
+                        "consumed_evidence_ids": list(_evidence_ids),
+                        "selected_capabilities": list(_local_selected),
+                    },
                     route_context={
                         "signal_snapshot": planner_snapshot,
                         "target_symbol": request.target_symbol,
                         "locked_search": request.locked_search,
                         "verifier_command": list(request.verifier_command),
+                        "capability_evidence_bundle": _bundle,
+                        "bundle_hash": _bundle_hash,
                     },
                     model_name=resolved_model,
                     dry_run=False,
@@ -351,6 +471,7 @@ class LocalAssistService:
                 )
                 executor_response = self._executor_runner(executor_request, provider=raw_provider)
                 local_model_invoked = bool(executor_response.local_model_called)
+                executor_invoked = bool(executor_response.invoked or executor_response.local_model_called)
                 candidate_patch = _recount_unified_diff(str(executor_response.candidate_patch or ""))
                 candidate_hash = _canonical_candidate_hash(candidate_patch) if candidate_patch.strip() else ""
                 if not isinstance(raw_provider, OllamaLocalModelProvider):
@@ -401,14 +522,132 @@ class LocalAssistService:
         terminal_status = "SUCCEEDED" if output_delivered else "FAILED"
         if not local_model_invoked and not fallback_reason:
             fallback_reason = "provider_not_invoked"
+        verifier_passed = str(verifier_summary.get("verifier_status") or "").lower() in {
+            "pass",
+            "passed",
+            "ok",
+        }
+        # Never claim partial success when verifier failed.
+        if request.action == "verified-subtask" and not verifier_passed:
+            output_delivered = False
+            if not fallback_reason:
+                fallback_reason = "verifier_failed_or_blocked"
+        stage_trace = substitution_stage_trace(
+            model_invoked=local_model_invoked,
+            output_delivered=output_delivered,
+            candidate_isolated=str(candidate_summary.get("isolation_status")) == "isolated",
+            hash_matched=bool(candidate_summary.get("selected_candidate_hash_matches_applied")),
+            verifier_reached=bool(verifier_summary.get("verifier_reached")),
+            verifier_passed=verifier_passed,
+            online_consumed=False,
+            final_outcome_contributed=False,
+            fallback_reason=fallback_reason,
+        )
+        # Online-facing concise summary: NEVER use reasoning_summary / CoT / raw patch /
+        # raw advisor diagnosis. Only structured status/evidence metadata.
+        private_reasoning = str(local_outputs.get("reasoning_summary") or "")
+        if request.action == "advisor":
+            # Strict whitelist — arbitrary model text cannot substantiate online-safe claims.
+            concise = (
+                f"action=advisor;"
+                f"status={'succeeded' if output_delivered else 'failed'};"
+                f"evidence_count={len(request.evidence_refs)};"
+                f"target={request.target_file}"
+            )
+        elif output_delivered:
+            concise = (
+                f"action={request.action};"
+                f"isolation={candidate_summary.get('isolation_status', 'not_run')};"
+                f"hash={str(candidate_summary.get('selected_candidate_hash') or candidate_hash or '')[:16]};"
+                f"verifier={verifier_summary.get('verifier_status', 'not_run')}"
+            )
+        else:
+            concise = f"local_assist_incomplete;reason={fallback_reason or 'undelivered'}"
+        # Online-safe structured artifact (no raw patch / CoT).
+        verified_artifact = build_verified_local_artifact(
+            task_id=request.task_id,
+            action=request.action,
+            candidate_hash=str(
+                candidate_summary.get("selected_candidate_hash")
+                or candidate_hash
+                or ""
+            ),
+            verifier_status=str(verifier_summary.get("verifier_status") or "not_run"),
+            evidence_refs=request.evidence_refs,
+            concise_summary=concise,
+            provider_displacement_type=str(
+                planner_snapshot.get("provider_displacement_type")
+                or ("call" if request.action == "verified-subtask" else "context")
+            ),
+            isolation_status=str(candidate_summary.get("isolation_status") or "not_run"),
+            hash_matched=bool(candidate_summary.get("selected_candidate_hash_matches_applied")),
+            verifier_reached=bool(verifier_summary.get("verifier_reached")),
+            model_invoked=local_model_invoked,
+            output_delivered=output_delivered,
+        ).to_dict()
+        # Strip fields that must never reach Online prompt builders or response local_outputs.
+        # Private CoT is disk-receipt only — never re-inserted into local_outputs.
+        local_outputs = {
+            k: v
+            for k, v in local_outputs.items()
+            if k
+            not in {
+                "candidate_patch",
+                "raw_model_metadata",
+                "reasoning_summary",
+                "_private_reasoning_not_for_online",
+            }
+        }
+        local_outputs["concise_summary"] = verified_artifact["concise_summary"]
+        local_outputs["verified_artifact"] = verified_artifact
+
+        # Shared evidence consumption proof (P3) — empty ids ⇒ not consumed.
+        try:
+            from nexus.services.capability_evidence_bundle import record_consumption
+            _ev_bundle = planner_snapshot.get("capability_evidence_bundle") if isinstance(planner_snapshot.get("capability_evidence_bundle"), dict) else {}
+            _consumed_ids = []
+            if isinstance(_ev_bundle, dict) and _ev_bundle.get("bundle_hash"):
+                _consumed_ids = list(_ev_bundle.get("evidence_ids") or [])
+                if not _consumed_ids and local_model_invoked:
+                    _consumed_ids = [f"bundle:{str(_ev_bundle.get('bundle_hash'))[:16]}"]
+            _local_selected = list(
+                planner_snapshot.get("local_consumable_capabilities")
+                or planner_snapshot.get("selected_capabilities")
+                or ("local_model_executor",)
+            )
+            _consumption = record_consumption(
+                bundle=_ev_bundle if _ev_bundle else {"bundle_hash": "", "selected_capabilities": []},
+                consumer="Local",
+                consumed_evidence_ids=_consumed_ids if local_model_invoked else [],
+                selected_capabilities=_local_selected,
+                physical_callable=physical_callable,
+            )
+        except Exception:
+            _consumption = {
+                "bundle_hash": str(planner_snapshot.get("bundle_hash") or ""),
+                "consumed_evidence_ids": [],
+                "selected_capabilities": list(planner_snapshot.get("selected_capabilities") or []),
+                "physical_callable": physical_callable,
+                "consumer_input_hash": "",
+                "capability_consumed": False,
+                "public_claim_allowed": False,
+            }
+        local_outputs["evidence_consumption"] = _consumption
+
         claim_boundary = {
             "registry_known": True,
             "planner_selected": True,
             "runtime_invoked": local_model_invoked,
+            "executor_invoked": executor_invoked,
+            "physical_callable": physical_callable,
             "output_delivered": output_delivered,
             "agent_consumed": False,
             "outcome_contributed": False,
             "value_measured": False,
+            # Advisor success is not local_model_executor INVOKED.
+            "local_model_executor_invoked": bool(executor_invoked and request.action != "advisor"),
+            "eligibility": eligibility.to_dict(),
+            "partial_success_claimed": False,
         }
         receipt_path, report_path = self._output_paths(request, report_file)
         receipt = {
@@ -416,11 +655,19 @@ class LocalAssistService:
             "task_id": request.task_id,
             "parent_task_id": request.parent_task_id,
             "workspace_revision": request.workspace_revision,
+            "planner_decision_id": planner_decision_id,
             "task_statement_hash": _hash_text(request.task_statement),
             "source_snapshot_hash": source_snapshot_hash,
             "planner_snapshot_hash": _hash_json(planner_snapshot),
             "action": request.action,
             "profile": request.requested_role,
+            "physical_callable": physical_callable,
+            "executor_invoked": executor_invoked,
+            "eligibility": eligibility.to_dict(),
+            "verified_artifact": verified_artifact,
+            "substitution_stages": stage_trace,
+            # Disk-only private field — not present on response.local_outputs.
+            "private_reasoning_disk_only": private_reasoning[:4000] if private_reasoning else "",
             "requested_model": str(planner_snapshot["executor_model"]),
             "resolved_model": resolved_model,
             "provider": provider_name,
@@ -459,6 +706,7 @@ class LocalAssistService:
                 "validated": True,
                 "automatic_dispatch": False,
                 "selected_action": request.action,
+                "planner_decision_id": planner_decision_id,
             },
             planner_selected=True,
             local_model_invoked=local_model_invoked,
@@ -472,6 +720,8 @@ class LocalAssistService:
             evidence_refs=request.evidence_refs,
             fallback_reason=fallback_reason,
             claim_boundary=claim_boundary,
+            physical_callable=physical_callable,
+            executor_invoked=executor_invoked,
         )
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(response.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -506,31 +756,14 @@ class LocalAssistService:
                 search_text=request.locked_search,
             )
         )
+        # Trust IsolatedApplyReceipt hash match only — never re-project a mismatch into a match.
         model_candidate_hash = candidate_hash
         selected_candidate_hash = candidate_hash
         applied_patch_hash = apply_receipt.applied_patch_hash
-        hash_matches = apply_receipt.selected_candidate_hash_matches_applied
-        if apply_receipt.patch_apply_status == "applied" and apply_receipt.workspace_path:
-            try:
-                diff_result = subprocess.run(
-                    ["git", "diff", "--", request.target_file],
-                    cwd=apply_receipt.workspace_path,
-                    shell=False,
-                    capture_output=True,
-                    timeout=5.0,
-                    check=True,
-                )
-                applied_diff = diff_result.stdout.decode("utf-8", errors="replace")
-                projected_hash = _canonical_candidate_hash(applied_diff)
-                if projected_hash:
-                    selected_candidate_hash = projected_hash
-                    applied_patch_hash = projected_hash
-                    hash_matches = True
-            except (OSError, subprocess.SubprocessError):
-                pass
+        hash_matches = bool(apply_receipt.selected_candidate_hash_matches_applied)
         return {
             "candidate_count": 1,
-            "candidate_hashes": list(dict.fromkeys([model_candidate_hash, selected_candidate_hash])),
+            "candidate_hashes": list(dict.fromkeys([model_candidate_hash, selected_candidate_hash, applied_patch_hash or ""])),
             "model_candidate_hash": model_candidate_hash,
             "selected_candidate_hash": selected_candidate_hash,
             "isolation_status": (

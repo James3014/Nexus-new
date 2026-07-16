@@ -1325,17 +1325,23 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
                     }
 
             receipt_path = report_path.with_name(f"{report_path.stem}.unified_runtime.json")
+            from nexus.services.mainchain_entry import stamp_mainchain_route
+
             unified_runtime_receipt = gateway.ask_unified(
                 UnifiedRuntimeRequest(
                     task_id=task_id,
                     workspace_revision=workspace_revision,
                     task_statement=task,
                     task_type="document_rewrite",
-                    route={
-                        "recommended_flow": "direct",
-                        "provider": gateway.oauth_provider,
-                        "online_capabilities": ("research", "repair_loop"),
-                    },
+                    route=stamp_mainchain_route(
+                        {
+                            "recommended_flow": "direct",
+                            "provider": gateway.oauth_provider,
+                            "online_capabilities": ("research", "repair_loop"),
+                        },
+                        with_nexus_armor=True,
+                        product_entry="content_rewrite",
+                    ),
                     online_prompt=(
                         "You are rewriting a document.\n"
                         f"Task: {task}\n"

@@ -580,6 +580,14 @@ class BattlesuitGateway:
             )
 
         runtime_online_invoker = online_invoker
+        # P4: World A mainchain — optional with_nexus Online armor (no new topology).
+        from nexus.services.mainchain_entry import (
+            merge_mainchain_capability_invokers,
+            with_nexus_armor_enabled,
+            wrap_mainchain_online_invoker,
+        )
+
+        armor_on = with_nexus_armor_enabled(route)
         if runtime_online_invoker is None:
             if binding.use_registered_cli:
                 command = None
@@ -659,10 +667,25 @@ class BattlesuitGateway:
                 # bound ask_structured or when no Online CLI identity was set.
                 runtime_online_invoker = gateway_online_invoker
 
+        final_online = runtime_online_invoker or gateway_online_invoker
+        if armor_on and final_online is not None:
+            final_online = wrap_mainchain_online_invoker(
+                final_online,
+                route=route,
+                force=True,
+                provider=str(route.get("provider") or binding.provider or "gateway"),
+            )
+        codeintel_payload = getattr(request, "codeintel", {}) or {}
+        final_caps = merge_mainchain_capability_invokers(
+            capability_invokers,
+            codeintel=dict(codeintel_payload) if isinstance(codeintel_payload, Mapping) else {},
+            enable=armor_on,
+        )
+
         return UnifiedRuntime(local_service=local_service).run(
             request,
-            online_invoker=runtime_online_invoker or gateway_online_invoker,
-            capability_invokers=capability_invokers,
+            online_invoker=final_online,
+            capability_invokers=final_caps,
             verifier=verifier,
             learning=learning,
             receipt_path=receipt_path,

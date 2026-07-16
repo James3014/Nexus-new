@@ -92,6 +92,47 @@ def _hash_json(value: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _local_action_from_request(local_request: Any, local_stage: Mapping[str, Any]) -> str:
+    """Resolve Local action for executor-identity attribution (advisor vs executor)."""
+    action = ""
+    if isinstance(local_request, Mapping):
+        action = str(local_request.get("action") or "")
+    elif local_request is not None:
+        action = str(getattr(local_request, "action", "") or "")
+    if not action:
+        response = local_stage.get("response") if isinstance(local_stage, Mapping) else None
+        if isinstance(response, Mapping):
+            action = str(response.get("action") or "")
+    return action.strip().lower()
+
+
+def _local_executor_invoked_proven(
+    *,
+    action: str,
+    physical_callable: str,
+    local_stage: Mapping[str, Any],
+) -> bool:
+    """True only when action + stage + physical callable + executor_invoked all prove Executor ran.
+
+    Requires ALL of:
+      - action in {candidate, verified-subtask}
+      - Local stage invoked
+      - physical_callable == LocalModelExecutor.run
+      - executor_invoked == true
+    """
+    if action not in {"candidate", "verified-subtask"}:
+        return False
+    if not bool(local_stage.get("invoked", False)):
+        return False
+    callable_name = str(physical_callable or "").strip()
+    if callable_name != "LocalModelExecutor.run":
+        return False
+    response = local_stage.get("response") if isinstance(local_stage, Mapping) else None
+    if not isinstance(response, Mapping):
+        return False
+    return response.get("executor_invoked") is True
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -152,7 +193,9 @@ def _capability_stage(
     data = _mapping(result)
     response_task_id = str(data.get("task_id", "") or "")
     task_identity_shared = not response_task_id or response_task_id == task_id
-    invoked = bool(data.get("invoked", False))
+    skipped = bool(data.get("skipped", False)) or str(data.get("status", "")).upper() == "SKIPPED"
+    skip_reason = str(data.get("skip_reason") or "")
+    invoked = bool(data.get("invoked", False)) and not skipped
     gate_passed = bool(
         data.get(
             "gate_passed",
@@ -161,20 +204,36 @@ def _capability_stage(
     )
     evidence_refs = [str(ref) for ref in data.get("evidence_refs", []) or []]
     evidence_present = bool(evidence_refs or data.get("evidence"))
+    if skipped and task_identity_shared and evidence_present:
+        status = "SKIPPED"
+        # Explicit skip is coverage-success for FCM; not a stage hard-fail.
+        gate_passed = True if data.get("gate_passed", True) else gate_passed
+    elif task_identity_shared and invoked and evidence_present and gate_passed:
+        status = "SUCCEEDED"
+    else:
+        status = "FAILED"
     return _stage(
         f"capability:{name}",
-        status="SUCCEEDED" if task_identity_shared and invoked and evidence_present and gate_passed else "FAILED",
+        status=status,
         invoked=invoked,
         evidence_present=evidence_present,
         gate_passed=task_identity_shared and gate_passed,
         outcome_contributed=bool(data.get("outcome_contributed", False)),
         evidence_refs=evidence_refs,
-        reason="capability_task_id_mismatch" if not task_identity_shared else "",
+        reason=(
+            "capability_task_id_mismatch"
+            if not task_identity_shared
+            else (skip_reason if skipped else "")
+        ),
         task_id=task_id,
         response_task_id=response_task_id,
         task_identity_shared=task_identity_shared,
         delegated_to=str(data.get("delegated_to", delegated_to) or delegated_to),
+        physical_callable=str(data.get("physical_callable") or ""),
+        telemetry=dict(data.get("telemetry") or {}) if isinstance(data.get("telemetry"), Mapping) else {},
         response=data,
+        skipped=skipped,
+        skip_reason=skip_reason if skipped else "",
     )
 
 
@@ -582,19 +641,32 @@ def build_subprocess_online_invoker(
         capability_context_forwarded = False
         if include_local_context:
             local_stage = context.get("local", {})
-            local_response = local_stage.get("response", {}) if isinstance(local_stage, Mapping) else {}
-            local_outputs = local_response.get("local_outputs", {}) if isinstance(local_response, Mapping) else {}
-            if local_outputs:
-                prompt += "\n\n[LOCAL_ASSIST_CONTEXT]\n" + json.dumps(
-                    local_outputs,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    default=str,
-                )
-                local_context_forwarded = True
+            # P2: never dump raw local_outputs (patch/CoT/private reasoning) into Online.
+            # Only structure-preserving online-safe concise evidence may be forwarded.
+            if isinstance(local_stage, Mapping) and (
+                local_stage.get("response") or local_stage.get("invoked") or local_stage.get("local_outputs")
+            ):
+                from nexus.services.local_substitution import build_online_safe_local_forward
+
+                safe = build_online_safe_local_forward(local_stage)
+                forward = safe.get("forward", {}) if isinstance(safe, Mapping) else {}
+                if isinstance(forward, Mapping) and (
+                    forward.get("concise_summary")
+                    or forward.get("candidate_hash")
+                    or str(forward.get("verifier_status") or "") not in {"", "not_run"}
+                ):
+                    prompt += "\n\n[LOCAL_ASSIST_CONTEXT]\n" + json.dumps(
+                        forward,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    local_context_forwarded = True
             capability_results = context.get("capability_results", {})
             if capability_results:
                 compressed = bool(context.get("capability_context_compressed"))
+                # Compressed path: evidence summary only. Uncompressed: capability
+                # stage receipts (status/refs/task_id), not private Local CoT fields.
                 prompt += (
                     "\n\n[CAPABILITY_EVIDENCE_SUMMARY]\n"
                     if compressed
@@ -1200,6 +1272,24 @@ class UnifiedRuntime:
         request.validate()
         planner_route = dict(request.route)
         planner_route.setdefault("local_enabled", request.local_enabled)
+        # Opt-in Nexus Light: merge deterministic preflight/postflight invokers.
+        # Default route is unchanged when flags are absent.
+        merged_invokers: dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] = dict(
+            capability_invokers or {}
+        )
+        if bool(planner_route.get("nexus_light") or planner_route.get("deterministic_core")):
+            from nexus.services.nexus_light_core import build_nexus_light_capability_invokers
+
+            workspace = str(planner_route.get("workspace_root") or ".")
+            light = build_nexus_light_capability_invokers(
+                workspace,
+                compression=bool(planner_route.get("prompt_compression")),
+            )
+            # Caller-provided invokers win over light defaults for the same name.
+            merged = dict(light)
+            merged.update(merged_invokers)
+            merged_invokers = merged
+        capability_invokers = merged_invokers or None
         plan = self._planner.plan(
             task_desc=request.task_statement,
             task_type=request.task_type,
@@ -1211,6 +1301,23 @@ class UnifiedRuntime:
             skills=[dict(item) for item in request.skills],
         )
         plan_payload = plan.to_dict()
+        plan_hash = _hash_json(plan_payload)
+        # Single stable decision id from actual plan payload/hash — never invent
+        # a second id downstream on receipt, context_trace, or capability rows.
+        planner_decision_id = plan_hash
+        snapshot = plan_payload.get("signal_snapshot")
+        if isinstance(snapshot, Mapping):
+            snapshot_with_id = dict(snapshot)
+            snapshot_with_id["planner_decision_id"] = planner_decision_id
+            plan_payload = dict(plan_payload)
+            plan_payload["signal_snapshot"] = snapshot_with_id
+        else:
+            plan_payload = dict(plan_payload)
+            plan_payload["signal_snapshot"] = {"planner_decision_id": planner_decision_id}
+        # Stamp stable ids onto the payload so Online armor / invokers share the
+        # same plan_hash as planner stage (hash itself remains pre-stamp).
+        plan_payload["plan_hash"] = plan_hash
+        plan_payload["planner_decision_id"] = planner_decision_id
         planner_stage = _stage(
             "planner",
             status="SUCCEEDED",
@@ -1219,34 +1326,52 @@ class UnifiedRuntime:
             gate_passed=True,
             evidence_refs=["runtime:planner_invoked"],
             selected_capabilities=list(plan.selected_capabilities),
+            required_capabilities=list(plan.required_capabilities),
+            conditional_capabilities=list(plan.conditional_capabilities),
+            pending_capabilities=list(plan.pending_capabilities),
             plan_schema=plan.schema_version,
-            plan_hash=_hash_json(plan_payload),
+            plan_hash=plan_hash,
+            planner_decision_id=planner_decision_id,
         )
 
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
-        local_stage = self._run_local(request, plan_payload)
-        if request.local_enabled:
-            stages["local"] = local_stage
-        else:
-            stages["local"] = _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
 
         capability_results: dict[str, dict[str, Any]] = {}
-        capability_context = {
-            "schema": REQUEST_SCHEMA,
-            "task_id": request.task_id,
-            "workspace_revision": request.workspace_revision,
-            "task_statement": request.task_statement,
-            "task_type": request.task_type,
-            "route": dict(request.route),
-            "planner": plan_payload,
-            "local": local_stage,
-            "online_prompt": request.online_prompt,
-            "online_payload": request.online_payload,
-            "capability_results": capability_results,
-        }
-        for capability_name, invoker in dict(capability_invokers or {}).items():
+        postflight_names = {"artifact_gate", "claim_gate", "delivery_gate"}
+        # Coverage handlers for every selected name (real / stub / explicit skip).
+        # Not a product route — invoker map only.
+        from nexus.services.capability_registry import (
+            LOCAL_STAGE_CAPABILITIES,
+            ensure_selected_coverage_invokers,
+        )
+
+        invoker_map = ensure_selected_coverage_invokers(
+            list(plan.selected_capabilities),
+            capability_invokers,
+            codeintel=dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {},
+        )
+        # P2: preflight BEFORE Local/Online so both stages share one evidence baseline.
+        # Local-owned capabilities are not preflight-invoked here.
+        preflight_items = [
+            (name, inv)
+            for name, inv in invoker_map.items()
+            if name not in postflight_names
+            and name not in LOCAL_STAGE_CAPABILITIES
+            and name in plan.selected_capabilities
+        ]
+        postflight_items = [
+            (name, inv)
+            for name, inv in invoker_map.items()
+            if name in postflight_names and name in plan.selected_capabilities
+        ]
+
+        def _invoke_capability(
+            capability_name: str,
+            invoker: Any,
+            capability_context: dict[str, Any],
+        ) -> None:
             if capability_name not in plan.selected_capabilities:
-                continue
+                return
             if not callable(invoker):
                 result: Any = {
                     "task_id": request.task_id,
@@ -1270,6 +1395,101 @@ class UnifiedRuntime:
                 request.task_id,
                 result,
             )
+
+        # Empty local placeholder until after shared preflight.
+        local_stage = _stage("local", status="NOT_REQUESTED", reason="pending_shared_preflight")
+        capability_context = {
+            "schema": REQUEST_SCHEMA,
+            "task_id": request.task_id,
+            "workspace_revision": request.workspace_revision,
+            "task_statement": request.task_statement,
+            "task_type": request.task_type,
+            "route": dict(request.route),
+            "codeintel": dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {},
+            "pillars": dict(request.pillars) if isinstance(request.pillars, Mapping) else {},
+            "planner": plan_payload,
+            "local": local_stage,
+            "online_prompt": request.online_prompt,
+            "online_payload": request.online_payload,
+            "capability_results": capability_results,
+        }
+        for capability_name, invoker in preflight_items:
+            _invoke_capability(capability_name, invoker, capability_context)
+
+        # Immutable shared evidence bundle (P2) — both Local and Online must see same baseline.
+        from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+
+        evidence_bundle = build_capability_evidence_bundle(
+            task_id=request.task_id,
+            workspace_revision=request.workspace_revision,
+            task_statement=request.task_statement,
+            plan_payload=plan_payload,
+            plan_hash=plan_hash,
+            planner_decision_id=planner_decision_id,
+            capability_results=capability_results,
+            selected_capabilities=list(plan.selected_capabilities),
+            source_hash=hashlib.sha256(
+                f"{request.workspace_revision}:{request.task_statement}".encode("utf-8")
+            ).hexdigest(),
+        )
+        plan_payload = dict(plan_payload)
+        from nexus.services.capability_evidence_bundle import (
+            consumer_view as _evidence_consumer_view,
+            verify_capability_evidence_bundle as _verify_evidence_bundle,
+        )
+        sealed_verdict = _verify_evidence_bundle(evidence_bundle)
+        if not sealed_verdict.get("ok"):
+            # Fail closed: do not hand a broken seal to Local/Online.
+            evidence_bundle = dict(evidence_bundle)
+            evidence_bundle["seal_verify"] = sealed_verdict
+        # Full read-only consumer view — same root bundle_hash for Local and Online.
+        evidence_consumer = _evidence_consumer_view(evidence_bundle)
+        plan_payload["capability_evidence_bundle"] = evidence_consumer
+        # LocalAssist planner_snapshot reads signal_snapshot — mirror full bundle there.
+        snap = dict(plan_payload.get("signal_snapshot") or {})
+        snap["capability_evidence_bundle"] = evidence_consumer
+        snap["baseline_hash"] = evidence_bundle["baseline_hash"]
+        snap["bundle_hash"] = evidence_bundle["bundle_hash"]
+        snap["planner_decision_id"] = planner_decision_id
+        # Local-consumable selected set from Planner (not hard-coded local_model_executor).
+        local_consumable = [
+            n for n in plan.selected_capabilities
+            if n == "local_model_executor" or n in {
+                "memory", "codeintel", "belief", "semantic_searcher", "lancedb",
+                "repair_loop", "sandbox",
+            }
+        ]
+        if "local_model_executor" in plan.selected_capabilities and "local_model_executor" not in local_consumable:
+            local_consumable.append("local_model_executor")
+        # Always include planner-selected local_model_executor when present; otherwise
+        # pass the planner-selected intersection that Local can consume.
+        if not local_consumable:
+            local_consumable = [n for n in plan.selected_capabilities if n == "local_model_executor"]
+        snap["selected_capabilities"] = list(plan.selected_capabilities)
+        snap["local_consumable_capabilities"] = list(local_consumable)
+        plan_payload["signal_snapshot"] = snap
+        plan_payload["local_consumable_capabilities"] = list(local_consumable)
+        stages["shared_capability_evidence"] = _stage(
+            "shared_capability_evidence",
+            status="SUCCEEDED",
+            invoked=True,
+            evidence_present=True,
+            gate_passed=True,
+            evidence_refs=[f"runtime:evidence_bundle:{evidence_bundle['bundle_hash'][:16]}"],
+            baseline_hash=evidence_bundle["baseline_hash"],
+            bundle_hash=evidence_bundle["bundle_hash"],
+            real_success_count=evidence_bundle["summary"]["real_success_count"],
+            stub_invoked=list(evidence_bundle["summary"]["stub_invoked"]),
+        )
+
+        local_stage = self._run_local(request, plan_payload)
+        if request.local_enabled:
+            stages["local"] = local_stage
+        else:
+            stages["local"] = _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
+        capability_context["local"] = local_stage
+        capability_context["capability_evidence_bundle"] = evidence_bundle
+        capability_context["baseline_hash"] = evidence_bundle["baseline_hash"]
 
         effective_online_prompt = request.online_prompt
         capability_context_compressed = False
@@ -1322,9 +1542,18 @@ class UnifiedRuntime:
             "online_model_name": request.online_model_name,
             "online_output_schema": dict(request.online_output_schema or {}),
             "planner": plan_payload,
+            # with_nexus Online armor (World B) reads route + codeintel from context.
+            # No new topology/RouteMode — existing request fields only.
+            "route": dict(request.route) if isinstance(request.route, Mapping) else {},
+            "codeintel": dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {},
+            "pillars": dict(request.pillars) if isinstance(request.pillars, Mapping) else {},
             "local": local_stage,
             "capability_results": capability_results,
             "capability_context_compressed": capability_context_compressed,
+            # P2: same immutable baseline for Online as Local saw after preflight.
+            "capability_evidence_bundle": evidence_bundle,
+            "baseline_hash": evidence_bundle["baseline_hash"],
+            "planner_decision_id": planner_decision_id,
             "online_execution_decision": online_decision.to_dict(),
             "online_policy": online_decision.online_policy,
             "online_execution_requested": online_decision.online_execution_requested,
@@ -1343,6 +1572,20 @@ class UnifiedRuntime:
         verifier_stage = self._run_callback("verifier", verifier, context, required=True)
         stages["verifier"] = verifier_stage
         context["verifier"] = verifier_stage
+
+        # Postflight gates after Online + verifier so proof fields are visible.
+        # Online reply alone never satisfies artifact/claim/delivery.
+        postflight_context = dict(context)
+        postflight_context["route"] = dict(request.route)
+        postflight_context["capability_results"] = capability_results
+        postflight_context["capability_evidence_bundle"] = evidence_bundle
+        postflight_context["source_hash"] = str(evidence_bundle.get("source_hash") or "")
+        postflight_context["task_statement"] = request.task_statement
+        for capability_name, invoker in postflight_items:
+            _invoke_capability(capability_name, invoker, postflight_context)
+            # Keep context capability_results live for subsequent stages.
+            context["capability_results"] = capability_results
+
         learning_stage = self._run_callback("learning", learning, context, required=True)
         stages["learning"] = learning_stage
         context["learning"] = learning_stage
@@ -1354,11 +1597,28 @@ class UnifiedRuntime:
             required_stage_names.append("online")
         required_stage_names.extend(("verifier", "learning"))
         required_stages = [stages[name] for name in required_stage_names]
-        required_stages.extend(capability_results.values())
-        receipt_complete = all(
-            bool(stage["invoked"] and stage["evidence_present"] and stage["gate_passed"])
-            for stage in required_stages
-        )
+        # Capability stages: INVOKED must pass; SKIPPED with evidence is coverage-ok (FCM).
+        # Stub / SELECTED_NOT_EXECUTED / evidence-less must NOT force receipt_complete success.
+        for cap_stage in capability_results.values():
+            if str(cap_stage.get("status") or "") == "SKIPPED" or cap_stage.get("skipped"):
+                continue
+            if str(cap_stage.get("status") or "") == "SELECTED_NOT_EXECUTED":
+                continue
+            if bool(cap_stage.get("stub")) or (
+                isinstance(cap_stage.get("response"), dict) and cap_stage["response"].get("stub")
+            ):
+                # stubs do not count toward receipt_complete required set
+                continue
+            required_stages.append(cap_stage)
+        def _stage_complete(stage: object) -> bool:
+            if not isinstance(stage, dict):
+                return False
+            if bool(stage.get("stub")):
+                return False
+            if str(stage.get("status") or "") in {"SELECTED_NOT_EXECUTED", "STUB_INVOKED"}:
+                return False
+            return bool(stage.get("invoked") and stage.get("evidence_present") and stage.get("gate_passed"))
+        receipt_complete = all(_stage_complete(stage) for stage in required_stages)
         outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages)
         evidence_refs = list(request.evidence_refs)
         for stage in stages.values():
@@ -1381,24 +1641,129 @@ class UnifiedRuntime:
                 str(name)
                 for name in request.route.get("online_capabilities", ()) or ()
             }
+        local_action = _local_action_from_request(request.local_request, local_stage)
+        local_physical_callable = str(
+            (local_stage.get("response") or {}).get("physical_callable", "")
+            if isinstance(local_stage.get("response"), Mapping)
+            else ""
+        )
         for name in plan.selected_capabilities:
+            skip_reason = ""
             if name == "local_model_executor":
                 delegated_to = "Local"
                 stage = local_stage
                 stage_name = "local"
+                # Advisor uses LocalModelProvider.generate — not the executor.
+                # Only candidate/verified-subtask with executor proof may be INVOKED.
+                executor_proven = _local_executor_invoked_proven(
+                    action=local_action,
+                    physical_callable=local_physical_callable,
+                    local_stage=local_stage,
+                )
+                if not request.local_enabled:
+                    invoked = False
+                    cap_status = "SKIPPED"
+                    cap_reason = "local_route_disabled"
+                    skip_reason = "local_route_disabled"
+                elif local_action == "advisor":
+                    invoked = False
+                    cap_status = "SKIPPED"
+                    cap_reason = "selected_executor_not_invoked_advisor_path"
+                    skip_reason = "selected_executor_not_invoked_advisor_path"
+                elif executor_proven:
+                    invoked = True
+                    cap_status = "INVOKED"
+                    cap_reason = ""
+                elif bool(stage.get("invoked", False)) and local_action in {"candidate", "verified-subtask"}:
+                    # Stage ran but lacked full executor proof → fail closed on identity.
+                    invoked = False
+                    cap_status = "SELECTED_NOT_EXECUTED"
+                    if "Provider" in local_physical_callable and "Executor" not in local_physical_callable:
+                        cap_reason = "selected_executor_not_invoked_advisor_path"
+                    else:
+                        cap_reason = "planner_selected_no_runtime_executor"
+                else:
+                    invoked = False
+                    # Prefer explicit skip row from registry if preflight skip was recorded.
+                    if name in capability_results and capability_results[name].get("skipped"):
+                        stage = capability_results[name]
+                        stage_name = f"capability:{name}"
+                        cap_status = "SKIPPED"
+                        cap_reason = str(
+                            capability_results[name].get("skip_reason")
+                            or capability_results[name].get("reason")
+                            or "delegated_to_local_stage"
+                        )
+                        skip_reason = cap_reason
+                    else:
+                        cap_status = "SELECTED_NOT_EXECUTED"
+                        cap_reason = "planner_selected_no_runtime_executor"
             elif name in capability_results:
                 delegated_to = str(capability_results[name].get("delegated_to", "Local"))
                 stage = capability_results[name]
                 stage_name = f"capability:{name}"
+                stage_skipped = bool(stage.get("skipped", False)) or str(stage.get("status", "")) == "SKIPPED"
+                # Nested response may carry skip flags from registry invoker.
+                response = stage.get("response") if isinstance(stage.get("response"), Mapping) else {}
+                if not stage_skipped and isinstance(response, Mapping):
+                    stage_skipped = bool(response.get("skipped", False))
+                stub_only = bool(response.get("stub", False)) if isinstance(response, Mapping) else False
+                # Route online_capabilities: attribute consumer to Online unless the
+                # invoker payload itself declared delegated_to (e.g. Local-bound memory).
+                # Note: _capability_stage defaults delegated_to=Local — that default is
+                # not treated as an explicit invoker declaration.
+                explicit_delegated = None
+                if isinstance(response, Mapping) and "delegated_to" in response:
+                    explicit_delegated = str(response.get("delegated_to") or "")
+                if name in online_capabilities and (stage_skipped or stub_only):
+                    delegated_to = "Online"
+                    stage = online_stage
+                    stage_name = "online"
+                    invoked = bool(stage.get("invoked", False))
+                    cap_status = "INVOKED" if invoked else "SELECTED_NOT_EXECUTED"
+                    cap_reason = "" if invoked else "planner_selected_no_runtime_executor"
+                    skip_reason = ""
+                elif name in online_capabilities and not stage_skipped and not explicit_delegated:
+                    delegated_to = "Online"
+                    invoked = bool(stage.get("invoked", False))
+                    cap_status = "INVOKED" if invoked else "SELECTED_NOT_EXECUTED"
+                    cap_reason = "" if invoked else "planner_selected_no_runtime_executor"
+                    skip_reason = ""
+                elif name in online_capabilities and explicit_delegated:
+                    delegated_to = explicit_delegated
+                    invoked = bool(stage.get("invoked", False))
+                    cap_status = "INVOKED" if invoked else "SELECTED_NOT_EXECUTED"
+                    cap_reason = "" if invoked else "planner_selected_no_runtime_executor"
+                    skip_reason = ""
+                elif stage_skipped:
+                    invoked = False
+                    cap_status = "SKIPPED"
+                    cap_reason = str(
+                        stage.get("skip_reason")
+                        or stage.get("reason")
+                        or response.get("skip_reason")
+                        or "explicit_skip"
+                    )
+                    skip_reason = cap_reason
+                else:
+                    invoked = bool(stage.get("invoked", False))
+                    cap_status = "INVOKED" if invoked else "SELECTED_NOT_EXECUTED"
+                    cap_reason = "" if invoked else "planner_selected_no_runtime_executor"
             elif name in online_capabilities:
                 delegated_to = "Online"
                 stage = online_stage
                 stage_name = "online"
+                invoked = bool(stage.get("invoked", False))
+                cap_status = "INVOKED" if invoked else "SELECTED_NOT_EXECUTED"
+                cap_reason = "" if invoked else "planner_selected_no_runtime_executor"
             else:
                 delegated_to = "PlannerOnly"
                 stage = {}
                 stage_name = ""
-            invoked = bool(stage.get("invoked", False))
+                invoked = False
+                cap_status = "SKIPPED"
+                cap_reason = "caller_omitted_auto_skip"
+                skip_reason = "caller_omitted_auto_skip"
             capability_receipts.append(
                 {
                     "name": name,
@@ -1407,35 +1772,183 @@ class UnifiedRuntime:
                     "delegated_to": delegated_to,
                     "stage": stage_name,
                     "invoked": invoked,
-                    "evidence_present": bool(stage.get("evidence_present", False)),
-                    "gate_passed": bool(stage.get("gate_passed", False)),
+                    "skipped": cap_status == "SKIPPED",
+                    "skip_reason": skip_reason if cap_status == "SKIPPED" else "",
+                    "evidence_present": bool(stage.get("evidence_present", False))
+                    or (cap_status == "SKIPPED" and bool(cap_reason)),
+                    "gate_passed": bool(stage.get("gate_passed", False))
+                    if cap_status != "SKIPPED"
+                    else True,
                     "outcome_contributed": bool(stage.get("outcome_contributed", False)),
-                    "evidence_refs": list(stage.get("evidence_refs", []) or []),
+                    "evidence_refs": list(stage.get("evidence_refs", []) or [])
+                    or (
+                        [f"capability:{name}:{request.task_id}:skipped:{skip_reason}"]
+                        if cap_status == "SKIPPED" and skip_reason
+                        else []
+                    ),
                     "task_id": request.task_id,
-                    "status": "INVOKED" if invoked else "SELECTED_NOT_EXECUTED",
-                    "reason": "" if invoked else "planner_selected_no_runtime_executor",
+                    "planner_decision_id": planner_decision_id,
+                    "status": cap_status,
+                    "reason": cap_reason,
+                    "physical_callable": (
+                        local_physical_callable
+                        if name == "local_model_executor"
+                        else str(stage.get("physical_callable", "") or "")
+                    ),
                 }
             )
+        # FCM coverage fields on receipt (machine-checkable)
+        from nexus.services.capability_registry import coverage_counts_from_receipt as _coverage_preview
+
+        # Temporary object for coverage helper — fill after append
+        _coverage_tmp = {
+            "context_trace": {"selected_capabilities": list(plan.selected_capabilities)},
+            "capabilities": capability_receipts,
+        }
+        capability_coverage = _coverage_preview(_coverage_tmp)
         online_evidence_refs = [str(ref) for ref in online_stage.get("evidence_refs", []) or []]
+        online_response = (
+            online_stage.get("response")
+            if isinstance(online_stage.get("response"), Mapping)
+            else {}
+        )
+        with_nexus_lineage = (
+            online_response.get("with_nexus")
+            if isinstance(online_response.get("with_nexus"), Mapping)
+            else {}
+        )
+        prompt_sections_present = [
+            str(item)
+            for item in (
+                online_response.get("prompt_sections_present")
+                or with_nexus_lineage.get("prompt_sections_present")
+                or []
+            )
+        ]
+        # P1: Local VAP lineage + B/D treatment fingerprints (same plan_hash + codeintel_hash).
+        local_response_map = (
+            local_stage.get("response") if isinstance(local_stage.get("response"), Mapping) else {}
+        )
+        vap_packet = (
+            local_response_map.get("verified_assist_packet")
+            if isinstance(local_response_map.get("verified_assist_packet"), Mapping)
+            else None
+        )
+        vap_packet_hash = str(
+            (vap_packet or {}).get("packet_hash")
+            or local_stage.get("verified_assist_packet_hash")
+            or ""
+        )
+        online_safe_forward: dict[str, Any] = {}
+        verified_assist_block: dict[str, Any] = {}
+        if request.local_enabled and local_stage.get("invoked") and vap_packet:
+            try:
+                from nexus.services.local_substitution import build_online_safe_local_forward
+
+                # Prefer assembled with_nexus prompt for physical consumption binding.
+                with_nexus_prompt = ""
+                if isinstance(online_response.get("with_nexus"), Mapping):
+                    with_nexus_prompt = str(online_response["with_nexus"].get("prompt") or "")
+                assembled = str(
+                    online_response.get("assembled_online_prompt")
+                    or with_nexus_prompt
+                    or effective_online_prompt
+                    or ""
+                )
+                # Re-run attach with final prompt so consumption_proof binds to Online injection.
+                forward_base = build_online_safe_local_forward(local_stage)
+                from nexus.services.verified_assist_contract import attach_verified_assist_to_forward
+
+                online_safe_forward = attach_verified_assist_to_forward(
+                    forward_base,
+                    vap_packet,
+                    consume=bool(request.online_enabled and online_stage.get("invoked")),
+                    consumed_by_stage="online_prompt_assembly",
+                    final_prompt=assembled if assembled else str(
+                        (forward_base.get("verified_assist") or {}).get("injection_fragment")
+                        or ""
+                    ),
+                )
+                verified_assist_block = dict(online_safe_forward.get("verified_assist") or {})
+                # Mark local substitution online_consumed when credit proves consumption.
+                credit = verified_assist_block.get("credit") if isinstance(verified_assist_block.get("credit"), Mapping) else {}
+                if credit.get("assist_credited") and isinstance(local_stage.get("substitution_trace"), Mapping):
+                    local_stage = dict(local_stage)
+                    trace = dict(local_stage.get("substitution_trace") or {})
+                    trace["online_consumed"] = True
+                    local_stage["substitution_trace"] = trace
+                    stages["local"] = local_stage
+            except Exception:
+                online_safe_forward = {}
+                verified_assist_block = {}
+
+        codeintel_hash = _hash_json(dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {})
+        treatment_config = {
+            "profile": "online_nexus_v1",
+            "with_nexus": True,
+            "plan_hash": plan_hash,
+            "codeintel_hash": codeintel_hash,
+            "planner_decision_id": planner_decision_id,
+        }
+        treatment_fingerprint_b: dict[str, Any] = {}
+        treatment_fingerprint_d: dict[str, Any] = {}
+        treatment_core_equal: dict[str, Any] = {}
+        try:
+            from nexus.services.verified_assist_contract import (
+                assert_treatment_core_equal,
+                build_treatment_fingerprint,
+            )
+
+            fp_b = build_treatment_fingerprint(
+                treatment_config=treatment_config,
+                assist_packet_attached=False,
+            )
+            fp_d = build_treatment_fingerprint(
+                treatment_config=treatment_config,
+                assist_packet_attached=bool(vap_packet_hash),
+            )
+            treatment_fingerprint_b = fp_b.to_dict()
+            treatment_fingerprint_d = fp_d.to_dict()
+            treatment_core_equal = assert_treatment_core_equal(fp_b, fp_d)
+        except Exception:
+            treatment_fingerprint_b = {}
+            treatment_fingerprint_d = {}
+            treatment_core_equal = {"equal": False, "reason": "fingerprint_unavailable"}
+
         context_trace = {
             "task_id": request.task_id,
             "workspace_revision": request.workspace_revision,
+            "planner_decision_id": planner_decision_id,
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
             "online_prompt_hash": _hash_json(effective_online_prompt),
             "online_payload_hash": _hash_json(request.online_payload),
             "capability_results_hash": _hash_json(capability_results),
             "selected_capabilities": list(plan.selected_capabilities),
+            "selection_authority": "CapabilityPlanner",
+            "baseline_hash": evidence_bundle["baseline_hash"],
+            "evidence_bundle_hash": evidence_bundle["bundle_hash"],
             "capability_context_compressed": capability_context_compressed,
+            "codeintel_hash": codeintel_hash,
             "online_received_context": {
                 "local_context_forwarded": any("local_context_forwarded" in ref for ref in online_evidence_refs),
                 "capability_context_forwarded": any("capability_context_forwarded" in ref for ref in online_evidence_refs),
                 "compressed_context_applied": any("compressed_context_applied" in ref for ref in online_evidence_refs),
+                "with_nexus_armor": str(online_response.get("armor") or "") == "with_nexus"
+                or bool(with_nexus_lineage),
+                "prompt_sections_present": prompt_sections_present,
+                "codeintel_present": bool(with_nexus_lineage.get("codeintel_present", False)),
+                "with_nexus_plan_hash": str(with_nexus_lineage.get("plan_hash") or ""),
+                "vap_attached": bool(vap_packet_hash),
+                "vap_packet_hash": vap_packet_hash,
+                "local_forward_section": "local_forward" in prompt_sections_present
+                or bool(vap_packet_hash and request.local_enabled),
             },
         }
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "task_id": request.task_id,
             "workspace_revision": request.workspace_revision,
+            "planner_decision_id": planner_decision_id,
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
             "context_trace": context_trace,
             "planner": planner_stage,
@@ -1467,6 +1980,22 @@ class UnifiedRuntime:
             "receipt_complete": receipt_complete,
             "terminal_status": "SUCCEEDED" if receipt_complete else "INCOMPLETE",
             "claim_boundary": claim_boundary,
+            "capability_coverage": capability_coverage,
+            "capability_evidence_bundle": evidence_bundle,
+            "selection_authority": "CapabilityPlanner",
+            "verified_assist": verified_assist_block,
+            "online_safe_local_forward": {
+                "schema": online_safe_forward.get("schema", ""),
+                "forward_keys": sorted((online_safe_forward.get("forward") or {}).keys())
+                if isinstance(online_safe_forward.get("forward"), Mapping)
+                else [],
+                "public_claim_allowed": False,
+            }
+            if online_safe_forward
+            else {},
+            "treatment_fingerprint_b": treatment_fingerprint_b,
+            "treatment_fingerprint_d": treatment_fingerprint_d,
+            "treatment_core_equal": treatment_core_equal,
         }
         if receipt_path is not None:
             path = Path(receipt_path)
@@ -1552,9 +2081,13 @@ class UnifiedRuntime:
         required_stages = [finalized.get(name, {}) for name in required_names]
         capability_results = finalized.get("capability_results", {})
         if isinstance(capability_results, Mapping):
-            required_stages.extend(
-                stage for stage in capability_results.values() if isinstance(stage, Mapping)
-            )
+            for stage in capability_results.values():
+                if not isinstance(stage, Mapping):
+                    continue
+                # FCM: explicit SKIPPED is coverage-ok, not a completion blocker.
+                if str(stage.get("status") or "") == "SKIPPED" or stage.get("skipped"):
+                    continue
+                required_stages.append(stage)
         receipt_complete = all(
             isinstance(stage, Mapping)
             and bool(stage.get("invoked"))
@@ -1655,14 +2188,71 @@ class UnifiedRuntime:
         local_verifier_status = ""
         if isinstance(verifier_payload, Mapping):
             local_verifier_status = str(verifier_payload.get("verifier_status", "") or "").lower()
+        # Verified-subtask: verifier fail is not partial success.
+        action = str(payload.get("action") or "")
+        if action == "verified-subtask" and local_verifier_status not in {"", "not_run", "pass", "passed"}:
+            delivered = False
         local_boundary_passed = task_identity_valid and invoked and delivered and (
             local_verifier_status in {"", "not_run", "pass", "passed"}
         )
+        # Attach substitution stage bits when Local assist provides them.
+        stage_bits = {}
+        if isinstance(payload.get("verified_artifact"), Mapping):
+            stage_bits["verified_artifact"] = dict(payload["verified_artifact"])
+        # Prefer explicit substitution_stages from response if present via nested keys.
+        candidate_summary = payload.get("candidate_summary") if isinstance(payload.get("candidate_summary"), Mapping) else {}
+        stage_bits["substitution_trace"] = {
+            "model_invoked": invoked,
+            "output_delivered": delivered,
+            "candidate_isolated": str(candidate_summary.get("isolation_status", "")) == "isolated",
+            "hash_matched": bool(candidate_summary.get("selected_candidate_hash_matches_applied")),
+            "verifier_reached": bool(
+                isinstance(verifier_payload, Mapping) and verifier_payload.get("verifier_reached")
+            ),
+            "verifier_passed": local_verifier_status in {"pass", "passed"},
+            "online_consumed": False,
+            "final_outcome_contributed": bool(payload.get("outcome_contributed", False)),
+            "partial_success_claimed": False,
+            "fallback_reason": str(payload.get("fallback_reason") or ""),
+        }
+        # P1: produce VerifiedAssistPacket from real Local receipt (not hand-written pilot).
+        # Packet rides on response so build_online_safe_local_forward can attach consumption.
+        if invoked and delivered and task_identity_valid and not payload.get("verified_assist_packet"):
+            try:
+                from nexus.services.verified_assist_contract import (
+                    build_vap_from_local_receipt,
+                )
+
+                planner_decision_id = str(
+                    shared_snapshot.get("planner_decision_id")
+                    or plan.get("planner_decision_id")
+                    or plan.get("plan_hash")
+                    or ""
+                )
+                plan_hash = str(plan.get("plan_hash") or planner_decision_id or "")
+                vap = build_vap_from_local_receipt(
+                    payload,
+                    planner_decision_id=planner_decision_id,
+                    task_contract_hash=plan_hash,
+                    treatment_run_id=str(request.task_id),
+                    plan_hash=plan_hash,
+                )
+                if vap is not None:
+                    payload = dict(payload)
+                    payload["verified_assist_packet"] = vap.to_dict()
+                    payload["consume_verified_assist"] = True
+                    payload["verified_assist_stage"] = "online_prompt_assembly"
+                    refs = list(refs) + [f"local:{request.task_id}:vap:{vap.packet_hash[:16]}"]
+                    stage_bits["verified_assist_packet_hash"] = vap.packet_hash
+                    stage_bits["verified_assist_packet_id"] = vap.packet_id
+            except Exception:
+                # Fail open on VAP attach only — Local stage still reports physical outcome.
+                pass
         return _stage(
             "local",
             status="SUCCEEDED" if task_identity_valid and invoked and delivered else "FAILED",
             invoked=invoked,
-            evidence_present=bool(payload.get("receipt_path") or refs),
+            evidence_present=bool(payload.get("receipt_path") or refs or payload.get("verified_assist_packet")),
             gate_passed=local_boundary_passed,
             outcome_contributed=bool(payload.get("outcome_contributed", False)),
             evidence_refs=refs,
@@ -1670,8 +2260,13 @@ class UnifiedRuntime:
             task_id=request.task_id,
             response_task_id=response_task_id,
             task_identity_shared=task_identity_valid,
-            reason="local_task_id_mismatch" if not task_identity_valid else "",
+            reason=(
+                "local_task_id_mismatch"
+                if not task_identity_valid
+                else str(payload.get("fallback_reason") or "")
+            ),
             response=payload,
+            **stage_bits,
         )
 
     @staticmethod

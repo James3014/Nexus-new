@@ -312,6 +312,130 @@ class PipelineRepairMixin:
             return online_callable(prompt)
 
         if mode == "disabled":
+            # P4: Online-only World A still uses UnifiedRuntime + with_nexus armor
+            # (no Local). Bare online_callable only if UR path fails closed.
+            try:
+                from nexus.services.mainchain_entry import (
+                    build_mainchain_capability_invokers,
+                    stamp_mainchain_route,
+                    wrap_mainchain_online_invoker,
+                )
+
+                receipt_path = root / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
+                receipt_path.parent.mkdir(parents=True, exist_ok=True)
+
+                def _disabled_online_invoker(context: dict[str, Any]) -> dict[str, Any]:
+                    prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
+                    res_i, raw_i = _guarded_online(prompt)
+                    delivered = bool(raw_i or (isinstance(res_i, dict) and res_i)) and str(raw_i) != "online_execution_not_authorized"
+                    return normalize_online_invoker_payload(
+                        provider=str(meta.get("oauth_provider") or meta.get("online_provider") or "gateway"),
+                        task_id=task_id,
+                        invoked=delivered,
+                        output_delivered=delivered,
+                        gate_passed=delivered,
+                        provider_call_count=1 if delivered else 0,
+                        response=res_i if isinstance(res_i, dict) else {"raw": raw_i},
+                        raw_response=str(raw_i or ""),
+                        error="" if delivered else "online_empty_or_denied",
+                        evidence_refs=[f"online:{task_id}:world_a_disabled_local"] if delivered else [],
+                    )
+
+                route = stamp_mainchain_route(
+                    build_online_route(
+                        recommended_flow="direct",
+                        gateway_provider=str(meta.get("oauth_provider") or ""),
+                        local_enabled=False,
+                    ),
+                    with_nexus_armor=True,
+                    product_entry="nexus_run",
+                )
+                if meta.get("online_policy"):
+                    route["online_policy"] = str(meta.get("online_policy"))
+                if meta.get("online_execution_decision"):
+                    route["online_execution_decision"] = meta.get("online_execution_decision")
+                route["workspace_root"] = str(root)
+                codeintel = meta.get("codeintel") if isinstance(meta.get("codeintel"), dict) else {}
+                request = UnifiedRuntimeRequest(
+                    task_id=task_id,
+                    workspace_revision=revision,
+                    task_statement=str(ctx.task_desc or task_id),
+                    task_type="repair",
+                    route=route,
+                    online_prompt=str(ctx.task_desc or ""),
+                    online_payload=f"attempt={repair_attempts}",
+                    online_phase="R",
+                    online_enabled=True,
+                    local_enabled=False,
+                    codeintel=codeintel,
+                    evidence_refs=(f"pipeline:{task_id}:world_a_online_only",),
+                )
+
+                def _v(context: dict[str, Any]) -> dict[str, Any]:
+                    online = context.get("online", {}) if isinstance(context, dict) else {}
+                    delivered = bool(online.get("invoked") and online.get("status") == "SUCCEEDED")
+                    return {
+                        "task_id": task_id,
+                        "status": "pass" if delivered else "fail",
+                        "gate_passed": delivered,
+                        "invoked": True,
+                        "evidence_refs": [f"verifier:{task_id}:world_a_online_only"],
+                    }
+
+                def _learn(context: dict[str, Any]) -> dict[str, Any]:
+                    return {
+                        "task_id": task_id,
+                        "status": "recorded",
+                        "invoked": True,
+                        "gate_passed": True,
+                        "evidence_refs": [f"learning:{task_id}:world_a_online_only"],
+                    }
+
+                receipt = UnifiedRuntime().run(
+                    request,
+                    online_invoker=wrap_mainchain_online_invoker(
+                        _disabled_online_invoker, route=route, force=True
+                    ),
+                    capability_invokers=build_mainchain_capability_invokers(codeintel=codeintel),
+                    verifier=_v,
+                    learning=_learn,
+                    receipt_path=receipt_path,
+                )
+                domain, raw, payload = extract_online_stage_payload(
+                    receipt.get("online") if isinstance(receipt.get("online"), dict) else {}
+                )
+                res = domain or payload.get("response") or {}
+                online_ok = bool(receipt.get("online", {}).get("invoked")) and str(raw) != "online_execution_not_authorized"
+                truth = self._stamp_stage_truth(
+                    meta,
+                    local_assist_success=False,
+                    online_success=online_ok,
+                    runtime_receipt_complete=bool(receipt.get("receipt_complete")),
+                    task_pipeline_success=False,
+                )
+                meta["local_assist_status"] = "NOT_REQUESTED"
+                meta["local_context_forwarded"] = False
+                meta["local_assist_contributed"] = False
+                meta["with_nexus_armor"] = True
+                self._write_unified_runtime_pointer(
+                    ctx,
+                    {
+                        "local_assist_mode": "disabled",
+                        "local_assist_status": "NOT_REQUESTED",
+                        "local_context_forwarded": False,
+                        "local_assist_contributed": False,
+                        "unified_runtime_receipt_path": str(receipt_path),
+                        "unified_runtime_task_id": task_id,
+                        "workspace_revision": revision,
+                        "with_nexus_armor": True,
+                        "mainchain_entry": True,
+                        "claim_boundary": dict(receipt.get("claim_boundary") or {"public_claim_allowed": False}),
+                        **truth,
+                    },
+                )
+                return res, raw
+            except Exception as exc:
+                logger.warning("world_a_mainchain_online_only_failed: %s", exc)
             res, raw = _guarded_online(str(ctx.task_desc or ""))
             online_ok = bool(raw or (isinstance(res, dict) and res)) and str(raw) != "online_execution_not_authorized"
             truth = self._stamp_stage_truth(
@@ -544,10 +668,20 @@ class PipelineRepairMixin:
                 "evidence_refs": [f"learning:{task_id}:repair_hybrid_stage"],
             }
 
-        route = build_online_route(
-            recommended_flow="hybrid",
-            gateway_provider=str(meta.get("oauth_provider") or ""),
-            local_enabled=True,
+        from nexus.services.mainchain_entry import (
+            build_mainchain_capability_invokers,
+            stamp_mainchain_route,
+            wrap_mainchain_online_invoker,
+        )
+
+        route = stamp_mainchain_route(
+            build_online_route(
+                recommended_flow="hybrid",
+                gateway_provider=str(meta.get("oauth_provider") or ""),
+                local_enabled=True,
+            ),
+            with_nexus_armor=True,
+            product_entry="nexus_run",
         )
         # Propagate Nexus-owned Online policy from task context (CLI/workspace).
         if meta.get("online_policy"):
@@ -555,6 +689,7 @@ class PipelineRepairMixin:
         if meta.get("online_execution_decision"):
             route["online_execution_decision"] = meta.get("online_execution_decision")
         route["workspace_root"] = str(Path(getattr(self.engine, "project_root", ".") or "."))
+        codeintel = meta.get("codeintel") if isinstance(meta.get("codeintel"), dict) else {}
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
@@ -566,13 +701,17 @@ class PipelineRepairMixin:
             online_phase="R",
             local_enabled=True,
             local_request=local_request,
+            codeintel=codeintel,
             evidence_refs=(f"pipeline:{task_id}:advisor_online",),
         )
 
         try:
             receipt = UnifiedRuntime(local_service=local_service).run(
                 request,
-                online_invoker=online_invoker,
+                online_invoker=wrap_mainchain_online_invoker(
+                    online_invoker, route=route, force=True, provider="pipeline_repair"
+                ),
+                capability_invokers=build_mainchain_capability_invokers(codeintel=codeintel),
                 verifier=response_contract,
                 learning=learning_contract,
                 receipt_path=receipt_path,

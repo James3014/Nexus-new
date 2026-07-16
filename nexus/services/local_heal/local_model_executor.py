@@ -2820,43 +2820,155 @@ class LocalModelExecutor:
                 cascade_stages_run=cascade_receipt.stages_run,
             )
 
-        # P3-I1/I3/I4/I5/I6: Cloud-with-local-assist shadow routing with stage1+2+3
-        # P3-I6: Stores cloud meta and FALLS THROUGH to local model for retry
+        # cloud_with_local_assist:
+        # - Live path: explicit CloudAgentAdapter required; FakeCloud blocked.
+        # - dry_run / allow_fake_cloud shadow path: legacy FakeCloud fallthrough for contracts.
         if execution_topology == "cloud_with_local_assist":
-            # P3-I3: Stage 1 local diagnosis
+            from nexus.services.local_heal.hybrid_cloud_assist_runtime import (
+                run_hybrid_cloud_assist_stages,
+            )
+
             stage1 = _p3_stage1_local_diagnosis(request)
-
-            # P3-I4: Stage 2 cloud candidate seam (fake provider)
-            cloud_provider = FakeCloudCandidateProvider()
-            cloud_response = cloud_provider.generate(request)
-
-            # P3-I5: Stage 3 cheap verifier
-            stage3 = _p3_stage3_cheap_verifier(cloud_response.candidate_patch, request)
-
-            stages = ["stage1_local_diagnosis", "stage2_cloud_candidate", "stage3_local_cheap_verifier"]
-            if not stage3.get("stage3_verifier_passed", False):
-                p3_status = "shadow_stage3_verifier_blocked"
+            route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
+            signal_snapshot = (
+                route_ctx.get("signal_snapshot")
+                if isinstance(route_ctx.get("signal_snapshot"), dict)
+                else {}
+            )
+            local_assist_enabled = bool(
+                route_ctx.get(
+                    "local_assist_enabled",
+                    signal_snapshot.get("local_assist_enabled", True),
+                )
+            )
+            has_adapter = (
+                route_ctx.get("cloud_agent_adapter") is not None
+                or route_ctx.get("cloud_adapter") is not None
+            )
+            # Live hybrid path only when adapter is injected or live_admission is
+            # explicitly requested. All other cloud_with_local_assist traffic
+            # remains the legacy FakeCloud shadow fallthrough (not live evidence).
+            if "live_admission" in route_ctx:
+                live_admission = bool(route_ctx.get("live_admission"))
             else:
-                p3_status = "shadow_stage3_verifier_passed"
+                live_admission = has_adapter
+            use_live_hybrid_path = has_adapter or (
+                "live_admission" in route_ctx and bool(route_ctx.get("live_admission"))
+            )
+            if use_live_hybrid_path:
+                hybrid = run_hybrid_cloud_assist_stages(
+                    task_id=request.task_id,
+                    workspace_revision=str(
+                        route_ctx.get("workspace_revision")
+                        or signal_snapshot.get("workspace_revision")
+                        or "unspecified"
+                    ),
+                    problem_statement=request.problem_statement,
+                    target_file=request.target_file,
+                    stage1_diagnosis=stage1,
+                    route_context=route_ctx,
+                    local_assist_enabled=local_assist_enabled,
+                    live_admission=live_admission,
+                    candidate_applied_hash=str(route_ctx.get("candidate_applied_hash") or ""),
+                )
+                _cloud_meta = {
+                    **hybrid.to_meta(),
+                    "cloud_used": bool(hybrid.cloud_payload.get("provider_call_confirmed")),
+                    "cloud_candidate_generated": bool(hybrid.candidate_patch.strip()),
+                    "local_assist_used": local_assist_enabled,
+                    "cloud_provider": hybrid.economics.get("online_provider", ""),
+                    "cloud_candidate_patch": hybrid.candidate_patch,
+                    "cloud_candidate_hash": (
+                        hashlib.sha256(hybrid.candidate_patch.encode("utf-8")).hexdigest()
+                        if hybrid.candidate_patch
+                        else ""
+                    ),
+                    "provider_call_confirmed": bool(hybrid.cloud_payload.get("provider_call_confirmed")),
+                    "real_cloud_call": bool(hybrid.cloud_payload.get("real_cloud_call")),
+                    "p3_stage4_local_retry": local_assist_enabled and not hybrid.hidden_verifier_passed,
+                    **stage1,
+                }
+                if isinstance(request.route_context, dict):
+                    request.route_context["_p3_cloud_meta"] = _cloud_meta
+                    request.route_context["_hybrid_cloud_assist"] = hybrid.to_meta()
 
-            _cloud_meta = {
-                "execution_topology": "cloud_with_local_assist",
-                "p3_shadow_route": True,
-                "cloud_used": True,
-                "cloud_candidate_generated": bool(cloud_response.candidate_patch.strip()),
-                "local_assist_used": True,
-                "assist_stages_activated": stages,
-                "p3_route_status": p3_status,
-                "cloud_provider": "fake_cloud",
-                "cloud_candidate_patch": cloud_response.candidate_patch,
-                "cloud_candidate_hash": cloud_response.candidate_hash,
-                "p3_stage4_local_retry": True,
-                **stage1,
-                **stage3,
-            }
-            # P3-I6: Store cloud meta to pass to local model path
-            request.route_context["_p3_cloud_meta"] = _cloud_meta
-            # FALL THROUGH to single_local_model instead of returning
+                if hybrid.status.startswith("BLOCKED_") or hybrid.infra_invalid:
+                    return LocalModelExecutorResponse(
+                        invoked=bool(hybrid.stages.get("stage1_local_diagnosis", {}).get("invoked")),
+                        local_model_called=bool(
+                            hybrid.stages.get("stage1_local_diagnosis", {}).get("invoked")
+                        ),
+                        candidate_patch="",
+                        candidate_hash="",
+                        reasoning_summary=hybrid.status.lower(),
+                        raw_model_metadata=_cloud_meta,
+                        provider=str(hybrid.economics.get("online_provider") or "none"),
+                        model_name=str(hybrid.economics.get("online_model") or ""),
+                        error=hybrid.error or hybrid.block_reason or hybrid.status,
+                        timeout=hybrid.infra_invalid and hybrid.error == "provider_timeout",
+                        evidence_refs=request.evidence_refs,
+                    )
+
+                if hybrid.live_evidence_allowed and hybrid.candidate_patch and hybrid.hidden_verifier_passed:
+                    return LocalModelExecutorResponse(
+                        invoked=True,
+                        local_model_called=True,
+                        candidate_patch=hybrid.candidate_patch,
+                        candidate_hash=str(_cloud_meta.get("cloud_candidate_hash") or ""),
+                        reasoning_summary="cloud_with_local_assist_verified",
+                        raw_model_metadata=_cloud_meta,
+                        provider=str(hybrid.economics.get("online_provider") or ""),
+                        model_name=str(hybrid.economics.get("online_model") or ""),
+                        error="",
+                        timeout=False,
+                        evidence_refs=request.evidence_refs,
+                    )
+
+                if not local_assist_enabled:
+                    return LocalModelExecutorResponse(
+                        invoked=bool(hybrid.cloud_payload.get("provider_call_confirmed")),
+                        local_model_called=False,
+                        candidate_patch=hybrid.candidate_patch,
+                        candidate_hash=str(_cloud_meta.get("cloud_candidate_hash") or ""),
+                        reasoning_summary="cloud_path_without_local_assist",
+                        raw_model_metadata=_cloud_meta,
+                        provider=str(hybrid.economics.get("online_provider") or ""),
+                        model_name=str(hybrid.economics.get("online_model") or ""),
+                        error=hybrid.error,
+                        timeout=False,
+                        evidence_refs=request.evidence_refs,
+                    )
+                # FALL THROUGH to single_local_model for stage4 local retry
+            else:
+                # Legacy shadow: FakeCloud + fallthrough (not live evidence).
+                cloud_provider = FakeCloudCandidateProvider()
+                cloud_response = cloud_provider.generate(request)
+                stage3 = _p3_stage3_cheap_verifier(cloud_response.candidate_patch, request)
+                stages = ["stage1_local_diagnosis", "stage2_cloud_candidate", "stage3_local_cheap_verifier"]
+                if not stage3.get("stage3_verifier_passed", False):
+                    p3_status = "shadow_stage3_verifier_blocked"
+                else:
+                    p3_status = "shadow_stage3_verifier_passed"
+                _cloud_meta = {
+                    "execution_topology": "cloud_with_local_assist",
+                    "p3_shadow_route": True,
+                    "live_evidence_allowed": False,
+                    "public_claim_allowed": False,
+                    "cloud_used": True,
+                    "cloud_candidate_generated": bool(cloud_response.candidate_patch.strip()),
+                    "local_assist_used": True,
+                    "assist_stages_activated": stages,
+                    "p3_route_status": p3_status,
+                    "cloud_provider": "fake_cloud",
+                    "cloud_candidate_patch": cloud_response.candidate_patch,
+                    "cloud_candidate_hash": cloud_response.candidate_hash,
+                    "p3_stage4_local_retry": True,
+                    **stage1,
+                    **stage3,
+                }
+                if isinstance(request.route_context, dict):
+                    request.route_context["_p3_cloud_meta"] = _cloud_meta
+                # FALL THROUGH to single_local_model instead of returning
 
         # 9. Generate Candidate Patch for single_local_model
         signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
@@ -3081,11 +3193,37 @@ class LocalModelExecutor:
             _meta["stage4_local_retry_candidate_patch"] = candidate_patch or ""
             _meta["stage4_local_retry_candidate_hash"] = candidate_hash or ""
             _meta["stage4_local_retry_success"] = bool(candidate_patch.strip())
-            _meta["assist_stages_activated"] = _meta.get("assist_stages_activated", []) + ["stage4_local_retry"]
+            _meta["assist_stages_activated"] = list(_meta.get("assist_stages_activated", []) or []) + [
+                "stage4_local_retry"
+            ]
             _meta.update(raw_meta)  # merge local model results
             raw_meta = _meta
-            p3_status = "shadow_stage4_retry_complete" if raw_meta["stage4_local_retry_success"] else "shadow_stage4_retry_failed"
+            p3_status = (
+                "shadow_stage4_retry_complete"
+                if raw_meta["stage4_local_retry_success"]
+                else "shadow_stage4_retry_failed"
+            )
             raw_meta["p3_route_status"] = p3_status
+            # Fallthrough is local recovery: never promote merged receipt as live hybrid success.
+            # real_cloud_call only if the cloud arm actually delivered a non-empty live candidate
+            # via a non-fake/non-injected provider.
+            _cloud_patch = str(raw_meta.get("cloud_candidate_patch") or "").strip()
+            _cloud_provider = str(raw_meta.get("cloud_provider") or "").strip().lower()
+            _fake_providers = {"", "fake_cloud", "fake", "injected", "controlled-cloud", "none"}
+            _cloud_delivered_live = bool(
+                raw_meta.get("real_cloud_call")
+                and _cloud_patch
+                and _cloud_provider not in _fake_providers
+            )
+            raw_meta["real_cloud_call"] = _cloud_delivered_live
+            raw_meta["live_evidence_allowed"] = False
+            raw_meta["public_claim_allowed"] = False
+            _final_patch = str(candidate_patch or _cloud_patch or "").strip()
+            if not _final_patch or raw_meta.get("error") or not raw_meta.get("stage4_local_retry_success"):
+                # Empty/error after fallthrough: strip residual live pretence from cloud meta.
+                raw_meta["live_evidence_allowed"] = False
+                if not _cloud_delivered_live:
+                    raw_meta["real_cloud_call"] = False
 
         # P3-I7: Stage 5 escalation stub (P3↔P4 boundary)
         if _p3_cloud_meta:

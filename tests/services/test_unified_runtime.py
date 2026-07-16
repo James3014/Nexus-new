@@ -19,12 +19,12 @@ from nexus.services.unified_runtime import (
     OnlineCliSpec,
     UnifiedRuntime,
     UnifiedRuntimeRequest,
-    build_online_route,
-    build_registered_online_invoker,
+    build_local_ast_capability_invoker,
     build_local_memory_capability_invoker,
     build_local_search_ranking_capability_invoker,
-    build_local_ast_capability_invoker,
+    build_online_route,
     build_prompt_compression_capability_invoker,
+    build_registered_online_invoker,
     build_structured_online_invoker,
     build_subprocess_online_invoker,
     extract_online_stage_payload,
@@ -64,7 +64,9 @@ def _request(*, local_enabled: bool = False, online_enabled: bool = True) -> Uni
         route={"recommended_flow": "direct"},
         online_enabled=online_enabled,
         local_enabled=local_enabled,
-        local_request={"task_id": "unified-test-001"} if local_enabled else None,
+        local_request=(
+            {"task_id": "unified-test-001", "action": "candidate"} if local_enabled else None
+        ),
     )
 
 
@@ -100,10 +102,25 @@ def test_runtime_calls_one_planner_and_emits_one_receipt() -> None:
     assert receipt["schema"] == "nexus.unified_runtime.receipt.v1"
     assert receipt["task_id"] == "unified-test-001"
     assert receipt["receipt_complete"] is True
-    assert [stage["name"] for stage in receipt["stages"]] == ["planner", "local", "online", "verifier", "learning"]
+    assert [stage["name"] for stage in receipt["stages"]] == [
+        "planner",
+        "shared_capability_evidence",
+        "local",
+        "online",
+        "verifier",
+        "learning",
+    ]
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    assert receipt["planner"]["required_capabilities"] == ["memory", "local_model_executor"]
+    assert receipt["planner"]["conditional_capabilities"] == []
+    assert receipt["planner"]["pending_capabilities"] == []
     assert all(item["task_id"] == receipt["task_id"] for item in receipt["capabilities"])
-    assert all(item["status"] == "SELECTED_NOT_EXECUTED" for item in receipt["capabilities"])
+    # FCM F1: selected names are INVOKED (stub/real) or SKIPPED — never silent omit.
+    assert all(
+        item["status"] in {"INVOKED", "SKIPPED", "SELECTED_NOT_EXECUTED"}
+        for item in receipt["capabilities"]
+    )
+    assert receipt["capability_coverage"]["coverage_ok"] is True
 
 
 def test_runtime_is_fail_closed_without_online_invoker() -> None:
@@ -166,14 +183,23 @@ class _LocalService:
         self.seen_snapshot: dict = {}
 
     def handle(self, request: dict) -> dict:
-        self.seen_snapshot = dict(request["planner_snapshot"])
+        self.seen_snapshot = dict(request.get("planner_snapshot") or {})
+        action = str(request.get("action") or "candidate")
+        # R4.2: executor INVOKED proof requires physical_callable + executor_invoked.
+        is_executor = action in {"candidate", "verified-subtask"}
         return {
             "task_id": request["task_id"],
+            "action": action,
             "local_model_invoked": True,
             "output_delivered": True,
+            "executor_invoked": is_executor,
+            "physical_callable": "LocalModelExecutor.run" if is_executor else "LocalModelProvider.generate",
             "receipt_path": "/tmp/local-receipt.json",
             "evidence_refs": ["local:test:invocation"],
             "verifier_summary": {"verifier_status": "not_run"},
+            "local_outputs": {
+                "concise_summary": f"action={action};status=succeeded;evidence_count=1",
+            },
         }
 
 
@@ -189,7 +215,8 @@ def test_hybrid_receipt_keeps_local_assist_and_online_on_same_task() -> None:
 
     assert receipt["receipt_complete"] is True
     assert receipt["local"]["invoked"] is True
-    assert local_service.seen_snapshot == {"route_truth_source": "CapabilityPlanner"}
+    assert local_service.seen_snapshot.get("route_truth_source") == "CapabilityPlanner"
+    assert local_service.seen_snapshot.get("planner_decision_id") == receipt["planner_decision_id"]
     assert receipt["online"]["invoked"] is True
     assert receipt["claim_boundary"]["local_online_continuation"] is True
     assert receipt["delegation"] == {
@@ -498,6 +525,41 @@ def test_capability_invoker_rejects_cross_task_result() -> None:
     assert finalized["receipt_complete"] is False
 
 
+def test_r4_provider_generate_not_executor_invoked_for_candidate() -> None:
+    """R4.0/R4.2: candidate + Provider.generate must remain SELECTED_NOT_EXECUTED."""
+
+    class _Misattributed:
+        def handle(self, request):
+            return {
+                "task_id": request["task_id"] if isinstance(request, dict) else request.task_id,
+                "action": "candidate",
+                "local_model_invoked": True,
+                "output_delivered": True,
+                "executor_invoked": True,
+                "physical_callable": "LocalModelProvider.generate",
+                "evidence_refs": ["local:mis"],
+                "receipt_path": "/tmp/mis.json",
+                "verifier_summary": {"verifier_status": "not_run"},
+            }
+
+    request = UnifiedRuntimeRequest(
+        **{
+            **_request(local_enabled=True).__dict__,
+            "local_request": {"task_id": "unified-test-001", "action": "candidate"},
+        }
+    )
+    receipt = UnifiedRuntime(planner=_Planner(), local_service=_Misattributed()).run(
+        request,
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+    local_cap = next(c for c in receipt["capabilities"] if c["name"] == "local_model_executor")
+    assert local_cap["status"] == "SELECTED_NOT_EXECUTED"
+    assert local_cap["invoked"] is False
+    assert local_cap["physical_callable"] == "LocalModelProvider.generate"
+
+
 def test_real_planner_selects_local_capability_from_unified_route(monkeypatch) -> None:
     monkeypatch.delenv("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", raising=False)
     runtime = UnifiedRuntime(planner=CapabilityPlanner(), local_service=_LocalService())
@@ -511,10 +573,16 @@ def test_real_planner_selects_local_capability_from_unified_route(monkeypatch) -
     assert "local_model_executor" in receipt["planner"]["selected_capabilities"]
     assert receipt["local"]["status"] == "SUCCEEDED"
     assert receipt["claim_boundary"]["local_online_continuation"] is True
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    decision_id = receipt["planner_decision_id"]
+    assert decision_id
+    assert receipt["planner"]["planner_decision_id"] == decision_id
+    assert receipt["context_trace"]["planner_decision_id"] == decision_id
     local_capability = next(item for item in receipt["capabilities"] if item["name"] == "local_model_executor")
     assert local_capability["delegated_to"] == "Local"
     assert local_capability["status"] == "INVOKED"
     assert local_capability["task_id"] == receipt["task_id"]
+    assert local_capability["planner_decision_id"] == decision_id
 
 
 def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkeypatch, tmp_path: Path) -> None:
@@ -569,10 +637,20 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
     assert "local_model_executor" in receipt["planner"]["selected_capabilities"]
     assert receipt["local"]["status"] == "SUCCEEDED"
     assert receipt["local"]["response"]["provider"] == "injected"
+    assert receipt["local"]["response"]["physical_callable"] == "LocalModelProvider.generate"
+    assert receipt["local"]["response"]["executor_invoked"] is False
+    local_capability = next(item for item in receipt["capabilities"] if item["name"] == "local_model_executor")
+    # Advisor path must not be attributed as local_model_executor INVOKED.
+    # FCM: explicit SKIPPED with same reason (coverage row, not silent omit).
+    assert local_capability["status"] in {"SELECTED_NOT_EXECUTED", "SKIPPED"}
+    assert local_capability["reason"] == "selected_executor_not_invoked_advisor_path"
+    assert local_capability["invoked"] is False
+    assert local_capability["planner_decision_id"] == receipt["planner_decision_id"]
     assert receipt["online"]["status"] == "SUCCEEDED"
     assert "local diagnosis: inspect candidate" in online_calls[0][0][0]
     assert "gateway:hybrid-runtime-test-001:local_context_forwarded" in receipt["evidence_refs"]
     assert receipt["claim_boundary"]["local_online_continuation"] is True
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
     assert receipt["receipt_complete"] is True
 
 
@@ -865,9 +943,21 @@ def test_capability_planner_exposes_committee_only_when_route_selects_it() -> No
             "route_decision": {"selected_capabilities": ["committee"]},
         },
     )
+    compression_off = CapabilityPlanner().plan(
+        task_desc="bounded repair task",
+        task_type="repair",
+        route={"recommended_flow": "direct"},
+    )
+    compression_on = CapabilityPlanner().plan(
+        task_desc="bounded repair task",
+        task_type="repair",
+        route={"recommended_flow": "direct", "prompt_compression": True},
+    )
 
     assert "committee" not in default_plan.selected_capabilities
     assert "committee" in routed_plan.selected_capabilities
+    assert "prompt_compression" not in compression_off.selected_capabilities
+    assert "prompt_compression" in compression_on.selected_capabilities
 
 
 def test_gateway_does_not_fallback_to_wrong_provider_for_unknown_route(tmp_path: Path, monkeypatch) -> None:
