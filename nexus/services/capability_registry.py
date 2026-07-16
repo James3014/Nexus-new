@@ -857,27 +857,39 @@ def _derive_wired_real() -> frozenset[str]:
 
 
 def _derive_escalate_only() -> frozenset[str]:
-    """Names that use escalate-gated mainchain handlers (derived view)."""
+    """Names that use escalate-gated mainchain handlers (derived view).
+
+    Includes TRIGGERED_REAL nodes whose trigger_policy is escalate_only so
+    untriggered selection yields SKIPPED (honest negative), not default run.
+    DEFAULT_REAL / stage-owned postflight are never escalate-gated here.
+    """
     out: set[str] = set()
     for name, c in PLANNER_EXECUTION_CONTRACTS.items():
-        if c["execution_class"] in REAL_EXECUTION_CLASSES:
-            continue
         if c["execution_class"] == EXECUTION_CLASS_LEGACY_ALIAS:
             continue
-        # Escalate / non-default path for non-F nodes.
+        if c["execution_class"] in {
+            EXECUTION_CLASS_DEFAULT_REAL,
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+        }:
+            continue
         policy = str(c.get("trigger_policy") or "")
-        if policy.startswith("escalate") or c["execution_class"] in {
+        if policy.startswith("escalate") or policy in {
+            "triggered_repair",
+            "triggered_sandbox",
+            "triggered_external",
+            "triggered_learning",
+            "triggered_validation",
+            "triggered_model_boundary",
+        }:
+            out.add(name)
+            continue
+        if c["execution_class"] in {
             EXECUTION_CLASS_MISSING_ENGINE,
             EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
             EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
             EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
+            EXECUTION_CLASS_TRIGGERED_REAL,
         }:
-            # Exclude pure model-armor flag names that are not escalate-listed historically
-            # unless trigger is escalate_only or they were probe escalate.
-            if name in {"autoreason", "ddtree", "judge_panel"} and "escalate" not in policy:
-                # Still escalate-gated via PROBE_ONLY path.
-                out.add(name)
-                continue
             out.add(name)
     return frozenset(out)
 
