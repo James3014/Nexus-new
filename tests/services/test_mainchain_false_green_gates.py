@@ -1501,9 +1501,31 @@ def test_local_candidate_executor_receives_capability_evidence_context(tmp_path:
 
 
 def test_bundle_carries_bounded_consumer_payload() -> None:
+    """Usable outcome fields survive seal; nested UnifiedRuntime stage shape supported."""
     from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+    from nexus.services.capability_registry import build_real_executor_invoker
 
     task_id = "payload-a1"
+    # Production-shaped nested stage: invoker return wrapped as stage.response
+    inv = build_real_executor_invoker("codeintel")
+    assert inv is not None
+    invoker_out = inv(
+        {
+            "task_id": task_id,
+            "task_statement": "scan impact risk workspace",
+            "planner": {"plan_hash": "ph"},
+        }
+    )
+    stage = {
+        "status": "SUCCEEDED" if invoker_out.get("gate_passed") else "FAILED",
+        "invoked": True,
+        "gate_passed": bool(invoker_out.get("gate_passed")),
+        "evidence_refs": invoker_out.get("evidence_refs") or [],
+        "evidence_ids": invoker_out.get("evidence_ids") or [],
+        "physical_callable": invoker_out.get("physical_callable") or "",
+        "response": invoker_out,  # nested wrap as UnifiedRuntime does
+    }
+    assert stage["gate_passed"] is True
     bundle = build_capability_evidence_bundle(
         task_id=task_id,
         workspace_revision="wr",
@@ -1511,37 +1533,7 @@ def test_bundle_carries_bounded_consumer_payload() -> None:
         plan_payload={"x": 1},
         plan_hash="ph",
         planner_decision_id="pd",
-        capability_results={
-            "codeintel": {
-                "status": "SUCCEEDED",
-                "invoked": True,
-                "gate_passed": True,
-                "evidence_refs": [f"capability:codeintel:{task_id}:real"],
-                "evidence_ids": [f"capability:codeintel:{task_id}:real"],
-                "physical_callable": "capability_executor_registry:codeintel",
-                "response": {
-                    "status": "SUCCEEDED",
-                    "outcome": {
-                        "action": "workspace_fingerprint",
-                        "result": "scan_ok",
-                        "risk_score": 1,
-                        "reasoning": "SECRET_COT_MUST_STRIP",
-                        "candidate_patch": "--- raw patch ---",
-                    },
-                    "consumer_payload": {
-                        "schema": "nexus.consumer_payload.v1",
-                        "capability": "codeintel",
-                        "markers": ["codeintel:result", "codeintel:payload", "codeintel:finding"],
-                        "fields": {
-                            "action": "workspace_fingerprint",
-                            "result": "scan_ok",
-                            "markers": ["codeintel:result", "codeintel:payload", "codeintel:finding"],
-                        },
-                        "payload_hash": "abc",
-                    },
-                },
-            }
-        },
+        capability_results={"codeintel": stage},
         selected_capabilities=["codeintel"],
         source_hash=VALID_SOURCE_HASH,
     )
@@ -1549,9 +1541,13 @@ def test_bundle_carries_bounded_consumer_payload() -> None:
     assert entry.get("has_consumer_payload") is True
     cp = entry.get("consumer_payload") or {}
     assert cp.get("schema") == "nexus.consumer_payload.v1"
+    fields = cp.get("fields") or {}
+    # Usable outcome content — not markers-only theater
+    assert fields.get("action"), fields
+    assert fields.get("result") or fields.get("evidence_id"), fields
     assert "codeintel:result" in (cp.get("markers") or [])
-    assert "reasoning" not in str(cp.get("fields") or {})
-    assert "candidate_patch" not in str(cp.get("fields") or {})
+    assert "reasoning" not in str(fields)
+    assert "candidate_patch" not in str(fields)
 
 
 def test_bundle_strips_private_reasoning_and_raw_patch() -> None:
@@ -1712,12 +1708,21 @@ def test_local_prompt_contains_codeintel_memory_belief_payload(tmp_path: Path) -
     req = req.__class__(**{**req.__dict__, "planner_snapshot": snap})
     response = LocalAssistService(provider=InjectedLocalModelProvider(_gen)).handle(req)
     prompt = captured.get("prompt") or ""
+    # Markers alone are insufficient — require usable outcome content in the prompt body.
+    assert "workspace_fingerprint" in prompt or '"action": "probe"' in prompt or "action" in prompt
+    assert "codeintel" in prompt and ("result" in prompt or "action" in prompt)
+    assert "memory" in prompt and ("hit_count" in prompt or "action" in prompt or "result" in prompt)
+    assert "belief" in prompt and ("action" in prompt or "result" in prompt)
     assert "codeintel:result" in prompt or "codeintel:payload" in prompt
     assert "memory:result" in prompt or "memory:payload" in prompt
     assert "belief:result" in prompt or "belief:payload" in prompt
     ec = response.local_outputs.get("evidence_consumption") or {}
     assert ec.get("capability_payload_consumed") is True, ec
-    assert list(ec.get("consumed_capability_payloads") or [])
+    payloads = list(ec.get("consumed_capability_payloads") or [])
+    assert payloads
+    for p in payloads:
+        fields = p.get("fields") or {}
+        assert fields.get("action") or fields.get("result") or fields.get("hit_count") is not None, p
 
 
 def test_online_prompt_contains_same_capability_payload() -> None:
@@ -1759,6 +1764,22 @@ def test_online_prompt_contains_same_capability_payload() -> None:
             for n in ("codeintel", "memory", "belief")
         ],
     }
+    # Use production-shaped sealed payloads with usable fields (not markers-only).
+    for ent in bundle["entries"]:
+        n = ent["name"]
+        ent["consumer_payload"] = {
+            "schema": "nexus.consumer_payload.v1",
+            "capability": n,
+            "markers": [f"{n}:result", f"{n}:payload", f"{n}:finding"],
+            "fields": {
+                "action": "probe",
+                "result": f"{n}_ok",
+                "hit_count": 1 if n == "memory" else 0,
+                "markers": [f"{n}:result", f"{n}:payload", f"{n}:finding"],
+                "capability": n,
+            },
+            "payload_hash": hashlib.sha256(n.encode()).hexdigest(),
+        }
     ctx = build_online_nexus_context(
         task_statement="online payload",
         task_id=task_id,
@@ -1769,9 +1790,14 @@ def test_online_prompt_contains_same_capability_payload() -> None:
     assert "codeintel:result" in prompt
     assert "memory:payload" in prompt
     assert "belief:finding" in prompt
+    assert "codeintel_ok" in prompt or '"result": "codeintel_ok"' in prompt or "probe" in prompt
+    assert "hit_count" in prompt
     lineage = ctx.lineage
     assert lineage.get("capability_payload_consumed") is True
     assert lineage.get("consumer_payload_hash")
+    for p in lineage.get("consumed_capability_payloads") or []:
+        fields = p.get("fields") or {}
+        assert fields.get("action") == "probe" or fields.get("result"), p
 
 
 def test_local_online_payload_hash_matches(tmp_path: Path) -> None:
@@ -1981,8 +2007,10 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
 
     def online(ctx: dict[str, Any]) -> dict[str, Any]:
         online_calls["n"] += 1
-        # Capture with_nexus assembled prompt if present.
-        online_calls["prompts"].append(str(ctx.get("online_prompt") or ""))
+        # Capture the final with_nexus-assembled provider prompt only — not lineage dumps.
+        prompt = str(ctx.get("online_prompt") or "")
+        online_calls["prompts"].append(prompt)
+        online_calls["last_prompt"] = prompt
         return _online(ctx)
 
     local_request = LocalAssistRequest(
@@ -2094,45 +2122,61 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
     lineage = with_nexus.get("lineage") if isinstance(with_nexus, dict) else {}
 
     local_prompt = "\n".join(local_calls["prompts"])
-    online_prompt = "\n".join(online_calls["prompts"]) or str(
-        (with_nexus.get("prompt") if isinstance(with_nexus, dict) else "")
-        or lineage.get("prompt")
-        or ""
-    )
-    # Prefer assembled with_nexus prompt from lineage context if online thin.
-    if "codeintel" not in online_prompt:
-        online_prompt = str(
-            getattr(
-                type("X", (), {}),
-                "x",
-                "",
-            )
-        )
-        # Recover from with_nexus to_dict fields when present.
-        if isinstance(with_nexus, dict):
-            # OnlineNexusContext.to_dict does not include full prompt; check markers via lineage
-            online_prompt = online_prompt or json.dumps(lineage, default=str) + json.dumps(
-                with_nexus, default=str
-            )
+    online_prompt = str(online_calls.get("last_prompt") or "\n".join(online_calls["prompts"]))
+    assert online_prompt.strip(), "Online provider must receive a non-empty with_nexus prompt"
+    # Must be real provider prompt (with_nexus sections), not lineage JSON dump.
+    assert "NEXUS_SESSION_BOUNDARY" in online_prompt or "[TASK]" in online_prompt or "NEXUS_" in online_prompt
 
-    local_markers = [m for m in ("codeintel:result", "memory:result", "belief:result", "codeintel:payload", "memory:payload", "belief:payload") if m in local_prompt]
-    # At least one payload marker family for each of the three context caps when payloads exist.
+    # Bundle carries usable outcome fields for context caps.
     for cap in ("codeintel", "memory", "belief"):
         entry = next((e for e in (bundle.get("entries") or []) if e.get("name") == cap), None)
-        if entry and entry.get("consumer_payload"):
-            assert any(f"{cap}:" in m for m in local_markers) or f"{cap}:payload" in local_prompt or f"{cap}:result" in local_prompt, (
-                cap,
-                local_prompt[:400],
-            )
+        assert entry is not None, cap
+        assert entry.get("success") is True, cap
+        cp = entry.get("consumer_payload") or {}
+        fields = cp.get("fields") or {}
+        assert fields.get("action"), (cap, fields)
+        assert fields.get("result") is not None or fields.get("hit_count") is not None or fields.get("evidence_id"), (
+            cap,
+            fields,
+        )
+        # Local + Online provider prompts contain usable content (not markers alone).
+        action = str(fields.get("action") or "")
+        assert action and action in local_prompt, (cap, action, local_prompt[:500])
+        assert action in online_prompt, (cap, action, online_prompt[:500])
+        assert f"{cap}:payload" in local_prompt or f"{cap}:result" in local_prompt
+        assert f"{cap}:payload" in online_prompt or f"{cap}:result" in online_prompt
 
-    # Online lineage must claim payload consumption when payloads present.
-    if any(e.get("consumer_payload") for e in (bundle.get("entries") or []) if e.get("name") in {"codeintel", "memory", "belief"}):
-        assert lineage.get("capability_payload_consumed") is True or lineage.get("consumer_payload_hash")
-        # Local/Online payload hashes match when both consumed.
-        local_ph = str((ec or {}).get("consumer_payload_hash") or "")
-        online_ph = str((lineage or {}).get("consumer_payload_hash") or "")
-        if local_ph and online_ph:
-            assert local_ph == online_ph
+    assert lineage.get("capability_payload_consumed") is True
+    assert (ec or {}).get("capability_payload_consumed") is True
+    local_ph = str((ec or {}).get("consumer_payload_hash") or "")
+    online_ph = str((lineage or {}).get("consumer_payload_hash") or "")
+    assert local_ph and online_ph and local_ph == online_ph
+
+    # Phase C: causal used status on mainchain Local path (not selected=used copy).
+    selected_caps = list(
+        (ec or {}).get("selected_capabilities")
+        or local_outputs.get("selected_capabilities")
+        or []
+    )
+    used_caps = list(
+        (ec or {}).get("selected_capabilities_used")
+        or local_outputs.get("selected_capabilities_used")
+        or []
+    )
+    usage_status = dict(
+        (ec or {}).get("capability_usage_status")
+        or local_outputs.get("capability_usage_status")
+        or {}
+    )
+    assert selected_caps, "selected_capabilities must be recorded"
+    assert used_caps, "selected_capabilities_used must be non-empty for injected payloads"
+    assert usage_status, "capability_usage_status required for causal used proof"
+    # Must not be a silent full selected=used copy of planner set (7 caps).
+    planner_selected = list(receipt.get("selected_capabilities") or [])
+    if len(planner_selected) > len(used_caps):
+        assert set(used_caps) != set(planner_selected)
+    for cap in used_caps:
+        assert usage_status.get(cap) == "used", (cap, usage_status)
 
     assert receipt.get("public_claim_allowed") is False
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
@@ -2141,14 +2185,7 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
     assert local_resp.get("physical_callable") == "LocalModelExecutor.run"
     assert out_tmp.is_file()
 
-    # Closure may be true when all selected production paths succeed.
-    # Do not force true if production engine leaves optional gate incomplete — but
-    # report honestly.
     blockers = list(receipt.get("capability_closure_blockers") or [])
-    if receipt.get("capability_closure_complete") is True:
-        assert blockers == []
-    assert receipt.get("receipt_complete") is True or receipt.get("receipt_complete") is False
-    # Hard requirement from OBJECTIVE: receipt_complete true for PASS canary.
     assert receipt.get("receipt_complete") is True
     assert receipt.get("capability_closure_complete") is True, blockers
     assert blockers == []

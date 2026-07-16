@@ -61,6 +61,28 @@ _ALLOWLISTED_OUTCOME_KEYS = frozenset(
         "capability",
         "registry_key",
         "proof",
+        "evidence_id",
+        "fields",  # nested body of an already-built consumer_payload
+        "schema",
+    }
+)
+# Keys that indicate a payload still has usable outcome content for consumers.
+_USABLE_FIELD_KEYS = frozenset(
+    {
+        "action",
+        "result",
+        "hit_count",
+        "confidence",
+        "risk_score",
+        "findings",
+        "summary",
+        "error",
+        "verdict",
+        "blockers",
+        "provider",
+        "file_sample",
+        "task_linked_hash",
+        "evidence_id",
     }
 )
 _FORBIDDEN_PAYLOAD_KEYS = frozenset(
@@ -114,7 +136,7 @@ def _bound_str(value: Any, *, limit: int = MAX_PAYLOAD_STRING_FIELD) -> str:
 
 
 def _scrub_payload_value(value: Any, *, depth: int = 0) -> Any:
-    if depth > 3:
+    if depth > 4:
         return _bound_str(value, limit=80)
     if isinstance(value, Mapping):
         out: dict[str, Any] = {}
@@ -124,6 +146,12 @@ def _scrub_payload_value(value: Any, *, depth: int = 0) -> Any:
             if key in _FORBIDDEN_PAYLOAD_KEYS or kl in _FORBIDDEN_PAYLOAD_KEYS:
                 continue
             if any(bad in kl for bad in ("secret", "token", "password", "api_key", "reasoning", "patch", "cot")):
+                continue
+            # Nested consumer_payload.fields: scrub recursively with allowlist.
+            if key == "fields" and isinstance(v, Mapping):
+                nested = _scrub_payload_value(v, depth=depth + 1)
+                if isinstance(nested, Mapping) and nested:
+                    out[key] = nested
                 continue
             if key not in _ALLOWLISTED_OUTCOME_KEYS and not key.endswith("_hash") and key not in {
                 "name",
@@ -136,7 +164,7 @@ def _scrub_payload_value(value: Any, *, depth: int = 0) -> Any:
                 if not isinstance(v, (str, int, float, bool)) and v is not None:
                     continue
             out[key] = _scrub_payload_value(v, depth=depth + 1)
-            if len(out) >= 16:
+            if len(out) >= 24:
                 break
         return out
     if isinstance(value, (list, tuple)):
@@ -148,6 +176,60 @@ def _scrub_payload_value(value: Any, *, depth: int = 0) -> Any:
     return _bound_str(value)
 
 
+def _is_schema_consumer_payload(value: Mapping[str, Any]) -> bool:
+    return str(value.get("schema") or "") == CONSUMER_PAYLOAD_SCHEMA
+
+
+def _usable_fields_present(fields: Mapping[str, Any] | None) -> bool:
+    if not isinstance(fields, Mapping) or not fields:
+        return False
+    return any(k in fields and fields.get(k) not in (None, "", [], {}) for k in _USABLE_FIELD_KEYS)
+
+
+def _unwrap_payload_candidate(cand: Mapping[str, Any]) -> dict[str, Any]:
+    """If cand is already consumer_payload.v1, return its fields body; else scrub cand."""
+    if _is_schema_consumer_payload(cand):
+        fields = cand.get("fields") if isinstance(cand.get("fields"), Mapping) else {}
+        # Prefer nested fields; fall back to flat allowlisted keys on the envelope.
+        if _usable_fields_present(fields):
+            return dict(_scrub_payload_value(fields) or {})
+        flat = {
+            k: v
+            for k, v in cand.items()
+            if k in _USABLE_FIELD_KEYS or k in {"action", "result", "evidence_id"}
+        }
+        if flat:
+            return dict(_scrub_payload_value(flat) or {})
+        return {}
+    scrubbed = _scrub_payload_value(cand)
+    if not isinstance(scrubbed, Mapping):
+        return {}
+    # If scrub produced nested fields (envelope re-entry), unwrap once.
+    if _usable_fields_present(scrubbed.get("fields") if isinstance(scrubbed.get("fields"), Mapping) else None):
+        return dict(scrubbed.get("fields") or {})
+    return dict(scrubbed)
+
+
+def _collect_receipt_maps(
+    stage: Mapping[str, Any] | None,
+    response: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Flatten nested UnifiedRuntime stage/response envelopes for source lookup."""
+    maps: list[dict[str, Any]] = []
+    stage_m = _mapping(stage)
+    resp = _mapping(response) if response is not None else _mapping(stage_m.get("response"))
+    if not resp and stage_m:
+        resp = stage_m
+    for m in (stage_m, resp):
+        if m and m not in maps:
+            maps.append(m)
+        # Nested invoker wrap: stage.response = invoker_return; invoker_return.response = engine body
+        nested = m.get("response") if isinstance(m.get("response"), Mapping) else None
+        if nested and nested not in maps:
+            maps.append(dict(nested))
+    return maps
+
+
 def extract_bounded_consumer_payload(
     *,
     capability: str,
@@ -157,36 +239,40 @@ def extract_bounded_consumer_payload(
 ) -> dict[str, Any]:
     """Extract a size-capped, fixed-schema consumer_payload from a production receipt.
 
-    Sources (in order): explicit consumer_payload, response.evidence,
-    allowlisted response.outcome / stage.outcome fields. Failed entries return {}.
+    Sources (in order): explicit consumer_payload (pass-through fields when
+    schema-valid), response.evidence, allowlisted response.outcome fields.
+    Handles UnifiedRuntime nesting where invoker payload lives under
+    stage.response and engine outcome under stage.response.response.outcome.
+    Failed entries return {}.
     """
     if not success:
         return {}
     name = str(capability or "").strip()
-    stage_m = _mapping(stage)
-    resp = _mapping(response) if response is not None else _mapping(stage_m.get("response"))
-    # Prefer nested response when stage is the full capability stage.
-    if not resp and stage_m:
-        resp = stage_m
+    maps = _collect_receipt_maps(stage, response)
+    resp = maps[1] if len(maps) > 1 else (maps[0] if maps else {})
 
     candidates: list[Any] = []
-    for src in (
-        stage_m.get("consumer_payload"),
-        resp.get("consumer_payload"),
-        resp.get("evidence"),
-        stage_m.get("evidence"),
-        resp.get("outcome"),
-        stage_m.get("outcome"),
-    ):
-        if src not in (None, "", {}, []):
-            candidates.append(src)
+    for m in maps:
+        for key in ("consumer_payload", "evidence", "outcome"):
+            src = m.get(key)
+            if src not in (None, "", {}, []):
+                candidates.append(src)
 
     body: dict[str, Any] = {}
     for cand in candidates:
         if isinstance(cand, Mapping):
-            scrubbed = _scrub_payload_value(cand)
-            if isinstance(scrubbed, Mapping) and scrubbed:
-                body.update(dict(scrubbed))
+            unwrapped = _unwrap_payload_candidate(cand)
+            # Skip envelope metadata-only re-wraps (schema/markers/hash without outcome).
+            if unwrapped and (
+                _usable_fields_present(unwrapped)
+                or any(k in unwrapped for k in ("verdict", "blockers", "status", "gate"))
+            ):
+                # Do not let envelope keys clobber usable outcome keys.
+                for k, v in unwrapped.items():
+                    if k in {"schema", "payload_hash", "payload_chars", "public_claim_allowed"}:
+                        continue
+                    if k not in body or body.get(k) in (None, "", [], {}):
+                        body[k] = v
         elif isinstance(cand, str) and cand.strip():
             body.setdefault("summary", _bound_str(cand))
         elif isinstance(cand, (list, tuple)) and cand:
@@ -194,17 +280,29 @@ def extract_bounded_consumer_payload(
 
     # Structural gates: verdict/blockers/hash are enough.
     if name in _STRUCTURAL_GATES:
-        blockers = resp.get("blockers") or stage_m.get("blockers") or body.get("blockers")
-        proof = resp.get("proof") if isinstance(resp.get("proof"), Mapping) else {}
+        blockers = None
+        proof: dict[str, Any] = {}
+        status_val = ""
+        for m in maps:
+            if blockers is None and m.get("blockers") is not None:
+                blockers = m.get("blockers")
+            if not proof and isinstance(m.get("proof"), Mapping):
+                proof = dict(m.get("proof") or {})
+            if not status_val and m.get("status"):
+                status_val = str(m.get("status") or "")
         if blockers is not None:
             body["blockers"] = _scrub_payload_value(blockers)
         if proof:
             for hk in ("source_hash", "artifact_hash", "candidate_hash", "applied_hash", "verifier_artifact"):
                 if proof.get(hk):
                     body[hk] = _bound_str(proof.get(hk), limit=80)
-        if resp.get("status") or stage_m.get("status"):
-            body["status"] = _bound_str(resp.get("status") or stage_m.get("status"), limit=40)
+        if status_val:
+            body["status"] = _bound_str(status_val, limit=40)
         body.setdefault("verdict", "PASS" if success else "BLOCK")
+
+    # Context capabilities must carry usable outcome content — markers alone insufficient.
+    if name in _CONTEXT_CAPABILITIES and not _usable_fields_present(body):
+        return {}
 
     if not body:
         return {}
@@ -212,6 +310,12 @@ def extract_bounded_consumer_payload(
     markers = [f"{name}:result", f"{name}:payload"]
     if name in _CONTEXT_CAPABILITIES:
         markers.append(f"{name}:finding")
+    # Drop envelope-only residue that may have leaked into body.
+    body = {
+        k: v
+        for k, v in body.items()
+        if k not in {"schema", "payload_hash", "payload_chars", "public_claim_allowed"}
+    }
     body["markers"] = markers
     body["capability"] = name
 
@@ -224,11 +328,12 @@ def extract_bounded_consumer_payload(
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     if len(encoded) > MAX_CONSUMER_PAYLOAD_CHARS:
-        # Truncate fields summary to fit.
+        # Truncate fields summary to fit — keep usable action/result when present.
         body = {
             "capability": name,
             "markers": markers,
-            "summary": _bound_str(body.get("summary") or body.get("result") or body.get("action") or "bounded", limit=200),
+            "action": _bound_str(body.get("action") or "", limit=80),
+            "result": _bound_str(body.get("result") or body.get("summary") or "bounded", limit=200),
             "truncated": True,
         }
         payload["fields"] = body

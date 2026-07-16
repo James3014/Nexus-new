@@ -615,6 +615,13 @@ class LocalAssistService:
                     "provider_error": provider_response.error,
                     "capability_evidence_injected": bool(_prompt_evidence_section),
                     "prompt_serialized_evidence_ids": list(_assembled_consumed_ids),
+                    # Advisor: payload-injected caps only count as used; never copy full selected.
+                    "selected_capabilities": list(_local_selected),
+                    "selected_capabilities_used": list(_assembled_caps_used),
+                    "capability_usage_status": {
+                        **{str(c): "selected_not_consumed" for c in _local_selected},
+                        **{str(c): "used" for c in _assembled_caps_used},
+                    },
                 }
                 if not local_model_invoked:
                     fallback_reason = provider_response.error or "provider_not_invoked"
@@ -666,11 +673,26 @@ class LocalAssistService:
                 if not isinstance(raw_provider, OllamaLocalModelProvider):
                     provider_name = str(executor_response.provider or provider_name)
                 resolved_model = str(executor_response.model_name or resolved_model)
+                _exec_meta = (
+                    executor_response.raw_model_metadata
+                    if isinstance(executor_response.raw_model_metadata, Mapping)
+                    else {}
+                )
                 local_outputs = {
                     "reasoning_summary": executor_response.reasoning_summary,
                     "candidate_patch": candidate_patch,
                     "provider_error": executor_response.error,
                     "raw_model_metadata": executor_response.raw_model_metadata,
+                    # Causal used status from LocalModelExecutor (never selected=used copy).
+                    "selected_capabilities": list(
+                        _exec_meta.get("selected_capabilities") or _local_selected
+                    ),
+                    "selected_capabilities_used": list(
+                        _exec_meta.get("selected_capabilities_used") or []
+                    ),
+                    "capability_usage_status": dict(
+                        _exec_meta.get("capability_usage_status") or {}
+                    ),
                 }
                 output_delivered = bool(local_model_invoked and candidate_patch.strip())
                 ledger = executor_response.raw_model_metadata.get("llm_call_ledger_records", [])
@@ -846,7 +868,14 @@ class LocalAssistService:
                 or ""
             ),
         }
-        local_outputs["evidence_consumption"] = _consumption
+        local_outputs["evidence_consumption"] = {
+            **_consumption,
+            "selected_capabilities": list(local_outputs.get("selected_capabilities") or _local_selected),
+            "selected_capabilities_used": list(
+                local_outputs.get("selected_capabilities_used") or _assembled_caps_used
+            ),
+            "capability_usage_status": dict(local_outputs.get("capability_usage_status") or {}),
+        }
         local_outputs["consumed_evidence_ids"] = list(_consumption.get("consumed_evidence_ids") or [])
 
         claim_boundary = {

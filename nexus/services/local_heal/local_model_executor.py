@@ -123,7 +123,9 @@ def compute_capability_usage(
                 or (isinstance(meta.get("memory_trace"), Mapping) and meta["memory_trace"].get("prompt_included"))
                 or meta.get("prompt_included")
             )
-            _mark(cap, attempted and prompt_included, "selected_not_consumed")
+            # Shared evidence payload injection also counts as real Local consumption.
+            payload_injected = cap in payload_caps or "memory:payload" in evidence_section or "memory:result" in evidence_section
+            _mark(cap, (attempted and prompt_included) or payload_injected, "selected_not_consumed")
         elif cap in {"codeintel", "belief", "lancedb", "semantic_searcher"}:
             _mark(cap, cap in payload_caps, "selected_not_consumed")
         elif cap == "ddtree":
