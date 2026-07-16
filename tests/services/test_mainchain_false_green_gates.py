@@ -1558,7 +1558,13 @@ def test_acceptance_check_unverified_not_success() -> None:
         plan_id="acc-unv",
         task_id="acc-1",
         phases=["R"],
-        constraints={"semantic_status": "UNVERIFIED"},
+        constraints={
+            "semantic_status": "UNVERIFIED",
+            "verifier_status": "pass",
+            "verifier_artifact": "sha256:" + ("ab" * 32),
+            "source_hash": "src" * 8,
+            "evidence_refs": ["ev:real:1"],
+        },
     )
     receipt = ex(plan, "task statement")
     assert receipt.gate_passed is False
@@ -1566,21 +1572,144 @@ def test_acceptance_check_unverified_not_success() -> None:
     assert str(outcome.get("semantic_status") or "").upper() == "UNVERIFIED"
 
 
-def test_acceptance_check_verified_can_succeed() -> None:
+def test_acceptance_check_verified_empty_evidence_refs_fails() -> None:
     from nexus.core.belief_contracts import CapabilityExecutionPlan
     from nexus.core.capability_executor_registry import get_executor
 
     ex = get_executor("acceptance_check")
     plan = CapabilityExecutionPlan(
-        plan_id="acc-v",
-        task_id="acc-2",
+        plan_id="acc-empty-refs",
+        task_id="acc-empty",
         phases=["R"],
-        constraints={"semantic_status": "VERIFIED"},
+        constraints={
+            "semantic_status": "VERIFIED",
+            "verifier_status": "pass",
+            "verifier_artifact": "sha256:" + ("cd" * 32),
+            "source_hash": "sourcehashvalue0001",
+            "evidence_refs": [],
+        },
+    )
+    receipt = ex(plan, "task statement")
+    assert receipt.gate_passed is False
+    assert "missing_evidence_refs" in list((receipt.outcome or {}).get("missing_evidence") or [])
+
+
+def test_acceptance_check_verified_missing_verifier_artifact_fails() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    ex = get_executor("acceptance_check")
+    plan = CapabilityExecutionPlan(
+        plan_id="acc-no-art",
+        task_id="acc-no-art",
+        phases=["R"],
+        constraints={
+            "semantic_status": "VERIFIED",
+            "verifier_status": "pass",
+            "verifier_artifact": "",
+            "source_hash": "sourcehashvalue0002",
+            "evidence_refs": ["ev:real:2"],
+        },
+    )
+    receipt = ex(plan, "task statement")
+    assert receipt.gate_passed is False
+    assert "missing_verifier_artifact" in list((receipt.outcome or {}).get("missing_evidence") or [])
+
+
+def test_acceptance_check_full_bounded_verifier_evidence_passes() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    ex = get_executor("acceptance_check")
+    plan = CapabilityExecutionPlan(
+        plan_id="acc-full",
+        task_id="acc-full",
+        phases=["R"],
+        constraints={
+            "semantic_status": "VERIFIED",
+            "verifier_status": "pass",
+            "verifier_artifact": "sha256:" + ("ef" * 32),
+            "source_hash": "sourcehashvalue0003",
+            "evidence_refs": ["ev:real:3", "verifier:acc-full"],
+        },
     )
     receipt = ex(plan, "task statement")
     assert receipt.invoked is True
     assert receipt.gate_passed is True
     assert str((receipt.outcome or {}).get("semantic_status") or "").upper() == "VERIFIED"
+
+
+def test_acceptance_check_verified_can_succeed() -> None:
+    """Backward-compatible name: full evidence allowlist required for PASS."""
+    test_acceptance_check_full_bounded_verifier_evidence_passes()
+
+
+def test_claim_gate_hash_match_omitted_fails() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core import capability_executor_registry as cer
+
+    plan = CapabilityExecutionPlan(
+        plan_id="cg-omit",
+        task_id="cg-omit",
+        phases=["R"],
+        constraints={
+            "source_hash": "deadbeefcafebabe01",
+            "candidate_target_file": "x.py",
+            # candidate_hash_matches_applied intentionally omitted
+        },
+    )
+    receipt = cer._exec_claim_gate(plan, "claim")
+    assert receipt.gate_passed is False
+    missing = list((receipt.outcome or {}).get("missing_fields") or [])
+    assert "candidate_hash_matches_applied" in missing
+
+
+def test_claim_gate_top_level_false_fails() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core import capability_executor_registry as cer
+
+    plan = CapabilityExecutionPlan(
+        plan_id="cg-top-false",
+        task_id="cg-top-false",
+        phases=["R"],
+        constraints={
+            "source_hash": "deadbeefcafebabe02",
+            "candidate_target_file": "x.py",
+            "candidate_hash_matches_applied": False,
+            "solve_eligible": True,
+            "final_patch": "--- a/x.py\n+++ b/x.py\n",
+            "evaluation_report": "verification_report.md",
+            "owner_approved": True,
+        },
+    )
+    receipt = cer._exec_claim_gate(plan, "claim")
+    assert receipt.gate_passed is False
+    outcome = dict(receipt.outcome or {})
+    assert outcome.get("candidate_hash_matches_applied") is False
+    reasons = list(outcome.get("failure_reasons") or [])
+    assert "candidate_hash_mismatch" in reasons or outcome.get("passed") is False
+
+
+def test_claim_gate_route_context_false_fails() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core import capability_executor_registry as cer
+
+    plan = CapabilityExecutionPlan(
+        plan_id="cg-rc-false",
+        task_id="cg-rc-false",
+        phases=["R"],
+        constraints={
+            "source_hash": "deadbeefcafebabe03",
+            "candidate_target_file": "x.py",
+            "route_context": {"candidate_hash_matches_applied": False},
+            "solve_eligible": True,
+            "final_patch": "patch",
+            "evaluation_report": "verification_report.md",
+        },
+    )
+    receipt = cer._exec_claim_gate(plan, "claim")
+    assert receipt.gate_passed is False
+    assert (receipt.outcome or {}).get("candidate_hash_matches_applied") is False
 
 
 def test_claim_gate_registry_has_no_synthetic_theater() -> None:
@@ -1624,7 +1753,9 @@ def test_claim_gate_real_failing_dict_forces_gate_passed_false() -> None:
         constraints={
             "source_hash": "deadbeefcafebabe",
             "candidate_target_file": "x.py",
-            # No verifier/patch/approval — real validator fails claim_gate_passed.
+            # Explicit match True but no verifier/patch — real validator fails claim.
+            "candidate_hash_matches_applied": True,
+            "solve_eligible": False,
         },
     )
     receipt = cer._exec_claim_gate(plan, "claim task")
@@ -1688,6 +1819,55 @@ def test_semantic_success_guard_rejects_error_and_unverified() -> None:
         outcome={"action": "assess_confidence", "confidence": 0.7},
     )
     assert inv4 is True and gate4 is True
+
+
+def test_semantic_guard_nested_result_error_fails() -> None:
+    from nexus.core.capability_executor_registry import apply_semantic_success_guard
+
+    _, gate, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "x", "result": {"error": "nested_fail", "detail": "x"}},
+    )
+    assert gate is False
+
+
+def test_semantic_guard_nested_semantic_status_unverified_fails() -> None:
+    from nexus.core.capability_executor_registry import apply_semantic_success_guard
+
+    _, gate, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "x", "result": {"semantic_status": "UNVERIFIED"}},
+    )
+    assert gate is False
+
+
+def test_semantic_guard_list_item_passed_false_fails() -> None:
+    from nexus.core.capability_executor_registry import apply_semantic_success_guard
+
+    _, gate, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={"action": "x", "items": [{"name": "a", "passed": True}, {"name": "b", "passed": False}]},
+    )
+    assert gate is False
+
+
+def test_semantic_guard_ordinary_success_payload_passes() -> None:
+    from nexus.core.capability_executor_registry import apply_semantic_success_guard
+
+    inv, gate, _ = apply_semantic_success_guard(
+        invoked=True,
+        gate_passed=True,
+        outcome={
+            "action": "assess_confidence",
+            "confidence": 0.7,
+            "result": {"summary": "ok", "score": 1},
+            "items": [{"name": "a", "ok": True}],
+        },
+    )
+    assert inv is True and gate is True
 
 
 # ─── Phase A: bounded consumer_payload ───────────────────────────────────────

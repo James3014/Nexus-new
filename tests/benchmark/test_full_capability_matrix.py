@@ -106,6 +106,21 @@ def test_production_f_executors_have_no_synthetic_claim_theater() -> None:
         assert classify_gap(name) == "F_wired_ok", name
 
 
+def test_postflight_gates_point_to_strict_postflight_callable() -> None:
+    """artifact/claim/delivery catalog rows must point at evaluate_postflight_gate."""
+    from nexus.services.capability_registry import build_wiring_matrix
+
+    matrix = build_wiring_matrix()
+    by_name = {r["name"]: r for r in matrix["rows"]}
+    for name in ("artifact_gate", "claim_gate", "delivery_gate"):
+        row = by_name[name]
+        assert row["gap_class"] == "F_wired_ok", (name, row)
+        assert row["handler_kind"] == "postflight_evaluator", (name, row["handler_kind"])
+        hint = str(row.get("physical_callable_hint") or "")
+        assert "online_nexus_context.evaluate_postflight_gate" in hint, (name, hint)
+        assert not hint.startswith("capability_executor_registry:"), (name, hint)
+
+
 def test_runtime_eligible_gap_classes_zero_abcd() -> None:
     """Final Gate bar for runtime-eligible production/beta rows."""
     root = Path(__file__).resolve().parents[2]

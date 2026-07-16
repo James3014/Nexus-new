@@ -92,6 +92,39 @@ _SEMANTIC_FAIL_STATUSES = frozenset(
 )
 
 
+def _structured_fail_in_value(value: Any, *, depth: int = 0, max_depth: int = 4) -> bool:
+    """Bounded recursive inspection of Mapping/list for structured fail fields.
+
+    Does **not** free-text scan strings or parse arbitrary ``result`` prose.
+    """
+    if depth > max_depth:
+        return False
+    if isinstance(value, Mapping):
+        err = value.get("error")
+        if err not in (None, "", [], {}):
+            return True
+        semantic = str(value.get("semantic_status") or "").strip().upper()
+        if semantic in _SEMANTIC_FAIL_STATUSES:
+            return True
+        if semantic and semantic not in _SEMANTIC_SUCCESS_STATUSES and "semantic_status" in value:
+            # Present but not an explicit success status.
+            return True
+        if value.get("passed") is False:
+            return True
+        if value.get("ok") is False:
+            return True
+        for v in value.values():
+            if _structured_fail_in_value(v, depth=depth + 1, max_depth=max_depth):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        for item in list(value)[:32]:
+            if _structured_fail_in_value(item, depth=depth + 1, max_depth=max_depth):
+                return True
+        return False
+    return False
+
+
 def apply_semantic_success_guard(
     *,
     invoked: bool,
@@ -100,29 +133,17 @@ def apply_semantic_success_guard(
 ) -> tuple[bool, bool, dict[str, Any]]:
     """Fail closed when structured outcome fields contradict success.
 
-    Does not rely on fuzzy free-text scanning. Structured fields checked:
+    Bounded recursive inspection of Mapping/list for:
     - non-empty ``error``
     - ``semantic_status`` in UNVERIFIED/BLOCKED/FAILED/ERROR
     - ``passed is False`` / ``ok is False``
+    Free-text / arbitrary ``result`` string parsing is not used.
     """
     out: dict[str, Any] = dict(outcome or {})
     if not invoked:
         return False, False, out
 
-    err = out.get("error")
-    if err not in (None, "", [], {}):
-        return invoked, False, out
-
-    semantic = str(out.get("semantic_status") or "").strip().upper()
-    if semantic in _SEMANTIC_FAIL_STATUSES:
-        return invoked, False, out
-    # If semantic_status is present and not an explicit success, fail closed.
-    if semantic and semantic not in _SEMANTIC_SUCCESS_STATUSES:
-        return invoked, False, out
-
-    if out.get("passed") is False:
-        return invoked, False, out
-    if out.get("ok") is False:
+    if _structured_fail_in_value(out):
         return invoked, False, out
 
     return invoked, bool(gate_passed), out
@@ -975,12 +996,29 @@ def _exec_artifact_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         )
 
 
+def _resolve_candidate_hash_match(
+    constraints: Mapping[str, Any],
+) -> tuple[bool | None, bool]:
+    """Return (hash_match_value, present).
+
+    Omitted match is NOT treated as True. Top-level False and route_context False
+    both count as present False.
+    """
+    if "candidate_hash_matches_applied" in constraints:
+        return bool(constraints.get("candidate_hash_matches_applied")), True
+    route = constraints.get("route_context")
+    if isinstance(route, Mapping) and "candidate_hash_matches_applied" in route:
+        return bool(route.get("candidate_hash_matches_applied")), True
+    return None, False
+
+
 def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """Registry claim_gate is NOT a synthetic proof factory.
+    """Registry claim_gate is postflight-owned when full context is incomplete.
 
     Mainchain production claim/delivery/artifact gates run via strict postflight
-    evaluators. This registry path only executes when real claim context is
-    supplied on plan.constraints — never invents hashes, patches, or approvals.
+    evaluators (online_nexus_context.evaluate_postflight_gate). This registry
+    path never invents hashes/patches/approvals and never accepts the validator's
+    backward-compatible True default when hash-match is omitted.
     """
     start = time.monotonic()
     fn = _try_import_class("nexus.services.local_heal.claim_delivery_gate", "validate_context_claim_delivery")
@@ -993,12 +1031,16 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             outcome={
                 "action": "validate_context_claim_delivery",
                 "error": "validate_context_claim_delivery not importable",
+                "postflight_owned": True,
             },
         )
     constraints = dict(plan.constraints or {})
     # Require real claim context — no synthetic theater.
     required = ("source_hash", "candidate_target_file")
     missing = [k for k in required if not str(constraints.get(k) or "").strip()]
+    hash_match, hash_present = _resolve_candidate_hash_match(constraints)
+    if not hash_present:
+        missing.append("candidate_hash_matches_applied")
     if missing:
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
@@ -1011,13 +1053,21 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
                 "action": "validate_context_claim_delivery",
                 "error": "missing_real_claim_context",
                 "missing_fields": missing,
+                "postflight_owned": True,
                 "note": "mainchain production claim_gate is postflight-owned",
             },
         )
+    # Explicit False (top-level or route_context) must reach validator as False.
+    assert hash_match is not None
     try:
         from types import SimpleNamespace
 
-        # Only forward caller-supplied fields — never invent approvals/hashes/patches.
+        route_ctx: dict[str, Any] = {}
+        if isinstance(constraints.get("route_context"), Mapping):
+            route_ctx = dict(constraints.get("route_context") or {})
+        # Force explicit hash-match into route_context so no True fallback applies.
+        route_ctx["candidate_hash_matches_applied"] = bool(hash_match)
+
         op = SimpleNamespace(
             solve_eligible=bool(constraints.get("solve_eligible", False)),
             failure_reason=str(constraints.get("failure_reason") or ""),
@@ -1025,20 +1075,19 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             source_hash=str(constraints.get("source_hash") or ""),
             final_patch=str(constraints.get("final_patch") or ""),
             owner_approved=bool(constraints.get("owner_approved", False)),
-            candidate_hash_matches_applied=bool(
-                constraints.get("candidate_hash_matches_applied", False)
-            ),
+            # Prefer selected_candidate_hash_matches_applied field name used by validator.
+            selected_candidate_hash_matches_applied=bool(hash_match),
+            candidate_hash_matches_applied=bool(hash_match),
             candidate_target_file=str(constraints.get("candidate_target_file") or ""),
-            route_context=dict(constraints.get("route_context") or {})
-            if isinstance(constraints.get("route_context"), Mapping)
-            else {},
+            route_context=route_ctx,
         )
         ctx = SimpleNamespace(op=op)
-        result = fn(ctx)
+        # Pass explicit kwarg so validator cannot apply omitted→True fallback.
+        try:
+            result = fn(ctx, candidate_hash_matches_applied=bool(hash_match))
+        except TypeError:
+            result = fn(ctx)
         elapsed = int((time.monotonic() - start) * 1000)
-        # Real validate_context_claim_delivery returns claim_gate_passed /
-        # delivery_gate_passed — NOT generic passed/ok/gate_passed. Missing
-        # explicit success fields must fail closed (never default True).
         claim_passed = None
         delivery_passed = None
         generic_passed = None
@@ -1057,25 +1106,30 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             raw_reasons = result.get("failure_reasons")
             if isinstance(raw_reasons, (list, tuple)):
                 failure_reasons = [str(x) for x in raw_reasons if str(x).strip()]
-        # Prefer claim_gate_passed for this capability; require explicit True.
-        if claim_passed is not None:
+        # Explicit False hash match always fails closed regardless of validator quirks.
+        if not bool(hash_match):
+            gate_ok = False
+            if "candidate_hash_mismatch" not in failure_reasons:
+                failure_reasons = ["candidate_hash_mismatch", *failure_reasons]
+        elif claim_passed is not None:
             gate_ok = bool(claim_passed)
         elif generic_passed is not None:
             gate_ok = bool(generic_passed)
         else:
-            gate_ok = False  # fail closed when result shape unknown
+            gate_ok = False
         outcome_map: dict[str, Any] = {
             "action": "validate_context_claim_delivery",
-            "result": str(result)[:200],
-            "claim_gate_passed": claim_passed,
+            "result": str(result)[:200] if result is not None else "",
+            "claim_gate_passed": claim_passed if claim_passed is not None else gate_ok,
             "delivery_gate_passed": delivery_passed,
+            "candidate_hash_matches_applied": bool(hash_match),
             "passed": gate_ok,
             "task_id": plan.task_id,
+            "postflight_owned": True,
         }
         if failure_reasons:
             outcome_map["failure_reasons"] = failure_reasons[:8]
-        if not gate_ok and not outcome_map.get("error"):
-            # Structured fail — keep gate_passed false via passed=False + reasons.
+        if not gate_ok:
             outcome_map["ok"] = False
         return _make_receipt(
             "claim_gate",
@@ -1095,6 +1149,7 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             outcome={
                 "action": "validate_context_claim_delivery",
                 "error": str(exc)[:300],
+                "postflight_owned": True,
             },
         )
 
@@ -1525,32 +1580,47 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
 
 
 def _exec_acceptance_check(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """Semantic-success gated acceptance — object return alone is never success.
+    """Semantic-success gated acceptance with joint verifier evidence allowlist.
 
-    Only VERIFIED / ACCEPTED / COMPLETE (and aliases) set gate_passed=true.
-    UNVERIFIED / BLOCKED / FAILED / ERROR fail closed.
+    VERIFIED alone is not enough. PASS requires all of:
+      semantic_status in VERIFIED/ACCEPTED/COMPLETE
+      verifier_status=pass
+      non-empty verifier_artifact
+      non-empty source_hash
+      non-empty evidence_refs (never invent acceptance:<task_id>)
+    UNVERIFIED / missing fields always fail closed.
     """
     start = time.monotonic()
     try:
         mod = importlib.import_module("nexus.engine.completion_enforcer")
         decide = getattr(mod, "decide_completion", None)
         constraints = dict(plan.constraints or {})
-        # Do not invent VERIFIED evidence. Default semantic_status is UNVERIFIED
-        # unless caller supplies an explicit status on constraints/payload.
-        payload = {
-            "task_id": plan.task_id,
-            "statement": task_desc,
-            "status": str(constraints.get("status") or "INCOMPLETE"),
-            "semantic_status": str(
-                constraints.get("semantic_status")
-                or constraints.get("completion_status")
-                or "UNVERIFIED"
-            ),
-            "evidence_refs": list(
-                constraints.get("evidence_refs")
-                or [f"acceptance:{plan.task_id}"]
-            ),
-        }
+        semantic_in = str(
+            constraints.get("semantic_status")
+            or constraints.get("completion_status")
+            or "UNVERIFIED"
+        ).strip().upper()
+        verifier_status = str(constraints.get("verifier_status") or "").strip().lower()
+        verifier_artifact = str(constraints.get("verifier_artifact") or "").strip()
+        source_hash = str(constraints.get("source_hash") or "").strip()
+        raw_refs = constraints.get("evidence_refs")
+        if isinstance(raw_refs, (list, tuple)):
+            evidence_refs = [str(x).strip() for x in raw_refs if str(x).strip()]
+        else:
+            evidence_refs = []
+        # Never mint acceptance:<task_id> as pass evidence.
+        missing_evidence: list[str] = []
+        if semantic_in not in _SEMANTIC_SUCCESS_STATUSES:
+            missing_evidence.append("semantic_status_not_success")
+        if verifier_status not in {"pass", "passed", "success", "ok"}:
+            missing_evidence.append("verifier_status_not_pass")
+        if not verifier_artifact:
+            missing_evidence.append("missing_verifier_artifact")
+        if not source_hash:
+            missing_evidence.append("missing_source_hash")
+        if not evidence_refs:
+            missing_evidence.append("missing_evidence_refs")
+
         if not callable(decide):
             elapsed = int((time.monotonic() - start) * 1000)
             return _make_receipt(
@@ -1564,22 +1634,46 @@ def _exec_acceptance_check(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
                     "error": "decide_completion_not_callable",
                 },
             )
+
+        payload = {
+            "task_id": plan.task_id,
+            "statement": task_desc,
+            "status": str(constraints.get("status") or "INCOMPLETE"),
+            "semantic_status": semantic_in or "UNVERIFIED",
+            "evidence_refs": list(evidence_refs),
+            "verifier_status": verifier_status,
+            "verifier_artifact": verifier_artifact,
+            "source_hash": source_hash,
+        }
         result = decide(payload)
         elapsed = int((time.monotonic() - start) * 1000)
-        semantic = str(getattr(result, "semantic_status", "") or "").strip().upper()
-        success = semantic in _SEMANTIC_SUCCESS_STATUSES
+        semantic = str(getattr(result, "semantic_status", "") or semantic_in or "UNVERIFIED").strip().upper()
+        success = (
+            semantic in _SEMANTIC_SUCCESS_STATUSES
+            and not missing_evidence
+        )
+        outcome = {
+            "action": "decide_completion",
+            "result": str(result)[:200],
+            "semantic_status": semantic or "UNVERIFIED",
+            "verifier_status": verifier_status,
+            "verifier_artifact": verifier_artifact[:80] if verifier_artifact else "",
+            "source_hash": source_hash[:80] if source_hash else "",
+            "evidence_refs": list(evidence_refs)[:8],
+            "passed": success,
+            "task_id": plan.task_id,
+        }
+        if missing_evidence:
+            outcome["missing_evidence"] = missing_evidence
+            outcome["ok"] = False
+        if not success:
+            outcome["ok"] = False
         return _make_receipt(
             "acceptance_check",
             plan,
             wall_time_ms=elapsed,
             gate_passed=success,
-            outcome={
-                "action": "decide_completion",
-                "result": str(result)[:200],
-                "semantic_status": semantic or "UNVERIFIED",
-                "passed": success,
-                "task_id": plan.task_id,
-            },
+            outcome=outcome,
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)

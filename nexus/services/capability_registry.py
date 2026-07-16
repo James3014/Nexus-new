@@ -258,6 +258,13 @@ def build_wiring_matrix() -> dict[str, Any]:
             feeds_online = True
             # Physical path is LocalModelExecutor on Local stage, not preflight skip.
             physical_hint = "local_stage:LocalModelExecutor"
+        elif name in {"artifact_gate", "claim_gate", "delivery_gate"} and gap == "F_wired_ok":
+            # Mainchain production path is strict postflight evaluator — not registry
+            # claim theater. Catalog must point at online_nexus_context.evaluate_postflight_gate.
+            handler = "postflight_evaluator"
+            has_invoker = True
+            feeds_online = True
+            physical_hint = "online_nexus_context.evaluate_postflight_gate"
         elif name in WIRED_REAL and gap == "F_wired_ok":
             handler = "real_invoker"
             has_invoker = True
@@ -549,18 +556,78 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     if executor is None:
         return None
 
+    # Explicit allowlists — never whole-context dump into plan.constraints.
+    _ACCEPTANCE_CONSTRAINT_KEYS = frozenset(
+        {
+            "semantic_status",
+            "completion_status",
+            "status",
+            "verifier_status",
+            "verifier_artifact",
+            "source_hash",
+            "evidence_refs",
+        }
+    )
+    _CLAIM_CONSTRAINT_KEYS = frozenset(
+        {
+            "source_hash",
+            "candidate_target_file",
+            "candidate_hash_matches_applied",
+            "solve_eligible",
+            "failure_reason",
+            "evaluation_report",
+            "final_patch",
+            "owner_approved",
+            "route_context",
+        }
+    )
+
+    def _allowlisted_constraints(context: Mapping[str, Any]) -> dict[str, Any]:
+        keys: frozenset[str]
+        if name == "acceptance_check":
+            keys = _ACCEPTANCE_CONSTRAINT_KEYS
+        elif name == "claim_gate":
+            keys = _CLAIM_CONSTRAINT_KEYS
+        else:
+            return {}
+        out: dict[str, Any] = {}
+        for k in keys:
+            if k in context and context.get(k) is not None:
+                out[k] = context.get(k)
+        # Nested verifier block (common mainchain shape)
+        verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
+        if name == "acceptance_check" and isinstance(verifier, Mapping):
+            for k in ("verifier_status", "verifier_artifact", "source_hash"):
+                if k not in out and verifier.get(k) not in (None, ""):
+                    # map verifier_status from nested verifier dict
+                    if k == "verifier_status":
+                        out["verifier_status"] = verifier.get("verifier_status") or verifier.get("status")
+                    elif k == "verifier_artifact":
+                        out["verifier_artifact"] = verifier.get("verifier_artifact")
+                    elif k == "source_hash":
+                        out["source_hash"] = verifier.get("source_hash")
+            if "evidence_refs" not in out and verifier.get("evidence_refs"):
+                out["evidence_refs"] = list(verifier.get("evidence_refs") or [])
+        # Top-level source_hash alias
+        if name == "acceptance_check" and "source_hash" not in out and context.get("source_hash"):
+            out["source_hash"] = context.get("source_hash")
+        if name == "claim_gate" and "source_hash" not in out and context.get("source_hash"):
+            out["source_hash"] = context.get("source_hash")
+        return out
+
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(context.get("task_id") or "")
         task_statement = str(context.get("task_statement") or "")
         plan_hash = ""
         planner = context.get("planner") if isinstance(context.get("planner"), Mapping) else {}
         plan_hash = str(planner.get("plan_hash") or planner.get("planner_decision_id") or "")
+        constraints = _allowlisted_constraints(context if isinstance(context, Mapping) else {})
         try:
             plan = CapabilityExecutionPlan(
                 plan_id=plan_hash or f"mainchain:{task_id}:{name}",
                 task_id=task_id,
                 phases=["R"],
-                constraints={},
+                constraints=constraints,
             )
         except TypeError:
             # Older/newer signature tolerance
