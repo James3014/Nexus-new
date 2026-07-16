@@ -68,6 +68,100 @@ class LocalModelExecutorResponse:
     cascade_stages_run: tuple[str, ...] = ()
 
 
+def compute_capability_usage(
+    *,
+    selected_capabilities: tuple[str, ...] | list[str],
+    metadata: Mapping[str, Any] | None = None,
+    local_model_called: bool = False,
+    route_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Causal used/not-used separation — never copy selected into used.
+
+    Returns selected_capabilities, selected_capabilities_used, capability_usage_status.
+    """
+    selected = [str(c) for c in (selected_capabilities or ()) if str(c)]
+    meta = dict(metadata or {})
+    route = dict(route_context or {})
+    status: dict[str, str] = {}
+    used: list[str] = []
+
+    def _mark(name: str, used_flag: bool, reason: str) -> None:
+        if used_flag:
+            status[name] = "used"
+            if name not in used:
+                used.append(name)
+        else:
+            status[name] = reason or "selected_not_consumed"
+
+    # Bundle payloads injected into problem/route (from LocalAssist assembly).
+    injected_payloads = route.get("consumed_evidence_ids") or meta.get("consumed_evidence_ids") or []
+    evidence_section = str(route.get("capability_evidence_prompt_section") or "")
+    evidence_ctx = route.get("capability_evidence_context") if isinstance(route.get("capability_evidence_context"), Mapping) else {}
+    payload_caps = set()
+    for ent in (evidence_ctx.get("entries") or []) if isinstance(evidence_ctx, Mapping) else []:
+        if isinstance(ent, Mapping) and ent.get("has_consumer_payload") and ent.get("consumer_payload"):
+            payload_caps.add(str(ent.get("name") or ""))
+    for p in evidence_ctx.get("consumer_payloads") or [] if isinstance(evidence_ctx, Mapping) else []:
+        if isinstance(p, Mapping) and p.get("capability"):
+            payload_caps.add(str(p.get("capability")))
+    # Markers in problem statement / evidence section.
+    for cap in ("codeintel", "memory", "belief", "lancedb", "semantic_searcher"):
+        if f"{cap}:payload" in evidence_section or f"{cap}:result" in evidence_section:
+            payload_caps.add(cap)
+
+    gate_results = meta.get("gate_results") if isinstance(meta.get("gate_results"), Mapping) else {}
+    ddtree_result = meta.get("ddtree_result") if isinstance(meta.get("ddtree_result"), Mapping) else {}
+    autoreason_result = meta.get("autoreason_result") if isinstance(meta.get("autoreason_result"), Mapping) else {}
+
+    for cap in selected:
+        if cap == "local_model_executor":
+            _mark(cap, bool(local_model_called or meta.get("local_model_called")), "selected_not_consumed")
+        elif cap == "memory":
+            attempted = bool(meta.get("memory_retrieval_attempted"))
+            prompt_included = bool(
+                meta.get("memory_prompt_included")
+                or (isinstance(meta.get("memory_trace"), Mapping) and meta["memory_trace"].get("prompt_included"))
+                or meta.get("prompt_included")
+            )
+            _mark(cap, attempted and prompt_included, "selected_not_consumed")
+        elif cap in {"codeintel", "belief", "lancedb", "semantic_searcher"}:
+            _mark(cap, cap in payload_caps, "selected_not_consumed")
+        elif cap == "ddtree":
+            invoked = bool(meta.get("ddtree_invoked") or (ddtree_result or {}).get("invoked"))
+            _mark(cap, invoked, "selected_not_consumed")
+        elif cap == "autoreason":
+            invoked = bool(meta.get("autoreason_invoked") or (autoreason_result or {}).get("invoked"))
+            _mark(cap, invoked, "selected_not_consumed")
+        elif cap in {"artifact_gate", "claim_gate", "delivery_gate"}:
+            gate = gate_results.get(cap) if isinstance(gate_results.get(cap), Mapping) else {}
+            invoked = bool(
+                meta.get(f"{cap}_invoked")
+                or (gate.get("invoked") if gate else False)
+            )
+            _mark(cap, invoked, "selected_not_consumed")
+        elif cap in {"repair_loop", "sandbox"}:
+            actual = bool(
+                meta.get("localheal_pipeline_actual_execution")
+                or meta.get(f"{cap}_invoked")
+                or meta.get(f"{cap}_gate_passed")
+            )
+            avail_only = bool(meta.get("localheal_pipeline_availability_only"))
+            ok = actual and not avail_only and not bool(meta.get(f"{cap}_failed"))
+            # Explicit failure marker
+            if meta.get("repair_loop_status") in {"FAILED", "failed", "BLOCKED"}:
+                ok = False
+            _mark(cap, ok, "selected_not_consumed" if not actual else "failed_not_used")
+        else:
+            # Unknown selected: never auto-used
+            _mark(cap, False, "selected_not_consumed")
+
+    return {
+        "selected_capabilities": list(selected),
+        "selected_capabilities_used": list(used),
+        "capability_usage_status": status,
+    }
+
+
 def _attach_local_armor_attempt_receipt(
     request: LocalModelExecutorRequest,
     raw_meta: dict[str, Any],
@@ -1495,7 +1589,6 @@ class LocalModelExecutor:
                 "selected_by": decision.selected_by,
                 "final_authority": decision.final_authority,
                 **memory_runtime_meta,
-                "selected_capabilities_used": list(selected_caps),
                 "protocol_normalization": patch_meta,
                 "source_anchor_present": source_anchor_present,
                 "source_anchor_source": source_anchor_source,
@@ -1546,6 +1639,13 @@ class LocalModelExecutor:
                 "mutation_allowed": mutation_allowed,
                 "verifier_allowed": verifier_allowed,
             }
+            _usage = compute_capability_usage(
+                selected_capabilities=selected_caps,
+                metadata=raw_meta,
+                local_model_called=True,
+                route_context=request.route_context if isinstance(request.route_context, dict) else {},
+            )
+            raw_meta.update(_usage)
             cap_ctx.local_model_metadata = raw_meta
             if hybrid_route is not None:
                 raw_meta["hybrid_route"] = hybrid_route.to_dict()
@@ -1825,7 +1925,6 @@ class LocalModelExecutor:
 
             raw_meta = {
                 "execution_topology": "localheal_pipeline",
-                "selected_capabilities_used": list(selected_caps),
                 "protocol_mode": "anchored_edit",
                 "candidate_hash_matches_applied": hash_match,
                 "source_anchor_present": source_anchor_present,
@@ -1877,6 +1976,16 @@ class LocalModelExecutor:
                 "mutation_allowed": mutation_allowed,
                 "verifier_allowed": verifier_allowed,
             }
+            _usage = compute_capability_usage(
+                selected_capabilities=selected_caps,
+                metadata=raw_meta,
+                local_model_called=bool(
+                    repair_exec.telemetries.get("model_called", False)
+                    or repair_exec.telemetries.get("patch_synthesis_model_called", False)
+                ),
+                route_context=request.route_context if isinstance(request.route_context, dict) else {},
+            )
+            raw_meta.update(_usage)
             cap_ctx.local_model_metadata = raw_meta
             if hybrid_route is not None:
                 raw_meta["hybrid_route"] = hybrid_route.to_dict()
@@ -3151,7 +3260,6 @@ class LocalModelExecutor:
             "ollama_metrics_available": getattr(prov_resp, "ollama_metrics_available", False),
             "protocol_mode": protocol_mode,
             "execution_topology": execution_topology,
-            "selected_capabilities_used": list(selected_caps),
             "protocol_normalization": patch_meta,
             "source_anchor_present": source_anchor_present,
             "source_anchor_source": source_anchor_source,
@@ -3166,6 +3274,13 @@ class LocalModelExecutor:
             **memory_runtime_meta,
             **_understanding_meta,
         }
+        _usage = compute_capability_usage(
+            selected_capabilities=selected_caps,
+            metadata=raw_meta,
+            local_model_called=bool(prov_resp.model_called if hasattr(prov_resp, "model_called") else True),
+            route_context=request.route_context if isinstance(request.route_context, dict) else {},
+        )
+        raw_meta.update(_usage)
         cap_ctx.local_model_metadata = raw_meta
         _inject_ledger_state(raw_meta, provider)
         armor_ok, armor_miss = validate_local_model_armor_metadata(raw_meta)

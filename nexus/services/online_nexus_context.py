@@ -134,26 +134,47 @@ def compact_executor_flags_for_prompt(flags: Mapping[str, Any] | None) -> dict[s
 def compact_capability_evidence_for_prompt(
     bundle: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Approved Online-safe evidence view — no CoT, secrets, or raw unapproved source."""
+    """Approved Online-safe evidence view — no CoT, secrets, or raw unapproved source.
+
+    Includes bounded consumer_payload when present so Online can consume results,
+    not only evidence IDs.
+    """
     b = _mapping(bundle)
     if not b:
         return {}
+    from nexus.services.capability_evidence_bundle import (
+        consumer_payload_markers,
+        hash_consumer_payloads,
+    )
+
     entries_out: list[dict[str, Any]] = []
+    payloads: list[dict[str, Any]] = []
+    payload_markers: list[str] = []
     for entry in b.get("entries") or []:
         if not isinstance(entry, Mapping):
             continue
-        entries_out.append(
-            {
-                "name": str(entry.get("name") or ""),
-                "status": str(entry.get("status") or ""),
-                "success": bool(entry.get("success")),
-                "invoked_real": bool(entry.get("invoked_real")),
-                "invoked_stub": bool(entry.get("invoked_stub")),
-                "skipped": bool(entry.get("skipped")),
-                "evidence_ids": list(entry.get("evidence_ids") or entry.get("evidence_refs") or [])[:8],
-                "physical_callable": str(entry.get("physical_callable") or ""),
-            }
-        )
+        # Failed / non-success entries never forward payload.
+        success = bool(entry.get("success") or entry.get("invoked_real"))
+        cp = entry.get("consumer_payload") if success else None
+        cp_map = dict(cp) if isinstance(cp, Mapping) and cp else {}
+        row = {
+            "name": str(entry.get("name") or ""),
+            "status": str(entry.get("status") or ""),
+            "success": success,
+            "invoked_real": bool(entry.get("invoked_real")),
+            "invoked_stub": bool(entry.get("invoked_stub")),
+            "skipped": bool(entry.get("skipped")),
+            "evidence_ids": list(entry.get("evidence_ids") or entry.get("evidence_refs") or [])[:8],
+            "physical_callable": str(entry.get("physical_callable") or ""),
+            "has_consumer_payload": bool(cp_map),
+        }
+        if cp_map:
+            row["consumer_payload"] = cp_map
+            payloads.append(cp_map)
+            for m in consumer_payload_markers(cp_map):
+                if m not in payload_markers:
+                    payload_markers.append(m)
+        entries_out.append(row)
     return {
         "schema": str(b.get("schema") or ""),
         "bundle_hash": str(b.get("bundle_hash") or ""),
@@ -165,6 +186,9 @@ def compact_capability_evidence_for_prompt(
         "selected_capabilities": list(b.get("selected_capabilities") or [])[:16],
         "evidence_ids": list(b.get("evidence_ids") or [])[:32],
         "entries": entries_out[:24],
+        "consumer_payloads": payloads[:16],
+        "payload_markers": payload_markers[:32],
+        "consumer_payload_hash": hash_consumer_payloads(payloads) if payloads else "",
         "public_claim_allowed": False,
         "selection_authority": str(b.get("selection_authority") or "CapabilityPlanner"),
     }
@@ -302,6 +326,8 @@ def build_online_nexus_context(
     sections.extend([PROFILE_SECTION, FLAGS_SECTION, HIDDEN_SECTION])
 
     consumed_evidence_ids: list[str] = []
+    consumed_capability_payloads: list[dict[str, Any]] = []
+    payload_markers_serialized: list[str] = []
     if evidence_compact and evidence_prompt:
         prompt_parts.append(f"\n{NEXUS_EVIDENCE_MARKER}\n{evidence_prompt}\n")
         sections.append(EVIDENCE_SECTION)
@@ -318,7 +344,20 @@ def build_online_nexus_context(
                 s = str(eid).strip()
                 if s and not s.startswith("bundle:"):
                     entry_ids.append(s)
+            cp = ent.get("consumer_payload")
+            if isinstance(cp, Mapping) and cp:
+                consumed_capability_payloads.append(dict(cp))
         consumed_evidence_ids = entry_ids or [i for i in raw_ids if not i.startswith("bundle:")]
+        # Payload markers only count when actually present in the serialized prompt.
+        for m in evidence_compact.get("payload_markers") or []:
+            ms = str(m)
+            if ms and ms in evidence_prompt and ms not in payload_markers_serialized:
+                payload_markers_serialized.append(ms)
+        # Also accept payloads listed at compact top-level.
+        if not consumed_capability_payloads:
+            for p in evidence_compact.get("consumer_payloads") or []:
+                if isinstance(p, Mapping) and p:
+                    consumed_capability_payloads.append(dict(p))
 
     if source:
         prompt_parts.append(f"\n[CURRENT SOURCE]\n{source}\n")
@@ -333,12 +372,34 @@ def build_online_nexus_context(
         sections.append(LOCAL_FORWARD_SECTION)
 
     prompt = "".join(prompt_parts)
+    # Final filter: only payloads whose markers appear in the assembled prompt.
+    final_payloads: list[dict[str, Any]] = []
+    for p in consumed_capability_payloads:
+        markers = [str(m) for m in (p.get("markers") or [])]
+        fields = p.get("fields") if isinstance(p.get("fields"), Mapping) else {}
+        markers.extend(str(m) for m in (fields.get("markers") or []))
+        if any(m and m in prompt for m in markers) or (
+            str(p.get("capability") or "") and f'{p.get("capability")}:payload' in prompt
+        ):
+            final_payloads.append(p)
+    payload_serialized = bool(final_payloads) and any(
+        m in prompt for m in (payload_markers_serialized or [f"{p.get('capability')}:payload" for p in final_payloads])
+    )
+    if not payload_serialized and final_payloads:
+        # Prompt contains the evidence JSON block with consumer_payload keys.
+        payload_serialized = "consumer_payload" in prompt and any(
+            str(p.get("capability") or "") in prompt for p in final_payloads
+        )
     assembled_prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    from nexus.services.capability_evidence_bundle import hash_consumer_payloads
+
+    consumer_payload_hash = hash_consumer_payloads(final_payloads) if final_payloads else ""
     provider_payload_hash = _hash_json(
         {
             "prompt_hash": assembled_prompt_hash,
             "bundle_hash": str(evidence_compact.get("bundle_hash") or ""),
             "consumed_evidence_ids": consumed_evidence_ids,
+            "consumer_payload_hash": consumer_payload_hash,
         }
     )
     nexus_control_chars = (
@@ -362,6 +423,10 @@ def build_online_nexus_context(
         "armor": "with_nexus",
         "bundle_hash": str(evidence_compact.get("bundle_hash") or ""),
         "consumed_evidence_ids": list(consumed_evidence_ids),
+        "consumed_capability_payloads": list(final_payloads),
+        "capability_payload_consumed": bool(payload_serialized and final_payloads),
+        "consumer_payload_hash": consumer_payload_hash,
+        "payload_markers": list(payload_markers_serialized),
         "assembled_prompt_hash": assembled_prompt_hash,
         "provider_payload_hash": provider_payload_hash,
         "capability_evidence_injected": bool(evidence_compact),
@@ -753,6 +818,20 @@ def build_plan_gated_postflight_invokers() -> dict[str, Callable[[Mapping[str, A
             task_id = str(context.get("task_id") or "")
             verdict = evaluate_postflight_gate(name, context)
             gate_passed = bool(verdict.get("gate_passed"))
+            from nexus.services.capability_evidence_bundle import extract_bounded_consumer_payload
+
+            response = {
+                "status": "PASS" if gate_passed else "BLOCK",
+                "gate": name,
+                "blockers": list(verdict.get("blockers") or []),
+                "proof": dict(verdict.get("proof") or {}),
+                "public_claim_allowed": False,
+            }
+            consumer_payload = extract_bounded_consumer_payload(
+                capability=name,
+                response=response,
+                success=gate_passed,
+            )
             return {
                 "task_id": task_id,
                 "invoked": True,
@@ -771,13 +850,8 @@ def build_plan_gated_postflight_invokers() -> dict[str, Callable[[Mapping[str, A
                 "delegated_to": "postflight",
                 "telemetry": {"token_usage": 0, "model_calls": 0},
                 "stub": False,
-                "response": {
-                    "status": "PASS" if gate_passed else "BLOCK",
-                    "gate": name,
-                    "blockers": list(verdict.get("blockers") or []),
-                    "proof": dict(verdict.get("proof") or {}),
-                    "public_claim_allowed": False,
-                },
+                "consumer_payload": consumer_payload,
+                "response": {**response, "consumer_payload": consumer_payload},
             }
 
         return invoke

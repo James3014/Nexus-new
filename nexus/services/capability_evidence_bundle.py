@@ -4,6 +4,9 @@ Produced after Planner + preflight invokers, before Local and Online stages.
 Stub invokers must not count as real-invoked success.
 SELECTED_NOT_EXECUTED must not count as success.
 ``immutable=True`` alone is never proof — consumers must re-verify bundle_hash.
+
+Entries may carry a bounded, fixed-schema ``consumer_payload`` for Local/Online
+prompt injection. ID-only entries never count as payload-consumed.
 """
 
 from __future__ import annotations
@@ -16,6 +19,80 @@ from typing import Any, Mapping
 
 BUNDLE_SCHEMA = "nexus.capability_evidence_bundle.v1"
 VERDICT_SCHEMA = "nexus.capability_evidence_bundle_verdict.v1"
+CONSUMER_PAYLOAD_SCHEMA = "nexus.consumer_payload.v1"
+MAX_CONSUMER_PAYLOAD_CHARS = 2000
+MAX_PAYLOAD_STRING_FIELD = 400
+MAX_PAYLOAD_LIST_ITEMS = 8
+
+# Safe outcome keys only — never CoT, raw patches, secrets, or source dumps.
+_ALLOWLISTED_OUTCOME_KEYS = frozenset(
+    {
+        "action",
+        "result",
+        "hit_count",
+        "confidence",
+        "risk_score",
+        "findings",
+        "summary",
+        "status",
+        "gate",
+        "blockers",
+        "provider",
+        "root",
+        "file_sample",
+        "task_linked_hash",
+        "query",
+        "task_id",
+        "error",
+        "markers",
+        "verdict",
+        "gate_passed",
+        "invoked",
+        "source_hash",
+        "artifact_hash",
+        "candidate_hash",
+        "applied_hash",
+        "scan_report_present",
+        "impact_report_present",
+        "risk_reason",
+        "impacted_files_count",
+        "impacted_symbols_count",
+        "dci_evidence_count",
+        "capability",
+        "registry_key",
+        "proof",
+    }
+)
+_FORBIDDEN_PAYLOAD_KEYS = frozenset(
+    {
+        "reasoning",
+        "private_reasoning",
+        "cot",
+        "chain_of_thought",
+        "candidate_patch",
+        "raw_patch",
+        "unified_diff",
+        "patch",
+        "secret",
+        "secrets",
+        "token",
+        "tokens",
+        "password",
+        "api_key",
+        "authorization",
+        "source_text",
+        "full_source",
+        "source_dump",
+        "raw_model_output",
+        "private_reasoning_disk_only",
+        "reasoning_summary",
+        "raw_model_metadata",
+    }
+)
+_CONTEXT_CAPABILITIES = frozenset(
+    {"codeintel", "memory", "belief", "semantic_searcher", "lancedb"}
+)
+_STRUCTURAL_GATES = frozenset({"artifact_gate", "claim_gate", "delivery_gate"})
 
 
 def _hash_json(value: Any) -> str:
@@ -27,6 +104,168 @@ def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _bound_str(value: Any, *, limit: int = MAX_PAYLOAD_STRING_FIELD) -> str:
+    text = str(value if value is not None else "")
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
+
+
+def _scrub_payload_value(value: Any, *, depth: int = 0) -> Any:
+    if depth > 3:
+        return _bound_str(value, limit=80)
+    if isinstance(value, Mapping):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            key = str(k)
+            kl = key.lower()
+            if key in _FORBIDDEN_PAYLOAD_KEYS or kl in _FORBIDDEN_PAYLOAD_KEYS:
+                continue
+            if any(bad in kl for bad in ("secret", "token", "password", "api_key", "reasoning", "patch", "cot")):
+                continue
+            if key not in _ALLOWLISTED_OUTCOME_KEYS and not key.endswith("_hash") and key not in {
+                "name",
+                "id",
+                "count",
+                "ok",
+                "message",
+            }:
+                # Nested allowlist: only keep scalar-ish metadata
+                if not isinstance(v, (str, int, float, bool)) and v is not None:
+                    continue
+            out[key] = _scrub_payload_value(v, depth=depth + 1)
+            if len(out) >= 16:
+                break
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_scrub_payload_value(v, depth=depth + 1) for v in list(value)[:MAX_PAYLOAD_LIST_ITEMS]]
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    return _bound_str(value)
+
+
+def extract_bounded_consumer_payload(
+    *,
+    capability: str,
+    stage: Mapping[str, Any] | None = None,
+    response: Mapping[str, Any] | None = None,
+    success: bool = False,
+) -> dict[str, Any]:
+    """Extract a size-capped, fixed-schema consumer_payload from a production receipt.
+
+    Sources (in order): explicit consumer_payload, response.evidence,
+    allowlisted response.outcome / stage.outcome fields. Failed entries return {}.
+    """
+    if not success:
+        return {}
+    name = str(capability or "").strip()
+    stage_m = _mapping(stage)
+    resp = _mapping(response) if response is not None else _mapping(stage_m.get("response"))
+    # Prefer nested response when stage is the full capability stage.
+    if not resp and stage_m:
+        resp = stage_m
+
+    candidates: list[Any] = []
+    for src in (
+        stage_m.get("consumer_payload"),
+        resp.get("consumer_payload"),
+        resp.get("evidence"),
+        stage_m.get("evidence"),
+        resp.get("outcome"),
+        stage_m.get("outcome"),
+    ):
+        if src not in (None, "", {}, []):
+            candidates.append(src)
+
+    body: dict[str, Any] = {}
+    for cand in candidates:
+        if isinstance(cand, Mapping):
+            scrubbed = _scrub_payload_value(cand)
+            if isinstance(scrubbed, Mapping) and scrubbed:
+                body.update(dict(scrubbed))
+        elif isinstance(cand, str) and cand.strip():
+            body.setdefault("summary", _bound_str(cand))
+        elif isinstance(cand, (list, tuple)) and cand:
+            body.setdefault("findings", _scrub_payload_value(list(cand)[:MAX_PAYLOAD_LIST_ITEMS]))
+
+    # Structural gates: verdict/blockers/hash are enough.
+    if name in _STRUCTURAL_GATES:
+        blockers = resp.get("blockers") or stage_m.get("blockers") or body.get("blockers")
+        proof = resp.get("proof") if isinstance(resp.get("proof"), Mapping) else {}
+        if blockers is not None:
+            body["blockers"] = _scrub_payload_value(blockers)
+        if proof:
+            for hk in ("source_hash", "artifact_hash", "candidate_hash", "applied_hash", "verifier_artifact"):
+                if proof.get(hk):
+                    body[hk] = _bound_str(proof.get(hk), limit=80)
+        if resp.get("status") or stage_m.get("status"):
+            body["status"] = _bound_str(resp.get("status") or stage_m.get("status"), limit=40)
+        body.setdefault("verdict", "PASS" if success else "BLOCK")
+
+    if not body:
+        return {}
+
+    markers = [f"{name}:result", f"{name}:payload"]
+    if name in _CONTEXT_CAPABILITIES:
+        markers.append(f"{name}:finding")
+    body["markers"] = markers
+    body["capability"] = name
+
+    payload = {
+        "schema": CONSUMER_PAYLOAD_SCHEMA,
+        "capability": name,
+        "markers": markers,
+        "fields": body,
+        "public_claim_allowed": False,
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    if len(encoded) > MAX_CONSUMER_PAYLOAD_CHARS:
+        # Truncate fields summary to fit.
+        body = {
+            "capability": name,
+            "markers": markers,
+            "summary": _bound_str(body.get("summary") or body.get("result") or body.get("action") or "bounded", limit=200),
+            "truncated": True,
+        }
+        payload["fields"] = body
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        if len(encoded) > MAX_CONSUMER_PAYLOAD_CHARS:
+            return {}
+    payload["payload_hash"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    payload["payload_chars"] = len(encoded)
+    return payload
+
+
+def consumer_payload_markers(payload: Mapping[str, Any] | None) -> list[str]:
+    p = _mapping(payload)
+    markers = [str(m) for m in (p.get("markers") or []) if str(m).strip()]
+    fields = p.get("fields") if isinstance(p.get("fields"), Mapping) else {}
+    for m in fields.get("markers") or []:
+        s = str(m).strip()
+        if s and s not in markers:
+            markers.append(s)
+    return markers
+
+
+def hash_consumer_payloads(payloads: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...]) -> str:
+    """Stable hash over a list of bounded consumer payloads (for Local/Online match)."""
+    cleaned = []
+    for p in payloads:
+        if not isinstance(p, Mapping):
+            continue
+        cleaned.append(
+            {
+                "capability": str(p.get("capability") or ""),
+                "payload_hash": str(p.get("payload_hash") or ""),
+                "markers": list(consumer_payload_markers(p)),
+            }
+        )
+    cleaned.sort(key=lambda x: x["capability"])
+    return _hash_json(cleaned)
 
 
 def _canonical_payload_for_hash(bundle: Mapping[str, Any]) -> dict[str, Any]:
@@ -138,6 +377,23 @@ def build_capability_evidence_bundle(
             if eid not in evidence_ids:
                 evidence_ids.append(eid)
 
+        # Bounded consumer_payload only for successful real invocations.
+        consumer_payload = extract_bounded_consumer_payload(
+            capability=key,
+            stage=stage,
+            response=response if isinstance(response, Mapping) else None,
+            success=bool(success and not stub_flag and not skipped_flag),
+        )
+        # Also accept stage-level consumer_payload set by production invokers.
+        if not consumer_payload and success:
+            raw_cp = stage.get("consumer_payload")
+            if isinstance(raw_cp, Mapping) and raw_cp:
+                consumer_payload = extract_bounded_consumer_payload(
+                    capability=key,
+                    stage={"consumer_payload": raw_cp, "response": {"consumer_payload": raw_cp}},
+                    success=True,
+                )
+
         entries.append(
             {
                 "name": key,
@@ -152,6 +408,8 @@ def build_capability_evidence_bundle(
                 "physical_callable": physical,
                 "stage_status": status,
                 "telemetry": telemetry,
+                "consumer_payload": consumer_payload,
+                "has_consumer_payload": bool(consumer_payload),
             }
         )
 
@@ -362,10 +620,14 @@ def record_consumption(
     selected_capabilities: list[str] | tuple[str, ...] | None = None,
     physical_callable: str = "",
     extra: Mapping[str, Any] | None = None,
+    consumed_capability_payloads: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
+    payload_serialized_into_prompt: bool = False,
 ) -> dict[str, Any]:
     """Build consumer consumption receipt fields.
 
     Empty consumed_evidence_ids must never mark capability as consumed.
+    ``capability_payload_consumed`` is true only when bounded payloads were
+    actually serialized into the provider prompt (not ID-only bookkeeping).
     """
     intact = assert_consumer_bundle_intact(bundle)
     # Reject empty / synthetic envelope IDs (bundle:<hash> is never real consumption).
@@ -373,6 +635,7 @@ def record_consumption(
     ids = [i for i in raw_ids if not i.startswith("bundle:")]
     # When entries exist, every consumed id must trace to a successful entry.
     entry_id_set: set[str] = set()
+    entry_payload_by_cap: dict[str, Mapping[str, Any]] = {}
     entries = bundle.get("entries") if isinstance(bundle, Mapping) else None
     if isinstance(entries, list):
         for ent in entries:
@@ -384,19 +647,44 @@ def record_consumption(
                 s = str(eid).strip()
                 if s:
                     entry_id_set.add(s)
+            cp = ent.get("consumer_payload")
+            ename = str(ent.get("name") or "")
+            if ename and isinstance(cp, Mapping) and cp:
+                entry_payload_by_cap[ename] = cp
         for eid in bundle.get("evidence_ids") or []:
             s = str(eid).strip()
             if s:
                 entry_id_set.add(s)
         if entry_id_set:
             ids = [i for i in ids if i in entry_id_set]
+
+    raw_payloads = list(consumed_capability_payloads or [])
+    payloads: list[dict[str, Any]] = []
+    for p in raw_payloads:
+        if not isinstance(p, Mapping):
+            continue
+        cap = str(p.get("capability") or "")
+        # Only forward payloads that exist on successful bundle entries.
+        if entry_payload_by_cap and cap and cap not in entry_payload_by_cap:
+            continue
+        if not p.get("payload_hash") and not p.get("fields"):
+            continue
+        payloads.append(dict(p))
+
+    # ID-only: payloads list empty or not serialized ⇒ payload not consumed.
+    payload_consumed = bool(payloads) and bool(payload_serialized_into_prompt) and bool(intact.get("ok"))
     selected = [str(x) for x in (selected_capabilities or bundle.get("selected_capabilities") or [])]
+    payload_hash = hash_consumer_payloads(payloads) if payloads else ""
     consumer_input = {
         "consumer": str(consumer),
         "bundle_hash": str(bundle.get("bundle_hash") or ""),
         "consumed_evidence_ids": ids,
+        "consumed_capability_payloads": [
+            {"capability": p.get("capability"), "payload_hash": p.get("payload_hash")} for p in payloads
+        ],
         "selected_capabilities": selected,
         "physical_callable": str(physical_callable or ""),
+        "payload_serialized_into_prompt": bool(payload_serialized_into_prompt),
         **(dict(extra) if isinstance(extra, Mapping) else {}),
     }
     consumer_input_hash = _hash_json(consumer_input)
@@ -405,6 +693,9 @@ def record_consumption(
     return {
         "bundle_hash": str(bundle.get("bundle_hash") or ""),
         "consumed_evidence_ids": ids,
+        "consumed_capability_payloads": payloads,
+        "capability_payload_consumed": payload_consumed,
+        "consumer_payload_hash": payload_hash,
         "selected_capabilities": selected,
         "physical_callable": str(physical_callable or ""),
         "consumer_input_hash": consumer_input_hash,

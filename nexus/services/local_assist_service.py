@@ -83,13 +83,23 @@ def build_local_compact_evidence(
     """Build compact evidence for Local provider prompt injection.
 
     Only Planner-selected local-consumable capabilities with success/invoked_real
-    entries are included. Returns prompt section text and the exact IDs serialized.
+    entries are included. Includes bounded consumer_payload when present.
+    Returns prompt section text and the exact IDs/payloads serialized.
     """
+    from nexus.services.capability_evidence_bundle import (
+        consumer_payload_markers,
+        hash_consumer_payloads,
+    )
+
     b = dict(bundle) if isinstance(bundle, Mapping) else {}
     if not b:
         return {
             "prompt_section": "",
             "consumed_evidence_ids": [],
+            "consumed_capability_payloads": [],
+            "capability_payload_consumed": False,
+            "consumer_payload_hash": "",
+            "payload_markers": [],
             "selected_capabilities_used": [],
             "compact": {},
             "bundle_hash": "",
@@ -111,6 +121,8 @@ def build_local_compact_evidence(
 
     entries_out: list[dict[str, Any]] = []
     consumed_ids: list[str] = []
+    payloads: list[dict[str, Any]] = []
+    payload_markers: list[str] = []
     caps_used: list[str] = []
     seen_ids: set[str] = set()
 
@@ -127,28 +139,40 @@ def build_local_compact_evidence(
             for x in (ent.get("evidence_ids") or ent.get("evidence_refs") or [])
             if str(x).strip() and not str(x).startswith("bundle:")
         ]
-        if not eids:
+        cp = ent.get("consumer_payload") if isinstance(ent.get("consumer_payload"), Mapping) else {}
+        # Context capabilities without payload: still may list IDs but not mark payload used.
+        if not eids and not cp:
             continue
         summary = (
             f"status={ent.get('status') or 'SUCCEEDED'};"
             f"physical={str(ent.get('physical_callable') or '')[:80]}"
         )
-        entries_out.append(
-            {
-                "name": ename,
-                "status": str(ent.get("status") or ""),
-                "success": True,
-                "invoked_real": bool(ent.get("invoked_real") or ent.get("success")),
-                "outcome_summary": summary,
-                "evidence_ids": eids[:8],
-            }
-        )
-        if ename not in caps_used:
-            caps_used.append(ename)
+        row: dict[str, Any] = {
+            "name": ename,
+            "status": str(ent.get("status") or ""),
+            "success": True,
+            "invoked_real": bool(ent.get("invoked_real") or ent.get("success")),
+            "outcome_summary": summary,
+            "evidence_ids": eids[:8],
+            "has_consumer_payload": bool(cp),
+        }
+        if cp:
+            row["consumer_payload"] = dict(cp)
+            payloads.append(dict(cp))
+            for m in consumer_payload_markers(cp):
+                if m not in payload_markers:
+                    payload_markers.append(m)
+            if ename not in caps_used:
+                caps_used.append(ename)
         for eid in eids:
             if eid not in seen_ids:
                 seen_ids.add(eid)
                 consumed_ids.append(eid)
+        # ID-only context entries do not enter selected_capabilities_used as payload-used.
+        if eids and not cp and ename not in caps_used:
+            # still not "used" for payload causality — leave out of caps_used
+            pass
+        entries_out.append(row)
 
     compact = {
         "schema": "nexus.local_capability_evidence.v1",
@@ -159,18 +183,29 @@ def build_local_compact_evidence(
         "selected_capabilities_used": list(caps_used),
         "entries": entries_out[:16],
         "evidence_ids": list(consumed_ids)[:32],
+        "consumer_payloads": payloads[:16],
+        "payload_markers": payload_markers[:32],
+        "consumer_payload_hash": hash_consumer_payloads(payloads) if payloads else "",
         "public_claim_allowed": False,
     }
     prompt_section = ""
-    if entries_out and consumed_ids:
+    if entries_out and (consumed_ids or payloads):
         prompt_section = (
             "[NEXUS_CAPABILITY_EVIDENCE]\n"
             + json.dumps(compact, ensure_ascii=False, sort_keys=True, default=str)
             + "\n"
         )
+    payload_serialized = bool(payloads) and bool(prompt_section) and all(
+        any(m in prompt_section for m in consumer_payload_markers(p)) or str(p.get("capability") or "") in prompt_section
+        for p in payloads
+    )
     return {
         "prompt_section": prompt_section,
         "consumed_evidence_ids": list(consumed_ids),
+        "consumed_capability_payloads": list(payloads),
+        "capability_payload_consumed": bool(payload_serialized),
+        "consumer_payload_hash": str(compact.get("consumer_payload_hash") or ""),
+        "payload_markers": list(payload_markers),
         "selected_capabilities_used": list(caps_used),
         "compact": compact if entries_out else {},
         "bundle_hash": str(b.get("bundle_hash") or ""),
@@ -767,18 +802,35 @@ class LocalAssistService:
         _ids_for_record = list(_assembled_consumed_ids) if (
             local_model_invoked and _prompt_evidence_section and _assembled_consumed_ids
         ) else []
-        _caps_for_record = list(_assembled_caps_used) if _ids_for_record else []
+        _payloads_for_record = list(_local_evidence.get("consumed_capability_payloads") or []) if (
+            local_model_invoked and _prompt_evidence_section
+        ) else []
+        _payload_serialized = bool(
+            local_model_invoked
+            and _prompt_evidence_section
+            and _local_evidence.get("capability_payload_consumed")
+            and _payloads_for_record
+        )
+        _caps_for_record = list(_assembled_caps_used) if (_ids_for_record or _payloads_for_record) else []
         _consumption = record_consumption(
             bundle=_ev_bundle if _ev_bundle else {"bundle_hash": "", "selected_capabilities": []},
             consumer="Local",
             consumed_evidence_ids=_ids_for_record,
             selected_capabilities=_caps_for_record,
             physical_callable=physical_callable,
+            consumed_capability_payloads=_payloads_for_record,
+            payload_serialized_into_prompt=_payload_serialized,
         )
         _consumption = {
             **_consumption,
             "selected_capabilities_used": list(_caps_for_record),
-            "prompt_evidence_injected": bool(_prompt_evidence_section and _ids_for_record),
+            "prompt_evidence_injected": bool(_prompt_evidence_section and (_ids_for_record or _payloads_for_record)),
+            "payload_markers": list(_local_evidence.get("payload_markers") or []),
+            "consumer_payload_hash": str(
+                _consumption.get("consumer_payload_hash")
+                or _local_evidence.get("consumer_payload_hash")
+                or ""
+            ),
             "bundle_hash": str(
                 _consumption.get("bundle_hash") or _bundle_hash or ""
             ),

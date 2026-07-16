@@ -655,6 +655,26 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 },
             }
         status = "SUCCEEDED" if gate_passed else "FAILED"
+        evidence_refs = [evidence_id] if evidence_id else [f"capability:{name}:{task_id}:real"]
+        # Bounded consumer_payload for Local/Online prompt injection (no CoT/patch).
+        consumer_payload: dict[str, Any] = {}
+        if gate_passed:
+            try:
+                from nexus.services.capability_evidence_bundle import (
+                    extract_bounded_consumer_payload,
+                )
+
+                consumer_payload = extract_bounded_consumer_payload(
+                    capability=name,
+                    response={
+                        "outcome": outcome_map,
+                        "evidence": {"evidence_id": evidence_id} if evidence_id else {},
+                        "status": status,
+                    },
+                    success=True,
+                )
+            except Exception:
+                consumer_payload = {}
         return {
             "task_id": task_id,
             "invoked": True,
@@ -662,16 +682,18 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "status": status,
             "gate_passed": gate_passed,
             "outcome_contributed": gate_passed,
-            "evidence_refs": [evidence_id] if evidence_id else [f"capability:{name}:{task_id}:real"],
-            "evidence_ids": [evidence_id] if evidence_id else [f"capability:{name}:{task_id}:real"],
+            "evidence_refs": evidence_refs,
+            "evidence_ids": list(evidence_refs),
             "physical_callable": f"capability_executor_registry:{registry_key}",
             "telemetry": telemetry,
             "stub": False,
+            "consumer_payload": consumer_payload,
             "response": {
                 "status": status,
                 "capability": name,
                 "registry_key": registry_key,
                 "outcome": outcome_map,
+                "consumer_payload": consumer_payload,
                 "stub": False,
             },
         }

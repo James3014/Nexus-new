@@ -22,6 +22,7 @@ _REQUIRED_FIELDS = (
     "failure_feedback_present",
     "final_authority",
 )
+# selected_capabilities is preferred when present; used must never silently equal selected.
 
 
 def validate_local_model_armor_metadata(
@@ -86,62 +87,114 @@ def validate_local_model_armor_metadata(
 def validate_capability_causality(
     metadata: Mapping[str, Any],
 ) -> tuple[bool, list[str]]:
-    """Validate that every selected capability has a causality status.
+    """Validate selected vs used causality.
 
-    Returns:
-        (is_complete, issues) where issues lists failed checks.
+    When both ``selected_capabilities`` and ``selected_capabilities_used`` are
+    present without ``capability_usage_status``, a full equality copy is a
+    false-green. Legacy receipts that only set ``selected_capabilities_used``
+    still use physical invoke checks (memory/ddtree/gates/path-A).
     """
     issues: list[str] = []
-    selected = metadata.get("selected_capabilities_used", [])
+    explicit_selected = list(metadata.get("selected_capabilities") or [])
+    used = list(metadata.get("selected_capabilities_used") or [])
+    usage_status = metadata.get("capability_usage_status")
+    if not isinstance(usage_status, Mapping):
+        usage_status = {}
+
+    # Legacy: only used list present — treat as the selected set for invoke checks.
+    legacy_mode = not explicit_selected and bool(used)
+    selected = list(explicit_selected) if explicit_selected else list(used)
+
     if not selected:
         return (True, [])
 
-    # Check each selected capability has execution result
-    gate_results = metadata.get("gate_results", {})
+    # New contract: selected + used present, equal, no status, multi-cap → reject copy.
+    if (
+        not legacy_mode
+        and explicit_selected
+        and used
+        and set(explicit_selected) == set(used)
+        and not usage_status
+        and len(explicit_selected) > 1
+    ):
+        issues.append("selected_used_mismatch_copy_without_usage_status")
+
+    gate_results = metadata.get("gate_results", {}) or {}
     ddtree_result = metadata.get("ddtree_result")
     autoreason_result = metadata.get("autoreason_result")
 
     for cap in selected:
-        if cap == "local_model_executor":
-            # Always present if we're in this path
+        st = str(usage_status.get(cap) or "")
+        if st == "used":
+            if cap not in used and not legacy_mode:
+                issues.append(f"{cap}_status_used_but_missing_from_used_list")
             continue
-        elif cap == "ddtree":
-            if not ddtree_result or not ddtree_result.get("invoked"):
-                issues.append(f"ddtree_selected_but_not_invoked")
+        if st in {"selected_not_consumed", "failed_not_used"}:
+            if cap in used:
+                issues.append(f"{cap}_selected_not_consumed_but_reported_used")
+            continue
+
+        # Physical invoke checks (legacy + when status absent).
+        if cap == "local_model_executor":
+            continue
+        if cap == "ddtree":
+            if not ddtree_result or not (
+                isinstance(ddtree_result, Mapping) and ddtree_result.get("invoked")
+            ):
+                issues.append("ddtree_selected_but_not_invoked")
         elif cap == "autoreason":
-            if not autoreason_result or not autoreason_result.get("invoked"):
-                issues.append(f"autoreason_selected_but_not_invoked")
+            if not autoreason_result or not (
+                isinstance(autoreason_result, Mapping) and autoreason_result.get("invoked")
+            ):
+                issues.append("autoreason_selected_but_not_invoked")
         elif cap in ("artifact_gate", "claim_gate", "delivery_gate"):
-            gate = gate_results.get(cap)
-            if not gate or not gate.get("invoked"):
+            gate = gate_results.get(cap) if isinstance(gate_results, Mapping) else None
+            if not gate or not (isinstance(gate, Mapping) and gate.get("invoked")):
                 issues.append(f"{cap}_selected_but_not_invoked")
-        elif cap in ("swarm_multi_agent", "drone", "ultra_review", "hyper_sprint",
-                       "nightshift", "codeintel", "lancedb", "belief", "mempalace",
-                       "research", "ui_validator", "external_productivity"):
-            # External only - expected
+        elif cap in (
+            "swarm_multi_agent",
+            "drone",
+            "ultra_review",
+            "hyper_sprint",
+            "nightshift",
+            "codeintel",
+            "lancedb",
+            "belief",
+            "mempalace",
+            "research",
+            "ui_validator",
+            "external_productivity",
+        ):
+            # External-only / context — expected without local invoke markers.
             pass
         elif cap == "memory":
             if not metadata.get("memory_retrieval_attempted", False):
                 issues.append("memory_selected_but_not_invoked")
         elif cap == "repair_loop":
-            # Path A causality: must have actual execution, not just availability
             actual_exec = metadata.get("localheal_pipeline_actual_execution", False)
             avail_only = metadata.get("localheal_pipeline_availability_only", False)
             if avail_only:
                 issues.append("localheal_pipeline_availability_only")
             elif not actual_exec:
                 issues.append("path_a_actual_execution_missing")
-        else:
+        elif not usage_status and not legacy_mode:
             issues.append(f"{cap}_selected_but_causality_unknown")
 
-    # Path A causality: if localheal_pipeline topology, must have actual execution
+    if not legacy_mode:
+        for cap in used:
+            if cap not in selected:
+                issues.append(f"{cap}_used_but_not_selected")
+
+    # Path A: localheal_pipeline topology always requires actual execution evidence.
     topo = metadata.get("execution_topology", "")
     if topo == "localheal_pipeline":
         actual_exec = metadata.get("localheal_pipeline_actual_execution", False)
         avail_only = metadata.get("localheal_pipeline_availability_only", False)
         if avail_only:
-            issues.append("localheal_pipeline_availability_only")
+            if "localheal_pipeline_availability_only" not in issues:
+                issues.append("localheal_pipeline_availability_only")
         elif not actual_exec:
-            issues.append("path_a_actual_execution_missing")
+            if "path_a_actual_execution_missing" not in issues:
+                issues.append("path_a_actual_execution_missing")
 
     return (len(issues) == 0, issues)
