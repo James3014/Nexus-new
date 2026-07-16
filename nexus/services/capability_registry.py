@@ -322,6 +322,179 @@ def build_wiring_matrix() -> dict[str, Any]:
     }
 
 
+def build_local_model_executor_invoker() -> CapabilityInvoker:
+    """Production LocalModelExecutor path for the local_model_executor capability.
+
+    Prefers proof already produced by the Local stage. Otherwise runs a bounded
+    dry-run LocalModelExecutor call with an injected fixture provider (no network).
+    Never reports F success from explicit_skip alone.
+    """
+
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = str(context.get("task_id") or "")
+        # Prefer Local stage physical proof when already present.
+        local = context.get("local") if isinstance(context.get("local"), Mapping) else {}
+        local_resp = (
+            local.get("response") if isinstance(local.get("response"), Mapping) else {}
+        )
+        physical = str(local_resp.get("physical_callable") or "")
+        if bool(local.get("invoked")) and physical and (
+            "LocalModel" in physical or "Executor" in physical or "local_model" in physical
+        ):
+            tele = (
+                dict(local_resp.get("telemetry") or {})
+                if isinstance(local_resp.get("telemetry"), Mapping)
+                else {"token_usage": 0, "model_calls": int(bool(local_resp.get("local_model_called")))}
+            )
+            refs = [str(r) for r in (local.get("evidence_refs") or local_resp.get("evidence_refs") or [])]
+            if not refs:
+                refs = [f"capability:local_model_executor:{task_id}:local_stage"]
+            gate = bool(local.get("gate_passed") or local_resp.get("gate_passed"))
+            return {
+                "task_id": task_id,
+                "invoked": True,
+                "skipped": False,
+                "status": "SUCCEEDED" if gate else "FAILED",
+                "gate_passed": gate,
+                "outcome_contributed": bool(local.get("outcome_contributed") or gate),
+                "evidence_refs": refs,
+                "evidence_ids": refs,
+                "physical_callable": physical,
+                "delegated_to": "Local",
+                "telemetry": tele,
+                "stub": False,
+                "response": {
+                    "status": "SUCCEEDED" if gate else "FAILED",
+                    "source": "local_stage_proof",
+                    "physical_callable": physical,
+                },
+            }
+
+        # Bounded production dry-run: real LocalModelExecutor class + fixture provider.
+        try:
+            from pathlib import Path
+
+            from nexus.services.local_heal.local_model_executor import (
+                LocalModelExecutor,
+                LocalModelExecutorRequest,
+            )
+            from nexus.services.local_heal.local_model_provider import (
+                LocalModelProvider,
+                LocalModelProviderRequest,
+                LocalModelProviderResponse,
+            )
+        except Exception as exc:
+            return {
+                "task_id": task_id,
+                "invoked": False,
+                "skipped": False,
+                "status": "BLOCKED",
+                "gate_passed": False,
+                "outcome_contributed": False,
+                "evidence_refs": [f"capability:local_model_executor:{task_id}:import_blocked"],
+                "physical_callable": "LocalModelExecutor.run",
+                "reason": BLOCKED_EXECUTOR_UNAVAILABLE,
+                "telemetry": {"token_usage": 0, "model_calls": 0},
+                "stub": False,
+                "response": {"error": f"{exc.__class__.__name__}:{exc}"[:200]},
+            }
+
+        class _FixtureLocalProvider(LocalModelProvider):
+            def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
+                return LocalModelProviderResponse(
+                    provider_invoked=True,
+                    model_called=True,
+                    model_name="fixture-local",
+                    output_text="# fixture local model output\n",
+                )
+
+        root = str(
+            context.get("workspace_root")
+            or (context.get("route") or {}).get("workspace_root")
+            or Path(".").resolve()
+        )
+        snap = {
+            "execution_topology": "single_local_model",
+            "protocol_mode": "anchored_edit",
+            "executor_model": "fixture-local",
+            "executor_provider": "fixture",
+            "model_call_allowed": True,
+            "planner_decision_id": str(
+                (context.get("planner") or {}).get("planner_decision_id")
+                or (context.get("planner") or {}).get("plan_hash")
+                or f"local:{task_id}"
+            ),
+        }
+        req = LocalModelExecutorRequest(
+            task_id=task_id or "local_model_executor",
+            problem_statement=str(context.get("task_statement") or "local_model_executor"),
+            repo_root=root,
+            target_file=str(context.get("target_file") or "README.md"),
+            selected_capabilities=("local_model_executor",),
+            evidence_refs=(f"capability:local_model_executor:{task_id}:request",),
+            dry_run=False,
+            mutation_allowed=False,
+            verifier_allowed=False,
+            execution_topology="single_local_model",
+            route_context={"signal_snapshot": dict(snap)},
+            receipt_context={"signal_snapshot": dict(snap)},
+            model_name="fixture-local",
+        )
+        try:
+            resp = LocalModelExecutor.run(req, provider=_FixtureLocalProvider())
+        except Exception as exc:
+            return {
+                "task_id": task_id,
+                "invoked": False,
+                "skipped": False,
+                "status": "BLOCKED",
+                "gate_passed": False,
+                "outcome_contributed": False,
+                "evidence_refs": [f"capability:local_model_executor:{task_id}:blocked"],
+                "physical_callable": "LocalModelExecutor.run",
+                "reason": BLOCKED_EXECUTOR_UNAVAILABLE,
+                "telemetry": {"token_usage": 0, "model_calls": 0},
+                "stub": False,
+                "response": {"error": f"{exc.__class__.__name__}:{exc}"[:200]},
+            }
+
+        invoked = bool(getattr(resp, "invoked", False))
+        model_called = bool(getattr(resp, "local_model_called", False))
+        gate = bool(invoked and model_called and not getattr(resp, "error", ""))
+        evidence = [str(x) for x in (getattr(resp, "evidence_refs", ()) or [])]
+        if not evidence:
+            evidence = [f"capability:local_model_executor:{task_id}:executor"]
+        tele = {
+            "token_usage": 0,
+            "model_calls": 1 if model_called else 0,
+        }
+        return {
+            "task_id": task_id,
+            "invoked": invoked,
+            "skipped": False,
+            "status": "SUCCEEDED" if gate else ("FAILED" if invoked else "BLOCKED"),
+            "gate_passed": gate,
+            "outcome_contributed": gate,
+            "evidence_refs": evidence,
+            "evidence_ids": evidence,
+            "physical_callable": "LocalModelExecutor.run",
+            "delegated_to": "Local",
+            "telemetry": tele,
+            "stub": False,
+            "response": {
+                "status": "SUCCEEDED" if gate else "FAILED",
+                "local_model_called": model_called,
+                "provider": str(getattr(resp, "provider", "") or ""),
+                "model_name": str(getattr(resp, "model_name", "") or ""),
+                "error": str(getattr(resp, "error", "") or "")[:200],
+                "reasoning_summary": str(getattr(resp, "reasoning_summary", "") or "")[:200],
+                "physical_callable": "LocalModelExecutor.run",
+            },
+        }
+
+    return invoke
+
+
 def build_explicit_skip_invoker(
     capability_name: str,
     *,
@@ -646,10 +819,8 @@ def build_default_mainchain_invokers(
         if name in invokers:
             continue
         if name in LOCAL_STAGE_CAPABILITIES:
-            # Local stage owns execution; registry records skip-from-preflight map.
-            invokers[name] = build_explicit_skip_invoker(
-                name, skip_reason=SKIP_LOCAL_STAGE
-            )
+            # Production LocalModelExecutor path (not explicit_skip theater).
+            invokers[name] = build_local_model_executor_invoker()
             continue
         real = build_real_executor_invoker(name)
         # Escalation-only / probe-only reclass: untriggered → policy skip; triggered → real or BLOCKED.

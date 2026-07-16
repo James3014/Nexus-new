@@ -279,23 +279,28 @@ def test_pipeline_repair_module_wires_unified_runtime() -> None:
 
 
 def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_path: Path) -> None:
-    """Runtime: PipelineRepair path must call run_mainchain (monkeypatch, not token search)."""
+    """Runtime: invoke PipelineRepairMixin._run_unified_advisor_online under run_mainchain monkeypatch."""
     import nexus.services.mainchain_entry as me
-    from nexus.services.unified_runtime import UnifiedRuntimeRequest
+    from nexus.engine.pipeline_repair import PipelineRepairMixin
 
     calls: list[str] = []
 
     def _fake_run_mainchain(request, **kwargs):  # type: ignore[no-untyped-def]
-        calls.append(str(getattr(request, "task_id", "")))
+        tid = str(getattr(request, "task_id", ""))
+        calls.append(tid)
         return {
             "schema": "nexus.unified_runtime.receipt.v1",
-            "task_id": getattr(request, "task_id", "pr-runtime-1"),
+            "task_id": tid,
             "planner_decision_id": "pr-pdid-1",
             "receipt_complete": True,
             "capability_closure_complete": False,
             "terminal_status": "SUCCEEDED",
             "claim_boundary": {"public_claim_allowed": False},
-            "online": {"invoked": True, "status": "SUCCEEDED", "response": {"ok": True}},
+            "online": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "response": {"status": "APPROVED", "patch": "ok", "ok": True},
+            },
             "capability_evidence_bundle": {
                 "planner_decision_id": "pr-pdid-1",
                 "bundle_hash": "b" * 64,
@@ -306,44 +311,70 @@ def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_pat
 
     monkeypatch.setattr(me, "run_mainchain", _fake_run_mainchain)
 
-    # Exercise pipeline_repair composition helper that builds the mainchain request.
-    from nexus.services.mainchain_entry import (
-        build_mainchain_capability_invokers,
-        stamp_mainchain_route,
-    )
+    class _Gateway:
+        oauth_provider = "gemini"
+        use_surgical_repair = False
 
-    route = stamp_mainchain_route(
-        {
-            "recommended_flow": "direct",
-            "injected_transport": True,
-            "online_policy": "auto",
-            "mainchain_entry": True,
-        },
-        product_entry="pipeline_repair",
+        def ask_structured(self, *a, **k):  # type: ignore[no-untyped-def]
+            return {"status": "APPROVED", "patch": "ok"}, "raw"
+
+        def bind_online_execution_decision(self, *a, **k):  # type: ignore[no-untyped-def]
+            return None
+
+    class _Harness(PipelineRepairMixin):
+        def __init__(self) -> None:
+            self.engine = type(
+                "E",
+                (),
+                {
+                    "project_root": tmp_path,
+                    "run_dir": tmp_path / "runs",
+                    "_add_step_to_history": lambda *a, **k: None,
+                },
+            )()
+            self.registry = None
+            self._repair_gateway = _Gateway()
+
+        def _ensure_repair_gateway(self, ctx):  # type: ignore[no-untyped-def]
+            return self._repair_gateway
+
+        def _ensure_workspace_revision(self, ctx) -> str:  # type: ignore[no-untyped-def]
+            return "wr-pr-1"
+
+        def _stamp_stage_truth(self, meta, **kwargs):  # type: ignore[no-untyped-def]
+            meta.update(kwargs)
+            return meta
+
+    class _State:
+        def __init__(self) -> None:
+            self.metadata = {
+                "task_id": "pr-runtime-1",
+                "local_assist_mode": "disabled",
+                "oauth_provider": "gemini",
+                "injected_transport": True,
+                "online_policy": "auto",
+            }
+
+    class _Ctx:
+        def __init__(self) -> None:
+            self.state = _State()
+            self.task_id = "pr-runtime-1"
+            self.task_desc = "pipeline repair formal caller proof"
+
+    harness = _Harness()
+    (tmp_path / ".nexus" / "reports" / "unified_runtime").mkdir(parents=True, exist_ok=True)
+
+    def _online_callable(prompt: str):
+        return {"status": "APPROVED", "patch": "ok"}, "raw-online"
+
+    res, raw = harness._run_unified_advisor_online(
+        _Ctx(),
+        online_callable=_online_callable,
+        repair_attempts=1,
     )
-    req = UnifiedRuntimeRequest(
-        task_id="pr-runtime-1",
-        workspace_revision="r",
-        task_statement="scan impact risk codeintel",
-        task_type="codeintel",
-        route=route,
-        online_enabled=True,
-        online_prompt="task",
-        codeintel={"scan_report_present": True, "risk_score": 1},
-    )
-    # Call through run_mainchain (same entry pipeline_repair uses after patch).
-    receipt = me.run_mainchain(
-        req,
-        online_invoker=_online,
-        capability_invokers=build_mainchain_capability_invokers(
-            codeintel={"scan_report_present": True, "risk_score": 1}
-        ),
-        verifier=_verifier,
-        learning=_learning,
-    )
-    assert "pr-runtime-1" in calls
-    assert receipt["planner_decision_id"] == "pr-pdid-1"
-    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    assert calls, "PipelineRepairMixin did not call run_mainchain"
+    assert any("pr-runtime-1" in c for c in calls), calls
+    assert res is not None or raw is not None
 
 
 def test_cli_module_uses_gateway_ask_unified() -> None:

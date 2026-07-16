@@ -313,8 +313,37 @@ def test_p1_every_f_wired_ok_has_production_invoke_or_local_stage() -> None:
     for row in f_rows:
         name = str(row["name"])
         if name == "local_model_executor":
+            # F requires real LocalModelExecutor production call — not label-only.
             assert row["handler_kind"] == "local_stage"
             assert "LocalModelExecutor" in str(row.get("physical_callable_hint") or "")
+            inv_local = invokers.get(name)
+            assert inv_local is not None
+            out_local = inv_local(
+                {
+                    "task_id": "f-local_model_executor",
+                    "task_statement": "physical LocalModelExecutor probe",
+                    "planner": {"plan_hash": "ph-local"},
+                    "route": {"workspace_root": "."},
+                }
+            )
+            if bool(out_local.get("stub")):
+                failures.append("local_model_executor:stub")
+            if not out_local.get("invoked"):
+                failures.append(f"local_model_executor:not_invoked:{out_local.get('status')}")
+            if not out_local.get("gate_passed"):
+                failures.append(f"local_model_executor:gate_failed:{out_local.get('response')}")
+            phys = str(out_local.get("physical_callable") or "")
+            if "LocalModelExecutor" not in phys:
+                failures.append(f"local_model_executor:bad_physical:{phys}")
+            tele = (
+                out_local.get("telemetry")
+                if isinstance(out_local.get("telemetry"), dict)
+                else {}
+            )
+            if "model_calls" not in tele and "token_usage" not in tele:
+                failures.append("local_model_executor:missing_telemetry")
+            if not (out_local.get("evidence_refs") or out_local.get("evidence_ids")):
+                failures.append("local_model_executor:missing_evidence")
             continue
         inv = invokers.get(name)
         if inv is None:
