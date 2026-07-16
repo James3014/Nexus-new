@@ -139,6 +139,40 @@ def test_catalog_denominators_91_77_14_unchanged() -> None:
     assert catalog["selection_authority"] == "CapabilityPlanner"
 
 
+def test_local_online_projection_covers_all_57() -> None:
+    from nexus.services.capability_registry import (
+        LOCAL_EXECUTION_MODES,
+        build_local_online_contract_projection,
+        project_local_execution_mode,
+    )
+
+    proj = build_local_online_contract_projection()
+    assert proj["planner_contract_count"] == 57
+    assert proj["independent_local_truth"] is False
+    assert sum(proj["local_mode_counts"].values()) == 57
+    for row in proj["rows"]:
+        assert row["local_mode"] in LOCAL_EXECUTION_MODES
+        assert row["online_mode"] == row["local_mode"]
+        assert row["public_claim_allowed"] is False
+        assert project_local_execution_mode(row["canonical_id"]) == row["local_mode"]
+
+
+def test_promotable_missing_engine_is_zero() -> None:
+    from nexus.services.capability_registry import (
+        EXECUTION_CLASS_MISSING_ENGINE,
+        _node_meta,
+    )
+
+    promotable_missing = [
+        n
+        for n, c in PLANNER_EXECUTION_CONTRACTS.items()
+        if c["execution_class"] == EXECUTION_CLASS_MISSING_ENGINE
+        and _node_meta(n)["maturity"].lower()
+        in {"production", "beta", "routed", "active", "ga"}
+    ]
+    assert promotable_missing == []
+
+
 def test_phase0_unresolved_list_is_reportable() -> None:
     """Phase 0 may list unresolved names; do not re-label them F to green."""
     unresolved = sorted(

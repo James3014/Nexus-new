@@ -255,6 +255,25 @@ def test_p0_bundle_hash_not_delivery_artifact() -> None:
     assert verdict["gate_passed"] is False
 
 
+def test_closure_receipt_structural_gates_if_present() -> None:
+    """Phase 5 ephemeral receipt gates when the receipt file exists."""
+    import json
+    from pathlib import Path
+
+    path = Path("/tmp/nexus_all_capability_closure_receipt.json")
+    if not path.is_file():
+        return
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    assert receipt["planner_contract_count"] == 57
+    assert receipt["promotable_count"] == 53
+    assert receipt["promotable_missing_engine_count"] == 0
+    assert receipt["probe_only_success_count"] == 0
+    assert receipt["fixture_callable_count"] == 0
+    assert receipt["routing_surface_changed"] is False
+    assert receipt["public_claim_allowed"] is False
+    assert receipt["structural_closure"] is True
+
+
 def test_p1_f_wired_ok_is_honest_production_set() -> None:
     matrix = build_wiring_matrix()
     f_rows = [r for r in matrix["rows"] if r["gap_class"] == "F_wired_ok"]
