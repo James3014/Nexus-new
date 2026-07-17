@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.evidence.receipt_base import attach_r3_receipt_base
 
 REQUEST_SCHEMA = "nexus.unified_runtime.request.v1"
 RECEIPT_SCHEMA = "nexus.unified_runtime.receipt.v1"
@@ -2478,6 +2479,8 @@ class UnifiedRuntime:
             "treatment_fingerprint_d": treatment_fingerprint_d,
             "treatment_core_equal": treatment_core_equal,
         }
+        # RC-1: additive JSON-safe receipt_base + acyclic run_anchor hash DAG
+        attach_r3_receipt_base(receipt)
         if receipt_path is not None:
             path = Path(receipt_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -2613,6 +2616,8 @@ class UnifiedRuntime:
         )
         finalized["claim_boundary"] = claim_boundary
         finalized["finalization"] = {"verifier": "observed_payload", "learning": "observed_payload"}
+        # RC-1: recompute receipt_base after finalization mutations (still acyclic)
+        attach_r3_receipt_base(finalized)
 
         target = receipt_path or finalized.get("receipt_path")
         if target is not None:
