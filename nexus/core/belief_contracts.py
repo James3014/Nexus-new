@@ -165,6 +165,56 @@ class CapabilityReceipt:
     def is_claimable(self) -> bool:
         return self.verify_telemetry.is_valid
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe projection with additive receipt_base (P2-B progressive migration).
+
+        Does not alias engine CapabilityReceipt. public_claim_allowed always false.
+        """
+        from dataclasses import asdict
+
+        base: dict[str, Any] = asdict(self)
+        # skill_receipts already dicts via asdict
+        base["is_claimable"] = bool(self.is_claimable)
+        base["public_claim_allowed"] = False
+        base["production_ready"] = False
+        try:
+            from nexus.evidence.receipt_base import project_child_receipt_base
+
+            refs: list[str] = []
+            eid = str(self.evidence_id or "").strip()
+            if eid:
+                refs.append(eid)
+            base["receipt_base"] = project_child_receipt_base(
+                source_world="C",
+                source_component="belief_capability_receipt",
+                task_id="",
+                stage_payload={
+                    "capability_name": self.capability_name,
+                    "selected": self.selected,
+                    "invoked": self.invoked,
+                    "gate_passed": self.gate_passed,
+                    "evidence_id": self.evidence_id,
+                    "telemetries": dict(self.telemetries or {}),
+                },
+                stage_name=str(self.capability_name or "capability"),
+                evidence_refs=refs,
+                consumer="core_belief",
+                selected=bool(self.selected),
+                injected=bool(self.invoked),
+                used=bool(self.invoked and self.gate_passed),
+                evidence_present=bool(eid),
+                gate_passed=bool(self.gate_passed),
+                outcome_contributed=bool(self.invoked and self.gate_passed and self.outcome),
+                claim_boundary={
+                    "public_claim_allowed": False,
+                    "production_ready": False,
+                    "claim_eligible": bool(self.is_claimable),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            base["receipt_base_error"] = str(exc)[:200]
+        return base
+
 
 @dataclass(frozen=True)
 class SkillSlot:
