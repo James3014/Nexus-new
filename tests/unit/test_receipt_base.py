@@ -247,3 +247,111 @@ def test_stamp_r1_auth_blocked_not_success():
     assert base["auth_status"] == "AUTH_BLOCKED"
     assert base["public_claim_allowed"] is False
     assert base["consumption_chain"][0]["used"] is False
+
+
+# --- P2-C schema validator (opt-in) ---
+
+
+def test_validate_receipt_base_unknown_major_fail_closed():
+    from nexus.evidence.receipt_base import validate_receipt_base
+
+    result = validate_receipt_base(
+        {"schema": "totally.unknown.v9", "schema_version": "9.0"},
+        mode="compatibility",
+    )
+    assert result["ok"] is False
+    assert any("unknown_major" in b for b in result["blockers"])
+    assert result["public_claim_allowed"] is False
+
+
+def test_validate_receipt_base_known_major_additive_minor_readable():
+    from nexus.evidence.receipt_base import build_receipt_base_dict, validate_receipt_base
+
+    base = build_receipt_base_dict(task_id="t", run_anchor_hash="a", receipt_hash="r")
+    # Simulate additive minor schema_version bump
+    base["schema_version"] = "1.1"
+    result = validate_receipt_base(base, mode="product")
+    assert result["ok"] is True
+    assert result["schema_major"] == "nexus.receipt_base"
+
+
+def test_validate_receipt_base_historical_compatibility_mode():
+    from nexus.evidence.receipt_base import validate_receipt_base
+
+    hist = {
+        "schema": "nexus.receipt_base.historical.v0",
+        "schema_version": "0.9",
+        "task_id": "old",
+        "run_anchor_hash": "a",
+        "receipt_hash": "r",
+        "parent_receipt_hashes": [],
+        "structured_evidence_refs": [],
+        "claim_boundary": {},
+        "public_claim_allowed": False,
+    }
+    compat = validate_receipt_base(hist, mode="compatibility")
+    assert compat["ok"] is True
+    assert any("compatibility_schema" in w for w in compat["warnings"])
+    strict = validate_receipt_base(hist, mode="strict")
+    assert strict["ok"] is False
+
+
+def test_validate_receipt_base_does_not_raise_by_default():
+    from nexus.evidence.receipt_base import validate_receipt_base
+
+    result = validate_receipt_base(None, mode="product")
+    assert result["ok"] is False
+    # opt-in raise only
+    with pytest.raises(ValueError, match="receipt_base_validation_failed"):
+        validate_receipt_base(None, mode="product", raise_on_error=True)
+
+
+def test_validate_legacy_evidence_refs_remain_list_str():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    receipt = {
+        "task_id": "t",
+        "evidence_refs": ["ev-1", "ev-2"],  # legacy list[str]
+    }
+    attach_r3_receipt_base(receipt)
+    assert isinstance(receipt["evidence_refs"], list)
+    assert all(isinstance(x, str) for x in receipt["evidence_refs"])
+    ok = validate_receipt_base(receipt, mode="product")
+    assert ok["ok"] is True
+    # typed breakage fails closed
+    broken = dict(receipt)
+    broken["evidence_refs"] = [{"id": "x"}]  # must not replace legacy with objects
+    bad = validate_receipt_base(broken, mode="product")
+    assert bad["ok"] is False
+    assert any("legacy_evidence_refs" in b for b in bad["blockers"])
+
+
+# --- P2-D 5/5 product coverage audit ---
+
+
+def test_audit_product_receipt_coverage_5_of_5_contract_embed():
+    from nexus.evidence.receipt_base import audit_product_receipt_coverage
+    from nexus.services.capability_registry import build_wiring_matrix
+
+    audit = audit_product_receipt_coverage(wiring_matrix=build_wiring_matrix())
+    assert audit["contract_coverage"] == "5/5"
+    assert audit["embed_complete"] is True
+    assert all(audit["contract_present"][k] for k in ("R1", "R2", "R3", "R4", "R5"))
+    # Must NOT equate embed with live/semantic closure
+    assert audit["live_provider_coverage"]["complete"] is False
+    assert audit["semantic_closure"] is False
+    assert audit["all_closure_complete"] is False
+    assert audit["public_claim_allowed"] is False
+    assert audit["physical_execution_coverage"]["missing_engine_count"] == 0
+    assert audit["physical_execution_coverage"]["node_count"] == 57
+
+
+def test_audit_missing_surface_does_not_fake_5_of_5():
+    from nexus.evidence.receipt_base import audit_product_receipt_coverage
+
+    audit = audit_product_receipt_coverage(
+        surfaces={"R1": True, "R2": None, "R3": True, "R4": True, "R5": True}
+    )
+    assert audit["contract_coverage"] == "4/5"
+    assert audit["embed_complete"] is False
+    assert audit["contract_present"]["R2"] is False

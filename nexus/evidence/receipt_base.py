@@ -737,3 +737,327 @@ def stamp_r2_hybrid_meta(
     meta["public_claim_allowed"] = False
     # Preserve legacy fields
     return meta
+
+
+# ---------------------------------------------------------------------------
+# P2-C: opt-in / product-path receipt_base schema validation
+# ---------------------------------------------------------------------------
+
+KNOWN_RECEIPT_BASE_MAJORS = frozenset(
+    {
+        "nexus.receipt_base",
+        # historical / experimental aliases kept readable in compatibility mode
+        "nexus.receipt_base.experimental",
+        "nexus.receipt_base.historical",
+    }
+)
+REQUIRED_RECEIPT_BASE_FIELDS = (
+    "schema",
+    "schema_version",
+    "task_id",
+    "run_anchor_hash",
+    "receipt_hash",
+    "parent_receipt_hashes",
+    "structured_evidence_refs",
+    "claim_boundary",
+    "public_claim_allowed",
+)
+
+
+def _parse_schema_parts(schema: str) -> tuple[str, str | None]:
+    """Return (major, minor_or_None). major is everything before last .vN if present."""
+    text = str(schema or "").strip()
+    if not text:
+        return "", None
+    # e.g. nexus.receipt_base.v1 → major=nexus.receipt_base, minor=v1
+    if ".v" in text:
+        idx = text.rfind(".v")
+        major = text[:idx]
+        minor = text[idx + 1 :]  # v1
+        return major, minor
+    return text, None
+
+
+def validate_receipt_base(
+    receipt_or_base: Mapping[str, Any] | None,
+    *,
+    mode: str = "compatibility",
+    raise_on_error: bool = False,
+) -> dict[str, Any]:
+    """Validate receipt_base schema (opt-in; never auto-raises globally).
+
+    Modes:
+    - compatibility: historical/experimental readable; unknown major fails closed
+    - product: known major required; missing required fields fail closed
+    - strict: product + forbids public_claim_allowed True / non-dict claim_boundary
+
+    Returns a receipt dict; does not mutate caller unless raise_on_error and invalid.
+    """
+    mode_norm = str(mode or "compatibility").strip().lower()
+    if mode_norm not in {"compatibility", "product", "strict"}:
+        mode_norm = "compatibility"
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    if receipt_or_base is None:
+        blockers.append("missing_receipt_or_base")
+        result = {
+            "ok": False,
+            "mode": mode_norm,
+            "blockers": blockers,
+            "warnings": warnings,
+            "public_claim_allowed": False,
+        }
+        if raise_on_error:
+            raise ValueError("receipt_base_validation_failed:" + ",".join(blockers))
+        return result
+
+    payload = dict(receipt_or_base)
+    base = payload.get("receipt_base") if isinstance(payload.get("receipt_base"), Mapping) else payload
+    if not isinstance(base, Mapping):
+        blockers.append("receipt_base_not_mapping")
+        result = {
+            "ok": False,
+            "mode": mode_norm,
+            "blockers": blockers,
+            "warnings": warnings,
+            "public_claim_allowed": False,
+        }
+        if raise_on_error:
+            raise ValueError("receipt_base_validation_failed:" + ",".join(blockers))
+        return result
+
+    schema = str(base.get("schema") or "")
+    major, minor = _parse_schema_parts(schema)
+    schema_version = str(base.get("schema_version") or "")
+
+    if not schema:
+        blockers.append("missing_schema")
+    elif major not in KNOWN_RECEIPT_BASE_MAJORS:
+        blockers.append(f"unknown_major:{major or schema}")
+    elif major in {"nexus.receipt_base.experimental", "nexus.receipt_base.historical"}:
+        if mode_norm == "strict":
+            blockers.append(f"non_product_schema_in_strict:{schema}")
+        else:
+            warnings.append(f"compatibility_schema:{schema}")
+
+    if mode_norm in {"product", "strict"}:
+        for field in REQUIRED_RECEIPT_BASE_FIELDS:
+            if field not in base:
+                blockers.append(f"missing_field:{field}")
+        # Additive minor is allowed: schema_version may advance without major change
+        if schema_version and not schema_version[0].isdigit():
+            warnings.append(f"non_numeric_schema_version:{schema_version}")
+        parents = base.get("parent_receipt_hashes")
+        if parents is not None and not isinstance(parents, (list, tuple)):
+            blockers.append("parent_receipt_hashes_not_list")
+        # Legacy top-level evidence_refs must remain list[str] if present on envelope
+        if "evidence_refs" in payload and payload.get("evidence_refs") is not None:
+            refs = payload.get("evidence_refs")
+            if not isinstance(refs, (list, tuple)):
+                blockers.append("legacy_evidence_refs_not_list")
+            else:
+                if any(not isinstance(x, str) for x in refs):
+                    # additive structured lives under receipt_base; legacy must stay str
+                    blockers.append("legacy_evidence_refs_not_list_str")
+
+    if mode_norm == "strict":
+        if base.get("public_claim_allowed") is True:
+            blockers.append("public_claim_not_false")
+        cb = base.get("claim_boundary")
+        if cb is not None and not isinstance(cb, Mapping):
+            blockers.append("claim_boundary_not_mapping")
+        # Acyclic hint: receipt_hash must not appear in parent_receipt_hashes
+        rh = str(base.get("receipt_hash") or "")
+        parents = [str(p) for p in (base.get("parent_receipt_hashes") or [])]
+        if rh and rh in parents:
+            blockers.append("cyclic_parent_includes_self_hash")
+
+    ok = not blockers
+    result = {
+        "ok": ok,
+        "mode": mode_norm,
+        "schema": schema,
+        "schema_major": major,
+        "schema_minor": minor,
+        "schema_version": schema_version,
+        "blockers": blockers,
+        "warnings": warnings,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+    if raise_on_error and not ok:
+        raise ValueError("receipt_base_validation_failed:" + ",".join(blockers))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# P2-D: product receipt surface coverage audit (contract vs physical vs live)
+# ---------------------------------------------------------------------------
+
+PRODUCT_RECEIPT_SURFACES = ("R1", "R2", "R3", "R4", "R5")
+
+
+def _surface_has_receipt_base(obj: Any) -> bool:
+    if obj is None:
+        return False
+    if isinstance(obj, Mapping):
+        if isinstance(obj.get("receipt_base"), Mapping):
+            return True
+        # bare receipt_base dict
+        if "run_anchor_hash" in obj and "schema" in obj and "receipt_hash" in obj:
+            return True
+        meta = obj.get("raw_model_metadata")
+        if isinstance(meta, Mapping) and isinstance(meta.get("receipt_base"), Mapping):
+            return True
+    meta = getattr(obj, "raw_model_metadata", None)
+    if isinstance(meta, Mapping) and isinstance(meta.get("receipt_base"), Mapping):
+        return True
+    return False
+
+
+def audit_product_receipt_coverage(
+    surfaces: Mapping[str, Any] | None = None,
+    *,
+    wiring_matrix: Mapping[str, Any] | None = None,
+    live_local_complete: bool = False,
+    live_online_complete: bool = False,
+    semantic_closure: bool = False,
+) -> dict[str, Any]:
+    """Audit R1–R5 receipt_base embed coverage without equating embed to live closure.
+
+    ``surfaces`` maps R1..R5 to a sample receipt/meta/object (or bool True if
+    contract-present-only). When surfaces is None, runs a static contract probe
+    that constructs minimal stamps for each surface.
+    """
+    samples: dict[str, Any] = {}
+    if surfaces is None:
+        # Static contract probe — proves stamp paths, not live providers.
+        try:
+            class _Resp:
+                raw_model_metadata: dict[str, Any] = {}
+                candidate_hash = "c0"
+                evidence_refs: tuple[str, ...] = ()
+                invoked = True
+                local_model_called = False
+                provider = "none"
+                model_name = ""
+                error = "provider_not_configured"
+
+            r1 = stamp_r1_local_response(_Resp())
+            samples["R1"] = r1
+        except Exception as exc:  # noqa: BLE001
+            samples["R1"] = {"error": str(exc)[:200]}
+        try:
+            samples["R2"] = stamp_r2_hybrid_meta(
+                {"live_evidence_allowed": False, "block_reason": "probe"},
+                task_id="coverage-probe",
+            )
+        except Exception as exc:  # noqa: BLE001
+            samples["R2"] = {"error": str(exc)[:200]}
+        try:
+            r3: dict[str, Any] = {"task_id": "coverage-probe", "schema": "nexus.runtime.probe"}
+            attach_r3_receipt_base(r3)
+            samples["R3"] = r3
+        except Exception as exc:  # noqa: BLE001
+            samples["R3"] = {"error": str(exc)[:200]}
+        try:
+            samples["R4"] = {
+                "receipt_base": project_child_receipt_base(
+                    source_world="C",
+                    source_component="localheal_pipeline",
+                    task_id="coverage-probe",
+                    stage_name="local_heal_repair",
+                    stage_payload={"probe": True},
+                )
+            }
+        except Exception as exc:  # noqa: BLE001
+            samples["R4"] = {"error": str(exc)[:200]}
+        try:
+            from nexus.engine.capability_contracts import CapabilityReceipt as _EngCR
+
+            samples["R5"] = _EngCR(
+                name="coverage_probe",
+                selected=True,
+                invoked=False,
+                evidence_present=False,
+                gate_passed=False,
+                outcome_contributed=False,
+            ).to_dict()
+        except Exception as exc:  # noqa: BLE001
+            samples["R5"] = {"error": str(exc)[:200]}
+    else:
+        samples = {k: surfaces.get(k) for k in PRODUCT_RECEIPT_SURFACES}
+
+    present: dict[str, bool] = {}
+    validations: dict[str, Any] = {}
+    for key in PRODUCT_RECEIPT_SURFACES:
+        obj = samples.get(key)
+        has = _surface_has_receipt_base(obj) if obj is not True else True
+        if obj is True:
+            has = True
+            validations[key] = {"ok": True, "mode": "contract_declared"}
+        elif has:
+            base_obj = obj
+            if isinstance(obj, Mapping) and "receipt_base" in obj:
+                base_obj = obj
+            elif hasattr(obj, "raw_model_metadata"):
+                base_obj = getattr(obj, "raw_model_metadata", {})
+            validations[key] = validate_receipt_base(base_obj, mode="product")
+            has = bool(validations[key].get("ok"))
+        else:
+            validations[key] = {
+                "ok": False,
+                "blockers": ["receipt_base_absent"],
+                "public_claim_allowed": False,
+            }
+        present[key] = bool(has)
+
+    contract_count = sum(1 for k in PRODUCT_RECEIPT_SURFACES if present.get(k))
+    contract_coverage = f"{contract_count}/5"
+
+    wm = dict(wiring_matrix or {})
+    physical_eligible = int(wm.get("physical_runtime_eligible") or 0)
+    node_count = int(wm.get("node_count") or wm.get("contract_count") or 0)
+    missing_engine = 0
+    gap = wm.get("gap_class_counts") if isinstance(wm.get("gap_class_counts"), Mapping) else {}
+    exec_counts = (
+        wm.get("execution_class_counts")
+        if isinstance(wm.get("execution_class_counts"), Mapping)
+        else {}
+    )
+    if exec_counts:
+        missing_engine = int(exec_counts.get("MISSING_ENGINE") or 0)
+
+    # Never equate 5/5 embed with physical/live complete
+    physical_execution_coverage = {
+        "eligible": physical_eligible,
+        "node_count": node_count,
+        "missing_engine_count": missing_engine,
+        "routing_surface_changed": bool(wm.get("routing_surface_changed", False)),
+        "complete": bool(node_count > 0 and missing_engine == 0 and physical_eligible > 0),
+        "note": "contract embed coverage does not imply physical execution complete",
+    }
+    live_provider_coverage = {
+        "live_local_complete": bool(live_local_complete),
+        "live_online_complete": bool(live_online_complete),
+        "complete": bool(live_local_complete and live_online_complete),
+        "note": "requires authorized live providers; not inferred from receipt_base embed",
+    }
+
+    return {
+        "schema": "nexus.product_receipt_coverage_audit.v1",
+        "contract_coverage": contract_coverage,
+        "contract_present": present,
+        "validations": validations,
+        "physical_execution_coverage": physical_execution_coverage,
+        "live_provider_coverage": live_provider_coverage,
+        "semantic_closure": bool(semantic_closure),
+        "public_claim_allowed": False,
+        "production_ready": False,
+        "embed_complete": contract_count == 5,
+        "all_closure_complete": False,  # never auto-true from embed alone
+        "gap_class_counts": dict(gap) if gap else {},
+        "execution_class_counts": dict(exec_counts) if exec_counts else {},
+    }
