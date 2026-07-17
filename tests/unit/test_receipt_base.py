@@ -178,3 +178,72 @@ def test_attach_detects_tamper_via_stage_change():
     h1 = r1["receipt_hash"]
     r2 = attach_r3_receipt_base({**base_receipt, "local": {"invoked": True, "payload": "b"}})
     assert r2["receipt_hash"] != h1
+
+
+def test_r1_r2_bind_run_anchor_not_final_r3():
+    from nexus.evidence.receipt_base import project_child_receipt_base
+
+    r1 = project_child_receipt_base(
+        source_world="C",
+        source_component="local_executor",
+        task_id="shared-task",
+        planner_decision_id="pd1",
+        shared_bundle_hash="bundle-x",
+        stage_payload={"invoked": True, "candidate_hash": "abc"},
+        stage_name="local_model_executor",
+        used=True,
+        evidence_present=True,
+        source_candidate_hash="abc",
+        applied_candidate_hash="abc",
+    )
+    r2 = project_child_receipt_base(
+        source_world="hybrid",
+        source_component="hybrid_runtime",
+        task_id="shared-task",
+        planner_decision_id="pd1",
+        shared_bundle_hash="bundle-x",
+        stage_payload={"status": "ok", "live": True},
+        stage_name="cloud_with_local_assist",
+        used=True,
+        evidence_present=True,
+    )
+    assert r1["run_anchor_hash"] == r2["run_anchor_hash"]
+    assert r1["shared_bundle_hash"] == r2["shared_bundle_hash"] == "bundle-x"
+    assert r1["parent_receipt_hashes"] == [r1["run_anchor_hash"]]
+    assert r2["parent_receipt_hashes"] == [r2["run_anchor_hash"]]
+    assert r1["receipt_hash"] != r2["receipt_hash"]
+    # same bundle, one side unused → different consumption hash path
+    r2_unused = project_child_receipt_base(
+        source_world="hybrid",
+        source_component="hybrid_runtime",
+        task_id="shared-task",
+        planner_decision_id="pd1",
+        shared_bundle_hash="bundle-x",
+        stage_payload={"status": "ok", "live": False},
+        stage_name="cloud_with_local_assist",
+        used=False,
+        evidence_present=False,
+    )
+    assert r2_unused["receipt_hash"] != r2["receipt_hash"]
+
+
+def test_stamp_r1_auth_blocked_not_success():
+    from types import SimpleNamespace
+    from nexus.evidence.receipt_base import stamp_r1_local_response
+
+    resp = SimpleNamespace(
+        invoked=True,
+        local_model_called=False,
+        candidate_hash="",
+        evidence_refs=(),
+        provider="none",
+        model_name="",
+        error="provider_not_configured",
+        raw_model_metadata={},
+    )
+    req = SimpleNamespace(task_id="t1", planner_snapshot={}, instance_id="")
+    stamp_r1_local_response(resp, request=req)
+    base = resp.raw_model_metadata["receipt_base"]
+    assert base["auth_status"] == "AUTH_BLOCKED"
+    assert base["public_claim_allowed"] is False
+    assert base["consumption_chain"][0]["used"] is False

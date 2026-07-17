@@ -849,6 +849,14 @@ class LocalModelExecutor:
             for k, v in defaults.items():
                 if k not in resp.raw_model_metadata:
                     resp.raw_model_metadata[k] = v
+            # RC-2: additive receipt_base (parent=run_anchor_hash; no final R3 cycle)
+            try:
+                from nexus.evidence.receipt_base import stamp_r1_local_response
+
+                stamp_r1_local_response(resp, request=request)
+            except Exception as exc:  # noqa: BLE001 — never break executor on projection
+                resp.raw_model_metadata["receipt_base_error"] = str(exc)[:200]
+                resp.raw_model_metadata["public_claim_allowed"] = False
         return resp
 
     @staticmethod

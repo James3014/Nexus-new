@@ -474,3 +474,266 @@ def assert_json_safe(obj: Any, *, path: str = "root") -> None:
 
 def _strict_default(o: Any) -> Any:
     raise TypeError(f"non-JSON type: {type(o)!r}")
+
+
+def project_child_receipt_base(
+    *,
+    source_world: str,
+    source_component: str,
+    task_id: str = "",
+    workspace_revision: str = "",
+    planner_decision_id: str = "",
+    treatment_run_id: str = "",
+    packet_hash: str = "",
+    shared_bundle_hash: str = "",
+    selection_authority: str = "CapabilityPlanner",
+    mainchain_route_version: str = "",
+    route_freeze: bool = False,
+    mainchain_entry: bool = False,
+    with_nexus_armor: bool = False,
+    stage_payload: Mapping[str, Any] | None = None,
+    stage_name: str = "child",
+    evidence_refs: Sequence[Any] = (),
+    consumer: str = "",
+    selected: bool = True,
+    injected: bool = False,
+    used: bool = False,
+    evidence_present: bool = False,
+    gate_passed: bool = False,
+    outcome_contributed: bool = False,
+    artifact_hash: str = "",
+    source_candidate_hash: str = "",
+    applied_candidate_hash: str = "",
+    claim_boundary: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build JSON-safe receipt_base for R1/R2 (parent = run_anchor only; acyclic)."""
+    run_anchor = compute_run_anchor_hash(
+        task_id=task_id,
+        workspace_revision=workspace_revision,
+        planner_decision_id=planner_decision_id,
+        treatment_run_id=treatment_run_id,
+        packet_hash=packet_hash,
+        shared_bundle_hash=shared_bundle_hash,
+        selection_authority=selection_authority,
+        mainchain_route_version=mainchain_route_version,
+        route_freeze=route_freeze,
+        mainchain_entry=mainchain_entry,
+    )
+    stage_hash = hash_stage_payload(stage_payload or {}, stage_name=stage_name)
+    structured = legacy_evidence_refs_to_structured(
+        evidence_refs,
+        task_id=task_id,
+        source=source_component,
+        scope=source_world or "child",
+    )
+    chain = [
+        build_consumption_chain_entry(
+            capability=stage_name,
+            selected=selected,
+            injected=injected,
+            used=used,
+            evidence_present=evidence_present,
+            gate_passed=gate_passed,
+            outcome_contributed=outcome_contributed,
+            consumer=consumer,
+        )
+    ]
+    consumer_payload_hash = canonical_json_hash(
+        {
+            "stage": stage_name,
+            "used": used,
+            "injected": injected,
+            "evidence_refs": [str(r) for r in evidence_refs],
+        }
+    )
+    r_hash = compute_receipt_hash(
+        run_anchor_hash=run_anchor,
+        ordered_child_hashes=[stage_hash],
+        claim_boundary=claim_boundary_projection(claim_boundary),
+        shared_bundle_hash=shared_bundle_hash,
+        consumer_payload_hash=consumer_payload_hash,
+        artifact_hash=artifact_hash,
+        source_candidate_hash=source_candidate_hash,
+        applied_candidate_hash=applied_candidate_hash,
+        structured_evidence_refs=structured,
+        consumption_chain=chain,
+    )
+    base = build_receipt_base_dict(
+        task_id=task_id,
+        workspace_revision=workspace_revision,
+        planner_decision_id=planner_decision_id,
+        treatment_run_id=treatment_run_id,
+        packet_hash=packet_hash,
+        run_anchor_hash=run_anchor,
+        receipt_hash=r_hash,
+        parent_receipt_hashes=[run_anchor],
+        shared_bundle_hash=shared_bundle_hash,
+        consumer_payload_hash=consumer_payload_hash,
+        artifact_hash=artifact_hash or stage_hash,
+        source_candidate_hash=source_candidate_hash,
+        applied_candidate_hash=applied_candidate_hash,
+        consumption_chain=chain,
+        structured_evidence_refs=structured,
+        claim_boundary=claim_boundary,
+        source_world=source_world,
+        source_component=source_component,
+        selection_authority=selection_authority,
+        mainchain_entry=mainchain_entry,
+        mainchain_route_version=mainchain_route_version,
+        route_freeze=route_freeze,
+        with_nexus_armor=with_nexus_armor,
+    )
+    base["stage_hash"] = stage_hash
+    return base
+
+
+def stamp_r1_local_response(
+    response: Any,
+    *,
+    request: Any = None,
+) -> Any:
+    """Additive stamp LocalModelExecutorResponse.raw_model_metadata['receipt_base']."""
+    if response is None:
+        return response
+    meta = getattr(response, "raw_model_metadata", None)
+    if not isinstance(meta, dict):
+        return response
+    req = request
+    task_id = ""
+    planner_decision_id = ""
+    workspace_revision = ""
+    shared_bundle_hash = ""
+    if req is not None:
+        task_id = str(getattr(req, "task_id", None) or (getattr(req, "planner_snapshot", {}) or {}).get("task_id") or "")
+        snap = getattr(req, "planner_snapshot", None)
+        if isinstance(snap, Mapping):
+            task_id = task_id or str(snap.get("task_id") or "")
+            planner_decision_id = str(snap.get("planner_decision_id") or snap.get("decision_id") or "")
+            workspace_revision = str(snap.get("workspace_revision") or "")
+            shared_bundle_hash = str(snap.get("shared_bundle_hash") or "")
+        task_id = task_id or str(getattr(req, "instance_id", "") or "")
+    candidate_hash = str(getattr(response, "candidate_hash", "") or "")
+    evidence_refs = tuple(getattr(response, "evidence_refs", ()) or ())
+    invoked = bool(getattr(response, "invoked", False))
+    called = bool(getattr(response, "local_model_called", False))
+    provider = str(getattr(response, "provider", "") or "")
+    model_name = str(getattr(response, "model_name", "") or "")
+    error = str(getattr(response, "error", "") or "")
+    auth_blocked = (not called) and (
+        "provider_not_configured" in error
+        or "not_configured" in error
+        or provider in {"none", "", "inert"}
+    )
+    stage_payload = {
+        "invoked": invoked,
+        "local_model_called": called,
+        "candidate_hash": candidate_hash,
+        "provider": provider,
+        "model_name": model_name,
+        "error": error,
+        "auth_blocked": auth_blocked,
+        "evidence_refs": list(evidence_refs),
+    }
+    base = project_child_receipt_base(
+        source_world="C",
+        source_component="local_executor",
+        task_id=task_id,
+        workspace_revision=workspace_revision,
+        planner_decision_id=planner_decision_id,
+        shared_bundle_hash=shared_bundle_hash,
+        stage_payload=stage_payload,
+        stage_name="local_model_executor",
+        evidence_refs=evidence_refs,
+        consumer="local",
+        selected=True,
+        injected=invoked,
+        used=called and not auth_blocked,
+        evidence_present=bool(evidence_refs) or bool(candidate_hash),
+        gate_passed=bool(called and not error and not auth_blocked),
+        outcome_contributed=bool(called and candidate_hash and not error),
+        artifact_hash=candidate_hash,
+        source_candidate_hash=candidate_hash,
+        applied_candidate_hash=candidate_hash if called else "",
+        claim_boundary={"public_claim_allowed": False, "auth_blocked": auth_blocked},
+    )
+    if auth_blocked:
+        base["auth_status"] = "AUTH_BLOCKED"
+        base["auth_reason"] = error or "provider_not_configured"
+    meta["receipt_base"] = base
+    meta["run_anchor_hash"] = base["run_anchor_hash"]
+    meta["receipt_hash"] = base["receipt_hash"]
+    meta["public_claim_allowed"] = False
+    return response
+
+
+def stamp_r2_hybrid_meta(
+    result: Any,
+    *,
+    task_id: str = "",
+    planner_decision_id: str = "",
+    workspace_revision: str = "",
+    shared_bundle_hash: str = "",
+) -> dict[str, Any]:
+    """Build HybridStageResult.to_meta() overlay with additive receipt_base."""
+    if hasattr(result, "to_meta"):
+        meta = dict(result.to_meta())
+    elif isinstance(result, Mapping):
+        meta = dict(result)
+    else:
+        meta = {}
+    stages = meta.get("hybrid_stages") if isinstance(meta.get("hybrid_stages"), Mapping) else {}
+    candidate_identity = str(meta.get("candidate_identity") or "")
+    selected_hash = str(
+        (meta.get("cloud_payload") or {}).get("selected_hash")
+        if isinstance(meta.get("cloud_payload"), Mapping)
+        else ""
+    ) or candidate_identity
+    applied_hash = candidate_identity
+    live_ok = bool(meta.get("live_evidence_allowed"))
+    stage_payload = {
+        "status": meta.get("hybrid_stage_status") or meta.get("status"),
+        "live_evidence_allowed": live_ok,
+        "block_reason": meta.get("live_evidence_block_reason") or meta.get("block_reason"),
+        "stages": stages,
+        "selected_hash_matches_applied": meta.get("selected_hash_matches_applied"),
+        "semantic_correctness_passed": meta.get("semantic_correctness_passed"),
+        "hidden_verifier_passed": meta.get("hidden_verifier_passed"),
+        "infra_invalid": meta.get("infra_invalid"),
+    }
+    base = project_child_receipt_base(
+        source_world="hybrid",
+        source_component="hybrid_runtime",
+        task_id=task_id,
+        workspace_revision=workspace_revision,
+        planner_decision_id=planner_decision_id,
+        shared_bundle_hash=shared_bundle_hash,
+        stage_payload=stage_payload,
+        stage_name="cloud_with_local_assist",
+        evidence_refs=[],
+        consumer="hybrid",
+        selected=True,
+        injected=True,
+        used=live_ok,
+        evidence_present=live_ok,
+        gate_passed=bool(meta.get("hidden_verifier_passed")),
+        outcome_contributed=bool(meta.get("semantic_correctness_passed")),
+        artifact_hash=applied_hash,
+        source_candidate_hash=selected_hash,
+        applied_candidate_hash=applied_hash if meta.get("selected_hash_matches_applied") else "",
+        claim_boundary={
+            "public_claim_allowed": False,
+            "live_evidence_allowed": live_ok,
+            "block_reason": str(meta.get("live_evidence_block_reason") or ""),
+        },
+    )
+    # Stage hashes for cloud/local legs
+    cloud_hash = hash_stage_payload(meta.get("cloud_payload") or {}, stage_name="hybrid_cloud")
+    local_hash = hash_stage_payload(stages, stage_name="hybrid_local_stages")
+    base["cloud_stage_hash"] = cloud_hash
+    base["local_stage_hash"] = local_hash
+    meta["receipt_base"] = base
+    meta["run_anchor_hash"] = base["run_anchor_hash"]
+    meta["receipt_hash"] = base["receipt_hash"]
+    meta["public_claim_allowed"] = False
+    # Preserve legacy fields
+    return meta
