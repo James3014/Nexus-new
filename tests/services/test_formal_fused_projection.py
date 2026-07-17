@@ -178,3 +178,58 @@ def test_missing_provider_or_verifier_receipt_is_experiment_invalid():
     assert decision["verdict"] == "EXPERIMENT_INVALID"
     assert decision["public_claim_allowed"] is False
     assert decision.get("formal_eligible") is False
+
+
+def test_forged_minimal_formal_receipts_are_experiment_invalid():
+    """provider confirmed / status PASS / anything packet must not be eligible."""
+    from nexus.services.formal_fused_projection import formal_from_pilot
+
+    pilot = {
+        "schema": "nexus.fused_live_pilot.v1",
+        "task_id": "forge",
+        "treatment_fingerprint": "tf",
+        "pair_count": 1,
+        "comparable_count": 1,
+        "b_solve_mean": 0.1,
+        "d_solve_mean": 0.9,
+        "token_samples": {"b": [10], "d": [5]},
+        "provider_receipt": {"confirmed": True},
+        "verifier_receipt": {"status": "PASS"},
+        "packet_consumption_proof": {"anything": True},
+        "pairs": [
+            {
+                "pair_id": "p0",
+                "task_id": "forge",
+                "comparable": True,
+                "treatment_equal": True,
+                "d_assist_credited": True,
+            }
+        ],
+        "contract_path_ok": True,  # must not unlock
+    }
+    decision = formal_from_pilot(pilot)
+    assert decision["verdict"] == "EXPERIMENT_INVALID"
+    assert decision["formal_eligible"] is False
+    assert decision["contract_path_ok"] is False
+    assert decision["provider_receipt_verified"] is False
+    assert decision["verifier_receipt_verified"] is False
+    assert decision["packet_consumption_verified"] is False
+    assert decision["formal_blockers"]
+    assert decision["public_claim_allowed"] is False
+
+
+def test_authentic_live_shaped_formal_emits_eligibility_flags():
+    from nexus.services.formal_fused_projection import (
+        efficiency_revise_live_shaped_pilot,
+        formal_from_pilot,
+    )
+
+    decision = formal_from_pilot(efficiency_revise_live_shaped_pilot())
+    assert decision["formal_eligible"] is True
+    assert decision["contract_path_ok"] is True
+    assert decision["provider_receipt_verified"] is True
+    assert decision["verifier_receipt_verified"] is True
+    assert decision["packet_consumption_verified"] is True
+    assert decision["formal_blockers"] == []
+    assert decision["public_claim_allowed"] is False
+    assert decision["verdict"] == "REVISE_PACKET"
