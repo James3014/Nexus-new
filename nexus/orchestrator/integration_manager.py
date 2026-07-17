@@ -6,12 +6,26 @@ from nexus.orchestrator.state_store import StateStore
 from nexus.orchestrator.evidence_collector import EvidenceCollector
 
 class IntegrationManager:
-    def __init__(self, state_store: StateStore, evidence_collector: EvidenceCollector):
+    def __init__(
+        self,
+        state_store: StateStore,
+        evidence_collector: EvidenceCollector,
+        *,
+        repo_root: str | Path = ".",
+        require_clean_preflight: bool = False,
+    ):
         self.state_store = state_store
         self.evidence_collector = evidence_collector
+        self.repo_root = Path(repo_root).expanduser().resolve()
+        self.require_clean_preflight = require_clean_preflight
 
     def _run_git(self, args: List[str]):
-        result = subprocess.run(["git"] + args, capture_output=True, text=True)
+        result = subprocess.run(
+            ["git"] + args,
+            capture_output=True,
+            text=True,
+            cwd=self.repo_root,
+        )
         return result
 
     def batch_integrate(self, task_ids: List[str], target_branch: str = "main") -> Tuple[List[str], List[str]]:
@@ -22,8 +36,25 @@ class IntegrationManager:
         success_tasks = []
         failed_tasks = []
 
+        if not task_ids:
+            return [], ["NO_TASKS_REQUESTED"]
+        original_sha = ""
+        original_branch_name = ""
+        if self.require_clean_preflight:
+            status = self._run_git(["status", "--porcelain"])
+            if status.returncode != 0 or status.stdout.strip():
+                return [], ["WORKTREE_NOT_CLEAN"]
+            original_head = self._run_git(["rev-parse", "HEAD"])
+            original_branch = self._run_git(["branch", "--show-current"])
+            if original_head.returncode != 0:
+                return [], ["ORIGINAL_HEAD_UNAVAILABLE"]
+            original_sha = original_head.stdout.strip()
+            original_branch_name = original_branch.stdout.strip()
+
         # 1. Ensure we are on target_branch and clean
-        self._run_git(["checkout", target_branch])
+        checkout = self._run_git(["checkout", target_branch])
+        if checkout.returncode != 0:
+            return [], ["TARGET_BRANCH_CHECKOUT_FAILED"]
         
         for tid in task_ids:
             task = self.state_store.load_task(tid)
@@ -66,8 +97,17 @@ class IntegrationManager:
             )
             passed = self.evidence_collector.verify_gate(global_task)
             if not passed:
-                # In a real system, we might rollback here. 
-                # For now, we report the status.
+                # Transactional rollback to the clean pre-integration head.
+                if original_sha:
+                    self._run_git(["reset", "--merge", original_sha])
+                    if original_branch_name and original_branch_name != target_branch:
+                        self._run_git(["checkout", original_branch_name])
+                for tid in success_tasks:
+                    task = self.state_store.load_task(tid)
+                    if task:
+                        task.set_status(TaskStatus.READY_FOR_REVIEW)
+                        self.state_store.save_task(task)
+                success_tasks = []
                 failed_tasks.append("GLOBAL_VERIFICATION_FAILED")
 
         return success_tasks, failed_tasks

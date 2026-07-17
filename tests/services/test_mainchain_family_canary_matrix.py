@@ -8,32 +8,37 @@ final_status derived from real pos/neg outcomes — not count-math theater.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import subprocess
+import sys
 import time
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
 
-from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.services.capability_registry import (
     EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
     EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
     EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
     EXECUTION_CLASS_LEGACY_ALIAS,
     EXECUTION_CLASS_MISSING_ENGINE,
+    LOCAL_STAGE_CAPABILITIES,
     PLANNER_EXECUTION_CONTRACTS,
     REAL_EXECUTION_CLASSES,
     _node_meta,
     list_planner_capability_names,
     project_local_execution_mode,
+    project_online_execution_mode,
 )
 from nexus.services.mainchain_entry import run_mainchain
 from nexus.services.mainchain_route_freeze import build_capability_catalog
 from nexus.services.unified_runtime import (
     UnifiedRuntimeRequest,
-    normalize_online_invoker_payload,
+    build_registered_online_invoker,
 )
 
 SCRATCH = Path(
@@ -71,44 +76,6 @@ def _promotable_names() -> list[str]:
             continue
         out.append(name)
     return out
-
-
-class _SelectPlanner:
-    """CapabilityPlanner stand-in that selects exactly one capability (family canary)."""
-
-    def __init__(self, selected: list[str], *, required: list[str] | None = None) -> None:
-        self._selected = list(selected)
-        self._required = list(required if required is not None else selected)
-
-    def plan(self, **_: object) -> CapabilityPlan:
-        return CapabilityPlan(
-            schema_version="nexus_capability_plan_v1",
-            selected_capabilities=list(self._selected),
-            required_capabilities=list(self._required),
-            optional_capabilities=[],
-            conditional_capabilities=[],
-            pending_capabilities=[],
-            forbidden_capabilities=[],
-            constraints=[],
-            decision_trace=[],
-            replan_trace=[],
-            score=1.0,
-            signal_snapshot={"route_truth_source": "CapabilityPlanner"},
-        )
-
-
-def _online_invoker(context: Mapping[str, Any]) -> dict[str, Any]:
-    return normalize_online_invoker_payload(
-        provider="fixture",
-        task_id=str(context.get("task_id") or ""),
-        invoked=True,
-        output_delivered=True,
-        gate_passed=True,
-        provider_call_count=1,
-        response={"ok": True, "provider": "fixture"},
-        raw_response="ok",
-        evidence_refs=[f"online:{context.get('task_id')}"],
-    )
 
 
 def _family_positive_context(name: str) -> dict[str, Any]:
@@ -201,12 +168,21 @@ def _consumer_proof(
         proof["kind"] = "prompt_or_shared_evidence"
     elif consumer_effect == "EXECUTION_CONTROL":
         proof["control_receipt"] = bool(
-            cap_row.get("invoked") or cap_row.get("physical_callable") or payload
+            cap_row.get("invoked") is True
+            and cap_row.get("gate_passed") is True
+            and cap_row.get("outcome_contributed") is True
+            and str(cap_row.get("semantic_status") or "")
+            in {"SUCCEEDED", "VERIFIED"}
+            and evidence
         )
         proof["kind"] = "execution_control_receipt"
     elif consumer_effect == "POSTFLIGHT_GATE":
-        proof["gate_receipt"] = "gate_passed" in cap_row or bool(
-            cap_row.get("status") in {"SUCCEEDED", "FAILED", "BLOCKED", "SKIPPED"}
+        proof["gate_receipt"] = bool(
+            cap_row.get("invoked") is True
+            and cap_row.get("gate_passed") is True
+            and str(cap_row.get("semantic_status") or "")
+            in {"SUCCEEDED", "VERIFIED"}
+            and evidence
         )
         proof["kind"] = "postflight_gate_receipt"
     elif consumer_effect == "EXTERNAL_SIDE_EFFECT":
@@ -223,7 +199,7 @@ def _consumer_proof(
     return proof
 
 
-_EVIDENCE_INJECT_KEYS = (
+_REQUEST_EVIDENCE_KEYS = (
     "semantic_status",
     "completion_status",
     "status",
@@ -247,123 +223,72 @@ _EVIDENCE_INJECT_KEYS = (
 )
 
 
-def _wrap_mainchain_invokers(
-    name: str,
-    *,
-    positive: bool,
-    family_ctx: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Wrap production invokers so MainchainEntry injects family context once.
-
-    Wrappers are called **by** UnifiedRuntime during run_mainchain — there is no
-    second post-mainchain probe. Gate/status come only from the receipt row.
-    """
-    from nexus.services.capability_registry import build_default_mainchain_invokers
-
-    base_map = build_default_mainchain_invokers(
-        codeintel=dict(family_ctx.get("codeintel") or {}) if positive else {"scan_report_present": False}
-    )
-    wrapped: dict[str, Any] = {}
-
-    def _enrich(context: Mapping[str, Any]) -> dict[str, Any]:
-        ctx = dict(context)
-        route = dict(ctx.get("route") or {})
-        if positive:
-            for k in _EVIDENCE_INJECT_KEYS:
-                if k in family_ctx and family_ctx.get(k) is not None:
-                    ctx[k] = family_ctx[k]
-            # Escalate-gated REAL/TRIGGERED paths need explicit trigger.
-            route["escalate"] = True
-            route["escalate_triggered"] = True
-            ctx["route"] = route
-            ctx["escalate_triggered"] = True
-            ctx["triggered_escalations"] = [name]
-            flags = dict(ctx.get("executor_flags") or {})
-            flags[name] = True
-            flags[f"enable_{name}"] = True
-            ctx["executor_flags"] = flags
-            # Align nested verifier.task_id when postflight already attached verifier.
-            ver = ctx.get("verifier")
-            if isinstance(ver, Mapping):
-                v2 = dict(ver)
-                v2["task_id"] = str(ctx.get("task_id") or v2.get("task_id") or "")
-                # Prefer bundle source_hash when present (postflight match).
-                bundle = ctx.get("capability_evidence_bundle")
-                if isinstance(bundle, Mapping) and bundle.get("source_hash"):
-                    v2["source_hash"] = str(bundle.get("source_hash"))
-                    ctx["source_hash"] = str(bundle.get("source_hash"))
-                if not v2.get("verifier_artifact"):
-                    v2["verifier_artifact"] = str(family_ctx.get("verifier_artifact") or "")
-                    v2["invoked"] = True
-                    v2["gate_passed"] = True
-                    v2["verifier_status"] = "pass"
-                ctx["verifier"] = v2
-        else:
-            # Negative: untriggered escalate + strip evidence (missing-evidence FAIL).
-            route.pop("escalate", None)
-            route.pop("escalate_triggered", None)
-            ctx["route"] = route
-            ctx["escalate_triggered"] = False
-            ctx["triggered_escalations"] = []
-            ctx["executor_flags"] = {}
-            for k in _EVIDENCE_INJECT_KEYS:
-                ctx.pop(k, None)
-            ver = ctx.get("verifier")
-            if isinstance(ver, Mapping):
-                ctx["verifier"] = {
-                    "task_id": str(ctx.get("task_id") or ""),
-                    "invoked": False,
-                    "gate_passed": False,
-                    "verifier_status": "fail",
-                    "verifier_artifact": "",
-                    "source_hash": "",
-                    "evidence_refs": [],
-                }
-            # Force postflight/acceptance to see missing evidence.
-            ctx["source_hash"] = ""
-            if isinstance(ctx.get("capability_evidence_bundle"), Mapping):
-                b = dict(ctx["capability_evidence_bundle"])
-                # Keep bundle immutable hash but empty proof fields for gate fail.
-                ctx["capability_evidence_bundle"] = b
-        return ctx
-
-    for key, inv in base_map.items():
-        if not callable(inv):
-            wrapped[key] = inv
-            continue
-
-        def _make(base_inv: Any = inv) -> Any:
-            def _wrapped(context: Mapping[str, Any]) -> Mapping[str, Any]:
-                return base_inv(_enrich(context))
-
-            return _wrapped
-
-        wrapped[key] = _make()
-    return wrapped
-
-
+@lru_cache(maxsize=None)
 def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
     """Single MainchainEntry canary — gate/status only from receipt capability row."""
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     family_ctx = _family_positive_context(name) if positive else {}
     task_id = f"{'pos' if positive else 'neg'}-{name}"
-    statement = (
-        family_ctx.get("task_statement")
-        if positive
-        else f"negative canary omit evidence for {name}"
+    canary_root = Path("/tmp/nexus_family_canary") / task_id
+    canary_root.mkdir(parents=True, exist_ok=True)
+    canary_target = canary_root / "target.py"
+    canary_target.write_text(
+        "def family_canary_target():\n    return 'verified'\n",
+        encoding="utf-8",
     )
+    if positive and name in {"semantic_searcher", "lancedb"}:
+        from nexus.services.memory_repository import MemoryRepository
+
+        MemoryRepository(
+            canary_root / ".nexus" / "knowledge" / "lancedb"
+        ).ensure_table(
+            "policy",
+            initial_data=[
+                {
+                    "rule_id": f"family-policy-{name}",
+                    "condition": "capability closure",
+                    "action": f"physical evidence for {name}",
+                    "confidence": 0.9,
+                }
+            ],
+            fts_column="action",
+        )
+    trigger_policy = str(contract.get("trigger_policy") or "")
+    postflight = name in {"artifact_gate", "claim_gate", "delivery_gate"}
+    acceptance_family = name in {"acceptance_check", "bdd_acceptance_skill"}
+    default_when_selected = trigger_policy in {
+        "default_when_selected",
+        "stage_owned_local",
+        "stage_owned_context",
+    } and not postflight and not acceptance_family
+    if positive:
+        statement = (
+            f"Capability family canary for {name}.\n"
+            f"Expected capability receipts: {name}"
+        )
+    elif default_when_selected:
+        statement = "Negative family canary with no optional capability signal."
+    else:
+        statement = (
+            "Negative capability family canary with missing evidence.\n"
+            f"Expected capability receipts: {name}"
+        )
     # Positive escalate: route flags; negative: no escalate flags.
     route: dict[str, Any] = {
         "recommended_flow": "direct",
-        "injected_transport": True,
-        "online_policy": "auto",
+        "provider": "agy",
+        "online_policy": "deny",
         "mainchain_entry": True,
+        "workspace_root": str(canary_root),
     }
     if positive:
         route["escalate"] = True
         route["escalate_triggered"] = True
 
-    local_enabled = name == "local_model_executor"
+    local_enabled = name in LOCAL_STAGE_CAPABILITIES
+    local_action = "verified-subtask" if name == "repair_loop" else "candidate"
+    from nexus.services.local_assist_service import LocalAssistRequest
+
     req = UnifiedRuntimeRequest(
         task_id=task_id,
         workspace_revision="rev-family-canary",
@@ -373,27 +298,141 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
         online_enabled=True,
         # Local stage only when exercising local_model_executor ownership.
         local_enabled=local_enabled,
-        local_request={
+        local_request=LocalAssistRequest.from_dict({
+            "schema": "nexus.local_assist.request.v1",
             "task_id": task_id,
-            "action": "candidate",
-            "target_file": "nexus/services/capability_registry.py",
+            "parent_task_id": task_id,
+            "workspace_root": str(canary_root),
+            "workspace_revision": "rev-family-canary",
+            "task_statement": statement,
+            "action": local_action,
+            "allowed_files": ["target.py"],
+            "target_file": "target.py",
+            "target_symbol": "family_canary_target",
+            "evidence_refs": [f"family-canary:{name}"],
+            "verifier_command": [
+                sys.executable,
+                "-m",
+                "py_compile",
+                "target.py",
+            ]
+            if local_action == "verified-subtask"
+            else [],
+            "requested_role": "candidate",
+            "mutation_policy": "isolated_only",
             "planner_snapshot": {
                 "route_truth_source": "CapabilityPlanner",
                 "selected_capabilities": [name] if positive else [],
+                "execution_topology": "single_local_model",
+                "protocol_mode": "code_patch",
+                "model_call_allowed": True,
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b-instruct",
             },
-        }
+        })
         if local_enabled
         else None,
         online_prompt="family canary",
-        codeintel=dict(family_ctx.get("codeintel") or {})
-        if positive
-        else {"scan_report_present": False},
+        codeintel=(
+            {
+                **dict(family_ctx.get("codeintel") or {}),
+                "workspace_root": str(canary_root),
+                "target_file": "target.py",
+                "target_symbol": "family_canary_target",
+                "verify_commands": [
+                    f"{sys.executable} -m py_compile target.py"
+                ],
+                "verify_timeout_sec": 15,
+                "search_query": f"physical evidence for {name}",
+                "search_table": "policy",
+                "search_limit": 3,
+                "jit_all_tools": ["read_file", "run_test", "write_file"],
+                "jit_token_usage": 120,
+                "mempalace_tenant_id": "family-canary",
+                "mempalace_artifact_type": "capability_evidence",
+                "mempalace_artifact": {
+                    "artifact_id": f"closure-evidence-{name}",
+                    "content": f"capability closure verified for {name}",
+                    "source_hash": hashlib.sha256(
+                        canary_target.read_bytes()
+                    ).hexdigest(),
+                },
+                "mempalace_query": f"closure-evidence-{name}",
+                "sandbox_command": [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; assert Path('target.py').exists()",
+                ],
+                "sandbox_timeout_sec": 15,
+                "metabolism_token_usage": 110000,
+                "metabolism_token_limit": 128000,
+                "intent_pass": True,
+                "risk_score": 1,
+                "target_files": ["target.py"],
+                "impact_map": {"target.py": []},
+                "acceptance_criteria": ["isolated verifier passes"],
+                "deliverables": ["family canary receipt"],
+                "steps": ["inspect", "verify"],
+                "handoff_readiness": 1.0,
+                "asi_failure_records": [
+                    {
+                        "status": "discard",
+                        "family": "family_canary_repeated_failure",
+                        "rollback_reason": "same verifier mismatch",
+                        "evidence": f"asi:{name}:failure:1",
+                        "run_id": f"{task_id}:1",
+                    },
+                    {
+                        "status": "discard",
+                        "family": "family_canary_repeated_failure",
+                        "rollback_reason": "same verifier mismatch",
+                        "evidence": f"asi:{name}:failure:2",
+                        "run_id": f"{task_id}:2",
+                    },
+                ],
+                "forecast_roi_score": 0.9,
+                "forecast_tokens": 1000,
+                "forecast_reject_prob": 0.05,
+                "formal_judge_votes": [
+                    {"judge": "deterministic_hard", "verdict": "PASS"}
+                ],
+                "formal_verification": [
+                    {"status": "PASS", "evidence": f"isolated-verifier:{task_id}"}
+                ],
+                "formal_route_receipts": [
+                    {
+                        "route": "mainchain",
+                        "evidence_present": True,
+                        "gate_passed": True,
+                    }
+                ],
+                "meta_opt_episode": {
+                    "task_id": task_id,
+                    "task_type": "codeintel",
+                    "task_desc": statement,
+                    "solved": True,
+                    "wall_duration_sec": 0.1,
+                    "total_tokens_used": 0,
+                    "trust_mismatch": False,
+                    "receipts": [
+                        {
+                            "name": "codeintel",
+                            "invoked": True,
+                            "gate_passed": True,
+                            "outcome_contributed": True,
+                        }
+                    ],
+                },
+            }
+            if positive
+            else {"scan_report_present": False}
+        ),
         pillars={
             # Family evidence may also ride pillars for preflight allowlists.
             **(
                 {
                     k: family_ctx[k]
-                    for k in _EVIDENCE_INJECT_KEYS
+                    for k in _REQUEST_EVIDENCE_KEYS
                     if k in family_ctx
                 }
                 if positive
@@ -405,101 +444,104 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
     # - escalate/triggered policies: select but untriggered → SKIP
     # - postflight/acceptance: select with missing evidence → FAIL
     # - default_when_selected: do NOT select (untriggered at planner) → not executed
-    trigger_policy = str(contract.get("trigger_policy") or "")
-    postflight = name in {"artifact_gate", "claim_gate", "delivery_gate"}
-    acceptance_family = name in {"acceptance_check", "bdd_acceptance_skill"}
-    default_when_selected = trigger_policy in {
-        "default_when_selected",
-        "stage_owned_local",
-        "stage_owned_context",
-    } and not postflight and not acceptance_family
+    from nexus.services.capability_registry import build_default_mainchain_invokers
+    from nexus.services.local_assist_service import LocalAssistService
 
-    if positive:
-        planner = _SelectPlanner([name], required=[name])
-    elif default_when_selected:
-        # Untriggered at selection authority — capability must not appear as used.
-        planner = _SelectPlanner([], required=[])
-    else:
-        planner = _SelectPlanner([name], required=[])
-
-    invoker_map = _wrap_mainchain_invokers(name, positive=positive, family_ctx=family_ctx)
+    invoker_map = build_default_mainchain_invokers(
+        codeintel=dict(req.codeintel) if isinstance(req.codeintel, Mapping) else {}
+    )
 
     def _verifier(c: Mapping[str, Any]) -> dict[str, Any]:
+        from nexus.services.local_heal.isolated_verifier import (
+            IsolatedVerifierRequest,
+            run_isolated_verifier,
+        )
+
         bundle = c.get("capability_evidence_bundle") if isinstance(c.get("capability_evidence_bundle"), Mapping) else {}
         src = str(bundle.get("source_hash") or "")
-        if positive:
-            return {
-                "task_id": str(c.get("task_id") or task_id),
-                "invoked": True,
-                "gate_passed": True,
-                "verifier_status": "pass",
-                "verifier_artifact": str(
-                    family_ctx.get("verifier_artifact") or ("sha256:" + ("ab" * 32))
-                ),
+        command = (
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                "source=Path('target.py').read_text(encoding='utf-8'); "
+                "compile(source, 'target.py', 'exec'); "
+                "assert 'family_canary_target' in source"
+                if positive
+                else "raise SystemExit(1)"
+            ),
+        )
+        isolated = run_isolated_verifier(
+            IsolatedVerifierRequest(
+                task_id=str(c.get("task_id") or task_id),
+                workspace_path=str(canary_root),
+                verifier_command=command,
+                timeout_sec=15.0,
+                verifier_allowed=True,
+            )
+        )
+        passed = isolated.verifier_status == "pass" and isolated.exit_code == 0
+        artifact_payload = json.dumps(
+            {
+                "task_id": isolated.task_id,
+                "exit_code": isolated.exit_code,
+                "stdout_tail": isolated.stdout_tail,
+                "stderr_tail": isolated.stderr_tail,
                 "source_hash": src,
-                "evidence_refs": [f"v:{c.get('task_id')}"],
-            }
+                "command": list(command),
+            },
+            sort_keys=True,
+        ).encode("utf-8")
         return {
             "task_id": str(c.get("task_id") or task_id),
-            "invoked": False,
-            "gate_passed": False,
-            "verifier_status": "fail",
-            "verifier_artifact": "",
-            "source_hash": "",
-            "evidence_refs": [],
+            "invoked": True,
+            "gate_passed": passed,
+            "semantic_status": "VERIFIED" if passed else "UNVERIFIED",
+            "verifier_status": isolated.verifier_status,
+            "verifier_artifact": (
+                "sha256:" + hashlib.sha256(artifact_payload).hexdigest()
+                if passed
+                else ""
+            ),
+            "source_hash": src if passed else "",
+            "evidence_refs": [f"isolated-verifier:{isolated.task_id}"],
+            "exit_code": isolated.exit_code,
+            "verifier_error": isolated.verifier_error,
+            "physical_callable": (
+                "nexus.services.local_heal.isolated_verifier."
+                "run_isolated_verifier"
+            ),
         }
-
-    class _LocalStageService:
-        """Minimal Local stage for local_model_executor ownership proof."""
-
-        def handle(self, request: Any) -> dict[str, Any]:
-            tid = request["task_id"] if isinstance(request, dict) else getattr(request, "task_id", "")
-            action = (
-                request.get("action")
-                if isinstance(request, dict)
-                else getattr(request, "action", "candidate")
-            )
-            return {
-                "task_id": tid,
-                "action": action,
-                "local_model_invoked": True,
-                "output_delivered": True,
-                "executor_invoked": True,
-                "physical_callable": "LocalModelExecutor.run",
-                "provider": "injected",
-                "receipt_path": f"/tmp/{tid}.json",
-                "evidence_refs": [f"local:{tid}"],
-                "target_file": "nexus/services/capability_registry.py",
-                "candidate_summary": {
-                    "isolation_status": "isolated",
-                    "selected_candidate_hash": "h1",
-                    "selected_candidate_hash_matches_applied": True,
-                    "model_candidate_hash": "h1",
-                },
-                "verifier_summary": {"verifier_status": "not_run", "verifier_reached": False},
-                "local_outputs": {
-                    "concise_summary": f"action={action};status=succeeded;evidence_count=1"
-                },
-                "outcome_contributed": True,
-            }
 
     receipt = run_mainchain(
         req,
-        online_invoker=_online_invoker,
-        planner=planner,
-        local_service=_LocalStageService() if local_enabled else None,
+        online_invoker=build_registered_online_invoker("agy"),
+        local_service=LocalAssistService() if local_enabled else None,
         capability_invokers=invoker_map,
         verifier=_verifier,
-        learning=lambda c: {
-            "task_id": c["task_id"],
-            "invoked": True,
-            "gate_passed": True,
-            "evidence_refs": [f"l:{c['task_id']}"],
-        },
+        learning=None,
     )
 
     # ── Truth only from MainchainEntry receipt (no second invoker probe) ──
     ctx_trace = receipt.get("context_trace") if isinstance(receipt.get("context_trace"), Mapping) else {}
+    online_stage = receipt.get("online") if isinstance(receipt.get("online"), Mapping) else {}
+    online_response = (
+        online_stage.get("response")
+        if isinstance(online_stage.get("response"), Mapping)
+        else {}
+    )
+    verifier_stage = receipt.get("verifier") if isinstance(receipt.get("verifier"), Mapping) else {}
+    verifier_response = (
+        verifier_stage.get("response")
+        if isinstance(verifier_stage.get("response"), Mapping)
+        else {}
+    )
+    local_stage = receipt.get("local") if isinstance(receipt.get("local"), Mapping) else {}
+    local_response = (
+        local_stage.get("response")
+        if isinstance(local_stage.get("response"), Mapping)
+        else {}
+    )
     selected = [str(x) for x in (ctx_trace.get("selected_capabilities") or receipt.get("selected_capabilities") or [])]
     cap_row = _extract_cap_row(receipt, name)
     # Prefer capability_results stage status when list row is thin
@@ -523,19 +565,60 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
     )
     # Nested response/outcome from stage if present
     response = stage.get("response") if isinstance(stage.get("response"), Mapping) else {}
-    nested = response.get("outcome") if isinstance(response.get("outcome"), Mapping) else response
+    inner_response: Mapping[str, Any] = response
+    for _ in range(3):
+        if isinstance(inner_response.get("outcome"), Mapping):
+            break
+        next_response = inner_response.get("response")
+        if not isinstance(next_response, Mapping):
+            break
+        inner_response = next_response
+    nested = (
+        inner_response.get("outcome")
+        if isinstance(inner_response.get("outcome"), Mapping)
+        else inner_response
+    )
     if not nested and isinstance(cap_row.get("response"), Mapping):
         nested = dict(cap_row["response"])
     action = str((nested or {}).get("action") or "")
+    semantic_status = str((nested or {}).get("semantic_status") or "")
+    outcome_error = str((nested or {}).get("error") or "")
+    outcome_auth_required = bool(
+        (nested or {}).get("authorization_required")
+        or (nested or {}).get("auth_required")
+    )
+    outcome_contributed = bool(
+        cap_row.get("outcome_contributed")
+        or stage.get("outcome_contributed")
+        or (nested or {}).get("outcome_contributed")
+    )
+    contract_violations = list(
+        inner_response.get("contract_violations") or []
+        if isinstance(inner_response, Mapping)
+        else []
+    )
     evidence = list(
-        cap_row.get("evidence_refs")
-        or stage.get("evidence_refs")
-        or (nested or {}).get("evidence_refs")
-        or []
+        dict.fromkeys(
+            [
+                str(ref)
+                for ref in (
+                    list(cap_row.get("evidence_refs") or [])
+                    + list(stage.get("evidence_refs") or [])
+                    + list((nested or {}).get("evidence_refs") or [])
+                )
+                if str(ref)
+            ]
+        )
     )
 
     # mainchain_entry proven from receipt (not hardcoded): route stamp and/or planner stage.
     planner_stage = receipt.get("planner") if isinstance(receipt.get("planner"), Mapping) else {}
+    selection_authority = str(receipt.get("selection_authority") or "")
+    planner_decision_id = str(
+        receipt.get("planner_decision_id")
+        or planner_stage.get("planner_decision_id")
+        or ""
+    )
     online_ctx = (
         ctx_trace.get("online_received_context")
         if isinstance(ctx_trace.get("online_received_context"), Mapping)
@@ -546,25 +629,43 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
         receipt["context_trace"].get("route"), Mapping
     ):
         route_stamp = dict(receipt["context_trace"]["route"])
+    shared_stage: Mapping[str, Any] = {}
+    for receipt_stage in receipt.get("stages") or []:
+        if (
+            isinstance(receipt_stage, Mapping)
+            and receipt_stage.get("name") == "shared_capability_evidence"
+        ):
+            shared_stage = receipt_stage
+            break
     mainchain_entry_real = bool(
-        route_stamp.get("mainchain_entry")
-        or online_ctx.get("with_nexus_armor")
-        or planner_stage.get("invoked")
-        or receipt.get("selection_authority") == "CapabilityPlanner"
-        or str(receipt.get("schema") or "").startswith("nexus")
+        route_stamp.get("mainchain_entry") is True
+        and planner_stage.get("invoked") is True
+        and selection_authority == "CapabilityPlanner"
+        and planner_decision_id
+        and shared_stage.get("invoked") is True
+        and shared_stage.get("gate_passed") is True
+        and shared_stage.get("bundle_hash")
     )
     # When the capability was selected, require a mainchain capability row.
     if name in selected and not cap_row and not stage:
         mainchain_entry_real = False
-    if name in selected and (
-        cap_row.get("selection_source") == "CapabilityPlanner" or cap_row.get("selected") is True
-    ):
-        mainchain_entry_real = True
-
     ec = str(contract["execution_class"])
     consumer_effect = str(contract["consumer_effect"])
+    consumer_source = {
+        **dict(stage),
+        **dict(cap_row),
+        "invoked": invoked,
+        "skipped": skipped,
+        "gate_passed": gate,
+        "semantic_status": semantic_status,
+        "outcome_contributed": outcome_contributed,
+        "evidence_refs": evidence,
+    }
     consumer = _consumer_proof(
-        name, cap_row=cap_row or stage, receipt=receipt, consumer_effect=consumer_effect
+        name,
+        cap_row=consumer_source,
+        receipt=receipt,
+        consumer_effect=consumer_effect,
     )
 
     first_broken: str | None = None
@@ -574,8 +675,17 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
         first_broken = "mainchain_entry_not_proven"
         final_status = "FAIL"
     if name not in selected and positive:
-        first_broken = first_broken or "not_selected_by_planner"
-        final_status = "FAIL"
+        alias_target = ""
+        if ec == EXECUTION_CLASS_LEGACY_ALIAS:
+            policy = str(contract.get("trigger_policy") or "")
+            if policy.startswith("legacy_alias_of:"):
+                alias_target = policy.split(":", 1)[1]
+        if alias_target and alias_target in selected:
+            first_broken = None
+            final_status = "ALIAS_NORMALIZED"
+        else:
+            first_broken = first_broken or "not_selected_by_planner"
+            final_status = "FAIL"
     if "fixture" in physical.lower() or physical.startswith("test:"):
         first_broken = first_broken or "fixture_callable"
         final_status = "FAIL"
@@ -584,7 +694,54 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
         final_status = "PROBE"
 
     if positive:
-        if ec in REAL_EXECUTION_CLASSES:
+        if (
+            bool(contract.get("provider_authorization_required"))
+            and ec != EXECUTION_CLASS_LEGACY_ALIAS
+        ):
+            observed_auth_block = bool(
+                invoked
+                and not skipped
+                and gate is False
+                and action == "auth_gate"
+                and semantic_status == "BLOCKED"
+                and outcome_auth_required
+                and outcome_error.startswith("BLOCKED_EXTERNAL_AUTH")
+                and evidence
+                and not outcome_contributed
+            )
+            observed_local_auth_block = bool(
+                name in LOCAL_STAGE_CAPABILITIES
+                and local_response
+                and local_response.get("provider") == "ollama"
+                and local_response.get("physical_callable") == "LocalModelExecutor.run"
+                and local_response.get("fallback_reason") == "provider_not_configured"
+                and local_response.get("local_model_invoked") is False
+                and local_response.get("output_delivered") is False
+            )
+            if final_status != "OK":
+                pass
+            elif observed_auth_block:
+                first_broken = None
+                final_status = "AUTH_BLOCKED"
+            elif observed_local_auth_block:
+                first_broken = None
+                final_status = "AUTH_BLOCKED"
+            elif name in {"claim_gate", "delivery_gate"} and (
+                gate is False and "blocker:online_not_invoked" in evidence
+            ):
+                first_broken = "online_not_exercised_offline"
+                final_status = "NOT_EXERCISED_OFFLINE"
+            elif name in LOCAL_STAGE_CAPABILITIES and not invoked:
+                local_stage = receipt.get("local") if isinstance(receipt.get("local"), Mapping) else {}
+                first_broken = str(local_stage.get("reason") or "local_stage_not_executed")
+                final_status = "IMPLEMENTATION_FAILURE"
+            elif gate is True and invoked and not skipped:
+                first_broken = first_broken or "offline_canary_unexpected_provider_success"
+                final_status = "FAIL"
+            else:
+                first_broken = first_broken or "authorization_block_not_observed"
+                final_status = "IMPLEMENTATION_FAILURE"
+        elif ec in REAL_EXECUTION_CLASSES:
             if not invoked and not skipped:
                 first_broken = first_broken or "real_not_invoked"
                 final_status = "FAIL"
@@ -613,9 +770,33 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
                     first_broken = first_broken or "missing_physical_callable"
                     final_status = "FAIL"
         elif ec == EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED:
-            if gate is True and action in _SHALLOW_ACTIONS:
+            semantic_ok = semantic_status in {"SUCCEEDED", "VERIFIED"}
+            operational_block = bool(
+                name == "learn_scheduler"
+                and invoked
+                and not skipped
+                and gate is False
+                and action == "run_scheduler"
+                and semantic_status == "BLOCKED"
+                and outcome_error in {"scheduler_exit_2", "scheduler_exit_3"}
+                and any(ref.startswith("file:") for ref in evidence)
+                and physical
+            )
+            if operational_block:
+                first_broken = "scheduler_policy_not_ready"
+                final_status = "OPERATIONAL_BLOCKED"
+            elif contract_violations:
+                first_broken = first_broken or "execution_contract_violation"
+                final_status = "IMPLEMENTATION_FAILURE"
+            elif not invoked or skipped or gate is not True:
+                first_broken = first_broken or "external_capability_not_successful"
+                final_status = "IMPLEMENTATION_FAILURE"
+            elif not semantic_ok or not evidence or not physical:
+                first_broken = first_broken or "external_capability_missing_semantic_evidence"
+                final_status = "IMPLEMENTATION_FAILURE"
+            elif action in _SHALLOW_ACTIONS:
                 first_broken = first_broken or "external_auth_probe_success"
-                final_status = "FAIL"
+                final_status = "IMPLEMENTATION_FAILURE"
         elif ec == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE:
             pass  # suggestion / skip is acceptable
         elif ec == EXECUTION_CLASS_LEGACY_ALIAS:
@@ -672,9 +853,33 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
         "status": status,
         "physical_callable": physical,
         "action": action,
+        "semantic_status": semantic_status,
+        "outcome_error": outcome_error,
+        "outcome_auth_required": outcome_auth_required,
+        "outcome_contributed": outcome_contributed,
+        "local_stage_status": str(local_stage.get("status") or ""),
+        "local_stage_reason": str(local_stage.get("reason") or ""),
+        "local_provider": str(local_response.get("provider") or ""),
+        "local_fallback_reason": str(local_response.get("fallback_reason") or ""),
+        "contract_violations": contract_violations,
         "evidence_refs": evidence[:8],
         "consumer_proof": consumer,
         "mainchain_entry": bool(mainchain_entry_real),
+        "selection_authority": selection_authority,
+        "planner_decision_id": planner_decision_id,
+        "online_provider": str(online_response.get("provider") or ""),
+        "online_provider_call_count": int(
+            online_response.get("provider_call_count") or 0
+        ),
+        "online_gate_passed": bool(online_stage.get("gate_passed")),
+        "verifier_physical_callable": str(
+            verifier_response.get("physical_callable") or ""
+        ),
+        "verifier_exit_code": verifier_response.get("exit_code"),
+        "verifier_status": str(verifier_response.get("verifier_status") or ""),
+        "verifier_artifact": str(
+            verifier_response.get("verifier_artifact") or ""
+        ),
         "public_claim_allowed": False,
         "first_broken_edge": first_broken,
         "final_status": final_status,
@@ -706,10 +911,8 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         neg = _run_family_canary(name, positive=False)
         # Merge: fail if either broken for promotable REAL
         first_broken = pos.get("first_broken_edge") or neg.get("first_broken_edge")
-        final_status = "OK"
-        if pos["final_status"] != "OK":
-            final_status = pos["final_status"]
-        if neg["final_status"] != "OK" and final_status == "OK":
+        final_status = str(pos["final_status"])
+        if neg["final_status"] != "OK":
             final_status = neg["final_status"]
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
@@ -719,7 +922,8 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         if (
             name in promotable
             and contract["execution_class"] in REAL_EXECUTION_CLASSES
-            and pos["final_status"] != "OK"
+            and pos["final_status"]
+            in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
         ):
             real_positive_fails += 1
         per_cap.append(
@@ -730,7 +934,10 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
                 "promotable": name in promotable,
                 "gap_proxy": contract["execution_class"],
                 "local_mode": project_local_execution_mode(name),
-                "online_mode": project_local_execution_mode(name),
+                "online_mode": project_online_execution_mode(name),
+                "provider_authorization_required": bool(
+                    contract.get("provider_authorization_required")
+                ),
                 "consumer_effect": contract["consumer_effect"],
                 "public_claim_allowed": False,
                 "positive": {
@@ -746,6 +953,10 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
                         "consumer_proof",
                         "planner_selected",
                         "mainchain_entry",
+                        "local_stage_status",
+                        "local_stage_reason",
+                        "local_provider",
+                        "local_fallback_reason",
                     )
                 },
                 "negative": {
@@ -771,19 +982,31 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         for n in promotable
         if PLANNER_EXECUTION_CONTRACTS[n]["execution_class"] == EXECUTION_CLASS_MISSING_ENGINE
     ]
-    blockers = [r for r in per_cap if r["final_status"] != "OK"]
+    blockers = [
+        r for r in per_cap if r["final_status"] not in {"OK", "ALIAS_NORMALIZED"}
+    ]
+    structural_blockers = [
+        r
+        for r in per_cap
+        if r["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
+    ]
+    semantic_blockers = [
+        r
+        for r in per_cap
+        if r["promotable"]
+        and r["execution_class"]
+        in {*REAL_EXECUTION_CLASSES, EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED}
+        and r["final_status"] != "OK"
+    ]
     structural = (
         len(list_planner_capability_names()) == 57
         and len(prom_missing) == 0
         and probe_only == 0
         and fixture_count == 0
         and real_positive_fails == 0
-        and all(
-            r["final_status"] == "OK"
-            for r in per_cap
-            if r["promotable"] and r["execution_class"] in REAL_EXECUTION_CLASSES
-        )
+        and not structural_blockers
     )
+    semantic = not semantic_blockers
     auth_ext = os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
     auth_local = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "1"
     live = (
@@ -794,7 +1017,9 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
 
     receipt: dict[str, Any] = {
         "schema": "nexus.all_capability_closure_receipt.v1",
-        "baseline_head": "132d0c85b",
+        "baseline_head": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True
+        ).strip(),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "planner_contract_count": 57,
         "promotable_count": len(promotable),
@@ -823,12 +1048,27 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
             "planner_contract_count": 57,
             "independent_local_truth": False,
             "modes": {
-                n: project_local_execution_mode(n) for n in list_planner_capability_names()
+                n: {
+                    "local": project_local_execution_mode(n),
+                    "online": project_online_execution_mode(n),
+                }
+                for n in list_planner_capability_names()
             },
         },
         "per_capability": per_cap,
         "blockers": blockers,
+        "structural_blockers": structural_blockers,
+        "semantic_blockers": semantic_blockers,
         "structural_closure": structural,
+        "semantic_closure": semantic,
+        "auth_blocked_count": sum(
+            1 for row in per_cap if row["final_status"] == "AUTH_BLOCKED"
+        ),
+        "not_exercised_offline_count": sum(
+            1
+            for row in per_cap
+            if row["final_status"] == "NOT_EXERCISED_OFFLINE"
+        ),
         "live_provider_closure": live,
         "live_online_complete": False,
         "live_local_complete": False,
@@ -852,13 +1092,49 @@ def test_generate_closure_receipt_required() -> None:
     assert receipt["routing_surface_changed"] is False
     assert receipt["public_claim_allowed"] is False
     assert receipt["structural_closure"] is True, receipt.get("blockers", [])[:10]
-    # REAL promotable must not remain in blockers
-    real_blockers = [
+    # Offline structural closure must not hide missing implementations.
+    real_structural_blockers = [
         b
-        for b in receipt["blockers"]
+        for b in receipt["structural_blockers"]
         if b.get("promotable") and b.get("execution_class") in REAL_EXECUTION_CLASSES
     ]
-    assert real_blockers == [], real_blockers[:8]
+    assert real_structural_blockers == [], real_structural_blockers[:8]
+    assert receipt["semantic_closure"] is False
+    assert receipt["live_online_complete"] is False
+    assert receipt["live_local_complete"] is False
+
+
+def test_family_canary_selection_authority_is_production_planner() -> None:
+    result = _run_family_canary("codeintel", positive=True)
+
+    assert result["selection_authority"] == "CapabilityPlanner"
+    assert result["planner_selected"] is True
+    assert result["planner_decision_id"]
+
+
+def test_family_canary_online_edge_is_registered_and_fail_closed_without_auth() -> None:
+    result = _run_family_canary("codeintel", positive=True)
+
+    assert result["online_provider"] != "fixture"
+    assert result["online_provider_call_count"] == 0
+    assert result["online_gate_passed"] is False
+
+
+def test_family_canary_verifier_executes_real_isolated_command() -> None:
+    result = _run_family_canary("codeintel", positive=True)
+
+    assert result["verifier_physical_callable"].endswith("run_isolated_verifier")
+    assert result["verifier_exit_code"] == 0
+    assert result["verifier_status"] == "pass"
+    assert result["verifier_artifact"].startswith("sha256:")
+
+
+def test_family_canary_reads_production_executor_outcome_not_wrapper_shell() -> None:
+    result = _run_family_canary("codeintel", positive=True)
+
+    assert result["action"] == "lookup_implementation"
+    assert result["semantic_status"] == "SUCCEEDED"
+    assert result["contract_violations"] == []
 
 
 @pytest.mark.parametrize("name", _promotable_names())
@@ -870,10 +1146,22 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     assert pos["mainchain_entry"] is True
     assert pos["planner_selected"] is True
     assert pos["public_claim_allowed"] is False
-    assert pos["final_status"] == "OK", (name, pos["first_broken_edge"], pos)
+    if name in {"claim_gate", "delivery_gate"}:
+        expected_positive_statuses = {"NOT_EXERCISED_OFFLINE"}
+    elif name == "learn_scheduler":
+        expected_positive_statuses = {"OPERATIONAL_BLOCKED"}
+    elif contract.get("provider_authorization_required"):
+        expected_positive_statuses = {"AUTH_BLOCKED"}
+    else:
+        expected_positive_statuses = {"OK"}
+    assert pos["final_status"] in expected_positive_statuses, (
+        name,
+        pos["first_broken_edge"],
+        pos,
+    )
     assert neg["final_status"] == "OK", (name, neg["first_broken_edge"], neg)
     # Consumer proof present for non-NONE effects
-    if contract["consumer_effect"] != "NONE":
+    if contract["consumer_effect"] != "NONE" and pos["final_status"] == "OK":
         assert pos["consumer_proof"].get("kind")
         if contract["consumer_effect"] == "PROMPT_EVIDENCE":
             assert pos["consumer_proof"].get("evidence_refs_present") or pos[
@@ -884,11 +1172,30 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
         if contract["consumer_effect"] == "EXECUTION_CONTROL":
             assert pos["consumer_proof"].get("control_receipt")
     # REAL requires physical invoke + evidence on positive
-    if contract["execution_class"] in REAL_EXECUTION_CLASSES:
-        assert pos["invoked"] is True or pos["skipped"] is False
+    if contract["execution_class"] in REAL_EXECUTION_CLASSES and pos["final_status"] == "OK":
+        assert pos["invoked"] is True and pos["skipped"] is False
         assert pos["physical_callable"]
         assert pos["evidence_refs"] or pos["action"]
         assert pos["action"] not in _SHALLOW_ACTIONS or pos["gate_passed"] is not True
+    if pos["final_status"] == "AUTH_BLOCKED" and name not in LOCAL_STAGE_CAPABILITIES:
+        assert pos["invoked"] is True
+        assert pos["skipped"] is False
+        assert pos["gate_passed"] is False
+        assert pos["action"] == "auth_gate"
+        assert pos["semantic_status"] == "BLOCKED"
+        assert pos["outcome_auth_required"] is True
+        assert pos["outcome_error"].startswith("BLOCKED_EXTERNAL_AUTH")
+        assert pos["evidence_refs"]
+        assert pos["outcome_contributed"] is False
+    if pos["final_status"] == "AUTH_BLOCKED" and name in LOCAL_STAGE_CAPABILITIES:
+        assert pos["local_provider"] == "ollama"
+        assert pos["local_fallback_reason"] == "provider_not_configured"
+        assert pos["local_stage_status"] in {"BLOCKED", "FAILED", "NOT_RUN"}
+        assert pos["gate_passed"] is False
+    if pos["final_status"] == "NOT_EXERCISED_OFFLINE":
+        assert pos["gate_passed"] is False
+        assert "blocker:online_not_invoked" in pos["evidence_refs"]
+        assert pos["action"] != "auth_gate"
     # EXTERNAL_AUTH: must not probe-success without auth
     if contract["execution_class"] == EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED:
         if pos["gate_passed"] is True:

@@ -125,6 +125,10 @@ REQUIRED_EXECUTION_CONTRACT_FIELDS: tuple[str, ...] = (
     "required_context_fields",
     "success_fields",
     "failure_fields",
+    "execution_kind",
+    "required_outcome_fields",
+    "required_evidence_fields",
+    "success_predicate",
     "consumer_effect",
     "consumer_targets",
     "provider_authorization_required",
@@ -135,7 +139,9 @@ REQUIRED_EXECUTION_CONTRACT_FIELDS: tuple[str, ...] = (
 )
 
 # Handled by Local stage, not a preflight invoker map entry that "runs" Online.
-LOCAL_STAGE_CAPABILITIES: frozenset[str] = frozenset({"local_model_executor"})
+LOCAL_STAGE_CAPABILITIES: frozenset[str] = frozenset(
+    {"local_model_executor", "repair_loop"}
+)
 
 # Online armor / executor flags path (flags in prompt; not separate preflight callable yet).
 ONLINE_ARMOR_FLAG_CAPABILITIES: frozenset[str] = frozenset(
@@ -144,7 +150,6 @@ ONLINE_ARMOR_FLAG_CAPABILITIES: frozenset[str] = frozenset(
         "ddtree",
         "judge_panel",
         "llm_judge_panel",
-        "repair_loop",
     }
 )
 
@@ -164,12 +169,56 @@ def _ec(
     consumer_targets: tuple[str, ...] = ("online", "local"),
     provider_authorization_required: bool = False,
     reason_code: str = "",
+    execution_kind: str | None = None,
+    required_outcome_fields: tuple[str, ...] | None = None,
+    required_evidence_fields: tuple[str, ...] | None = None,
+    success_predicate: str | None = None,
 ) -> dict[str, Any]:
     """Build one planner-node execution contract (public_claim_allowed always false)."""
     if execution_class not in EXECUTION_CLASSES:
         raise ValueError(f"invalid_execution_class:{canonical_id}:{execution_class}")
     if consumer_effect not in CONSUMER_EFFECTS:
         raise ValueError(f"invalid_consumer_effect:{canonical_id}:{consumer_effect}")
+    if execution_kind is None:
+        if execution_class in REAL_EXECUTION_CLASSES:
+            execution_kind = "PHYSICAL_EFFECT"
+        elif execution_class == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE:
+            execution_kind = "CONTROL_EFFECT"
+        elif execution_class == EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED:
+            execution_kind = "EXTERNAL_EFFECT"
+        elif execution_class == EXECUTION_CLASS_MISSING_ENGINE:
+            execution_kind = "MISSING"
+        else:
+            execution_kind = "NONPROMOTED"
+    if required_outcome_fields is None:
+        if execution_kind in {"PHYSICAL_EFFECT", "EXTERNAL_EFFECT"}:
+            required_outcome_fields = (
+                "action",
+                "semantic_status",
+                "evidence_refs",
+            )
+        elif execution_kind == "CONTROL_EFFECT":
+            required_outcome_fields = (
+                "action",
+                "semantic_status",
+                "control_plane_reference",
+            )
+        else:
+            required_outcome_fields = ("action", "semantic_status")
+    if required_evidence_fields is None:
+        required_evidence_fields = (
+            ("evidence_refs",)
+            if execution_kind in {"PHYSICAL_EFFECT", "CONTROL_EFFECT", "EXTERNAL_EFFECT"}
+            else ()
+        )
+    if success_predicate is None:
+        success_predicate = {
+            "PHYSICAL_EFFECT": "invoked_and_gate_and_effect_fields",
+            "CONTROL_EFFECT": "planner_control_observed_downstream",
+            "EXTERNAL_EFFECT": "authorized_adapter_effect_or_fail_closed_auth",
+            "NONPROMOTED": "must_not_promote",
+            "MISSING": "must_not_succeed",
+        }[execution_kind]
     return {
         "canonical_id": canonical_id,
         "execution_class": execution_class,
@@ -180,6 +229,10 @@ def _ec(
         "required_context_fields": list(required_context_fields),
         "success_fields": list(success_fields),
         "failure_fields": list(failure_fields),
+        "execution_kind": execution_kind,
+        "required_outcome_fields": list(required_outcome_fields),
+        "required_evidence_fields": list(required_evidence_fields),
+        "success_predicate": success_predicate,
         "consumer_effect": consumer_effect,
         "consumer_targets": list(consumer_targets),
         "provider_authorization_required": bool(provider_authorization_required),
@@ -223,7 +276,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="artifact_gate",
             physical_callable=postflight,
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
-            consumer_targets=("online", "claim_delivery"),
+            consumer_targets=("online", "local", "claim_delivery"),
         ),
         "belief": _ec(
             "belief",
@@ -243,7 +296,8 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="claim_gate",
             physical_callable=postflight,
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
-            consumer_targets=("online", "claim_delivery"),
+            consumer_targets=("online", "local", "claim_delivery"),
+            provider_authorization_required=True,
         ),
         "codeintel": _ec(
             "codeintel",
@@ -253,6 +307,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="codeintel",
             physical_callable=f"{reg}:codeintel",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "workspace_root", "target_symbol"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "lookup_symbol",
+                "lookup_performed",
+            ),
+            success_predicate="codeintel_lookup_performed",
         ),
         "delivery_gate": _ec(
             "delivery_gate",
@@ -262,7 +325,8 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="delivery_gate",
             physical_callable=postflight,
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
-            consumer_targets=("online", "claim_delivery"),
+            consumer_targets=("online", "local", "claim_delivery"),
+            provider_authorization_required=True,
         ),
         "harness_preflight_sensor": _ec(
             "harness_preflight_sensor",
@@ -281,6 +345,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="jit_validation",
             physical_callable=f"{reg}:jit_validation",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "task_statement", "jit_all_tools"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "mask_applied",
+                "quota_checked",
+            ),
+            success_predicate="jit_mask_and_quota_applied",
         ),
         "lancedb": _ec(
             "lancedb",
@@ -290,6 +363,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="lancedb",
             physical_callable=f"{reg}:lancedb",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "workspace_root", "search_query"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "query_performed",
+                "query",
+            ),
+            success_predicate="lancedb_query_performed",
         ),
         "local_model_executor": _ec(
             "local_model_executor",
@@ -310,6 +392,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="memory",
             physical_callable=f"{reg}:memory",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "workspace_root", "task_statement"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "query",
+                "search_performed",
+            ),
+            success_predicate="project_memory_search_performed",
         ),
         "mempalace_gate": _ec(
             "mempalace_gate",
@@ -320,6 +411,20 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             physical_callable=f"{reg}:mempalace",
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
             consumer_targets=("online", "local"),
+            required_context_fields=(
+                "task_id",
+                "workspace_root",
+                "mempalace_artifact",
+            ),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "ingest_performed",
+                "retrieve_performed",
+                "verification_passed",
+            ),
+            success_predicate="mempalace_roundtrip_verified",
         ),
         "plan_quality_gate": _ec(
             "plan_quality_gate",
@@ -329,6 +434,26 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="plan_quality_gate",
             physical_callable=f"{reg}:plan_quality_gate",
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            required_context_fields=(
+                "task_id",
+                "intent_pass",
+                "risk_score",
+                "target_files",
+                "impact_map",
+                "acceptance_criteria",
+                "deliverables",
+                "steps",
+                "handoff_readiness",
+            ),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "passed",
+                "input_fields_present",
+                "impact_map_evaluated",
+            ),
+            success_predicate="plan_quality_real_inputs_evaluated",
         ),
         "pregate": _ec(
             "pregate",
@@ -338,16 +463,36 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="pregate",
             physical_callable=f"{reg}:pregate",
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "command_count",
+                "all_passed",
+                "results",
+            ),
+            success_predicate="non_empty_verify_commands",
         ),
         "repair_loop": _ec(
             "repair_loop",
-            EXECUTION_CLASS_TRIGGERED_REAL,
-            producer_stage="UnifiedRuntime",
-            trigger_policy="triggered_repair",
+            EXECUTION_CLASS_STAGE_OWNED_REAL,
+            producer_stage="Local",
+            trigger_policy="stage_owned_local_repair",
             executor_key="repair_loop",
-            physical_callable=f"{reg}:repair_loop",
+            physical_callable=local_phys,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
             consumer_targets=("local", "online"),
+            provider_authorization_required=True,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "candidate_hash",
+                "hash_matched",
+                "verifier_passed",
+                "settlement_decision",
+            ),
+            success_predicate="verified_local_repair_receipt",
         ),
         "sandbox": _ec(
             "sandbox",
@@ -357,6 +502,17 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="sandbox_runner",
             physical_callable=f"{reg}:sandbox_runner",
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_context_fields=("task_id", "workspace_root", "sandbox_command"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "sandbox_executed",
+                "workspace_isolated",
+                "exit_code",
+                "network_allowed",
+            ),
+            success_predicate="sandbox_isolated_execution_passed",
         ),
         "semantic_searcher": _ec(
             "semantic_searcher",
@@ -366,6 +522,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="semantic_searcher",
             physical_callable=f"{reg}:semantic_searcher",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "workspace_root", "search_query"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "search_performed",
+                "query",
+            ),
+            success_predicate="semantic_search_performed",
         ),
     }
 
@@ -546,12 +711,20 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         ),
         "nightshift": _ec(
             "nightshift",
-            EXECUTION_CLASS_TRIGGERED_REAL,
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
             executor_key="nightshift",
             physical_callable=f"{reg}:nightshift",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "terminal_success",
+            ),
+            success_predicate="nightshift_terminal_success",
         ),
         "research": _ec(
             "research",
@@ -617,6 +790,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             trigger_policy="escalate_only",
             executor_key="hyper_sprint",
             physical_callable=f"{reg}:hyper_sprint",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
             reason_code="escalate_probe_or_unavailable",
         ),
@@ -627,6 +801,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             trigger_policy="escalate_only",
             executor_key="swarm_multi_agent",
             physical_callable=f"{reg}:swarm_multi_agent",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
             reason_code="escalate_probe_or_unavailable",
         ),
@@ -637,6 +812,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             trigger_policy="escalate_only",
             executor_key="swarm_multi_agent",
             physical_callable=f"{reg}:swarm_multi_agent",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
             reason_code="escalate_probe_or_unavailable",
         ),
@@ -681,6 +857,16 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="asi_constraint_extractor",
             physical_callable=f"{reg}:asi_constraint_extractor",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=("task_id", "asi_failure_records"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "records_count",
+                "constraints_count",
+                "extracted_evidence_refs",
+            ),
+            success_predicate="asi_constraints_extracted",
         ),
         "benchmark": _ec(
             "benchmark",
@@ -693,12 +879,22 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         ),
         "committee": _ec(
             "committee",
-            EXECUTION_CLASS_TRIGGERED_REAL,
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
             executor_key="committee",
             physical_callable=f"{reg}:committee",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "candidate_count",
+                "verdict_count",
+                "explicit_abstain",
+            ),
+            success_predicate="committee_quorum_decided",
         ),
         "file_lock": _ec(
             "file_lock",
@@ -708,6 +904,16 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="file_lock_security_gate",
             physical_callable=f"{reg}:file_lock",
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_context_fields=("task_id", "target_files", "workspace_root"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "access_granted",
+                "task_files_match",
+                "lock_file",
+            ),
+            success_predicate="file_lock_acquired_and_verified",
         ),
         "forecast_gate": _ec(
             "forecast_gate",
@@ -717,6 +923,15 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="forecast_pregate",
             physical_callable=f"{reg}:forecast_gate",
             consumer_effect=CONSUMER_EFFECT_POSTFLIGHT_GATE,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "decision_emitted",
+                "state_persisted",
+                "state_path",
+            ),
+            success_predicate="forecast_decision_or_persisted_rejection",
         ),
         "formal_report": _ec(
             "formal_report",
@@ -726,15 +941,42 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="formal_report",
             physical_callable=f"{reg}:formal_report",
             consumer_effect=CONSUMER_EFFECT_PROMPT_EVIDENCE,
+            required_context_fields=(
+                "task_id",
+                "formal_judge_votes",
+                "formal_verification",
+                "formal_route_receipts",
+            ),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "report_status",
+                "claim_status",
+                "judge_vote_count",
+                "verification_passed",
+                "route_receipt_count",
+            ),
+            success_predicate="formal_report_evidence_ready",
         ),
         "integration_manager": _ec(
             "integration_manager",
-            EXECUTION_CLASS_TRIGGERED_REAL,
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
             executor_key="integration_manager",
             physical_callable=f"{reg}:integration_manager",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "integrated_task_ids",
+                "target_branch",
+                "transactional_rollback_supported",
+            ),
+            success_predicate="integration_completed_transactionally",
         ),
         "meta_opt": _ec(
             "meta_opt",
@@ -744,6 +986,16 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="benchmark_meta_opt",
             physical_callable=f"{reg}:meta_opt",
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_context_fields=("task_id", "workspace_root", "meta_opt_episode"),
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "episode_persisted",
+                "policy_persisted",
+                "autotune_status",
+            ),
+            success_predicate="outcome_memory_autotune_persisted",
         ),
         "prompt_compression": _ec(
             "prompt_compression",
@@ -756,12 +1008,21 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         ),
         "registry_sync": _ec(
             "registry_sync",
-            EXECUTION_CLASS_TRIGGERED_REAL,
+            EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
             executor_key="registry_skills_sync",
             physical_callable=f"{reg}:registry_sync",
+            provider_authorization_required=True,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            required_outcome_fields=(
+                "action",
+                "semantic_status",
+                "evidence_refs",
+                "peer_contacted",
+                "row_count",
+            ),
+            success_predicate="registry_peer_contacted",
         ),
         "stress_test": _ec(
             "stress_test",
@@ -774,12 +1035,13 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
         ),
         "swarm_quiet_moment": _ec(
             "swarm_quiet_moment",
-            EXECUTION_CLASS_TRIGGERED_REAL,
+            EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
             producer_stage="UnifiedRuntime",
             trigger_policy="escalate_only",
             executor_key="swarm_quiet_moment",
             physical_callable=f"{reg}:swarm_quiet_moment",
-            consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
+            consumer_effect=CONSUMER_EFFECT_NONE,
+            consumer_targets=(),
         ),
         "xray": _ec(
             "xray",
@@ -932,6 +1194,8 @@ LOCAL_MODE_EXECUTE_HERE = "EXECUTE_HERE"
 LOCAL_MODE_CONSUME_SHARED_EVIDENCE = "CONSUME_SHARED_EVIDENCE"
 LOCAL_MODE_CONTROLLED_BY_POSTFLIGHT = "CONTROLLED_BY_POSTFLIGHT"
 LOCAL_MODE_EXTERNAL_NOT_LOCAL = "EXTERNAL_NOT_LOCAL"
+CONSUMER_MODE_NOT_TARGET = "NOT_TARGET"
+CONSUMER_MODE_EXTERNAL_AUTHORIZED_EXECUTE = "EXTERNAL_AUTHORIZED_EXECUTE"
 
 LOCAL_EXECUTION_MODES = frozenset(
     {
@@ -942,47 +1206,72 @@ LOCAL_EXECUTION_MODES = frozenset(
     }
 )
 
+ONLINE_EXECUTION_MODES = frozenset(
+    {
+        LOCAL_MODE_EXECUTE_HERE,
+        LOCAL_MODE_CONSUME_SHARED_EVIDENCE,
+        LOCAL_MODE_CONTROLLED_BY_POSTFLIGHT,
+        CONSUMER_MODE_EXTERNAL_AUTHORIZED_EXECUTE,
+        CONSUMER_MODE_NOT_TARGET,
+    }
+)
 
-def project_local_execution_mode(name: str) -> str:
-    """Project a planner capability onto Local consumer mode (contract-derived)."""
-    c = PLANNER_EXECUTION_CONTRACTS.get(str(name or "").strip())
-    if c is None:
-        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+
+def project_consumer_execution_mode(name: str, target: str) -> str:
+    """Project one planner contract onto a concrete consumer target.
+
+    Local and Online share the same contract authority, but they are not the
+    same consumer. ``consumer_targets`` is therefore a mandatory routing
+    constraint rather than descriptive metadata.
+    """
+    key = str(name or "").strip()
+    consumer = str(target or "").strip().lower()
+    c = PLANNER_EXECUTION_CONTRACTS.get(key)
+    if c is None or consumer not in {"local", "online"}:
+        return CONSUMER_MODE_NOT_TARGET
+
+    targets = {str(item).strip().lower() for item in c.get("consumer_targets") or []}
+    if consumer not in targets:
+        return CONSUMER_MODE_NOT_TARGET
+
     ec = str(c.get("execution_class") or "")
     effect = str(c.get("consumer_effect") or "")
-    if ec == EXECUTION_CLASS_STAGE_OWNED_REAL and name == "local_model_executor":
-        return LOCAL_MODE_EXECUTE_HERE
-    if effect == CONSUMER_EFFECT_POSTFLIGHT_GATE or name in {
+    if effect == CONSUMER_EFFECT_POSTFLIGHT_GATE or key in {
         "artifact_gate",
         "claim_gate",
         "delivery_gate",
     }:
         return LOCAL_MODE_CONTROLLED_BY_POSTFLIGHT
-    if ec == EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED and bool(
-        c.get("provider_authorization_required")
-    ):
-        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
-    if ec in {
-        EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
-        EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
-        EXECUTION_CLASS_LEGACY_ALIAS,
-        EXECUTION_CLASS_MISSING_ENGINE,
-    }:
-        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
-    if effect == CONSUMER_EFFECT_PROMPT_EVIDENCE:
-        return LOCAL_MODE_CONSUME_SHARED_EVIDENCE
+    if effect == CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT:
+        if consumer == "online" and bool(c.get("provider_authorization_required")):
+            return CONSUMER_MODE_EXTERNAL_AUTHORIZED_EXECUTE
+        return CONSUMER_MODE_NOT_TARGET
+    if ec == EXECUTION_CLASS_STAGE_OWNED_REAL and key in LOCAL_STAGE_CAPABILITIES:
+        return (
+            LOCAL_MODE_EXECUTE_HERE
+            if consumer == "local"
+            else LOCAL_MODE_CONSUME_SHARED_EVIDENCE
+        )
     if effect == CONSUMER_EFFECT_EXECUTION_CONTROL:
         return LOCAL_MODE_EXECUTE_HERE
-    if effect == CONSUMER_EFFECT_EXTERNAL_SIDE_EFFECT:
-        return LOCAL_MODE_EXTERNAL_NOT_LOCAL
+    if effect == CONSUMER_EFFECT_PROMPT_EVIDENCE:
+        return LOCAL_MODE_CONSUME_SHARED_EVIDENCE
     if ec in REAL_EXECUTION_CLASSES:
         return LOCAL_MODE_CONSUME_SHARED_EVIDENCE
+    return CONSUMER_MODE_NOT_TARGET
+
+
+def project_local_execution_mode(name: str) -> str:
+    """Project a planner capability onto Local consumer mode (contract-derived)."""
+    mode = project_consumer_execution_mode(name, "local")
+    if mode in LOCAL_EXECUTION_MODES:
+        return mode
     return LOCAL_MODE_EXTERNAL_NOT_LOCAL
 
 
 def project_online_execution_mode(name: str) -> str:
-    """Online uses the same contract projection vocabulary as Local."""
-    return project_local_execution_mode(name)
+    """Project a planner capability onto the Online consumer target."""
+    return project_consumer_execution_mode(name, "online")
 
 
 def build_local_online_contract_projection() -> dict[str, Any]:
@@ -1001,14 +1290,19 @@ def build_local_online_contract_projection() -> dict[str, Any]:
                 "public_claim_allowed": False,
             }
         )
-    mode_counts = {m: 0 for m in sorted(LOCAL_EXECUTION_MODES)}
+    local_mode_counts = {m: 0 for m in sorted(LOCAL_EXECUTION_MODES)}
+    online_mode_counts = {m: 0 for m in sorted(ONLINE_EXECUTION_MODES)}
     for row in rows:
-        mode_counts[str(row["local_mode"])] = mode_counts.get(str(row["local_mode"]), 0) + 1
+        local_mode = str(row["local_mode"])
+        online_mode = str(row["online_mode"])
+        local_mode_counts[local_mode] = local_mode_counts.get(local_mode, 0) + 1
+        online_mode_counts[online_mode] = online_mode_counts.get(online_mode, 0) + 1
     return {
         "schema": "nexus.local_online_contract_projection.v1",
         "source": "PLANNER_EXECUTION_CONTRACTS",
         "planner_contract_count": len(rows),
-        "local_mode_counts": mode_counts,
+        "local_mode_counts": local_mode_counts,
+        "online_mode_counts": online_mode_counts,
         "independent_local_truth": False,
         "rows": rows,
     }
@@ -1483,6 +1777,60 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             "handoff_readiness",
         }
     )
+    _CODEINTEL_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "target_file", "target_symbol", "search_paths"}
+    )
+    _MEMORY_CONSTRAINT_KEYS = frozenset({"workspace_root", "memory_query"})
+    _PREGATE_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "verify_commands", "verify_timeout_sec"}
+    )
+    _SEMANTIC_SEARCH_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "search_query", "search_table", "search_limit"}
+    )
+    _JIT_CONSTRAINT_KEYS = frozenset({"jit_all_tools", "jit_token_usage"})
+    _MEMPALACE_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "mempalace_tenant_id",
+            "mempalace_artifact_type",
+            "mempalace_artifact",
+            "mempalace_query",
+        }
+    )
+    _SANDBOX_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "sandbox_command", "sandbox_timeout_sec"}
+    )
+    _SCHEDULER_CONSTRAINT_KEYS = frozenset({"workspace_root"})
+    _METABOLISM_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "metabolism_token_usage", "metabolism_token_limit"}
+    )
+    _ASI_CONSTRAINT_KEYS = frozenset({"asi_failure_records"})
+    _COMMITTEE_CONSTRAINT_KEYS = frozenset({"committee_proposals"})
+    _FILE_LOCK_CONSTRAINT_KEYS = frozenset({"workspace_root", "target_files"})
+    _FORECAST_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "forecast_roi_score", "forecast_tokens", "forecast_reject_prob"}
+    )
+    _FORMAL_REPORT_CONSTRAINT_KEYS = frozenset(
+        {
+            "formal_judge_votes",
+            "formal_verification",
+            "formal_route_receipts",
+            "formal_asi_constraints",
+        }
+    )
+    _INTEGRATION_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "integration_task_ids",
+            "integration_target_branch",
+            "integration_state_dir",
+        }
+    )
+    _META_OPT_CONSTRAINT_KEYS = frozenset({"workspace_root", "meta_opt_episode"})
+    _REGISTRY_SYNC_CONSTRAINT_KEYS = frozenset(
+        {"workspace_root", "registry_peer_host", "registry_peer_port", "registry_query_tokens"}
+    )
+    _NIGHTSHIFT_CONSTRAINT_KEYS = frozenset({"workspace_root", "nightshift_target_file"})
 
     def _allowlisted_constraints(context: Mapping[str, Any]) -> dict[str, Any]:
         keys: frozenset[str]
@@ -1492,32 +1840,333 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _CLAIM_CONSTRAINT_KEYS
         elif name == "plan_quality_gate":
             keys = _PLAN_QUALITY_CONSTRAINT_KEYS
+        elif name == "codeintel":
+            keys = _CODEINTEL_CONSTRAINT_KEYS
+        elif name == "memory":
+            keys = _MEMORY_CONSTRAINT_KEYS
+        elif name in {"pregate", "harness_preflight_sensor"}:
+            keys = _PREGATE_CONSTRAINT_KEYS
+        elif name in {"lancedb", "semantic_searcher"}:
+            keys = _SEMANTIC_SEARCH_CONSTRAINT_KEYS
+        elif name == "jit_validation":
+            keys = _JIT_CONSTRAINT_KEYS
+        elif name == "mempalace_gate":
+            keys = _MEMPALACE_CONSTRAINT_KEYS
+        elif name == "sandbox":
+            keys = _SANDBOX_CONSTRAINT_KEYS
+        elif name == "learn_scheduler":
+            keys = _SCHEDULER_CONSTRAINT_KEYS
+        elif name == "metabolism":
+            keys = _METABOLISM_CONSTRAINT_KEYS
+        elif name == "asi_constraint_extractor":
+            keys = _ASI_CONSTRAINT_KEYS
+        elif name == "committee":
+            keys = _COMMITTEE_CONSTRAINT_KEYS
+        elif name == "file_lock":
+            keys = _FILE_LOCK_CONSTRAINT_KEYS
+        elif name == "forecast_gate":
+            keys = _FORECAST_CONSTRAINT_KEYS
+        elif name == "formal_report":
+            keys = _FORMAL_REPORT_CONSTRAINT_KEYS
+        elif name == "integration_manager":
+            keys = _INTEGRATION_CONSTRAINT_KEYS
+        elif name == "meta_opt":
+            keys = _META_OPT_CONSTRAINT_KEYS
+        elif name == "registry_sync":
+            keys = _REGISTRY_SYNC_CONSTRAINT_KEYS
+        elif name == "nightshift":
+            keys = _NIGHTSHIFT_CONSTRAINT_KEYS
         else:
             return {}
         out: dict[str, Any] = {}
         for k in keys:
             if k in context and context.get(k) is not None:
                 out[k] = context.get(k)
+        if name == "codeintel":
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in _CODEINTEL_CONSTRAINT_KEYS:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
+        if name == "memory":
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            if "workspace_root" not in out and route.get("workspace_root") not in (None, ""):
+                out["workspace_root"] = route.get("workspace_root")
+            if "memory_query" not in out and context.get("task_statement") not in (None, ""):
+                out["memory_query"] = context.get("task_statement")
+        if name in {"pregate", "harness_preflight_sensor"}:
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in _PREGATE_CONSTRAINT_KEYS:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
+        if name in {"lancedb", "semantic_searcher"}:
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in _SEMANTIC_SEARCH_CONSTRAINT_KEYS:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
+        if name == "jit_validation":
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in _JIT_CONSTRAINT_KEYS:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+        if name == "mempalace_gate":
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in _MEMPALACE_CONSTRAINT_KEYS:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
+        if name == "sandbox":
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in _SANDBOX_CONSTRAINT_KEYS:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
+        if name in {"learn_scheduler", "metabolism"}:
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            selected_keys = (
+                _SCHEDULER_CONSTRAINT_KEYS
+                if name == "learn_scheduler"
+                else _METABOLISM_CONSTRAINT_KEYS
+            )
+            for k in selected_keys:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
+        extra_context_keys = {
+            "plan_quality_gate": _PLAN_QUALITY_CONSTRAINT_KEYS,
+            "asi_constraint_extractor": _ASI_CONSTRAINT_KEYS,
+            "committee": _COMMITTEE_CONSTRAINT_KEYS,
+            "file_lock": _FILE_LOCK_CONSTRAINT_KEYS,
+            "forecast_gate": _FORECAST_CONSTRAINT_KEYS,
+            "formal_report": _FORMAL_REPORT_CONSTRAINT_KEYS,
+            "integration_manager": _INTEGRATION_CONSTRAINT_KEYS,
+            "meta_opt": _META_OPT_CONSTRAINT_KEYS,
+            "registry_sync": _REGISTRY_SYNC_CONSTRAINT_KEYS,
+            "nightshift": _NIGHTSHIFT_CONSTRAINT_KEYS,
+        }.get(name, frozenset())
+        if extra_context_keys:
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for k in extra_context_keys:
+                if k not in out and codeintel.get(k) not in (None, ""):
+                    out[k] = codeintel.get(k)
+                if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
+                    out[k] = route.get(k)
         # Nested verifier block (common mainchain shape)
         verifier = context.get("verifier") if isinstance(context.get("verifier"), Mapping) else {}
         if name in {"acceptance_check", "bdd_acceptance_skill"} and isinstance(verifier, Mapping):
-            for k in ("verifier_status", "verifier_artifact", "source_hash"):
+            verifier_payload: Mapping[str, Any] = verifier
+            nested_response = verifier.get("response")
+            if (
+                isinstance(nested_response, Mapping)
+                and verifier.get("invoked") is True
+                and verifier.get("gate_passed") is True
+                and str(verifier.get("status") or "").upper() == "SUCCEEDED"
+            ):
+                verifier_payload = nested_response
+            for k in (
+                "semantic_status",
+                "completion_status",
+                "verifier_status",
+                "verifier_artifact",
+                "source_hash",
+            ):
                 if k not in out and verifier.get(k) not in (None, ""):
-                    # map verifier_status from nested verifier dict
+                    out[k] = verifier.get(k)
+                if k not in out and verifier_payload.get(k) not in (None, ""):
                     if k == "verifier_status":
-                        out["verifier_status"] = verifier.get("verifier_status") or verifier.get("status")
-                    elif k == "verifier_artifact":
-                        out["verifier_artifact"] = verifier.get("verifier_artifact")
-                    elif k == "source_hash":
-                        out["source_hash"] = verifier.get("source_hash")
-            if "evidence_refs" not in out and verifier.get("evidence_refs"):
-                out["evidence_refs"] = list(verifier.get("evidence_refs") or [])
+                        out["verifier_status"] = (
+                            verifier_payload.get("verifier_status")
+                            or verifier_payload.get("status")
+                        )
+                    else:
+                        out[k] = verifier_payload.get(k)
+            if "evidence_refs" not in out and verifier_payload.get("evidence_refs"):
+                out["evidence_refs"] = list(verifier_payload.get("evidence_refs") or [])
         # Top-level source_hash alias
         if name in {"acceptance_check", "bdd_acceptance_skill"} and "source_hash" not in out and context.get("source_hash"):
             out["source_hash"] = context.get("source_hash")
         if name == "claim_gate" and "source_hash" not in out and context.get("source_hash"):
             out["source_hash"] = context.get("source_hash")
         return out
+
+    def _execution_contract_violations(outcome: Mapping[str, Any]) -> list[str]:
+        contract = PLANNER_EXECUTION_CONTRACTS.get(name) or {}
+        violations: list[str] = []
+        for field in contract.get("required_outcome_fields") or []:
+            value = outcome.get(str(field))
+            if value in (None, "", [], {}):
+                violations.append(f"missing_outcome_field:{field}")
+        for field in contract.get("required_evidence_fields") or []:
+            value = outcome.get(str(field))
+            if value in (None, "", [], {}):
+                violations.append(f"missing_evidence_field:{field}")
+        semantic_status = str(outcome.get("semantic_status") or "").strip().upper()
+        if semantic_status not in {"VERIFIED", "SUCCEEDED", "PASS", "PASSED", "COMPLETE"}:
+            violations.append(f"non_success_semantic_status:{semantic_status or 'missing'}")
+        predicate = str(contract.get("success_predicate") or "")
+        if predicate == "non_empty_verify_commands":
+            try:
+                command_count = int(outcome.get("command_count") or 0)
+            except (TypeError, ValueError):
+                command_count = 0
+            if command_count <= 0:
+                violations.append("empty_verify_command_set")
+        if predicate == "codeintel_lookup_performed":
+            if outcome.get("lookup_performed") is not True:
+                violations.append("codeintel_lookup_not_performed")
+        if predicate == "project_memory_search_performed":
+            if outcome.get("search_performed") is not True:
+                violations.append("project_memory_search_not_performed")
+        if predicate == "semantic_search_performed":
+            if outcome.get("search_performed") is not True:
+                violations.append("semantic_search_not_performed")
+        if predicate == "lancedb_query_performed":
+            if outcome.get("query_performed") is not True:
+                violations.append("lancedb_query_not_performed")
+        if predicate == "jit_mask_and_quota_applied":
+            if outcome.get("mask_applied") is not True:
+                violations.append("jit_mask_not_applied")
+            if outcome.get("quota_checked") is not True:
+                violations.append("jit_quota_not_checked")
+        if predicate == "mempalace_roundtrip_verified":
+            for field in (
+                "ingest_performed",
+                "retrieve_performed",
+                "verification_passed",
+            ):
+                if outcome.get(field) is not True:
+                    violations.append(f"mempalace_{field}_false")
+        if predicate == "sandbox_isolated_execution_passed":
+            if outcome.get("sandbox_executed") is not True:
+                violations.append("sandbox_not_executed")
+            if outcome.get("workspace_isolated") is not True:
+                violations.append("sandbox_workspace_not_isolated")
+            if outcome.get("network_allowed") is not False:
+                violations.append("sandbox_network_not_denied")
+            if outcome.get("exit_code") != 0:
+                violations.append("sandbox_exit_nonzero")
+        if predicate == "verified_local_repair_receipt":
+            if outcome.get("hash_matched") is not True:
+                violations.append("repair_hash_not_matched")
+            if outcome.get("verifier_passed") is not True:
+                violations.append("repair_verifier_not_passed")
+            if outcome.get("settlement_decision") != "receipt_complete":
+                violations.append("repair_receipt_not_complete")
+        if predicate == "plan_quality_real_inputs_evaluated":
+            if outcome.get("passed") is not True:
+                violations.append("plan_quality_not_passed")
+            if outcome.get("input_fields_present") is not True:
+                violations.append("plan_quality_inputs_missing")
+            if outcome.get("impact_map_evaluated") is not True:
+                violations.append("plan_quality_impact_not_evaluated")
+        if predicate == "asi_constraints_extracted":
+            if int(outcome.get("records_count") or 0) < 2:
+                violations.append("asi_insufficient_failure_records")
+            if int(outcome.get("constraints_count") or 0) < 1:
+                violations.append("asi_no_constraint_extracted")
+            if not outcome.get("extracted_evidence_refs"):
+                violations.append("asi_missing_extracted_evidence")
+        if predicate == "file_lock_acquired_and_verified":
+            if outcome.get("conflicts") not in ([], ()):
+                violations.append("file_lock_conflict")
+            if outcome.get("access_granted") is not True:
+                violations.append("file_lock_access_not_granted")
+            if outcome.get("task_files_match") is not True:
+                violations.append("file_lock_task_files_mismatch")
+        if predicate == "forecast_decision_or_persisted_rejection":
+            if outcome.get("decision_emitted") is not True:
+                violations.append("forecast_decision_missing")
+            result = outcome.get("result") if isinstance(outcome.get("result"), Mapping) else {}
+            if result.get("proceed") is not True and not (
+                outcome.get("ash_strategy") and outcome.get("state_persisted") is True
+            ):
+                violations.append("forecast_rejection_not_persisted")
+        if predicate == "formal_report_evidence_ready":
+            if outcome.get("report_status") != "READY":
+                violations.append("formal_report_not_ready")
+            if outcome.get("claim_status") != "PASS":
+                violations.append("formal_report_claim_blocked")
+            if int(outcome.get("judge_vote_count") or 0) < 1:
+                violations.append("formal_report_missing_judge_votes")
+            if outcome.get("verification_passed") is not True:
+                violations.append("formal_report_verification_not_passed")
+            if int(outcome.get("route_receipt_count") or 0) < 1:
+                violations.append("formal_report_missing_route_receipt")
+        if predicate == "outcome_memory_autotune_persisted":
+            if outcome.get("episode_persisted") is not True:
+                violations.append("meta_opt_episode_not_persisted")
+            if outcome.get("policy_persisted") is not True:
+                violations.append("meta_opt_policy_not_persisted")
+            if outcome.get("autotune_status") != "PASS":
+                violations.append("meta_opt_autotune_not_passed")
+        if predicate == "committee_quorum_decided":
+            if int(outcome.get("candidate_count") or 0) < 2:
+                violations.append("committee_insufficient_candidates")
+            if int(outcome.get("verdict_count") or 0) < 1:
+                violations.append("committee_missing_verdicts")
+            if not outcome.get("winner_id") and outcome.get("explicit_abstain") is not True:
+                violations.append("committee_no_winner_or_abstain")
+        if predicate == "nightshift_terminal_success":
+            if outcome.get("terminal_success") is not True:
+                violations.append("nightshift_not_terminal_success")
+        if predicate == "integration_completed_transactionally":
+            if not outcome.get("integrated_task_ids"):
+                violations.append("integration_no_tasks_integrated")
+            if outcome.get("failed_task_ids"):
+                violations.append("integration_has_failed_tasks")
+            if outcome.get("transactional_rollback_supported") is not True:
+                violations.append("integration_rollback_not_supported")
+        if predicate == "registry_peer_contacted":
+            if outcome.get("peer_contacted") is not True:
+                violations.append("registry_peer_not_contacted")
+        return sorted(set(violations))
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(context.get("task_id") or "")
@@ -1623,6 +2272,30 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                     "registry_key": registry_key,
                     "outcome": outcome_map,
                     "shallow_rejected": is_shallow,
+                },
+            }
+        contract_violations = _execution_contract_violations(outcome_map) if gate_passed else []
+        if contract_violations:
+            return {
+                "task_id": task_id,
+                "invoked": True,
+                "skipped": False,
+                "status": "BLOCKED",
+                "gate_passed": False,
+                "outcome_contributed": False,
+                "evidence_refs": [evidence_id] if evidence_id else [],
+                "evidence_ids": [evidence_id] if evidence_id else [],
+                "physical_callable": f"capability_executor_registry:{registry_key}",
+                "reason": "execution_contract_violation",
+                "telemetry": telemetry,
+                "stub": False,
+                "response": {
+                    "status": "BLOCKED_EXECUTION_CONTRACT",
+                    "reason": "execution_contract_violation",
+                    "capability": name,
+                    "registry_key": registry_key,
+                    "outcome": outcome_map,
+                    "contract_violations": contract_violations,
                 },
             }
         status = "SUCCEEDED" if gate_passed else "FAILED"
@@ -1782,6 +2455,9 @@ def build_default_mainchain_invokers(
         build_codeintel_preflight_invoker,
         build_plan_gated_postflight_invokers,
     )
+    from nexus.services.unified_runtime import (
+        build_prompt_compression_capability_invoker,
+    )
 
     invokers: dict[str, CapabilityInvoker] = {}
 
@@ -1810,6 +2486,12 @@ def build_default_mainchain_invokers(
 
     for name in list_planner_capability_names():
         if name in invokers:
+            continue
+        if name == "prompt_compression":
+            # Runtime owns the measured compression edge.  The registry
+            # adapter must not replace it with an import/module-reference
+            # receipt that can pass without reducing context.
+            invokers[name] = build_prompt_compression_capability_invoker()
             continue
         if name in LOCAL_STAGE_CAPABILITIES:
             # Production LocalModelExecutor path (not explicit_skip theater).

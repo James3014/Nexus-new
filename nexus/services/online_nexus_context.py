@@ -41,6 +41,37 @@ NEXUS_LOCAL_MARKER = "[LOCAL_ASSIST_CONTEXT]"
 NEXUS_EVIDENCE_MARKER = "[NEXUS CAPABILITY EVIDENCE]"
 
 
+_CAPABILITY_GUIDANCE: dict[str, str] = {
+    "autoreason": "For Autoreason decisions, reject candidates without evidence and require a verifier-backed semantic outcome.",
+    "belief": "Treat Belief confidence as a routing signal, never as proof of correctness or claim eligibility.",
+    "claim_gate": "Do not accept claim booleans without verifier status, verifier artifact, and matching source hash.",
+    "ddtree": "For DDTree pruning, preserve boundary-risk candidates before filling remaining slots by score.",
+    "delivery_gate": "Delivery requires applied-output lineage and verifier evidence; a bundle hash alone is not an artifact.",
+    "lancedb": "Use LanceDB hits only when their source identity and relevance evidence are present.",
+    "memory": "Use retrieved memory as bounded context and preserve its provenance; do not treat a hit as verified truth.",
+    "nightshift": "Nightshift recovery is valid only with invocation, recovery evidence, and a persisted report path.",
+    "research": "Research claims require a supported status and a non-empty citation or source reference.",
+    "semantic_searcher": "Semantic references require topic match, threshold evidence, and a non-empty source identity.",
+    "swarm": "Swarm conclusions require distinct-role evidence and may not infer consensus from role labels alone.",
+}
+
+_FIXTURE_GUIDANCE: dict[str, str] = {
+    "rlm_harder_v2_governance_guard": "Allow read-only tools; block destructive or task-forbidden path operations with reason governance_block.",
+    "rlm_harder_v2_governance_scope": "Approved mutations use reason approved, read-only inspection uses read_only, and unapproved mutations use scope_block.",
+    "rlm_harder_v2_evidence_replay": "Accept replay receipts only when claim is verified, replay_command is non-empty, and exit_code is zero.",
+    "rlm_harder_v2_nightshift_recovery": "Accept Nightshift recovery only when recommended, invoked, recovered, and report_path are all present.",
+    "rlm_harder_v2_belief_budget": "Require evidence for low or uncertain confidence and elevated risk; reserve one round for high-confidence low-risk work.",
+    "rlm_harder_v2_autoreason_judge": "Ignore candidates with empty evidence_refs or non-pass status, then choose the highest-scoring remaining candidate.",
+    "rlm_harder_v2_ddtree_pruning": "Include the highest-risk boundary candidate first, then fill remaining slots with highest-score unselected candidates.",
+    "rlm_harder_v2_research_citation": "Select a research claim only when topic matches, supported is exactly true, and citation is non-empty.",
+    "rlm_harder_v2_lancedb_retrieval": "Select hits only when topic matches, score meets the threshold, and source_id is non-empty.",
+    "rlm_harder_v2_semantic_searcher_refs": "Select refs only when topic matches, relevance meets the threshold, gate_passed is true, and source_id is non-empty.",
+    "rlm_harder_v2_swarm_quiet_moment": "Require the exact quiet-moment schema, production writes disabled, observe/report/rollback actions, and status evidence.",
+    "nexus_value_mempalace_secret_redaction": "Preserve non-secret fields and redact token, password, secret, api_key, and credential-like values.",
+    "nexus_value_trust_incident_classifier": "A smoke pass without semantic verification remains needs_evidence; only verified semantic evidence resolves the incident.",
+}
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -59,6 +90,59 @@ def _json_prompt_block(payload: Mapping[str, Any]) -> str:
 def _hash_json(value: Any) -> str:
     encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def build_guidance_pack(
+    *,
+    selected_capabilities: tuple[str, ...] | list[str],
+    task_type: str,
+    task_statement: str,
+    source: str = "",
+    route: Mapping[str, Any] | None = None,
+    explicit_guidance: str = "",
+) -> dict[str, Any]:
+    """Build bounded runtime guidance from capability and task signals.
+
+    This is the product projection of the World-B hidden-verifier guidance.
+    It is advisory only, carries no claim authority, and introduces no route.
+    """
+    selected = tuple(dict.fromkeys(str(item) for item in selected_capabilities if str(item)))
+    route_map = _mapping(route)
+    fixture_kind = str(route_map.get("fixture_kind") or "").strip()
+    combined = f"{task_statement}\n{source}".lower()
+    rules = [
+        "Visible tests are acceptance hints, not the full contract; infer hidden invariants from source and task category.",
+        "Prefer evidence-backed changes and fail closed when required verification evidence is missing.",
+    ]
+    if "test_repair" in str(task_type).lower() or "repair" in combined:
+        rules.append(
+            "Repair tasks must preserve caller-owned inputs and handle edge cases not shown by visible tests."
+        )
+    if "claim" in combined or "evidence" in combined:
+        rules.append(
+            "Do not mark unsupported claims successful; require artifact-backed verification."
+        )
+    for capability in selected:
+        rule = _CAPABILITY_GUIDANCE.get(capability)
+        if rule and rule not in rules:
+            rules.append(rule)
+    fixture_rule = _FIXTURE_GUIDANCE.get(fixture_kind)
+    if fixture_rule and fixture_rule not in rules:
+        rules.append(fixture_rule)
+    explicit = str(explicit_guidance or "").strip()
+    if explicit and explicit not in rules:
+        rules.append(explicit)
+    payload = {
+        "schema": "nexus.online_guidance_pack.v1",
+        "fixture_kind": fixture_kind,
+        "selected_capabilities": list(selected),
+        "rules": rules,
+        "source_authority": "nexus.services.online_nexus_context.build_guidance_pack",
+        "ported_from": "scripts.bench.capability_ab_runner._nexus_codex_hidden_verifier_guidance",
+        "public_claim_allowed": False,
+    }
+    payload["guidance_hash"] = _hash_json(payload)
+    return payload
 
 
 def compact_route_for_prompt(
@@ -215,6 +299,7 @@ class OnlineNexusContext:
     codeintel_compact: dict[str, Any] = field(default_factory=dict)
     planner_decision_id: str = ""
     lineage: dict[str, Any] = field(default_factory=dict)
+    guidance_pack: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -229,6 +314,7 @@ class OnlineNexusContext:
             "codeintel_compact": dict(self.codeintel_compact),
             "prompt_hash": hashlib.sha256(self.prompt.encode("utf-8")).hexdigest(),
             "lineage": dict(self.lineage),
+            "guidance_pack": dict(self.guidance_pack),
         }
 
 
@@ -271,6 +357,11 @@ def build_online_nexus_context(
         or _mapping(plan_map.get("signal_snapshot")).get("planner_decision_id")
         or plan_hash
     )
+    from nexus.services.capability_registry import project_online_execution_mode
+
+    consumer_execution_modes = {
+        name: project_online_execution_mode(name) for name in selected
+    }
 
     route_compact = compact_route_for_prompt(route, selected_capabilities=selected)
     codeintel_compact = compact_codeintel_for_prompt(codeintel)
@@ -293,12 +384,15 @@ def build_online_nexus_context(
     profile_prompt = _json_prompt_block(profile_compact)
     flags_prompt = _json_prompt_block(flags_compact)
     evidence_prompt = _json_prompt_block(evidence_compact) if evidence_compact else ""
-    hidden = str(hidden_guidance or "").strip()
-    if not hidden:
-        hidden = (
-            "- Prefer evidence-backed changes; do not invent files, symbols, or claims.\n"
-            "- Fail closed when verification evidence is missing."
-        )
+    guidance_pack = build_guidance_pack(
+        selected_capabilities=selected,
+        task_type=task_type,
+        task_statement=task_statement,
+        source=source,
+        route=route,
+        explicit_guidance=hidden_guidance,
+    )
+    hidden = "\n".join(f"- {rule}" for rule in guidance_pack["rules"])
 
     task_body = str(base_prompt or task_statement or "").strip()
     if not task_body:
@@ -436,11 +530,22 @@ def build_online_nexus_context(
         "plan_hash": plan_hash,
         "planner_decision_id": planner_decision_id,
         "selected_capabilities": list(selected),
+        "consumer_execution_modes": dict(consumer_execution_modes),
+        "consumer_contract_source": (
+            "nexus.services.capability_registry.PLANNER_EXECUTION_CONTRACTS"
+        ),
         "prompt_sections_present": list(sections),
         "codeintel_present": codeintel_present,
         "markers": {
             "route": NEXUS_ROUTE_MARKER,
             "codeintel": NEXUS_CODEINTEL_MARKER,
+        },
+        "guidance_pack": {
+            "schema": guidance_pack["schema"],
+            "guidance_hash": guidance_pack["guidance_hash"],
+            "fixture_kind": guidance_pack["fixture_kind"],
+            "selected_capabilities": list(guidance_pack["selected_capabilities"]),
+            "public_claim_allowed": False,
         },
         "public_claim_allowed": False,
     }
@@ -463,6 +568,7 @@ def build_online_nexus_context(
         codeintel_compact=codeintel_compact,
         planner_decision_id=planner_decision_id,
         lineage=lineage,
+        guidance_pack=guidance_pack,
     )
 
 
@@ -822,6 +928,8 @@ def build_plan_gated_postflight_invokers() -> dict[str, Callable[[Mapping[str, A
 
             response = {
                 "status": "PASS" if gate_passed else "BLOCK",
+                "action": "evaluate_postflight_gate",
+                "semantic_status": "VERIFIED" if gate_passed else "BLOCKED",
                 "gate": name,
                 "blockers": list(verdict.get("blockers") or []),
                 "proof": dict(verdict.get("proof") or {}),
@@ -838,6 +946,7 @@ def build_plan_gated_postflight_invokers() -> dict[str, Callable[[Mapping[str, A
                 "gate_passed": gate_passed,
                 "outcome_contributed": gate_passed,
                 "status": "SUCCEEDED" if gate_passed else "FAILED",
+                "semantic_status": "VERIFIED" if gate_passed else "BLOCKED",
                 "evidence_refs": [
                     f"capability:{name}:{task_id}:postflight",
                     *(

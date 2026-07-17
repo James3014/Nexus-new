@@ -19,6 +19,7 @@ from nexus.services.capability_evidence_bundle import (
     verify_capability_evidence_bundle,
 )
 from nexus.services.capability_registry import (
+    LOCAL_STAGE_CAPABILITIES,
     PROBE_ONLY_REASON_CODES,
     WIRED_REAL,
     build_wiring_matrix,
@@ -279,14 +280,17 @@ def test_closure_receipt_structural_gates_required() -> None:
     assert loaded["public_claim_allowed"] is False
     assert loaded["structural_closure"] is True
     assert receipt["structural_closure"] is True
-    real_blockers = [
+    real_structural_blockers = [
         b
-        for b in loaded.get("blockers") or []
+        for b in loaded.get("structural_blockers") or []
         if b.get("promotable")
         and b.get("execution_class")
         in {"DEFAULT_REAL", "TRIGGERED_REAL", "STAGE_OWNED_REAL"}
     ]
-    assert real_blockers == [], real_blockers[:5]
+    assert real_structural_blockers == [], real_structural_blockers[:5]
+    assert loaded["semantic_closure"] is False
+    assert loaded["live_online_complete"] is False
+    assert loaded["live_local_complete"] is False
 
 
 def test_p1_f_wired_ok_is_honest_production_set() -> None:
@@ -298,7 +302,7 @@ def test_p1_f_wired_ok_is_honest_production_set() -> None:
     assert len(f_rows) < 91
     for row in f_rows:
         assert classify_gap(row["name"]) == "F_wired_ok"
-        assert row["name"] in WIRED_REAL or row["name"] == "local_model_executor"
+        assert row["name"] in WIRED_REAL or row["name"] in LOCAL_STAGE_CAPABILITIES
         # probe-only names must never be F
         assert row["name"] not in PROBE_ONLY_REASON_CODES
     for name, reason in PROBE_ONLY_REASON_CODES.items():
@@ -1678,6 +1682,37 @@ def test_acceptance_check_verified_can_succeed() -> None:
     test_acceptance_check_full_bounded_verifier_evidence_passes()
 
 
+def test_acceptance_invoker_reads_normalized_verifier_stage_response() -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("acceptance_check")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "acc-normalized-stage",
+            "task_statement": "accept verified callback evidence",
+            "planner": {"plan_hash": "plan-acc-normalized-stage"},
+            "verifier": {
+                "name": "verifier",
+                "status": "SUCCEEDED",
+                "invoked": True,
+                "gate_passed": True,
+                "response": {
+                    "semantic_status": "VERIFIED",
+                    "verifier_status": "pass",
+                    "verifier_artifact": "sha256:" + ("12" * 32),
+                    "source_hash": "sourcehashvalue0004",
+                    "evidence_refs": ["verifier:acc-normalized-stage"],
+                },
+            },
+        }
+    )
+
+    assert result["invoked"] is True
+    assert result["gate_passed"] is True
+    assert result["status"] == "SUCCEEDED"
+
+
 def test_claim_gate_hash_match_omitted_fails() -> None:
     from nexus.core.belief_contracts import CapabilityExecutionPlan
     from nexus.core import capability_executor_registry as cer
@@ -1921,6 +1956,9 @@ def test_bundle_carries_bounded_consumer_payload() -> None:
             "task_id": task_id,
             "task_statement": "scan impact risk workspace",
             "planner": {"plan_hash": "ph"},
+            "workspace_root": str(Path.cwd()),
+            "target_file": "nexus/services/capability_registry.py",
+            "target_symbol": "build_real_executor_invoker",
         }
     )
     stage = {
@@ -2205,6 +2243,447 @@ def test_online_prompt_contains_same_capability_payload() -> None:
     for p in lineage.get("consumed_capability_payloads") or []:
         fields = p.get("fields") or {}
         assert fields.get("action") == "probe" or fields.get("result"), p
+
+
+def test_runtime_guidance_pack_ports_world_b_fixture_and_capability_rules() -> None:
+    ctx = build_online_nexus_context(
+        task_statement="Repair the evidence-backed candidate selector",
+        task_id="guidance-pack-1",
+        task_type="test_repair",
+        route={"fixture_kind": "rlm_harder_v2_autoreason_judge"},
+        plan={
+            "selected_capabilities": ["autoreason", "claim_gate"],
+            "plan_hash": "plan-guidance-1",
+        },
+    )
+
+    pack = ctx.guidance_pack
+    assert pack["schema"] == "nexus.online_guidance_pack.v1"
+    assert pack["public_claim_allowed"] is False
+    assert pack["fixture_kind"] == "rlm_harder_v2_autoreason_judge"
+    assert pack["guidance_hash"]
+    assert "empty evidence_refs" in ctx.hidden_guidance
+    assert "verifier status" in ctx.hidden_guidance
+    assert ctx.lineage["guidance_pack"]["guidance_hash"] == pack["guidance_hash"]
+
+
+def test_runtime_guidance_pack_does_not_leak_unselected_fixture_rules() -> None:
+    ctx = build_online_nexus_context(
+        task_statement="Inspect a normal configuration change",
+        task_id="guidance-pack-2",
+        task_type="codeintel",
+        route={},
+        plan={"selected_capabilities": ["codeintel"], "plan_hash": "plan-guidance-2"},
+    )
+
+    assert ctx.guidance_pack["fixture_kind"] == ""
+    assert "empty evidence_refs" not in ctx.hidden_guidance
+    assert "governance_block" not in ctx.hidden_guidance
+    assert ctx.guidance_pack["public_claim_allowed"] is False
+
+
+def test_default_prompt_compression_uses_measured_runtime_edge() -> None:
+    from nexus.services.capability_registry import build_default_mainchain_invokers
+
+    invoker = build_default_mainchain_invokers()["prompt_compression"]
+    result = invoker(
+        {
+            "task_id": "compression-real-edge-1",
+            "task_statement": "x" * 9000,
+            "online_prompt": "x" * 9000,
+            "online_payload": "y" * 9000,
+            "capability_results": {
+                "memory": {
+                    "status": "SUCCEEDED",
+                    "evidence_refs": ["memory:compression-real-edge-1"],
+                }
+            },
+        }
+    )
+
+    response = result["response"]
+    assert result["invoked"] is True
+    assert result["gate_passed"] is True
+    assert result["outcome_contributed"] is True
+    assert response["compressed_context_chars"] < response["original_context_chars"]
+    assert response["compression_ratio"] > 0
+    assert result["physical_callable"].endswith(
+        "build_prompt_compression_capability_invoker"
+    )
+
+
+def test_repair_loop_cannot_pass_without_real_attempt_and_verification_effect() -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("repair_loop")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "repair-no-effect-1",
+            "task_statement": "repair without a candidate or verifier command",
+            "planner": {"plan_hash": "repair-no-effect-plan"},
+        }
+    )
+
+    assert result["gate_passed"] is False
+    assert result["outcome_contributed"] is False
+    assert result["status"] in {"FAILED", "BLOCKED"}
+    outcome = result["response"].get("outcome") or {}
+    assert outcome.get("semantic_status") in {"BLOCKED", "FAILED", "UNVERIFIED"}
+
+
+def test_pregate_empty_verify_command_set_cannot_satisfy_physical_contract(
+    tmp_path: Path,
+) -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("pregate")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "pregate-empty-work-1",
+            "task_statement": "detect a project without a runnable verifier command",
+            "planner": {"plan_hash": "pregate-empty-work-plan"},
+            "codeintel": {"workspace_root": str(tmp_path)},
+        }
+    )
+
+    assert result["gate_passed"] is False
+    assert result["outcome_contributed"] is False
+    assert result["status"] == "FAILED"
+    outcome = result["response"]["outcome"]
+    assert outcome["semantic_status"] == "BLOCKED"
+    assert outcome["error"] == "EXPLICIT_VERIFY_COMMANDS_REQUIRED"
+    assert outcome["command_count"] == 0
+    assert outcome["all_passed"] is False
+
+
+def test_pregate_executes_non_empty_verifier_command(tmp_path: Path) -> None:
+    import sys
+
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    (tmp_path / "target.py").write_text("value = 1\n", encoding="utf-8")
+    invoker = build_real_executor_invoker("pregate")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "pregate-real-command-1",
+            "task_statement": "compile the bounded target",
+            "planner": {"plan_hash": "pregate-real-command-plan"},
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "verify_commands": [f"{sys.executable} -m py_compile target.py"],
+            },
+        }
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    outcome = result["response"]["outcome"]
+    assert outcome["command_count"] == 1
+    assert outcome["all_passed"] is True
+    assert outcome["results"][0]["exit_code"] == 0
+
+
+def test_semantic_searcher_queries_real_memory_repository(tmp_path: Path) -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+    from nexus.services.memory_repository import MemoryRepository
+
+    db_path = tmp_path / ".nexus" / "knowledge" / "lancedb"
+    repository = MemoryRepository(db_path)
+    repository.ensure_table(
+        "policy",
+        initial_data=[
+            {
+                "rule_id": "family-policy-1",
+                "condition": "capability closure",
+                "action": "require physical evidence",
+                "confidence": 0.9,
+            }
+        ],
+        fts_column="action",
+    )
+    invoker = build_real_executor_invoker("semantic_searcher")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "semantic-search-real-1",
+            "task_statement": "physical evidence",
+            "planner": {"plan_hash": "semantic-search-real-plan"},
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "search_query": "physical evidence",
+                "search_table": "policy",
+            },
+        }
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    outcome = result["response"]["outcome"]
+    assert outcome["search_performed"] is True
+    assert outcome["hit_count"] == 1
+    assert outcome["result"]["hits"][0]["id"] == "family-policy-1"
+
+
+def test_lancedb_queries_real_repository_table(tmp_path: Path) -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+    from nexus.services.memory_repository import MemoryRepository
+
+    repository = MemoryRepository(tmp_path / ".nexus" / "knowledge" / "lancedb")
+    repository.ensure_table(
+        "policy",
+        initial_data=[
+            {
+                "rule_id": "lancedb-policy-1",
+                "condition": "machine contract",
+                "action": "query real repository",
+                "confidence": 0.8,
+            }
+        ],
+        fts_column="action",
+    )
+    invoker = build_real_executor_invoker("lancedb")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "lancedb-real-query-1",
+            "task_statement": "real repository",
+            "planner": {"plan_hash": "lancedb-real-query-plan"},
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "search_query": "real repository",
+                "search_table": "policy",
+            },
+        }
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    outcome = result["response"]["outcome"]
+    assert outcome["query_performed"] is True
+    assert outcome["hit_count"] == 1
+    assert outcome["result"]["records"][0]["rule_id"] == "lancedb-policy-1"
+
+
+def test_jit_validation_applies_real_tool_mask_and_quota() -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("jit_validation")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "jit-real-mask-1",
+            "task_statement": "核驗 capability contract",
+            "planner": {"plan_hash": "jit-real-mask-plan"},
+            "codeintel": {
+                "jit_all_tools": ["read_file", "run_test", "write_file"],
+                "jit_token_usage": 120,
+            },
+        }
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    outcome = result["response"]["outcome"]
+    assert outcome["mask_applied"] is True
+    assert outcome["quota_checked"] is True
+    assert outcome["result"]["selected_tools"] == ["read_file", "run_test"]
+    assert outcome["result"]["token_usage"] == 120
+
+
+def test_mempalace_gate_ingests_retrieves_and_verifies_real_artifact(
+    tmp_path: Path,
+) -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("mempalace_gate")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "mempalace-real-roundtrip-1",
+            "task_statement": "retain capability closure evidence",
+            "planner": {"plan_hash": "mempalace-real-roundtrip-plan"},
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "mempalace_tenant_id": "family-canary",
+                "mempalace_artifact_type": "capability_evidence",
+                "mempalace_artifact": {
+                    "artifact_id": "closure-evidence-1",
+                    "content": "capability closure verified",
+                    "source_hash": "source-hash-1",
+                },
+                "mempalace_query": "closure-evidence-1",
+            },
+        }
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    outcome = result["response"]["outcome"]
+    assert outcome["ingest_performed"] is True
+    assert outcome["retrieve_performed"] is True
+    assert outcome["verification_passed"] is True
+    assert outcome["retrieved_count"] == 1
+
+
+def test_sandbox_executes_command_inside_copied_workspace(tmp_path: Path) -> None:
+    import sys
+
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    (tmp_path / "target.py").write_text("value = 1\n", encoding="utf-8")
+    invoker = build_real_executor_invoker("sandbox")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "sandbox-real-run-1",
+            "task_statement": "execute bounded isolated verification",
+            "planner": {"plan_hash": "sandbox-real-run-plan"},
+            "route": {"escalate": True},
+            "escalate_triggered": True,
+            "triggered_escalations": ["sandbox"],
+            "executor_flags": {"sandbox": True},
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "sandbox_command": [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; assert Path('target.py').exists()",
+                ],
+                "sandbox_timeout_sec": 15,
+            },
+        }
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["gate_passed"] is True
+    outcome = result["response"]["outcome"]
+    assert outcome["sandbox_executed"] is True
+    assert outcome["workspace_isolated"] is True
+    assert outcome["exit_code"] == 0
+    assert outcome["network_allowed"] is False
+
+
+def test_repair_loop_is_materialized_from_verified_local_receipt(tmp_path: Path) -> None:
+    local_receipt_path = tmp_path / "local-repair-receipt.json"
+    local_receipt_path.write_text(
+        json.dumps(
+            {
+                "task_id": "repair-stage-owned-1",
+                "terminal_status": "SUCCEEDED",
+                "receipt_complete": True,
+                "verifier_reached": True,
+                "verifier_result": "pass",
+                "candidate_hashes": ["candidate-hash-1"],
+                "isolation_status": "isolated",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _VerifiedLocalService:
+        def handle(self, request: Any) -> dict[str, Any]:
+            return {
+                "task_id": "repair-stage-owned-1",
+                "status": "SUCCEEDED",
+                "action": "verified-subtask",
+                "local_model_invoked": True,
+                "output_delivered": True,
+                "executor_invoked": True,
+                "physical_callable": "LocalModelExecutor.run",
+                "candidate_summary": {
+                    "isolation_status": "isolated",
+                    "selected_candidate_hash": "candidate-hash-1",
+                    "selected_candidate_hash_matches_applied": True,
+                },
+                "verifier_summary": {
+                    "verifier_reached": True,
+                    "verifier_status": "pass",
+                    "exit_code": 0,
+                },
+                "receipt_path": str(local_receipt_path),
+                "evidence_refs": ["local:repair-stage-owned-1"],
+                "outcome_contributed": True,
+            }
+
+    receipt = UnifiedRuntime(
+        planner=_Planner(
+            selected=["local_model_executor", "repair_loop"],
+            required=["repair_loop"],
+        ),
+        local_service=_VerifiedLocalService(),
+    ).run(
+        UnifiedRuntimeRequest(
+            task_id="repair-stage-owned-1",
+            workspace_revision="wr-repair-stage-owned",
+            task_statement="repair and verify candidate in isolation",
+            task_type="repair",
+            route={"mainchain_entry": True},
+            local_enabled=True,
+            online_enabled=False,
+            local_request={
+                "task_id": "repair-stage-owned-1",
+                "action": "verified-subtask",
+            },
+        ),
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+
+    stage = receipt["capability_results"]["repair_loop"]
+    assert stage["status"] == "SUCCEEDED"
+    assert stage["gate_passed"] is True
+    outcome = stage["response"]["response"]["outcome"]
+    assert outcome["candidate_hash"] == "candidate-hash-1"
+    assert outcome["verifier_passed"] is True
+    assert outcome["settlement_decision"] == "receipt_complete"
+
+
+@pytest.mark.parametrize("capability_name", ["acceptance_check", "bdd_acceptance_skill"])
+def test_acceptance_capabilities_execute_only_after_verifier(
+    capability_name: str,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def acceptance_invoker(context: dict[str, Any]) -> dict[str, Any]:
+        seen.update(context)
+        verifier = context.get("verifier") or {}
+        verifier_response = verifier.get("response") or {}
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "gate_passed": verifier_response.get("verifier_status") == "pass",
+            "evidence_refs": [f"acceptance:{context['task_id']}"],
+            "response": {"status": "SUCCEEDED"},
+        }
+
+    receipt = UnifiedRuntime(
+        planner=_Planner(selected=[capability_name], required=[]),
+        local_service=None,
+    ).run(
+        UnifiedRuntimeRequest(
+            task_id=f"postflight-{capability_name}",
+            workspace_revision="wr-postflight",
+            task_statement=f"verify {capability_name} ordering",
+            task_type="analysis",
+            route={"mainchain_entry": True},
+            online_prompt="unused",
+            online_payload="unused",
+            local_enabled=False,
+            online_enabled=True,
+        ),
+        online_invoker=_online,
+        capability_invokers={capability_name: acceptance_invoker},
+        verifier=_verifier_explicit,
+        learning=_learning,
+    )
+
+    verifier_seen = seen.get("verifier") or {}
+    assert verifier_seen.get("invoked") is True
+    assert (verifier_seen.get("response") or {}).get("verifier_status") == "pass"
+    assert receipt["capability_results"][capability_name]["gate_passed"] is True
 
 
 def test_local_online_payload_hash_matches(tmp_path: Path) -> None:

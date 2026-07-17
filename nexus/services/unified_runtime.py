@@ -133,6 +133,115 @@ def _local_executor_invoked_proven(
     return response.get("executor_invoked") is True
 
 
+def _repair_loop_result_from_local_stage(
+    *,
+    task_id: str,
+    local_stage: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Materialize repair-loop truth from the Local verified-subtask receipt.
+
+    A model call or isolated candidate alone is insufficient.  Success needs
+    candidate/apply hash agreement, verifier PASS, and a complete disk receipt
+    bound to the same task.
+    """
+    response = (
+        local_stage.get("response")
+        if isinstance(local_stage.get("response"), Mapping)
+        else {}
+    )
+    candidate = (
+        response.get("candidate_summary")
+        if isinstance(response.get("candidate_summary"), Mapping)
+        else {}
+    )
+    verifier = (
+        response.get("verifier_summary")
+        if isinstance(response.get("verifier_summary"), Mapping)
+        else {}
+    )
+    evidence_refs = [str(item) for item in response.get("evidence_refs", []) or []]
+    candidate_hash = str(candidate.get("selected_candidate_hash") or "").strip()
+    hash_matched = candidate.get("selected_candidate_hash_matches_applied") is True
+    verifier_passed = (
+        verifier.get("verifier_reached") is True
+        and str(verifier.get("verifier_status") or "").strip().lower()
+        in {"pass", "passed", "ok"}
+        and int(verifier.get("exit_code") or 0) == 0
+    )
+    receipt_path = Path(str(response.get("receipt_path") or ""))
+    disk_receipt: dict[str, Any] = {}
+    if receipt_path.is_file() and receipt_path.stat().st_size <= 1_000_000:
+        try:
+            loaded = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, Mapping):
+                disk_receipt = dict(loaded)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            disk_receipt = {}
+    disk_hashes = [str(item) for item in disk_receipt.get("candidate_hashes", []) or []]
+    receipt_complete = bool(
+        disk_receipt.get("task_id") == task_id
+        and disk_receipt.get("terminal_status") == "SUCCEEDED"
+        and disk_receipt.get("receipt_complete") is True
+        and str(disk_receipt.get("verifier_result") or "").lower()
+        in {"pass", "passed", "ok"}
+        and candidate_hash
+        and candidate_hash in disk_hashes
+    )
+    executor_proven = _local_executor_invoked_proven(
+        action=str(response.get("action") or "").strip().lower(),
+        physical_callable=str(response.get("physical_callable") or ""),
+        local_stage=local_stage,
+    )
+    success = bool(
+        executor_proven
+        and response.get("output_delivered") is True
+        and candidate.get("isolation_status") == "isolated"
+        and candidate_hash
+        and hash_matched
+        and verifier_passed
+        and receipt_complete
+        and evidence_refs
+    )
+    blockers: list[str] = []
+    if not executor_proven:
+        blockers.append("local_model_executor_not_proven")
+    if not candidate_hash:
+        blockers.append("missing_candidate_hash")
+    if not hash_matched:
+        blockers.append("candidate_hash_not_applied")
+    if not verifier_passed:
+        blockers.append("verifier_not_passed")
+    if not receipt_complete:
+        blockers.append("local_receipt_incomplete")
+    if not evidence_refs:
+        blockers.append("missing_local_evidence_refs")
+    outcome = {
+        "action": "verified_local_repair",
+        "semantic_status": "SUCCEEDED" if success else "BLOCKED",
+        "evidence_refs": evidence_refs,
+        "candidate_hash": candidate_hash,
+        "hash_matched": hash_matched,
+        "verifier_passed": verifier_passed,
+        "settlement_decision": "receipt_complete" if receipt_complete else "incomplete",
+        "receipt_path": str(receipt_path) if str(receipt_path) else "",
+        "blockers": blockers,
+        "physical_callable": "LocalModelExecutor.run",
+    }
+    return {
+        "task_id": task_id,
+        "invoked": bool(local_stage.get("invoked")),
+        "skipped": False,
+        "status": "SUCCEEDED" if success else "BLOCKED",
+        "gate_passed": success,
+        "outcome_contributed": success,
+        "evidence_refs": evidence_refs,
+        "physical_callable": "LocalModelExecutor.run",
+        "telemetry": dict(local_stage.get("telemetry") or {}),
+        "stub": False,
+        "response": {"status": "SUCCEEDED" if success else "BLOCKED", "outcome": outcome},
+    }
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -1172,10 +1281,18 @@ def build_prompt_compression_capability_invoker(
             "task_id": task_id,
             "invoked": True,
             "gate_passed": gate_passed,
+            "action": "compress_context",
+            "semantic_status": "SUCCEEDED" if gate_passed else "FAILED",
             "outcome_contributed": gate_passed,
             "evidence": "bounded_json_context_compression",
             "evidence_refs": evidence_refs,
+            "physical_callable": (
+                "nexus.services.unified_runtime."
+                "build_prompt_compression_capability_invoker"
+            ),
             "response": {
+                "action": "compress_context",
+                "semantic_status": "SUCCEEDED" if gate_passed else "FAILED",
                 "original_context_chars": original_chars,
                 "compressed_context_chars": compressed_chars,
                 "compression_ratio": round(1.0 - (compressed_chars / original_chars), 4)
@@ -1337,7 +1454,13 @@ class UnifiedRuntime:
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
 
         capability_results: dict[str, dict[str, Any]] = {}
-        postflight_names = {"artifact_gate", "claim_gate", "delivery_gate"}
+        postflight_names = {
+            "acceptance_check",
+            "artifact_gate",
+            "bdd_acceptance_skill",
+            "claim_gate",
+            "delivery_gate",
+        }
         # Coverage handlers for every selected name (real / stub / explicit skip).
         # Not a product route — invoker map only.
         from nexus.services.capability_registry import (
@@ -1413,6 +1536,11 @@ class UnifiedRuntime:
             "online_payload": request.online_payload,
             "capability_results": capability_results,
         }
+        if request.local_request is not None:
+            for field_name in ("workspace_root", "target_file", "target_symbol"):
+                value = getattr(request.local_request, field_name, None)
+                if value not in (None, ""):
+                    capability_context[field_name] = value
         for capability_name, invoker in preflight_items:
             _invoke_capability(capability_name, invoker, capability_context)
 
@@ -1584,6 +1712,17 @@ class UnifiedRuntime:
         capability_context["local"] = local_stage
         capability_context["capability_evidence_bundle"] = evidence_bundle
         capability_context["baseline_hash"] = evidence_bundle["baseline_hash"]
+        if "repair_loop" in plan.selected_capabilities:
+            repair_result = _repair_loop_result_from_local_stage(
+                task_id=request.task_id,
+                local_stage=local_stage,
+            )
+            capability_results["repair_loop"] = _capability_stage(
+                "repair_loop",
+                request.task_id,
+                repair_result,
+                delegated_to="Local",
+            )
 
         effective_online_prompt = request.online_prompt
         capability_context_compressed = False
@@ -2250,6 +2389,17 @@ class UnifiedRuntime:
             "evidence_bundle_hash": evidence_bundle["bundle_hash"],
             "capability_context_compressed": capability_context_compressed,
             "codeintel_hash": codeintel_hash,
+            "route": {
+                key: request.route.get(key)
+                for key in (
+                    "mainchain_entry",
+                    "mainchain_route_version",
+                    "route_freeze",
+                    "product_entry",
+                    "with_nexus_armor",
+                )
+                if isinstance(request.route, Mapping) and key in request.route
+            },
             "online_received_context": {
                 "local_context_forwarded": any("local_context_forwarded" in ref for ref in online_evidence_refs),
                 "capability_context_forwarded": any("capability_context_forwarded" in ref for ref in online_evidence_refs),

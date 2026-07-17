@@ -83,7 +83,9 @@ class MemoryRepository:
         db = self._get_db()
         if db is None:
             return []
-        return db.list_tables() if hasattr(db, 'list_tables') else db.table_names()
+        raw = db.list_tables() if hasattr(db, 'list_tables') else db.table_names()
+        tables = getattr(raw, "tables", raw)
+        return [str(name) for name in list(tables or [])]
 
 
     def semantic_dedup_ingest(self, table_name: str, new_record: Dict[str, Any], vector_col: str = "vector", tenant_id: str = "default"):
@@ -95,7 +97,7 @@ class MemoryRepository:
         new_record["aaak_content"] = self.compress_to_aaak(content)
         
         db = self._get_db()
-        if db is None or table_name not in db.list_tables():
+        if db is None or table_name not in self.list_tables():
             self.add_rows(table_name, [new_record])
             return "NEW_INITIAL"
 
@@ -148,13 +150,13 @@ class MemoryRepository:
         if db is None:
             return
         
-        if table_name in db.list_tables() or not initial_data:
+        if table_name in self.list_tables() or not initial_data:
             return
 
         try:
             tbl = db.create_table(table_name, data=initial_data)
         except Exception as e:
-            if "already exists" in str(e).lower() or table_name in db.list_tables():
+            if "already exists" in str(e).lower() or table_name in self.list_tables():
                 logger.debug(f"LanceDB table already exists during ensure_table race: {table_name}")
                 return
             raise
@@ -169,7 +171,7 @@ class MemoryRepository:
         db = self._get_db()
         if db is None:
             return
-        if table_name not in db.list_tables():
+        if table_name not in self.list_tables():
             self.ensure_table(table_name, initial_data=rows)
         else:
             table = db.open_table(table_name)
@@ -185,7 +187,7 @@ class MemoryRepository:
         db = self._get_db()
         if db is None:
             return
-        if table_name not in db.list_tables():
+        if table_name not in self.list_tables():
             self.ensure_table(table_name, initial_data=rows)
             return
         table = db.open_table(table_name)
@@ -201,7 +203,7 @@ class MemoryRepository:
     def get_all_rows(self, table_name: str):
         import pandas as pd
         db = self._get_db()
-        if db is None or table_name not in db.list_tables():
+        if db is None or table_name not in self.list_tables():
             return pd.DataFrame()
         return db.open_table(table_name).to_pandas()
 
@@ -231,7 +233,7 @@ class MemoryRepository:
         """執行單表全文搜尋。"""
         import pandas as pd
         db = self._get_db()
-        if db is None or table_name not in db.list_tables():
+        if db is None or table_name not in self.list_tables():
             return pd.DataFrame()
             
         table = db.open_table(table_name)

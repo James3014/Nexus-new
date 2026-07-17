@@ -13,6 +13,7 @@ from nexus.engine.capability_planner import default_capability_nodes
 from nexus.services.capability_registry import (
     CONSUMER_EFFECTS,
     EXECUTION_CLASSES,
+    LOCAL_STAGE_CAPABILITIES,
     PLANNER_EXECUTION_CONTRACTS,
     PROBE_ONLY_REASON_CODES,
     REAL_EXECUTION_CLASSES,
@@ -55,6 +56,16 @@ def test_every_contract_has_required_fields_and_enums() -> None:
         assert isinstance(c["success_fields"], list)
         assert isinstance(c["failure_fields"], list)
         assert isinstance(c["consumer_targets"], list)
+        assert c["execution_kind"] in {
+            "PHYSICAL_EFFECT",
+            "CONTROL_EFFECT",
+            "EXTERNAL_EFFECT",
+            "NONPROMOTED",
+            "MISSING",
+        }
+        assert isinstance(c["required_outcome_fields"], list)
+        assert isinstance(c["required_evidence_fields"], list)
+        assert c["success_predicate"]
 
 
 def test_gap_class_derived_from_execution_class() -> None:
@@ -68,7 +79,7 @@ def test_wired_real_is_derived_view_of_real_contracts() -> None:
         n
         for n, c in PLANNER_EXECUTION_CONTRACTS.items()
         if c["execution_class"] in REAL_EXECUTION_CLASSES
-        and n != "local_model_executor"
+        and n not in LOCAL_STAGE_CAPABILITIES
     }
     assert set(WIRED_REAL) == derived
     for name in WIRED_REAL:
@@ -142,19 +153,61 @@ def test_catalog_denominators_91_77_14_unchanged() -> None:
 def test_local_online_projection_covers_all_57() -> None:
     from nexus.services.capability_registry import (
         LOCAL_EXECUTION_MODES,
+        ONLINE_EXECUTION_MODES,
         build_local_online_contract_projection,
         project_local_execution_mode,
+        project_online_execution_mode,
     )
 
     proj = build_local_online_contract_projection()
     assert proj["planner_contract_count"] == 57
     assert proj["independent_local_truth"] is False
     assert sum(proj["local_mode_counts"].values()) == 57
+    assert sum(proj["online_mode_counts"].values()) == 57
     for row in proj["rows"]:
         assert row["local_mode"] in LOCAL_EXECUTION_MODES
-        assert row["online_mode"] == row["local_mode"]
+        assert row["online_mode"] in ONLINE_EXECUTION_MODES
         assert row["public_claim_allowed"] is False
         assert project_local_execution_mode(row["canonical_id"]) == row["local_mode"]
+        assert project_online_execution_mode(row["canonical_id"]) == row["online_mode"]
+
+    by_name = {row["canonical_id"]: row for row in proj["rows"]}
+    assert by_name["local_model_executor"]["local_mode"] == "EXECUTE_HERE"
+    assert by_name["local_model_executor"]["online_mode"] == "NOT_TARGET"
+    assert by_name["external_doc_scout"]["local_mode"] == "EXTERNAL_NOT_LOCAL"
+    assert (
+        by_name["external_doc_scout"]["online_mode"]
+        == "EXTERNAL_AUTHORIZED_EXECUTE"
+    )
+    assert by_name["codeintel"]["local_mode"] == "CONSUME_SHARED_EVIDENCE"
+    assert by_name["codeintel"]["online_mode"] == "CONSUME_SHARED_EVIDENCE"
+
+
+def test_online_production_context_exposes_contract_derived_consumer_modes() -> None:
+    from nexus.services.online_nexus_context import build_online_nexus_context
+
+    ctx = build_online_nexus_context(
+        task_statement="target-specific contract projection",
+        task_id="consumer-targets-1",
+        plan={
+            "selected_capabilities": [
+                "codeintel",
+                "local_model_executor",
+                "external_doc_scout",
+            ],
+            "plan_hash": "plan-consumer-targets-1",
+        },
+    )
+
+    modes = ctx.lineage["consumer_execution_modes"]
+    assert modes == {
+        "codeintel": "CONSUME_SHARED_EVIDENCE",
+        "local_model_executor": "NOT_TARGET",
+        "external_doc_scout": "EXTERNAL_AUTHORIZED_EXECUTE",
+    }
+    assert ctx.lineage["consumer_contract_source"].endswith(
+        "PLANNER_EXECUTION_CONTRACTS"
+    )
 
 
 def test_promotable_missing_engine_is_zero() -> None:
