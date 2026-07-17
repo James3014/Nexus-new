@@ -277,9 +277,16 @@ class PublicTelemetryBoundaryContract:
         )
 
         # 4. observation_only_n — 包裝既有 OBSERVATION_ONLY_TELEMETRY_SOURCES 分類
+        # Fail-closed: missing source resolves to unavailable (not measured)
+        from nexus.core.belief_contracts import _resolve_telemetry_source
+
         observation_only = sum(
-            1 for r in eligible
-            if self._classify_telemetry_source(str(r.get("telemetry_source", "measured"))) == "observation_only"
+            1
+            for r in eligible
+            if self._classify_telemetry_source(
+                _resolve_telemetry_source(r if isinstance(r, dict) else {})
+            )
+            == "observation_only"
         )
 
         return {
