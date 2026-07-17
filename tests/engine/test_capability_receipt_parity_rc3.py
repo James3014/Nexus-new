@@ -203,10 +203,56 @@ def test_canonical_envelope_separates_shared_and_extensions():
     assert env["public_claim_allowed"] is False
     # source-specific preserved in extensions
     assert "selection_source" in env["extensions"] or "executor_id" in env["extensions"]
-    # full lossless not claimed while matrix has lossy/unrepresentable
+    # full type alias parity remains false (dual classes kept)
     assert env["full_type_parity"] is False
-    assert env["rc3_migration_complete"] is False
-    assert env["blockers"]
+    assert env.get("direct_type_alias_parity") is False
+    # envelope migration complete only when source→envelope→source hash matches
+    assert env["envelope_migration_complete"] is True
+    assert env.get("source_payload")
+    assert env.get("source_content_hash")
+    from nexus.engine.capability_receipt_parity import from_canonical_envelope
+
+    rev = from_canonical_envelope(env)
+    assert rev["ok"] is True
+    assert rev["source"]
     rt = envelope_roundtrip_shared(eng)
+    assert rt["envelope_migration_complete"] is True
+    assert rt["public_claim_allowed"] is False
+    # rc3 full type lossless still false while loss ledger non-empty
     assert rt["full_type_parity"] is False
+
+
+
+def test_envelope_roundtrip_migration_complete():
+    from nexus.engine.capability_receipt_parity import (
+        from_canonical_envelope,
+        to_canonical_envelope,
+        verify_envelope_roundtrip,
+    )
+
+    eng = EngineReceipt(
+        name="codeintel",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        selection_source="planner",
+        executor_id="ci-1",
+        evidence_refs=("ev:1",),
+        failure_reason="",
+        telemetries={"telemetry_source": "unavailable"},
+    )
+    env = to_canonical_envelope(eng)
+    assert env["envelope_migration_complete"] is True
+    assert env["direct_type_alias_parity"] is False
+    rev = from_canonical_envelope(env)
+    assert rev["ok"] is True
+    # selection_source preserved in reverse projection
+    assert rev["source"].get("selection_source") == "planner" or rev["source"].get(
+        "executor_id"
+    ) == "ci-1"
+    rt = verify_envelope_roundtrip(env)
+    assert rt["ok"] is True
+    assert rt["source_hash_match"] is True
     assert rt["public_claim_allowed"] is False

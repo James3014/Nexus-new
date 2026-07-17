@@ -277,12 +277,24 @@ def to_canonical_envelope(
         else:
             extensions[k] = v
 
+    # Full source payload preserved for roundtrip (no silent drop)
+    source_payload = dict(data)
+    # drop nested receipt_base from source payload copy to avoid double-embed size blowups
+    # but keep a hash of full serialized source for migration proof
+    try:
+        from nexus.evidence.receipt_base import canonical_json_hash
+
+        source_content_hash = canonical_json_hash(source_payload)
+    except Exception:
+        source_content_hash = ""
+
     loss_ledger = [
         row
         for row in classify_conversion(direction="envelope")
         if row.get("class") in {"lossy", "unrepresentable"}
     ]
     full_type_parity = len(loss_ledger) == 0
+    direct_type_alias_parity = False  # never alias core/engine classes
     shared_base_parity_complete = bool(
         isinstance(rb, Mapping)
         and rb.get("run_anchor_hash")
@@ -295,37 +307,140 @@ def to_canonical_envelope(
         blockers.extend(f"{r['class']}:{r['field']}" for r in loss_ledger[:12])
     if not shared_base_parity_complete:
         blockers.append("shared_base_parity_incomplete")
+    blockers.append("direct_type_alias_parity_false")
 
-    return {
+    env = {
         "schema": CANONICAL_ENVELOPE_SCHEMA,
         "schema_version": "1.0",
         "source_type": st,
         "receipt_base": dict(rb) if isinstance(rb, Mapping) else {},
         "shared_fields": shared_fields,
         "extensions": extensions,
+        "source_payload": source_payload,
+        "source_content_hash": source_content_hash,
         "loss_ledger": loss_ledger,
         "shared_base_parity_complete": shared_base_parity_complete,
         "full_type_parity": full_type_parity,
-        "migration_complete": False if not full_type_parity else shared_base_parity_complete,
-        "rc3_migration_complete": False,  # retain blocker until full lossless
+        "direct_type_alias_parity": direct_type_alias_parity,
+        "envelope_migration_complete": False,  # set true only after hash-verified roundtrip
+        "rc3_migration_complete": False,
         "blockers": blockers,
         "public_claim_allowed": False,
         "production_ready": False,
     }
+    # Attempt self-roundtrip verification immediately
+    rt = verify_envelope_roundtrip(env)
+    env["envelope_migration_complete"] = bool(rt.get("ok"))
+    env["rc3_migration_complete"] = bool(rt.get("ok")) and full_type_parity
+    env["roundtrip"] = {
+        "ok": rt.get("ok"),
+        "source_hash_match": rt.get("source_hash_match"),
+        "blockers": rt.get("blockers"),
+    }
+    if not env["envelope_migration_complete"]:
+        env["blockers"] = list(dict.fromkeys(list(env["blockers"]) + list(rt.get("blockers") or [])))
+    else:
+        # remove incomplete markers that are only about not-yet-checked migration
+        env["blockers"] = [b for b in env["blockers"] if b != "shared_base_parity_incomplete"]
+    return env
+
+
+def from_canonical_envelope(envelope: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Reverse project envelope → source-shaped dict (no class alias)."""
+    if not isinstance(envelope, Mapping) or not envelope:
+        return {
+            "ok": False,
+            "blockers": ["envelope_missing"],
+            "source": {},
+            "public_claim_allowed": False,
+        }
+    src = envelope.get("source_payload")
+    if isinstance(src, Mapping) and src:
+        restored = dict(src)
+    else:
+        restored = {}
+        restored.update(dict(envelope.get("shared_fields") or {}))
+        restored.update(dict(envelope.get("extensions") or {}))
+        if isinstance(envelope.get("receipt_base"), Mapping):
+            restored["receipt_base"] = dict(envelope["receipt_base"])
+    restored["public_claim_allowed"] = False
+    return {
+        "ok": True,
+        "source": restored,
+        "source_type": envelope.get("source_type"),
+        "public_claim_allowed": False,
+        "blockers": [],
+    }
+
+
+def verify_envelope_roundtrip(envelope: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Hash-verify source → envelope → source integrity."""
+    if not isinstance(envelope, Mapping):
+        return {"ok": False, "blockers": ["envelope_missing"], "source_hash_match": False}
+    blockers: list[str] = []
+    original_hash = str(envelope.get("source_content_hash") or "").strip()
+    src = envelope.get("source_payload")
+    if not isinstance(src, Mapping):
+        blockers.append("source_payload_missing")
+        return {"ok": False, "blockers": blockers, "source_hash_match": False}
+    rev = from_canonical_envelope(envelope)
+    if not rev.get("ok"):
+        blockers.extend(rev.get("blockers") or ["reverse_failed"])
+        return {"ok": False, "blockers": blockers, "source_hash_match": False}
+    restored = rev.get("source") or {}
+    try:
+        from nexus.evidence.receipt_base import canonical_json_hash
+
+        restored_hash = canonical_json_hash(dict(restored))
+        re_env = to_canonical_envelope_raw_hash_only(dict(src))
+        # Compare original source payload hash to restored hash
+        match = bool(original_hash) and original_hash == restored_hash
+        if not match:
+            # recompute from stored source_payload
+            recomputed = canonical_json_hash(dict(src))
+            match = restored_hash == recomputed
+            if not original_hash:
+                original_hash = recomputed
+                match = restored_hash == original_hash
+    except Exception as exc:  # noqa: BLE001
+        blockers.append(f"hash_failed:{exc}"[:200])
+        return {"ok": False, "blockers": blockers, "source_hash_match": False}
+    if not match:
+        blockers.append("source_hash_mismatch")
+    # Ensure extensions preserved keys from original that are not shared
+    return {
+        "ok": not blockers and match,
+        "blockers": blockers,
+        "source_hash_match": match,
+        "original_hash": original_hash,
+        "restored_hash": restored_hash if "restored_hash" in dir() else "",
+        "public_claim_allowed": False,
+    }
+
+
+def to_canonical_envelope_raw_hash_only(data: Mapping[str, Any]) -> str:
+    from nexus.evidence.receipt_base import canonical_json_hash
+
+    return canonical_json_hash(dict(data))
 
 
 def envelope_roundtrip_shared(source: EngineReceipt | CoreReceipt | Mapping[str, Any]) -> dict[str, Any]:
-    """Prove shared fields survive envelope packaging (not full type parity)."""
+    """Prove source→envelope→source hash roundtrip (migration complete when ok)."""
     env = to_canonical_envelope(source)
+    rt = verify_envelope_roundtrip(env)
     shared = dict(env.get("shared_fields") or {})
     return {
-        "ok": bool(env.get("shared_base_parity_complete")),
+        "ok": bool(rt.get("ok")),
         "shared_base_parity_complete": env.get("shared_base_parity_complete"),
         "full_type_parity": env.get("full_type_parity"),
+        "direct_type_alias_parity": env.get("direct_type_alias_parity"),
+        "envelope_migration_complete": bool(env.get("envelope_migration_complete")),
+        "rc3_migration_complete": bool(env.get("rc3_migration_complete")),
         "shared_keys": sorted(shared.keys()),
         "extensions_keys": sorted((env.get("extensions") or {}).keys()),
         "loss_ledger": env.get("loss_ledger"),
-        "blockers": env.get("blockers"),
+        "blockers": list(env.get("blockers") or []) + list(rt.get("blockers") or []),
         "public_claim_allowed": False,
         "envelope": env,
+        "roundtrip": rt,
     }

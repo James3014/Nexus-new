@@ -1179,6 +1179,39 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
     wm.setdefault("contract_count", 57)
     wm.setdefault("execution_class_counts", dict(ec_counts))
     wm["routing_surface_changed"] = False
+    # Physical target = formal REAL execution classes (DEFAULT+STAGE+TRIGGERED = 34)
+    physical_target = sum(
+        1
+        for c in PLANNER_EXECUTION_CONTRACTS.values()
+        if c.get("execution_class") in REAL_EXECUTION_CLASSES
+    )
+    # Observed = true positive real executions (not fixture/probe/auth-blocked/selected-only)
+    observed_exec = 0
+    for row in per_cap:
+        if row.get("execution_class") not in REAL_EXECUTION_CLASSES:
+            continue
+        pos = row.get("positive") or {}
+        status = str(row.get("final_status") or "")
+        if status in {"AUTH_BLOCKED", "NOT_EXERCISED_OFFLINE", "OPERATIONAL_BLOCKED"}:
+            continue
+        if status in {"PROBE", "IMPLEMENTATION_FAILURE", "FAIL"}:
+            continue
+        phys = str(pos.get("physical_callable") or "")
+        if "fixture" in phys.lower() or phys.startswith("test:"):
+            continue
+        if pos.get("action") in _SHALLOW_ACTIONS:
+            continue
+        if not pos.get("invoked"):
+            continue
+        if pos.get("skipped"):
+            continue
+        if status == "OK" or (pos.get("invoked") and pos.get("gate_passed") and not pos.get("skipped")):
+            observed_exec += 1
+    wm["physical_target_count"] = physical_target
+    wm["physical_runtime_eligible"] = physical_target
+    wm["physical_observed_execution_count"] = observed_exec
+    receipt["physical_target_count"] = physical_target
+    receipt["physical_observed_execution_count"] = observed_exec
     coverage_audit = audit_product_receipt_coverage(
         wiring_matrix=wm,
         live_local_complete=False,
@@ -1230,6 +1263,10 @@ def test_generate_closure_receipt_required() -> None:
     assert receipt["routing_surface_changed"] is False
     assert receipt["public_claim_allowed"] is False
     assert receipt["structural_closure"] is True, receipt.get("blockers", [])[:10]
+    assert int(receipt.get("physical_target_count") or 0) == 34
+    phys = receipt.get("physical_observed_execution_coverage") or {}
+    assert int(phys.get("physical_target") or 0) == 34
+    assert receipt.get("all_closure_complete") is False
     # Offline structural closure must not hide missing implementations.
     real_structural_blockers = [
         b
