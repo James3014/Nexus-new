@@ -447,7 +447,7 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
     if total_tokens > 0 and actually_solved:
         token_efficiency = f"{total_tokens} tokens / solved"
 
-    return {
+    receipt = {
         # --- Identity ---
         "schema": "nexus.local_heal.repair_receipt.v1",
         "schema_version": schema_version,
@@ -702,6 +702,44 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
         # --- Latency Ledger ---
         "latency_ledger": getattr(ctx, "_latency_ledger", None) and getattr(ctx._latency_ledger, "to_dict", lambda: {})() or None,
     }
+    # RC product: additive receipt_base (JSON-safe; parent=run_anchor; claim false)
+    try:
+        from nexus.evidence.receipt_base import project_child_receipt_base
+
+        refs = list(receipt.get("evidence_refs") or [])
+        receipt["receipt_base"] = project_child_receipt_base(
+            source_world="C",
+            source_component="localheal_pipeline",
+            task_id=str(receipt.get("task_id") or ""),
+            stage_payload={
+                "schema": receipt.get("schema"),
+                "run_id": receipt.get("run_id"),
+                "claim_eligible": receipt.get("claim_eligible"),
+                "model_calls": receipt.get("model_calls"),
+            },
+            stage_name="local_heal_repair",
+            evidence_refs=refs,
+            consumer="localheal",
+            selected=True,
+            injected=True,
+            used=bool(receipt.get("claim_eligible") or receipt.get("solve_eligible")),
+            evidence_present=bool(refs),
+            gate_passed=bool(receipt.get("claim_eligible")),
+            outcome_contributed=bool(receipt.get("solve_eligible")),
+            claim_boundary={
+                "public_claim_allowed": False,
+                "simulated": bool(receipt.get("simulated")),
+                "claim_eligible": bool(receipt.get("claim_eligible")),
+                "production_ready": False,
+            },
+        )
+        receipt["run_anchor_hash"] = receipt["receipt_base"].get("run_anchor_hash", "")
+        receipt["receipt_hash"] = receipt["receipt_base"].get("receipt_hash", "")
+        receipt["public_claim_allowed"] = False
+    except Exception as exc:  # noqa: BLE001
+        receipt["receipt_base_error"] = str(exc)[:200]
+        receipt["public_claim_allowed"] = False
+    return receipt
 
 
 def write_repair_receipt(
