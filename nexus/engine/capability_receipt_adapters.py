@@ -14,6 +14,63 @@ class CapabilityReceiptAdapter(Protocol):
         ...
 
 
+def honest_unavailable_telemetries(
+    *,
+    missing_reason: str = "telemetry_unavailable",
+    model_calls: int | None = None,
+) -> dict[str, Any]:
+    """Fail-closed telemetry when not actually measured (RC-3: no synthetic PASS)."""
+    out: dict[str, Any] = {
+        "telemetry_source": "unavailable",
+        "wall_time_ms": None,
+        "token_usage": None,
+        "provider_costs": None,
+        "overhead_ms": None,
+        "claimable": False,
+        "missing_evidence_reason": missing_reason,
+    }
+    if model_calls is not None:
+        out["model_calls"] = model_calls
+    return out
+
+
+def honest_telemetries_from_payload(
+    payload: dict[str, Any] | None,
+    *,
+    extras: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build telemetries only from real payload fields; never invent 100/100 measured."""
+    p = dict(payload or {})
+    has_wall = "elapsed_ms" in p or "wall_time_ms" in p
+    has_tokens = "token_usage" in p or "tokens" in p
+    has_overhead = "overhead_ms" in p
+    has_costs = "provider_costs" in p
+    if not (has_wall or has_tokens or has_overhead):
+        t = honest_unavailable_telemetries()
+        if extras:
+            t.update(extras)
+        return t
+    wall = p.get("wall_time_ms", p.get("elapsed_ms"))
+    tokens = p.get("token_usage", p.get("tokens"))
+    overhead = p.get("overhead_ms")
+    costs = p.get("provider_costs")
+    # Only mark measured when core fields present without fabrication
+    measured = has_wall and wall is not None
+    out: dict[str, Any] = {
+        "telemetry_source": "measured" if measured else "unavailable",
+        "wall_time_ms": as_int(wall) if wall is not None else None,
+        "token_usage": as_int(tokens) if tokens is not None else None,
+        "provider_costs": float(costs) if costs is not None else None,
+        "overhead_ms": as_int(overhead) if overhead is not None else None,
+        "claimable": bool(measured and has_tokens and tokens is not None),
+    }
+    if not out["claimable"]:
+        out["missing_evidence_reason"] = "partial_or_unavailable_telemetry"
+    if extras:
+        out.update(extras)
+    return out
+
+
 def merge_capability_receipt(
     *,
     name: str,
@@ -34,14 +91,12 @@ def merge_capability_receipt(
         for text in (str(item).strip(),)
         if text and text != "None"
     )
+    # RC-3: never synthesize measured telemetry when missing
     if invoked and gate_passed and not telemetries:
-        telemetries = {
-            "telemetry_source": "measured",
-            "wall_time_ms": 100,
-            "token_usage": 100,
-            "provider_costs": 0.002,
-            "overhead_ms": 10,
-        }
+        telemetries = honest_unavailable_telemetries(
+            missing_reason="telemetry_unavailable",
+            model_calls=0,
+        )
     return CapabilityReceipt(
         name=name,
         selected=selected,
@@ -177,14 +232,8 @@ class AutoreasonReceiptAdapter:
         
         telemetries = payload.get("telemetries")
         if not telemetries and invoked and gate_passed:
-            telemetries = {
-                "telemetry_source": "measured",
-                "wall_time_ms": 100,
-                "token_usage": 100,
-                "provider_costs": 0.002,
-                "overhead_ms": 10,
-            }
-            
+            telemetries = honest_unavailable_telemetries(missing_reason="adapter_payload_missing_telemetry")
+
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -313,11 +362,7 @@ class DDTreeReceiptAdapter:
             executor_id=self.name,
             failure_reason=failure_reason,
             telemetries={
-                "telemetry_source": "measured",
-                "wall_time_ms": as_int(payload.get("elapsed_ms", 100)),
-                "token_usage": as_int(payload.get("token_usage", 0)),
-                "provider_costs": float(payload.get("provider_costs", 0.0)),
-                "overhead_ms": as_int(payload.get("overhead_ms", 10)),
+                **honest_telemetries_from_payload(payload if isinstance(payload, dict) else {}),
                 "ddtree_saved_steps": saved_steps,
                 "ddtree_candidate_count": candidate_count,
                 "ddtree_max_candidates": max_candidates,
@@ -566,13 +611,9 @@ class ResearchReceiptAdapter:
         gate_passed = bool(substantive_refs and _as_bool(payload.get("research_gate_passed", False)))
         telemetries: dict[str, Any] = {}
         if invoked and gate_passed:
-            telemetries = {
-                "telemetry_source": "measured",
-                "wall_time_ms": 100,
-                "token_usage": 100,
-                "provider_costs": 0.002,
-                "overhead_ms": 10,
-            }
+            telemetries = honest_unavailable_telemetries(
+                missing_reason="generic_adapter_no_measured_telemetry",
+            )
         return CapabilityReceipt(
             name=self.name,
             selected=True,
@@ -669,11 +710,7 @@ class UltraReviewReceiptAdapter:
             executor_id=self.name,
             failure_reason=failure_reason,
             telemetries={
-                "telemetry_source": "measured",
-                "wall_time_ms": as_int(payload.get("elapsed_ms", 100)),
-                "token_usage": as_int(payload.get("token_usage", 0)),
-                "provider_costs": float(payload.get("provider_costs", 0.0)),
-                "overhead_ms": as_int(payload.get("overhead_ms", 10)),
+                **honest_telemetries_from_payload(payload if isinstance(payload, dict) else {}),
                 "ultra_review_verdict": str(payload.get("verdict") or ""),
             } if invoked and gate_passed else None,
         )
@@ -710,11 +747,7 @@ class SwarmReceiptAdapter:
                 gate_passed=gate_passed,
             ),
             telemetries={
-                "telemetry_source": "measured",
-                "wall_time_ms": as_int(payload.get("elapsed_ms", 100)),
-                "token_usage": as_int(payload.get("token_usage", 0)),
-                "provider_costs": float(payload.get("provider_costs", 0.0)),
-                "overhead_ms": as_int(payload.get("overhead_ms", 10)),
+                **honest_telemetries_from_payload(payload if isinstance(payload, dict) else {}),
                 "swarm_evidence_count": evidence_count,
                 "swarm_consensus": str(consensus or ""),
             } if invoked and gate_passed else None,
@@ -890,11 +923,7 @@ class DroneReceiptAdapter:
                 gate_passed=gate_passed,
             ),
             telemetries={
-                "telemetry_source": "measured",
-                "wall_time_ms": as_int(payload.get("elapsed_ms", 100)),
-                "token_usage": as_int(payload.get("token_usage", 0)),
-                "provider_costs": float(payload.get("provider_costs", 0.0)),
-                "overhead_ms": as_int(payload.get("overhead_ms", 10)),
+                **honest_telemetries_from_payload(payload if isinstance(payload, dict) else {}),
                 "drone_invoked_count": invoked_count,
             } if invoked and gate_passed else None,
         )
@@ -931,11 +960,7 @@ class NightshiftReceiptAdapter:
             executor_id=self.name,
             failure_reason=failure_reason,
             telemetries={
-                "telemetry_source": "measured",
-                "wall_time_ms": as_int(payload.get("elapsed_ms", 100)),
-                "token_usage": as_int(payload.get("token_usage", 0)),
-                "provider_costs": float(payload.get("provider_costs", 0.0)),
-                "overhead_ms": as_int(payload.get("overhead_ms", 10)),
+                **honest_telemetries_from_payload(payload if isinstance(payload, dict) else {}),
                 "nightshift_recovered": recovered,
                 "nightshift_recommended": recommended,
             } if invoked and recovered else None,
