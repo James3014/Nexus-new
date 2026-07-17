@@ -174,3 +174,39 @@ def test_no_alias_of_classes():
     assert set(f.name for f in Core.__dataclass_fields__.values()) != set(
         f.name for f in Eng.__dataclass_fields__.values()
     )
+
+
+
+def test_canonical_envelope_separates_shared_and_extensions():
+    from nexus.engine.capability_receipt_parity import (
+        envelope_roundtrip_shared,
+        to_canonical_envelope,
+    )
+
+    eng = EngineReceipt(
+        name="memory",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        selection_source="planner",
+        executor_id="mem-1",
+        evidence_refs=("ev:1",),
+        failure_reason="",
+        telemetries={"telemetry_source": "unavailable"},
+    )
+    env = to_canonical_envelope(eng)
+    assert env["schema"].startswith("nexus.capability_receipt.canonical_envelope")
+    assert env["source_type"]
+    assert isinstance(env["receipt_base"], dict)
+    assert env["public_claim_allowed"] is False
+    # source-specific preserved in extensions
+    assert "selection_source" in env["extensions"] or "executor_id" in env["extensions"]
+    # full lossless not claimed while matrix has lossy/unrepresentable
+    assert env["full_type_parity"] is False
+    assert env["rc3_migration_complete"] is False
+    assert env["blockers"]
+    rt = envelope_roundtrip_shared(eng)
+    assert rt["full_type_parity"] is False
+    assert rt["public_claim_allowed"] is False

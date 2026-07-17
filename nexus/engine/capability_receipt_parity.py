@@ -202,3 +202,130 @@ def audit_roundtrip(engine: EngineReceipt) -> dict[str, Any]:
         "blockers": sorted(set(list(e2c.get("blockers") or []) + list(c2e.get("blockers") or []))),
         "public_claim_allowed": False,
     }
+
+
+
+CANONICAL_ENVELOPE_SCHEMA = "nexus.capability_receipt.canonical_envelope.v1"
+
+
+def to_canonical_envelope(
+    source: EngineReceipt | CoreReceipt | Mapping[str, Any],
+    *,
+    source_type: str = "",
+) -> dict[str, Any]:
+    """Versioned envelope: shared receipt_base + extensions + explicit loss ledger.
+
+    Does not alias core/engine classes. Consumers must read the envelope rather
+    than assuming silent partial conversion is lossless.
+    """
+    if isinstance(source, EngineReceipt):
+        st = source_type or "engine.CapabilityReceipt"
+        data = source.to_dict() if hasattr(source, "to_dict") else asdict(source)
+    elif isinstance(source, CoreReceipt):
+        st = source_type or "core.CapabilityReceipt"
+        data = source.to_dict() if hasattr(source, "to_dict") else asdict(source)
+    else:
+        st = source_type or str((source or {}).get("source_type") or "unknown")
+        data = dict(source or {})
+
+    # Shared receipt_base if already present, else project minimal child base
+    rb = data.get("receipt_base") if isinstance(data.get("receipt_base"), Mapping) else None
+    if not isinstance(rb, Mapping):
+        try:
+            from nexus.evidence.receipt_base import project_child_receipt_base
+
+            rb = project_child_receipt_base(
+                source_world="R5",
+                source_component=st,
+                task_id=str(data.get("task_id") or ""),
+                stage_name=str(data.get("name") or data.get("capability_name") or "capability"),
+                stage_payload={
+                    "selected": data.get("selected"),
+                    "invoked": data.get("invoked"),
+                    "gate_passed": data.get("gate_passed"),
+                    "outcome_contributed": data.get("outcome_contributed"),
+                },
+                selected=bool(data.get("selected")),
+                injected=bool(data.get("invoked")),
+                used=bool(data.get("outcome_contributed")),
+                evidence_present=bool(data.get("evidence_present") or data.get("evidence_id")),
+                gate_passed=bool(data.get("gate_passed")),
+                outcome_contributed=bool(data.get("outcome_contributed")),
+                claim_boundary={"public_claim_allowed": False},
+            )
+        except Exception as exc:  # noqa: BLE001
+            rb = {"schema": "nexus.receipt_base.v1", "error": str(exc)[:200], "public_claim_allowed": False}
+
+    # Partition shared vs source-specific
+    shared_keys = {
+        "selected",
+        "invoked",
+        "gate_passed",
+        "evidence_present",
+        "semantic_hash",
+        "evidence_alignment",
+        "telemetries",
+        "public_claim_safe",
+    }
+    extensions: dict[str, Any] = {}
+    shared_fields: dict[str, Any] = {}
+    for k, v in data.items():
+        if k in {"receipt_base", "receipt_base_error"}:
+            continue
+        if k in shared_keys or k in {"name", "capability_name"}:
+            shared_fields[k] = v
+        else:
+            extensions[k] = v
+
+    loss_ledger = [
+        row
+        for row in classify_conversion(direction="envelope")
+        if row.get("class") in {"lossy", "unrepresentable"}
+    ]
+    full_type_parity = len(loss_ledger) == 0
+    shared_base_parity_complete = bool(
+        isinstance(rb, Mapping)
+        and rb.get("run_anchor_hash")
+        and rb.get("receipt_hash")
+        and rb.get("public_claim_allowed") is False
+    )
+    blockers: list[str] = []
+    if not full_type_parity:
+        blockers.append("full_type_parity_incomplete")
+        blockers.extend(f"{r['class']}:{r['field']}" for r in loss_ledger[:12])
+    if not shared_base_parity_complete:
+        blockers.append("shared_base_parity_incomplete")
+
+    return {
+        "schema": CANONICAL_ENVELOPE_SCHEMA,
+        "schema_version": "1.0",
+        "source_type": st,
+        "receipt_base": dict(rb) if isinstance(rb, Mapping) else {},
+        "shared_fields": shared_fields,
+        "extensions": extensions,
+        "loss_ledger": loss_ledger,
+        "shared_base_parity_complete": shared_base_parity_complete,
+        "full_type_parity": full_type_parity,
+        "migration_complete": False if not full_type_parity else shared_base_parity_complete,
+        "rc3_migration_complete": False,  # retain blocker until full lossless
+        "blockers": blockers,
+        "public_claim_allowed": False,
+        "production_ready": False,
+    }
+
+
+def envelope_roundtrip_shared(source: EngineReceipt | CoreReceipt | Mapping[str, Any]) -> dict[str, Any]:
+    """Prove shared fields survive envelope packaging (not full type parity)."""
+    env = to_canonical_envelope(source)
+    shared = dict(env.get("shared_fields") or {})
+    return {
+        "ok": bool(env.get("shared_base_parity_complete")),
+        "shared_base_parity_complete": env.get("shared_base_parity_complete"),
+        "full_type_parity": env.get("full_type_parity"),
+        "shared_keys": sorted(shared.keys()),
+        "extensions_keys": sorted((env.get("extensions") or {}).keys()),
+        "loss_ledger": env.get("loss_ledger"),
+        "blockers": env.get("blockers"),
+        "public_claim_allowed": False,
+        "envelope": env,
+    }

@@ -54,18 +54,27 @@ def honest_telemetries_from_payload(
     tokens = p.get("token_usage", p.get("tokens"))
     overhead = p.get("overhead_ms")
     costs = p.get("provider_costs")
-    # Only mark measured when core fields present without fabrication
-    measured = has_wall and wall is not None
+    # wall alone is partial_measured; full measured needs wall + tokens (or structural model_calls=0 path)
+    if has_wall and wall is not None and has_tokens and tokens is not None:
+        source = "measured"
+    elif has_wall and wall is not None:
+        source = "partial_measured"
+    elif has_tokens or has_overhead:
+        source = "partial_measured"
+    else:
+        source = "unavailable"
     out: dict[str, Any] = {
-        "telemetry_source": "measured" if measured else "unavailable",
+        "telemetry_source": source,
         "wall_time_ms": as_int(wall) if wall is not None else None,
         "token_usage": as_int(tokens) if tokens is not None else None,
         "provider_costs": float(costs) if costs is not None else None,
         "overhead_ms": as_int(overhead) if overhead is not None else None,
-        "claimable": bool(measured and has_tokens and tokens is not None),
+        "claimable": source == "measured",
     }
     if not out["claimable"]:
-        out["missing_evidence_reason"] = "partial_or_unavailable_telemetry"
+        out["missing_evidence_reason"] = (
+            "partial_measured_telemetry" if source == "partial_measured" else "partial_or_unavailable_telemetry"
+        )
     if extras:
         out.update(extras)
     return out
@@ -97,11 +106,21 @@ def merge_capability_receipt(
             missing_reason="telemetry_unavailable",
             model_calls=0,
         )
+    # Semantic invariant: outcome_contributed → gate_passed → evidence_present → invoked
+    evidence_present = bool(refs)
+    if not gate_passed:
+        outcome_contributed = False
+    if outcome_contributed and not evidence_present:
+        outcome_contributed = False
+    if outcome_contributed and not invoked:
+        outcome_contributed = False
+    if outcome_contributed and not gate_passed:
+        outcome_contributed = False
     return CapabilityReceipt(
         name=name,
         selected=selected,
         invoked=invoked,
-        evidence_present=bool(refs),
+        evidence_present=evidence_present,
         gate_passed=gate_passed,
         outcome_contributed=outcome_contributed,
         selection_source=selection_source,
@@ -147,13 +166,44 @@ def _as_refs(value: Any) -> list[str]:
 
 
 def _explicit_bool(payload: dict[str, Any], key: str) -> bool:
-    return key in payload and payload.get(key) is not None
+    """True only when key is present AND value is truthy-true (not mere presence)."""
+    if key not in payload:
+        return False
+    return _as_bool(payload.get(key))
 
 
 def _fail_closed_ref(payload: dict[str, Any], key: str, ref: str) -> list[str]:
-    if _explicit_bool(payload, key) and not _as_bool(payload.get(key)):
+    # Key present with non-true value → fail-closed evidence ref
+    if key in payload and not _as_bool(payload.get(key)):
         return [ref]
     return []
+
+
+def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
+    """Claim/delivery/artifact/mempalace: require verifier artifact + pass status + source_hash."""
+    status = str(
+        payload.get("verifier_status")
+        or payload.get("status")
+        or ""
+    ).upper()
+    art = str(
+        payload.get("verifier_artifact")
+        or payload.get("verifier_artifact_hash")
+        or payload.get("artifact_hash")
+        or ""
+    ).strip()
+    source = str(payload.get("source_hash") or payload.get("verifier_source_hash") or "").strip()
+    if status in {"FAIL", "FAILED", "ERROR", "BLOCKED"}:
+        return False
+    if payload.get("gate_passed") is False:
+        return False
+    if not art:
+        return False
+    if not source:
+        return False
+    if status and status not in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS"}:
+        return False
+    return True
 
 
 def _pillar_present(payload: dict[str, Any], *names: str) -> bool:
@@ -415,7 +465,7 @@ class MemPalaceGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "mempalace_gate_passed"))),
+            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -440,7 +490,7 @@ class ArtifactGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "artifact_gate_passed"))),
+            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -479,7 +529,7 @@ class ClaimGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "claim_gate_invoked"))),
+            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
             executor_id=self.name,
             failure_reason=failure_reason,
         )
@@ -513,7 +563,7 @@ class DeliveryGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "delivery_gate_passed"))),
+            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
             executor_id=self.name,
             failure_reason=failure_reason,
         )
