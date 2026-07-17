@@ -308,16 +308,20 @@ class CapabilityReceipt:
         # Telemetry must be fully complete and present to allow public claim promotion
         if not self.telemetries:
             return False
-            
-        # Row-Keyed Hygiene and Source Classification checks
-        source = self.telemetries.get("telemetry_source", "measured")
-        if source in ("estimated", "unknown"):
+
+        # Fail-closed: never default missing telemetry_source to "measured"
+        from nexus.core.belief_contracts import _resolve_telemetry_source, _telemetry_numeric
+
+        source = _resolve_telemetry_source(self.telemetries)
+        if source in ("unavailable", "estimated", "unknown"):
             return False
-            
+
         if self.telemetries.get("has_infra_invalid", False):
             return False
 
-        if self.telemetries.get("model_calls", 0) > 0 and self.telemetries.get("token_usage", 0) <= 0:
+        model_calls = _telemetry_numeric(self.telemetries.get("model_calls")) or 0.0
+        token_usage = _telemetry_numeric(self.telemetries.get("token_usage"))
+        if model_calls > 0 and (token_usage is None or token_usage <= 0):
             return False
 
         if self.telemetries.get("gateway_token_outlier_reason") == "stats_outlier_possible_cumulative":
@@ -327,6 +331,9 @@ class CapabilityReceipt:
         for key in required_keys:
             if key not in self.telemetries:
                 return False
+        wall = _telemetry_numeric(self.telemetries.get("wall_time_ms"))
+        if wall is None or wall <= 0:
+            return False
         return True
 
     def to_dict(self) -> dict[str, Any]:

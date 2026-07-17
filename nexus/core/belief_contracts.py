@@ -73,9 +73,43 @@ class TelemetryVerificationResult:
     reason: str
 
 
+def _telemetry_numeric(value: Any) -> float | None:
+    """Coerce telemetry numbers; None/invalid → None (never treat missing as 0 success)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_telemetry_source(telemetries: dict[str, Any]) -> str:
+    """Fail-closed source: never default missing label to measured.
+
+    Explicit measured only when producer set it, or when full positive measured
+    fields are present (derived_with_proof for legacy rows without the key).
+    """
+    raw = telemetries.get("telemetry_source")
+    if raw is not None and str(raw).strip():
+        return str(raw).strip().lower()
+    required = ("wall_time_ms", "token_usage", "provider_costs", "overhead_ms")
+    if not all(k in telemetries for k in required):
+        return "unavailable"
+    wall = _telemetry_numeric(telemetries.get("wall_time_ms"))
+    if wall is None or wall <= 0:
+        return "unavailable"
+    return "measured"
+
+
 @dataclass(frozen=True)
 class CapabilityReceipt:
-    """Rigorous artifact confirming that a capability was active, backed by concrete evidence & gates."""
+    """Core capability receipt (belief domain).
+
+    **P2-B / RC-3:** Prefer engine ``CapabilityReceipt`` for mainchain product
+    paths. Core↔engine conversion is **lossy** — use
+    ``nexus.engine.capability_receipt_parity`` (never alias the two classes).
+    This type remains for historical belief/governance consumers.
+    """
 
     capability_name: str
     selected: bool
@@ -95,16 +129,22 @@ class CapabilityReceipt:
             return TelemetryVerificationResult(False, TelemetryReasonCodes.ALIGNMENT_FAILED, "Evidence alignment verification failed")
         if not self.telemetries:
             return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Telemetry data is empty or missing")
-        
-        # Row-Keyed Hygiene and Source Classification checks
-        source = self.telemetries.get("telemetry_source", "measured")
-        if source in ("estimated", "unknown"):
-            return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Estimated or unknown telemetry is observation-only and cannot be claimed")
-            
+
+        # Fail-closed: missing source is NOT measured; unavailable/estimated/unknown cannot claim
+        source = _resolve_telemetry_source(self.telemetries)
+        if source in ("unavailable", "estimated", "unknown"):
+            return TelemetryVerificationResult(
+                False,
+                TelemetryReasonCodes.TELEMETRY_MISSING,
+                f"Telemetry source={source} is observation-only and cannot be claimed",
+            )
+
         if self.telemetries.get("has_infra_invalid", False):
             return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, "Telemetry carries infra-invalid reason codes")
 
-        if self.telemetries.get("model_calls", 0) > 0 and self.telemetries.get("token_usage", 0) <= 0:
+        model_calls = _telemetry_numeric(self.telemetries.get("model_calls")) or 0.0
+        token_usage = _telemetry_numeric(self.telemetries.get("token_usage"))
+        if model_calls > 0 and (token_usage is None or token_usage <= 0):
             return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "Model call occurred but tokens are missing (infra-invalid)")
 
         if self.telemetries.get("gateway_token_outlier_reason") == "stats_outlier_possible_cumulative":
@@ -114,15 +154,11 @@ class CapabilityReceipt:
         for key in required_keys:
             if key not in self.telemetries:
                 return TelemetryVerificationResult(False, TelemetryReasonCodes.TELEMETRY_MISSING, f"Required telemetry key missing: {key}")
-                
-        if self.telemetries.get("wall_time_ms", 0) <= 0:
+
+        wall = _telemetry_numeric(self.telemetries.get("wall_time_ms"))
+        if wall is None or wall <= 0:
             return TelemetryVerificationResult(False, TelemetryReasonCodes.WALL_TIME_INVALID, "wall_time_ms must be strictly greater than 0")
-        # token_usage is only required for capabilities that invoke a model
-        model_calls = self.telemetries.get("model_calls", 0)
-        token_usage = self.telemetries.get("token_usage", 0)
-        if model_calls > 0 and token_usage <= 0:
-            return TelemetryVerificationResult(False, TelemetryReasonCodes.TOKEN_USAGE_INVALID, "Model call occurred but token_usage is 0 or missing")
-            
+
         return TelemetryVerificationResult(True, TelemetryReasonCodes.SUCCESS, "Telemetry verification passed successfully")
 
     @property

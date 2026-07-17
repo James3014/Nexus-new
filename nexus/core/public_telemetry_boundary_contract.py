@@ -110,7 +110,10 @@ class PublicTelemetryBoundaryContract:
             raise ValueError(msg)
 
         # ── Gate 1: Telemetry 來源分類 ──
-        telemetry_source = telemetry.get("telemetry_source", "measured")
+        # Fail-closed: missing source is unavailable, never open-default measured
+        from nexus.core.belief_contracts import _resolve_telemetry_source
+
+        telemetry_source = _resolve_telemetry_source(telemetry if isinstance(telemetry, dict) else {})
         source_class = self._classify_telemetry_source(telemetry_source)
         if source_class == "observation_only":
             block_flags.append(f"OBSERVATION_ONLY_TELEMETRY_SOURCE:{telemetry_source}")
@@ -207,12 +210,14 @@ class PublicTelemetryBoundaryContract:
         Returns:
             "measured" | "included_in_parent" | "zero_fill" | "observation_only"
         """
-        source = entry.get("telemetry_source", "measured")
-        if source == "included_in_parent":
+        from nexus.core.belief_contracts import _resolve_telemetry_source
+
+        source = _resolve_telemetry_source(entry if isinstance(entry, dict) else {})
+        if entry.get("telemetry_source") == "included_in_parent" or source == "included_in_parent":
             return "included_in_parent"
-        if source == "zero_fill":
+        if entry.get("telemetry_source") == "zero_fill" or source == "zero_fill":
             return "zero_fill"
-        if source in OBSERVATION_ONLY_TELEMETRY_SOURCES:
+        if source in OBSERVATION_ONLY_TELEMETRY_SOURCES or source in ("unavailable", "estimated", "unknown"):
             return "observation_only"
         wall_time = entry.get("wall_time_ms", -1)
         if wall_time == 0:

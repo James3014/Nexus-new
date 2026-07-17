@@ -109,6 +109,63 @@ def test_estimated_telemetry_not_public_claim_safe():
     assert r.public_claim_safe is False
 
 
+def test_missing_telemetry_source_not_default_measured():
+    """RC-3 / fail-closed: absent source must not open-default to measured."""
+    from nexus.core.belief_contracts import CapabilityReceipt as Core
+
+    core = Core(
+        capability_name="z",
+        selected=True,
+        invoked=True,
+        evidence_id="e",
+        gate_passed=True,
+        telemetries={
+            "wall_time_ms": None,
+            "token_usage": None,
+            "provider_costs": None,
+            "overhead_ms": None,
+            # no telemetry_source key
+        },
+    )
+    assert core.is_claimable is False
+    assert "unavailable" in core.verify_telemetry.reason or "missing" in core.verify_telemetry.reason.lower()
+
+    eng = EngineReceipt(
+        name="z",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        telemetries={
+            "wall_time_ms": None,
+            "token_usage": None,
+            "provider_costs": None,
+            "overhead_ms": None,
+        },
+    )
+    assert eng.public_claim_safe is False
+
+
+def test_fake_measured_with_nulls_not_claimable():
+    eng = EngineReceipt(
+        name="z",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        telemetries={
+            "telemetry_source": "measured",
+            "wall_time_ms": None,
+            "token_usage": 100,
+            "provider_costs": 0.0,
+            "overhead_ms": 1,
+        },
+    )
+    assert eng.public_claim_safe is False
+
+
 def test_no_alias_of_classes():
     from nexus.core.belief_contracts import CapabilityReceipt as Core
     from nexus.engine.capability_contracts import CapabilityReceipt as Eng
