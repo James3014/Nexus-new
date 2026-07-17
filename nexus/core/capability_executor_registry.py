@@ -1131,8 +1131,10 @@ def _exec_belief(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
 
 def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    # Model-boundary: fail closed without local model call authorization.
-    if not _provider_auth_allowed(require_local_model=True) and not bool(
+    # These planner nodes are EXTERNAL_AUTH_REQUIRED model boundaries.  Local
+    # consumes their shared evidence; a local-call flag must not authorize the
+    # producer itself or turn an offline canary green.
+    if not _provider_auth_allowed(require_external=True) and not bool(
         (plan.constraints or {}).get("allow_fixture_model_boundary")
     ):
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2219,7 +2221,7 @@ def _exec_harness_preflight_sensor(
 
 def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    if not _provider_auth_allowed(require_local_model=True) and not bool(
+    if not _provider_auth_allowed(require_external=True) and not bool(
         (plan.constraints or {}).get("allow_fixture_model_boundary")
     ):
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2658,7 +2660,7 @@ def _exec_bdd_acceptance_skill(
 def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     allow_fixture = bool((plan.constraints or {}).get("allow_fixture_model_boundary"))
-    if not _provider_auth_allowed(require_local_model=True) and not allow_fixture:
+    if not _provider_auth_allowed(require_external=True) and not allow_fixture:
         elapsed = int((time.monotonic() - start) * 1000)
         return _auth_blocked_receipt("judge_panel", plan, wall_time_ms=elapsed)
     try:

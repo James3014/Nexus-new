@@ -277,10 +277,20 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
     # Positive escalate: route flags; negative: no escalate flags.
     # When external live is authorized, allow Online so postflight can consume real online output.
     auth_ext_route = os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
+    # Production Online provider: default agy; operator may set NEXUS_ONLINE_PROVIDER=grok
+    # when agy is quota-blocked (user-authorized substitute, not Gemini/API-key).
+    online_provider = (
+        os.environ.get("NEXUS_ONLINE_PROVIDER")
+        or os.environ.get("NEXUS_CLOUD_PROVIDER")
+        or "agy"
+    ).strip().lower() or "agy"
+    if online_provider not in {"agy", "grok", "codex", "gemini", "openai"}:
+        online_provider = "agy"
     route: dict[str, Any] = {
         "recommended_flow": "direct",
-        "provider": "agy",
-        "online_policy": "allow" if (positive and auth_ext_route) else "deny",
+        "provider": online_provider,
+        # auto/require are the only authorizing task policies; "allow" is not a policy token
+        "online_policy": ("auto" if (positive and auth_ext_route) else "deny"),
         "mainchain_entry": True,
         "workspace_root": str(canary_root),
     }
@@ -288,7 +298,10 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
         route["escalate"] = True
         route["escalate_triggered"] = True
 
-    local_enabled = name in LOCAL_STAGE_CAPABILITIES
+    # The negative arm must not invoke the Local stage.  Keeping it enabled here
+    # makes an authorized Ollama run execute both positive and negative arms,
+    # turning a valid live proof into a false negative (negative_not_skip_or_fail).
+    local_enabled = positive and name in LOCAL_STAGE_CAPABILITIES
     local_action = "verified-subtask" if name == "repair_loop" else "candidate"
     from nexus.services.local_assist_service import LocalAssistRequest
 
@@ -518,7 +531,7 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
 
     receipt = run_mainchain(
         req,
-        online_invoker=build_registered_online_invoker("agy"),
+        online_invoker=build_registered_online_invoker(online_provider),
         local_service=LocalAssistService() if local_enabled else None,
         capability_invokers=invoker_map,
         verifier=_verifier,
