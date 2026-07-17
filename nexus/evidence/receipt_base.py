@@ -73,10 +73,11 @@ def resolve_shared_bundle_hash(
     *,
     explicit_hash: str = "",
 ) -> dict[str, Any]:
-    """Only a sealed/verified bundle yields shared_bundle_hash.
+    """Only official verify_capability_evidence_bundle success yields shared seal.
 
-    Empty or unsealed bundles return empty hash + status UNAVAILABLE/UNSEALED.
-    Optionally records computed_bundle_content_hash without impersonating seal.
+    Never trusts producer sealed/verified/seal_status booleans. Claimed
+    bundle_hash must equal verifier recomputed expected_bundle_hash.
+    Tampered or fake-sealed bundles clear shared_bundle_hash and surface blockers.
     """
     explicit = str(explicit_hash or "").strip()
     if not isinstance(bundle, Mapping) or not bundle:
@@ -85,38 +86,74 @@ def resolve_shared_bundle_hash(
             "shared_bundle_verified": False,
             "status": "EMPTY" if not bundle else "UNAVAILABLE",
             "computed_bundle_content_hash": "",
+            "blockers": ["bundle_missing_or_empty"],
+            "expected_bundle_hash": "",
         }
-    sealed = bool(
-        bundle.get("sealed")
-        or bundle.get("seal_verified")
-        or bundle.get("verified")
-        or str(bundle.get("seal_status") or "").lower() in {"sealed", "verified", "ok", "pass"}
-    )
-    seal_hash = str(
-        bundle.get("seal_hash")
-        or bundle.get("verified_bundle_hash")
-        or (bundle.get("bundle_hash") if sealed else "")
-        or ""
-    ).strip()
-    # Prefer explicit only when bundle is sealed
-    if sealed and explicit:
-        seal_hash = explicit
+
+    # Optional content fingerprint for diagnostics (never a verified seal)
     try:
-        computed = canonical_json_hash(dict(bundle))
+        computed = canonical_json_hash(
+            {k: v for k, v in dict(bundle).items() if k != "bundle_hash"}
+        )
     except TypeError:
         computed = ""
-    if sealed and seal_hash:
+
+    try:
+        from nexus.services.capability_evidence_bundle import (
+            verify_capability_evidence_bundle,
+        )
+    except Exception as exc:  # noqa: BLE001
         return {
-            "shared_bundle_hash": seal_hash,
-            "shared_bundle_verified": True,
-            "status": "VERIFIED",
+            "shared_bundle_hash": "",
+            "shared_bundle_verified": False,
+            "status": "UNAVAILABLE",
             "computed_bundle_content_hash": computed,
+            "blockers": [f"verifier_import_failed:{exc}"[:200]],
+            "expected_bundle_hash": "",
+        }
+
+    verdict = verify_capability_evidence_bundle(bundle)
+    blockers = list(verdict.get("blockers") or [])
+    expected = str(verdict.get("expected_bundle_hash") or "").strip()
+    claimed = str(verdict.get("bundle_hash") or bundle.get("bundle_hash") or "").strip()
+
+    # Never promote producer bools
+    if not verdict.get("ok"):
+        # Tamper / fake seal: leave seal field empty
+        if claimed and expected and claimed != expected:
+            blockers = list(dict.fromkeys(blockers + ["bundle_hash_mismatch", "tampered_bundle"]))
+        if any(
+            k in bundle
+            for k in ("sealed", "seal_verified", "verified", "seal_status")
+        ) and not verdict.get("ok"):
+            blockers = list(dict.fromkeys(blockers + ["producer_seal_bool_rejected"]))
+        return {
+            "shared_bundle_hash": "",
+            "shared_bundle_verified": False,
+            "status": "UNSEALED" if blockers else "UNAVAILABLE",
+            "computed_bundle_content_hash": computed or expected,
+            "blockers": blockers,
+            "expected_bundle_hash": expected,
+        }
+
+    # Verified path: claimed must equal recomputed expected
+    seal = expected if expected else claimed
+    if explicit and explicit != seal:
+        return {
+            "shared_bundle_hash": "",
+            "shared_bundle_verified": False,
+            "status": "UNSEALED",
+            "computed_bundle_content_hash": computed or expected,
+            "blockers": ["explicit_hash_mismatch", f"expected:{seal[:16]}"],
+            "expected_bundle_hash": expected,
         }
     return {
-        "shared_bundle_hash": "",
-        "shared_bundle_verified": False,
-        "status": "UNSEALED",
-        "computed_bundle_content_hash": computed,
+        "shared_bundle_hash": seal,
+        "shared_bundle_verified": True,
+        "status": "VERIFIED",
+        "computed_bundle_content_hash": computed or expected,
+        "blockers": [],
+        "expected_bundle_hash": expected,
     }
 
 

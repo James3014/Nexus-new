@@ -638,3 +638,110 @@ def test_bare_shared_bundle_hash_not_verified():
     )
     assert base.get("shared_bundle_verified") is False
     assert base.get("shared_bundle_hash_status") in {"UNSEALED", "EMPTY", "UNAVAILABLE"}
+
+
+def test_official_verified_bundle_projects_shared_hash():
+    """Official build_capability_evidence_bundle → verified shared_bundle_hash."""
+    from nexus.evidence.receipt_base import resolve_shared_bundle_hash
+    from nexus.services.capability_evidence_bundle import (
+        build_capability_evidence_bundle,
+        verify_capability_evidence_bundle,
+    )
+
+    bundle = build_capability_evidence_bundle(
+        task_id="t-official",
+        workspace_revision="wr1",
+        task_statement="do the thing",
+        plan_payload={"steps": ["a"]},
+        plan_hash="plan-h1",
+        planner_decision_id="pd1",
+        capability_results={
+            "codeintel": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "evidence_refs": ["ev:codeintel:1"],
+                "physical_callable": "capability_executor_registry:codeintel",
+                "telemetry": {"token_usage": 0, "model_calls": 0},
+            }
+        },
+        selected_capabilities=["codeintel"],
+    )
+    v = verify_capability_evidence_bundle(bundle)
+    assert v["ok"] is True
+    assert v["bundle_hash"] == v["expected_bundle_hash"]
+    res = resolve_shared_bundle_hash(bundle)
+    assert res["shared_bundle_verified"] is True
+    assert res["status"] == "VERIFIED"
+    assert res["shared_bundle_hash"] == bundle["bundle_hash"]
+    assert res["shared_bundle_hash"] == v["expected_bundle_hash"]
+    assert res.get("blockers") in (None, [], ())
+
+
+def test_fake_sealed_boolean_cannot_verify_bundle():
+    """Producer sealed/verified bools alone must not yield verified seal."""
+    from nexus.evidence.receipt_base import resolve_shared_bundle_hash
+
+    fake = {"sealed": True, "bundle_hash": "a" * 64, "verified": True, "seal_status": "sealed"}
+    res = resolve_shared_bundle_hash(fake)
+    assert res["shared_bundle_verified"] is False
+    assert (res.get("shared_bundle_hash") or "") == ""
+    assert res["status"] in {"UNSEALED", "UNAVAILABLE"}
+    assert res.get("blockers")
+
+
+def test_tampered_bundle_cannot_enter_run_anchor():
+    """Tampered official bundle clears shared_bundle_hash and must not bind run_anchor seal."""
+    from nexus.evidence.receipt_base import (
+        attach_r3_receipt_base,
+        compute_run_anchor_hash,
+        resolve_shared_bundle_hash,
+    )
+    from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+
+    bundle = build_capability_evidence_bundle(
+        task_id="t-tamper",
+        workspace_revision="wr",
+        task_statement="task",
+        plan_payload={"x": 1},
+        plan_hash="ph",
+        planner_decision_id="pd",
+        capability_results={
+            "memory": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "evidence_refs": ["ev:m1"],
+                "physical_callable": "mem",
+            }
+        },
+        selected_capabilities=["memory"],
+    )
+    good = resolve_shared_bundle_hash(bundle)
+    assert good["shared_bundle_verified"] is True
+    # Tamper body while keeping claimed hash
+    bad_bundle = dict(bundle)
+    bad_bundle["task_id"] = "t-tamper-MUTATED"
+    res = resolve_shared_bundle_hash(bad_bundle)
+    assert res["shared_bundle_verified"] is False
+    assert (res.get("shared_bundle_hash") or "") == ""
+    assert res.get("blockers")
+    # attach_r3 must not treat tampered bundle as verified seal identity
+    receipt = {
+        "task_id": "t-tamper",
+        "workspace_revision": "wr",
+        "planner_decision_id": "pd",
+        "capability_evidence_bundle": bad_bundle,
+    }
+    attach_r3_receipt_base(receipt)
+    base = receipt["receipt_base"]
+    assert base.get("shared_bundle_verified") is False
+    assert (base.get("shared_bundle_hash") or "") == ""
+    # run_anchor must not embed the forged claimed hash as verified seal
+    anchor_with_forged = compute_run_anchor_hash(
+        task_id="t-tamper",
+        workspace_revision="wr",
+        planner_decision_id="pd",
+        shared_bundle_hash=str(bad_bundle.get("bundle_hash") or ""),
+    )
+    assert receipt["run_anchor_hash"] != anchor_with_forged or not base.get(
+        "shared_bundle_verified"
+    )
