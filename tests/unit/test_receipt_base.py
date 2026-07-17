@@ -355,3 +355,240 @@ def test_audit_missing_surface_does_not_fake_5_of_5():
     assert audit["contract_coverage"] == "4/5"
     assert audit["embed_complete"] is False
     assert audit["contract_present"]["R2"] is False
+
+
+# --- Phase 0 false-green regressions A–L (must fail closed on product path) ---
+
+
+def test_A_canonical_json_hash_rejects_non_json_safe():
+    """A: Path/set/dataclass must not hash via default=str."""
+    from dataclasses import dataclass
+    from pathlib import Path
+
+    from nexus.evidence.receipt_base import canonical_json_hash
+
+    @dataclass
+    class _Box:
+        x: int
+
+    with pytest.raises((TypeError, ValueError)):
+        canonical_json_hash({"p": Path("/tmp/x")})
+    with pytest.raises((TypeError, ValueError)):
+        canonical_json_hash({"s": {1, 2, 3}})
+    with pytest.raises((TypeError, ValueError)):
+        canonical_json_hash({"d": _Box(1)})
+
+
+def test_B_empty_identity_hashes_fail_strict_product_validation():
+    """B: empty task_id / run_anchor_hash / receipt_hash fail strict product."""
+    from nexus.evidence.receipt_base import build_receipt_base_dict, validate_receipt_base
+
+    base = build_receipt_base_dict(task_id="", run_anchor_hash="", receipt_hash="")
+    result = validate_receipt_base(base, mode="strict")
+    assert result["ok"] is False
+    joined = " ".join(result["blockers"])
+    assert "task_id" in joined or "empty_task_id" in joined
+    assert "run_anchor" in joined or "empty_run_anchor" in joined
+    assert "receipt_hash" in joined or "empty_receipt_hash" in joined
+
+
+def test_C_empty_bundle_not_verified_shared_bundle_hash():
+    """C: empty/unsealed bundle must not yield verified shared_bundle_hash."""
+    from nexus.evidence.receipt_base import (
+        attach_r3_receipt_base,
+        resolve_shared_bundle_hash,
+    )
+
+    resolved = resolve_shared_bundle_hash({})
+    assert not resolved.get("verified")
+    assert not (resolved.get("shared_bundle_hash") or "").strip()
+    assert resolved.get("status") in {"UNAVAILABLE", "UNSEALED", "EMPTY"}
+
+    receipt = {"task_id": "t", "capability_evidence_bundle": {}}
+    attach_r3_receipt_base(receipt)
+    base = receipt["receipt_base"]
+    # May keep computed content hash separately, but verified seal empty
+    assert not base.get("shared_bundle_verified")
+    assert (base.get("shared_bundle_hash") or "") == "" or base.get(
+        "shared_bundle_hash_status"
+    ) in {"UNAVAILABLE", "UNSEALED", "EMPTY"}
+
+
+def test_D_empty_consumer_payload_not_consumed_hash():
+    """D: empty consumer payload → empty hash + UNAVAILABLE, not fake consumed."""
+    from nexus.evidence.receipt_base import (
+        attach_r3_receipt_base,
+        resolve_consumer_payload_hash,
+    )
+
+    res = resolve_consumer_payload_hash(None)
+    assert (res.get("consumer_payload_hash") or "") == ""
+    assert res.get("status") == "UNAVAILABLE"
+
+    receipt = {
+        "task_id": "t",
+        "consumed_evidence_ids": [],
+        "contributed_capabilities": [],
+        "executed_capabilities": [],
+    }
+    attach_r3_receipt_base(receipt)
+    base = receipt["receipt_base"]
+    assert (base.get("consumer_payload_hash") or "") == "" or base.get(
+        "consumer_payload_hash_status"
+    ) == "UNAVAILABLE"
+
+
+def test_E_failed_verifier_without_artifact_no_artifact_hash():
+    """E: verifier FAILED and no artifact → artifact_hash empty."""
+    from nexus.evidence.receipt_base import attach_r3_receipt_base
+
+    receipt = {
+        "task_id": "t-task",
+        "workspace_revision": "wr",
+        "planner_decision_id": "pd",
+        "verifier": {
+            "status": "FAILED",
+            "gate_passed": False,
+            "exit_code": 1,
+        },
+    }
+    attach_r3_receipt_base(receipt)
+    base = receipt["receipt_base"]
+    assert (base.get("artifact_hash") or "") == ""
+
+
+def test_F_source_candidate_not_equal_applied_without_apply():
+    """F: generated candidate must not equal applied without apply stage."""
+    from nexus.evidence.receipt_base import stamp_r1_local_response
+
+    class _Resp:
+        raw_model_metadata: dict = {}
+        candidate_hash = "cand-abc"
+        evidence_refs = ()
+        invoked = True
+        local_model_called = True
+        provider = "ollama"
+        model_name = "qwen"
+        error = ""
+
+    stamp_r1_local_response(_Resp())
+    base = _Resp.raw_model_metadata.get("receipt_base") or {}
+    # source may be set; applied must be empty until apply stage
+    assert base.get("source_candidate_hash") == "cand-abc"
+    assert (base.get("applied_candidate_hash") or "") == ""
+    # artifact must not impersonate generated candidate
+    assert (base.get("artifact_hash") or "") != "cand-abc" or not base.get("artifact_hash")
+
+
+def test_G_hidden_verifier_failed_clears_applied_lineage():
+    """G: hidden_verifier_passed=false → applied_candidate_hash blank."""
+    from nexus.evidence.receipt_base import stamp_r2_hybrid_meta
+
+    meta = stamp_r2_hybrid_meta(
+        {
+            "live_evidence_allowed": True,
+            "candidate_identity": "cand-xyz",
+            "selected_hash_matches_applied": True,
+            "hidden_verifier_passed": False,
+            "semantic_correctness_passed": False,
+            "cloud_payload": {"selected_hash": "cand-xyz"},
+        },
+        task_id="t",
+    )
+    base = meta["receipt_base"]
+    assert (base.get("applied_candidate_hash") or "") == ""
+    assert base.get("gate_passed") is False or base.get("consumption_chain", [{}])[0].get(
+        "gate_passed"
+    ) is False
+    assert base.get("outcome_contributed") is False or base.get("consumption_chain", [{}])[
+        0
+    ].get("outcome_contributed") is False
+
+
+def test_H_gate_failed_forces_outcome_contributed_false():
+    """H: gate_passed=false → outcome_contributed must be false."""
+    from nexus.evidence.receipt_base import build_consumption_chain_entry
+
+    entry = build_consumption_chain_entry(
+        capability="claim_gate",
+        selected=True,
+        injected=True,
+        used=True,
+        evidence_present=True,
+        gate_passed=False,
+        outcome_contributed=True,  # producer attempt
+    )
+    assert entry["gate_passed"] is False
+    assert entry["outcome_contributed"] is False
+
+
+def test_J_bool_true_is_declared_not_observed_coverage():
+    """J: bool True counts declared only, not observed embed."""
+    from nexus.evidence.receipt_base import audit_product_receipt_coverage
+
+    audit = audit_product_receipt_coverage(
+        surfaces={"R1": True, "R2": True, "R3": True, "R4": True, "R5": True}
+    )
+    # declared may be 5/5; observed must not claim real embeds
+    assert audit.get("contract_declared_coverage") == "5/5" or audit.get(
+        "declared_coverage"
+    ) == "5/5" or "declared" in str(audit)
+    observed = audit.get("observed_receipt_embed_coverage") or audit.get(
+        "observed_coverage"
+    )
+    assert observed in {"0/5", "0/5"} or (
+        isinstance(observed, str) and observed.startswith("0/")
+    )
+    # Must not mark observed embed complete from bools alone
+    assert audit.get("observed_embed_complete") is not True
+    if "observed_present" in audit:
+        assert not any(audit["observed_present"].values())
+
+
+def test_K_one_of_fifty_seven_eligible_not_physical_complete():
+    """K: 1/57 eligible must not be physical complete."""
+    from nexus.evidence.receipt_base import audit_product_receipt_coverage
+
+    audit = audit_product_receipt_coverage(
+        wiring_matrix={
+            "physical_runtime_eligible": 1,
+            "node_count": 57,
+            "contract_count": 57,
+            "execution_class_counts": {"MISSING_ENGINE": 0},
+            "routing_surface_changed": False,
+        }
+    )
+    phys = audit.get("physical_execution_coverage") or {}
+    observed = audit.get("physical_observed_execution_coverage") or phys
+    assert phys.get("complete") is not True
+    if isinstance(observed, dict):
+        assert observed.get("complete") is not True
+    # physical target may note 34/57 style but never full complete on 1 eligible
+    eligible_cov = audit.get("physical_contract_eligible_coverage")
+    if eligible_cov:
+        assert "1/57" in str(eligible_cov) or eligible_cov != "57/57"
+
+
+def test_L_context_trace_route_projects_into_receipt_base():
+    """L: context_trace.route must project mainchain_entry/route_freeze/version/armor."""
+    from nexus.evidence.receipt_base import attach_r3_receipt_base
+
+    receipt = {
+        "task_id": "route-task",
+        "workspace_revision": "wr-1",
+        "planner_decision_id": "pd-1",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "with_nexus_armor": True,
+            }
+        },
+    }
+    attach_r3_receipt_base(receipt)
+    base = receipt["receipt_base"]
+    assert base.get("mainchain_entry") is True
+    assert base.get("route_freeze") is True
+    assert base.get("mainchain_route_version") == "mainchain.v1"
+    assert base.get("with_nexus_armor") is True

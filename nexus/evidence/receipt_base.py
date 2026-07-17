@@ -38,16 +38,162 @@ _RUN_ANCHOR_KEYS = (
 def canonical_json_hash(value: Any) -> str:
     """Deterministic SHA-256 over canonical JSON (sort_keys, compact separators).
 
-    Same convention as ``nexus.contracts.evidence_sealing`` / zero_trust receipts.
+    Fail-closed: non-JSON-safe types (Path, set, dataclass, bytes, ...) raise
+    TypeError — never default=str (truth-seal Phase 1).
+    Same convention as ``nexus.contracts.evidence_sealing`` / zero_trust receipts
+    for pure JSON payloads.
     """
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"canonical_json_hash_non_json_safe:{type(value)!r}:{exc}") from exc
     return hashlib.sha256(encoded).hexdigest()
+
+
+_SHA256_HEX_RE = None
+
+
+def _is_sha256_hex(value: str) -> bool:
+    global _SHA256_HEX_RE
+    if _SHA256_HEX_RE is None:
+        import re
+
+        _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+    return bool(_SHA256_HEX_RE.match(str(value or "")))
+
+
+def resolve_shared_bundle_hash(
+    bundle: Mapping[str, Any] | None,
+    *,
+    explicit_hash: str = "",
+) -> dict[str, Any]:
+    """Only a sealed/verified bundle yields shared_bundle_hash.
+
+    Empty or unsealed bundles return empty hash + status UNAVAILABLE/UNSEALED.
+    Optionally records computed_bundle_content_hash without impersonating seal.
+    """
+    explicit = str(explicit_hash or "").strip()
+    if not isinstance(bundle, Mapping) or not bundle:
+        return {
+            "shared_bundle_hash": "",
+            "shared_bundle_verified": False,
+            "status": "EMPTY" if not bundle else "UNAVAILABLE",
+            "computed_bundle_content_hash": "",
+        }
+    sealed = bool(
+        bundle.get("sealed")
+        or bundle.get("seal_verified")
+        or bundle.get("verified")
+        or str(bundle.get("seal_status") or "").lower() in {"sealed", "verified", "ok", "pass"}
+    )
+    seal_hash = str(
+        bundle.get("seal_hash")
+        or bundle.get("verified_bundle_hash")
+        or (bundle.get("bundle_hash") if sealed else "")
+        or ""
+    ).strip()
+    # Prefer explicit only when bundle is sealed
+    if sealed and explicit:
+        seal_hash = explicit
+    try:
+        computed = canonical_json_hash(dict(bundle))
+    except TypeError:
+        computed = ""
+    if sealed and seal_hash:
+        return {
+            "shared_bundle_hash": seal_hash,
+            "shared_bundle_verified": True,
+            "status": "VERIFIED",
+            "computed_bundle_content_hash": computed,
+        }
+    return {
+        "shared_bundle_hash": "",
+        "shared_bundle_verified": False,
+        "status": "UNSEALED",
+        "computed_bundle_content_hash": computed,
+    }
+
+
+def resolve_consumer_payload_hash(
+    payload: Mapping[str, Any] | Sequence[Any] | None,
+    *,
+    consumed: bool = False,
+) -> dict[str, Any]:
+    """Hash only a real bounded consumed payload; empty → UNAVAILABLE."""
+    if payload is None:
+        return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+    if isinstance(payload, Mapping):
+        # Drop empty collections
+        meaningful = {
+            k: v
+            for k, v in payload.items()
+            if v not in (None, "", [], (), {}, False)
+        }
+        if not meaningful or not consumed:
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+            }
+        try:
+            h = canonical_json_hash(meaningful)
+        except TypeError:
+            return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+        return {"consumer_payload_hash": h, "status": "CONSUMED", "consumed": True}
+    if isinstance(payload, (list, tuple)):
+        items = [x for x in payload if x not in (None, "")]
+        if not items or not consumed:
+            return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+        try:
+            h = canonical_json_hash(list(items))
+        except TypeError:
+            return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+        return {"consumer_payload_hash": h, "status": "CONSUMED", "consumed": True}
+    return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+
+
+def resolve_artifact_hash(
+    *,
+    artifact_hash: str = "",
+    verifier: Mapping[str, Any] | None = None,
+    applied_artifact_hash: str = "",
+) -> dict[str, Any]:
+    """Artifact hash only from real artifact/verifier artifact; never stage-dict hash."""
+    explicit = str(artifact_hash or applied_artifact_hash or "").strip()
+    v = verifier if isinstance(verifier, Mapping) else {}
+    status = str(v.get("status") or v.get("verifier_status") or "").upper()
+    gate_ok = bool(v.get("gate_passed")) if "gate_passed" in v else status in {
+        "PASS",
+        "PASSED",
+        "OK",
+        "VERIFIED",
+        "SUCCESS",
+    }
+    v_art = str(
+        v.get("artifact_hash")
+        or v.get("verifier_artifact_hash")
+        or v.get("verifier_artifact")
+        or ""
+    ).strip()
+    # Never hash the whole verifier stage as artifact
+    if explicit and (not v or gate_ok or not status):
+        # explicit applied/artifact allowed when not contradicted by FAILED verifier
+        if status in {"FAIL", "FAILED", "ERROR"} and not v_art:
+            return {"artifact_hash": "", "status": "VERIFIER_FAILED", "gate_passed": False}
+        return {"artifact_hash": explicit, "status": "PRESENT", "gate_passed": gate_ok if v else None}
+    if status in {"FAIL", "FAILED", "ERROR"} or (v and v.get("gate_passed") is False):
+        if v_art and gate_ok:
+            return {"artifact_hash": v_art, "status": "PRESENT", "gate_passed": True}
+        return {"artifact_hash": "", "status": "VERIFIER_FAILED", "gate_passed": False}
+    if v_art:
+        return {"artifact_hash": v_art, "status": "PRESENT", "gate_passed": gate_ok}
+    return {"artifact_hash": "", "status": "UNAVAILABLE", "gate_passed": gate_ok if v else None}
 
 
 def compute_run_anchor_hash(
@@ -149,14 +295,23 @@ def build_consumption_chain_entry(
     outcome_contributed: bool = False,
     consumer: str = "",
 ) -> dict[str, Any]:
+    """Honest consumption entry: outcome cannot contribute without gate pass.
+
+    Never infer used from invoked alone — callers must pass used explicitly.
+    """
+    gp = bool(gate_passed)
+    oc = bool(outcome_contributed) and gp
+    # Semantic invariant: outcome → gate → evidence when contributing
+    if oc and not evidence_present:
+        oc = False
     return {
         "capability": str(capability or ""),
         "selected": bool(selected),
         "injected": bool(injected),
         "used": bool(used),
         "evidence_present": bool(evidence_present),
-        "gate_passed": bool(gate_passed),
-        "outcome_contributed": bool(outcome_contributed),
+        "gate_passed": gp,
+        "outcome_contributed": oc,
         "consumer": str(consumer or ""),
     }
 
@@ -315,21 +470,42 @@ def attach_r3_receipt_base(
     )
     packet_hash = str(receipt.get("packet_hash") or packet.get("packet_hash") or verified.get("packet_hash") or "")
     bundle = receipt.get("capability_evidence_bundle")
-    if isinstance(bundle, Mapping):
-        shared_bundle_hash = str(
-            receipt.get("shared_bundle_hash")
-            or bundle.get("bundle_hash")
-            or bundle.get("shared_bundle_hash")
-            or canonical_json_hash(dict(bundle))
-        )
-    else:
-        shared_bundle_hash = str(receipt.get("shared_bundle_hash") or "")
+    bundle_map = bundle if isinstance(bundle, Mapping) else None
+    bundle_res = resolve_shared_bundle_hash(
+        bundle_map,
+        explicit_hash=str(receipt.get("shared_bundle_hash") or ""),
+    )
+    shared_bundle_hash = str(bundle_res.get("shared_bundle_hash") or "")
+    shared_bundle_verified = bool(bundle_res.get("shared_bundle_verified"))
+    computed_bundle_content_hash = str(bundle_res.get("computed_bundle_content_hash") or "")
 
-    selection_authority = str(receipt.get("selection_authority") or "CapabilityPlanner")
-    mainchain_entry = bool(receipt.get("mainchain_entry", False))
-    mainchain_route_version = str(receipt.get("mainchain_route_version") or "")
-    route_freeze = bool(receipt.get("route_freeze", False))
-    with_nexus_armor = bool(receipt.get("with_nexus_armor", False))
+    # Route provenance from context_trace.route (does not create new route system)
+    ctx = receipt.get("context_trace") if isinstance(receipt.get("context_trace"), Mapping) else {}
+    route = ctx.get("route") if isinstance(ctx.get("route"), Mapping) else {}
+    selection_authority = str(
+        receipt.get("selection_authority")
+        or route.get("selection_authority")
+        or "CapabilityPlanner"
+    )
+    mainchain_entry = bool(
+        receipt["mainchain_entry"]
+        if "mainchain_entry" in receipt
+        else route.get("mainchain_entry", False)
+    )
+    mainchain_route_version = str(
+        receipt.get("mainchain_route_version")
+        or route.get("mainchain_route_version")
+        or route.get("version")
+        or ""
+    )
+    route_freeze = bool(
+        receipt["route_freeze"] if "route_freeze" in receipt else route.get("route_freeze", False)
+    )
+    with_nexus_armor = bool(
+        receipt["with_nexus_armor"]
+        if "with_nexus_armor" in receipt
+        else route.get("with_nexus_armor", False)
+    )
 
     run_anchor = compute_run_anchor_hash(
         task_id=task_id,
@@ -369,32 +545,54 @@ def attach_r3_receipt_base(
                     children.append(hash_stage_payload(stage, stage_name=f"cap:{cap_name}"))
 
     claim = claim_boundary_projection(receipt.get("claim_boundary"))
-    consumer_payload_hash = str(
-        receipt.get("consumer_payload_hash")
-        or canonical_json_hash(
-            {
-                "consumed_evidence_ids": receipt.get("consumed_evidence_ids") or [],
-                "contributed_capabilities": receipt.get("contributed_capabilities") or [],
-                "executed_capabilities": receipt.get("executed_capabilities") or [],
-            }
-        )
+    consumed_ids = list(receipt.get("consumed_evidence_ids") or [])
+    contributed = list(receipt.get("contributed_capabilities") or [])
+    executed = list(receipt.get("executed_capabilities") or [])
+    has_consumption = bool(consumed_ids or contributed)
+    consumer_res = resolve_consumer_payload_hash(
+        {
+            "consumed_evidence_ids": consumed_ids,
+            "contributed_capabilities": contributed,
+            "executed_capabilities": executed,
+        }
+        if has_consumption
+        else None,
+        consumed=has_consumption,
     )
+    # Honor explicit only when non-empty and consumption proven
+    explicit_consumer = str(receipt.get("consumer_payload_hash") or "").strip()
+    if explicit_consumer and has_consumption:
+        consumer_payload_hash = explicit_consumer
+        consumer_status = "CONSUMED"
+    else:
+        consumer_payload_hash = str(consumer_res.get("consumer_payload_hash") or "")
+        consumer_status = str(consumer_res.get("status") or "UNAVAILABLE")
 
     chain = [dict(c) for c in (consumption_chain or ())]
     if not chain:
-        # Minimal chain from capability_results if present
+        # Minimal chain from capability_results — never auto-selected=true for all
         caps = receipt.get("capability_results")
+        selected_caps = set(str(x) for x in (receipt.get("selected_capabilities") or []) if str(x).strip())
         if isinstance(caps, Mapping):
             for cap_name in sorted(caps.keys()):
                 stage = caps[cap_name]
                 if not isinstance(stage, Mapping):
                     continue
+                invoked = bool(stage.get("invoked"))
+                used_explicit = stage.get("used")
+                used = bool(used_explicit) if used_explicit is not None else False
+                # Do NOT infer used from invoked
+                selected = bool(
+                    stage.get("selected")
+                    if "selected" in stage
+                    else (str(cap_name) in selected_caps)
+                )
                 chain.append(
                     build_consumption_chain_entry(
                         capability=str(cap_name),
-                        selected=True,
-                        injected=bool(stage.get("invoked") or stage.get("injected")),
-                        used=bool(stage.get("invoked") or stage.get("used")),
+                        selected=selected,
+                        injected=bool(stage.get("injected")),
+                        used=used,
                         evidence_present=bool(stage.get("evidence_present") or stage.get("evidence_refs")),
                         gate_passed=bool(stage.get("gate_passed")),
                         outcome_contributed=bool(stage.get("outcome_contributed")),
@@ -403,14 +601,22 @@ def attach_r3_receipt_base(
                 )
 
     # Verifier / candidate hashes if present on receipt
-    artifact_hash = str(receipt.get("artifact_hash") or "")
     source_candidate_hash = str(receipt.get("source_candidate_hash") or "")
     applied_candidate_hash = str(receipt.get("applied_candidate_hash") or "")
     verifier = receipt.get("verifier") if isinstance(receipt.get("verifier"), Mapping) else {}
-    if not artifact_hash and verifier:
-        artifact_hash = str(verifier.get("artifact_hash") or "")
-        if not artifact_hash:
-            artifact_hash = hash_stage_payload(verifier, stage_name="verifier")
+    art_res = resolve_artifact_hash(
+        artifact_hash=str(receipt.get("artifact_hash") or ""),
+        verifier=verifier,
+        applied_artifact_hash=str(receipt.get("applied_artifact_hash") or ""),
+    )
+    artifact_hash = str(art_res.get("artifact_hash") or "")
+    # Hidden/failed verifier clears applied lineage
+    if verifier and (
+        verifier.get("gate_passed") is False
+        or str(verifier.get("status") or "").upper() in {"FAIL", "FAILED", "ERROR"}
+        or verifier.get("hidden_verifier_passed") is False
+    ):
+        applied_candidate_hash = ""
 
     r_hash = compute_receipt_hash(
         run_anchor_hash=run_anchor,
@@ -425,7 +631,7 @@ def attach_r3_receipt_base(
         consumption_chain=chain,
     )
 
-    # Final R3 parents = run anchor only (not self, not circular child binding)
+    # Final R3 parents = typed run_anchor only (not self, not circular child binding)
     base = build_receipt_base_dict(
         task_id=task_id,
         workspace_revision=workspace_revision,
@@ -451,8 +657,14 @@ def attach_r3_receipt_base(
         route_freeze=route_freeze,
         with_nexus_armor=with_nexus_armor,
     )
-    # Record ordered children for audit (not a second identity system)
+    # Typed parent semantics (legacy parent_receipt_hashes retained as hash list)
+    base["parent_refs"] = [{"type": "run_anchor", "hash": run_anchor}]
     base["ordered_child_hashes"] = list(children)
+    base["shared_bundle_verified"] = shared_bundle_verified
+    base["shared_bundle_hash_status"] = str(bundle_res.get("status") or "UNAVAILABLE")
+    base["computed_bundle_content_hash"] = computed_bundle_content_hash
+    base["consumer_payload_hash_status"] = consumer_status
+    base["artifact_hash_status"] = str(art_res.get("status") or "UNAVAILABLE")
 
     receipt["receipt_base"] = base
     receipt["run_anchor_hash"] = run_anchor
@@ -538,21 +750,27 @@ def project_child_receipt_base(
             consumer=consumer,
         )
     ]
-    consumer_payload_hash = canonical_json_hash(
+    cons = resolve_consumer_payload_hash(
         {
             "stage": stage_name,
             "used": used,
             "injected": injected,
             "evidence_refs": [str(r) for r in evidence_refs],
         }
+        if used
+        else None,
+        consumed=bool(used),
     )
+    consumer_payload_hash = str(cons.get("consumer_payload_hash") or "")
+    # Never impersonate artifact with stage hash
+    art_h = str(artifact_hash or "").strip()
     r_hash = compute_receipt_hash(
         run_anchor_hash=run_anchor,
         ordered_child_hashes=[stage_hash],
         claim_boundary=claim_boundary_projection(claim_boundary),
         shared_bundle_hash=shared_bundle_hash,
         consumer_payload_hash=consumer_payload_hash,
-        artifact_hash=artifact_hash,
+        artifact_hash=art_h,
         source_candidate_hash=source_candidate_hash,
         applied_candidate_hash=applied_candidate_hash,
         structured_evidence_refs=structured,
@@ -569,7 +787,7 @@ def project_child_receipt_base(
         parent_receipt_hashes=[run_anchor],
         shared_bundle_hash=shared_bundle_hash,
         consumer_payload_hash=consumer_payload_hash,
-        artifact_hash=artifact_hash or stage_hash,
+        artifact_hash=art_h,
         source_candidate_hash=source_candidate_hash,
         applied_candidate_hash=applied_candidate_hash,
         consumption_chain=chain,
@@ -583,7 +801,10 @@ def project_child_receipt_base(
         route_freeze=route_freeze,
         with_nexus_armor=with_nexus_armor,
     )
+    base["parent_refs"] = [{"type": "run_anchor", "hash": run_anchor}]
     base["stage_hash"] = stage_hash
+    base["consumer_payload_hash_status"] = str(cons.get("status") or "UNAVAILABLE")
+    base["shared_bundle_verified"] = bool(shared_bundle_hash)
     return base
 
 
@@ -634,6 +855,10 @@ def stamp_r1_local_response(
         "auth_blocked": auth_blocked,
         "evidence_refs": list(evidence_refs),
     }
+    # local_model_called = invoked only; applied/artifact require apply/verify stages
+    applied_from_meta = str(meta.get("applied_candidate_hash") or meta.get("applied_hash") or "")
+    artifact_from_meta = str(meta.get("artifact_hash") or meta.get("verifier_artifact_hash") or "")
+    apply_ok = bool(meta.get("apply_succeeded") or meta.get("patch_applied") or applied_from_meta)
     base = project_child_receipt_base(
         source_world="C",
         source_component="local_executor",
@@ -649,11 +874,13 @@ def stamp_r1_local_response(
         injected=invoked,
         used=called and not auth_blocked,
         evidence_present=bool(evidence_refs) or bool(candidate_hash),
-        gate_passed=bool(called and not error and not auth_blocked),
-        outcome_contributed=bool(called and candidate_hash and not error),
-        artifact_hash=candidate_hash,
+        gate_passed=bool(called and not error and not auth_blocked and apply_ok and meta.get("hidden_verifier_passed", True)),
+        outcome_contributed=bool(
+            called and candidate_hash and not error and apply_ok and meta.get("hidden_verifier_passed", True)
+        ),
+        artifact_hash=artifact_from_meta,  # never use generated candidate as artifact
         source_candidate_hash=candidate_hash,
-        applied_candidate_hash=candidate_hash if called else "",
+        applied_candidate_hash=applied_from_meta if apply_ok else "",
         claim_boundary={"public_claim_allowed": False, "auth_blocked": auth_blocked},
     )
     if auth_blocked:
@@ -700,6 +927,21 @@ def stamp_r2_hybrid_meta(
         "hidden_verifier_passed": meta.get("hidden_verifier_passed"),
         "infra_invalid": meta.get("infra_invalid"),
     }
+    hidden_ok = bool(meta.get("hidden_verifier_passed"))
+    # live_evidence_allowed = authorization only; not evidence_present/used
+    evidence_present = bool(
+        meta.get("evidence_present")
+        or meta.get("evidence_refs")
+        or (stages and hidden_ok)
+    )
+    used = bool(meta.get("used")) if "used" in meta else bool(hidden_ok and live_ok and selected_hash)
+    applied = ""
+    if hidden_ok and meta.get("selected_hash_matches_applied") and applied_hash:
+        applied = applied_hash
+    art = str(meta.get("artifact_hash") or meta.get("verifier_artifact_hash") or "")
+    if not hidden_ok:
+        applied = ""
+        art = ""
     base = project_child_receipt_base(
         source_world="hybrid",
         source_component="hybrid_runtime",
@@ -709,21 +951,21 @@ def stamp_r2_hybrid_meta(
         shared_bundle_hash=shared_bundle_hash,
         stage_payload=stage_payload,
         stage_name="cloud_with_local_assist",
-        evidence_refs=[],
+        evidence_refs=list(meta.get("evidence_refs") or []),
         consumer="hybrid",
         selected=True,
-        injected=True,
-        used=live_ok,
-        evidence_present=live_ok,
-        gate_passed=bool(meta.get("hidden_verifier_passed")),
-        outcome_contributed=bool(meta.get("semantic_correctness_passed")),
-        artifact_hash=applied_hash,
+        injected=bool(meta.get("injected", True)),
+        used=used,
+        evidence_present=evidence_present,
+        gate_passed=hidden_ok,
+        outcome_contributed=bool(meta.get("semantic_correctness_passed")) and hidden_ok,
+        artifact_hash=art,
         source_candidate_hash=selected_hash,
-        applied_candidate_hash=applied_hash if meta.get("selected_hash_matches_applied") else "",
+        applied_candidate_hash=applied,
         claim_boundary={
             "public_claim_allowed": False,
             "live_evidence_allowed": live_ok,
-            "block_reason": str(meta.get("live_evidence_block_reason") or ""),
+            "block_reason": str(meta.get("live_evidence_block_reason") or meta.get("block_reason") or ""),
         },
     )
     # Stage hashes for cloud/local legs
@@ -862,6 +1104,53 @@ def validate_receipt_base(
                     # additive structured lives under receipt_base; legacy must stay str
                     blockers.append("legacy_evidence_refs_not_list_str")
 
+    if mode_norm in {"product", "strict"}:
+        tid = str(base.get("task_id") or "").strip()
+        ra = str(base.get("run_anchor_hash") or "").strip()
+        rh = str(base.get("receipt_hash") or "").strip()
+        if not tid:
+            blockers.append("empty_task_id")
+        if not ra:
+            blockers.append("empty_run_anchor_hash")
+        if not rh:
+            blockers.append("empty_receipt_hash")
+        prefs = base.get("parent_refs")
+        if prefs is not None:
+            if not isinstance(prefs, (list, tuple)):
+                blockers.append("parent_refs_not_list")
+            else:
+                for pref in prefs:
+                    if not isinstance(pref, Mapping):
+                        blockers.append("parent_ref_not_mapping")
+                        break
+                    if str(pref.get("type") or "") not in {"run_anchor", "stage", "receipt"}:
+                        blockers.append("parent_ref_unknown_type")
+                        break
+
+    if mode_norm == "strict":
+        tid = str(base.get("task_id") or "").strip()
+        ra = str(base.get("run_anchor_hash") or "").strip()
+        rh = str(base.get("receipt_hash") or "").strip()
+        if ra and not _is_sha256_hex(ra):
+            blockers.append("run_anchor_hash_not_sha256")
+        if rh and not _is_sha256_hex(rh):
+            blockers.append("receipt_hash_not_sha256")
+        if tid and ra and _is_sha256_hex(ra):
+            expected_anchor = compute_run_anchor_hash(
+                task_id=tid,
+                workspace_revision=str(base.get("workspace_revision") or ""),
+                planner_decision_id=str(base.get("planner_decision_id") or ""),
+                treatment_run_id=str(base.get("treatment_run_id") or ""),
+                packet_hash=str(base.get("packet_hash") or ""),
+                shared_bundle_hash=str(base.get("shared_bundle_hash") or ""),
+                selection_authority=str(base.get("selection_authority") or "CapabilityPlanner"),
+                mainchain_route_version=str(base.get("mainchain_route_version") or ""),
+                route_freeze=bool(base.get("route_freeze", False)),
+                mainchain_entry=bool(base.get("mainchain_entry", False)),
+            )
+            if ra != expected_anchor:
+                blockers.append("run_anchor_hash_tamper")
+
     if mode_norm == "strict":
         if base.get("public_claim_allowed") is True:
             blockers.append("public_claim_not_false")
@@ -873,6 +1162,9 @@ def validate_receipt_base(
         parents = [str(p) for p in (base.get("parent_receipt_hashes") or [])]
         if rh and rh in parents:
             blockers.append("cyclic_parent_includes_self_hash")
+        # claim boundary must stay fail-closed projection
+        if isinstance(cb, Mapping) and cb.get("public_claim_allowed") is True:
+            blockers.append("claim_boundary_public_claim_true")
 
     ok = not blockers
     result = {
@@ -945,7 +1237,12 @@ def audit_product_receipt_coverage(
                 model_name = ""
                 error = "provider_not_configured"
 
-            r1 = stamp_r1_local_response(_Resp())
+            class _Req:
+                task_id = "coverage-probe"
+                instance_id = "coverage-probe"
+                planner_snapshot = {"task_id": "coverage-probe", "planner_decision_id": "pd-probe"}
+
+            r1 = stamp_r1_local_response(_Resp(), request=_Req())
             samples["R1"] = r1
         except Exception as exc:  # noqa: BLE001
             samples["R1"] = {"error": str(exc)[:200]}
@@ -977,7 +1274,7 @@ def audit_product_receipt_coverage(
         try:
             from nexus.engine.capability_contracts import CapabilityReceipt as _EngCR
 
-            samples["R5"] = _EngCR(
+            r5 = _EngCR(
                 name="coverage_probe",
                 selected=True,
                 invoked=False,
@@ -985,6 +1282,16 @@ def audit_product_receipt_coverage(
                 gate_passed=False,
                 outcome_contributed=False,
             ).to_dict()
+            # Ensure product validation identity for static probe
+            if isinstance(r5, dict):
+                rb = r5.get("receipt_base")
+                if isinstance(rb, dict):
+                    rb.setdefault("task_id", "coverage-probe")
+                    if not rb.get("task_id"):
+                        rb["task_id"] = "coverage-probe"
+                else:
+                    r5["task_id"] = "coverage-probe"
+            samples["R5"] = r5
         except Exception as exc:  # noqa: BLE001
             samples["R5"] = {"error": str(exc)[:200]}
     else:
@@ -1014,12 +1321,47 @@ def audit_product_receipt_coverage(
             }
         present[key] = bool(has)
 
-    contract_count = sum(1 for k in PRODUCT_RECEIPT_SURFACES if present.get(k))
-    contract_coverage = f"{contract_count}/5"
+    # Separate declared (bool True allowed) from observed (real receipt_base present)
+    declared_present: dict[str, bool] = {}
+    observed_present: dict[str, bool] = {}
+    for key in PRODUCT_RECEIPT_SURFACES:
+        obj = samples.get(key)
+        if obj is True:
+            declared_present[key] = True
+            observed_present[key] = False
+            present[key] = True  # declared contract surface
+            validations[key] = {
+                "ok": True,
+                "mode": "contract_declared",
+                "observed": False,
+            }
+        else:
+            declared_present[key] = bool(present.get(key))
+            observed_present[key] = bool(
+                present.get(key) and validations.get(key, {}).get("mode") != "contract_declared"
+            )
+            if present.get(key) and obj is not True:
+                observed_present[key] = True
+                declared_present[key] = True
+
+    declared_count = sum(1 for k in PRODUCT_RECEIPT_SURFACES if declared_present.get(k))
+    observed_count = sum(1 for k in PRODUCT_RECEIPT_SURFACES if observed_present.get(k))
+    contract_declared_coverage = f"{declared_count}/5"
+    observed_receipt_embed_coverage = f"{observed_count}/5"
+    # Back-compat: contract_coverage tracks declared for old callers, but embed_complete
+    # requires observed embeds.
+    contract_coverage = contract_declared_coverage
+    contract_count = declared_count
 
     wm = dict(wiring_matrix or {})
     physical_eligible = int(wm.get("physical_runtime_eligible") or 0)
     node_count = int(wm.get("node_count") or wm.get("contract_count") or 0)
+    # Physical target subset (promotable real engines) — not all 57 unless proven
+    physical_target = int(
+        wm.get("physical_target_count")
+        or wm.get("promotable_physical_count")
+        or 0
+    )
     missing_engine = 0
     gap = wm.get("gap_class_counts") if isinstance(wm.get("gap_class_counts"), Mapping) else {}
     exec_counts = (
@@ -1029,14 +1371,33 @@ def audit_product_receipt_coverage(
     )
     if exec_counts:
         missing_engine = int(exec_counts.get("MISSING_ENGINE") or 0)
+    observed_exec = int(wm.get("physical_observed_execution_count") or 0)
 
-    # Never equate 5/5 embed with physical/live complete
+    physical_contract_eligible_coverage = (
+        f"{physical_eligible}/{node_count}" if node_count else f"{physical_eligible}/0"
+    )
+    physical_observed_execution_coverage = {
+        "eligible": physical_eligible,
+        "observed": observed_exec,
+        "node_count": node_count,
+        "physical_target": physical_target,
+        "missing_engine_count": missing_engine,
+        "complete": bool(
+            node_count > 0
+            and missing_engine == 0
+            and physical_target > 0
+            and observed_exec >= physical_target
+            and physical_eligible >= physical_target
+        ),
+        "note": "1/N eligible is never complete; target subset must be fully observed",
+    }
+    # Legacy field: never complete on mere eligible>0
     physical_execution_coverage = {
         "eligible": physical_eligible,
         "node_count": node_count,
         "missing_engine_count": missing_engine,
         "routing_surface_changed": bool(wm.get("routing_surface_changed", False)),
-        "complete": bool(node_count > 0 and missing_engine == 0 and physical_eligible > 0),
+        "complete": bool(physical_observed_execution_coverage["complete"]),
         "note": "contract embed coverage does not imply physical execution complete",
     }
     live_provider_coverage = {
@@ -1045,19 +1406,49 @@ def audit_product_receipt_coverage(
         "complete": bool(live_local_complete and live_online_complete),
         "note": "requires authorized live providers; not inferred from receipt_base embed",
     }
+    live_semantic_coverage = {
+        "semantic_closure": bool(semantic_closure),
+        "live_local_complete": bool(live_local_complete),
+        "live_online_complete": bool(live_online_complete),
+        "complete": bool(semantic_closure and live_local_complete and live_online_complete),
+    }
+
+    receipt_integrity = bool(observed_count == 5 and all(
+        (validations.get(k) or {}).get("ok", False) for k in PRODUCT_RECEIPT_SURFACES
+        if observed_present.get(k)
+    ))
+    structural_ok = bool(node_count > 0 and missing_engine == 0 and not wm.get("routing_surface_changed", False))
+    physical_target_ok = bool(physical_observed_execution_coverage["complete"])
+    all_closure_complete = bool(
+        receipt_integrity
+        and structural_ok
+        and physical_target_ok
+        and live_local_complete
+        and live_online_complete
+        and semantic_closure
+    )
 
     return {
         "schema": "nexus.product_receipt_coverage_audit.v1",
         "contract_coverage": contract_coverage,
+        "contract_declared_coverage": contract_declared_coverage,
+        "observed_receipt_embed_coverage": observed_receipt_embed_coverage,
+        "physical_contract_eligible_coverage": physical_contract_eligible_coverage,
+        "physical_observed_execution_coverage": physical_observed_execution_coverage,
+        "live_semantic_coverage": live_semantic_coverage,
         "contract_present": present,
+        "declared_present": declared_present,
+        "observed_present": observed_present,
         "validations": validations,
         "physical_execution_coverage": physical_execution_coverage,
         "live_provider_coverage": live_provider_coverage,
         "semantic_closure": bool(semantic_closure),
         "public_claim_allowed": False,
         "production_ready": False,
-        "embed_complete": contract_count == 5,
-        "all_closure_complete": False,  # never auto-true from embed alone
+        "embed_complete": observed_count == 5,
+        "observed_embed_complete": observed_count == 5,
+        "declared_embed_complete": declared_count == 5,
+        "all_closure_complete": all_closure_complete,
         "gap_class_counts": dict(gap) if gap else {},
         "execution_class_counts": dict(exec_counts) if exec_counts else {},
     }

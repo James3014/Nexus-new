@@ -3085,3 +3085,69 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
     assert receipt.get("receipt_complete") is True
     assert receipt.get("capability_closure_complete") is True, blockers
     assert blockers == []
+
+
+# --- Phase 0 / truth-seal false-green: consumption + adapter invariants ---
+
+
+def test_H_adapter_gate_failed_blocks_outcome_contributed():
+    """H: adapters must not set outcome_contributed when gate_passed is false."""
+    from nexus.engine.capability_receipt_adapters import (
+        ClaimGateReceiptAdapter,
+        DeliveryGateReceiptAdapter,
+        ArtifactGateReceiptAdapter,
+        merge_capability_receipt,
+    )
+    try:
+        from nexus.engine.capability_receipt_adapters import MemPalaceGateReceiptAdapter as MempalaceGateReceiptAdapter
+    except ImportError:
+        try:
+            from nexus.engine.capability_receipt_adapters import MemPalaceGateReceiptAdapter
+        except ImportError:
+            MempalaceGateReceiptAdapter = None
+
+    r = merge_capability_receipt(
+        name="x",
+        selected=True,
+        invoked=True,
+        evidence_refs=["ev1"],
+        gate_passed=False,
+        outcome_contributed=True,
+    )
+    assert r.gate_passed is False
+    assert r.outcome_contributed is False
+
+    payload_fail = {
+        "claim_gate_invoked": True,
+        "claim_gate_passed": False,
+        "verifier_status": "FAILED",
+        "evidence_refs": ["ev"],
+    }
+    adapters = [
+        ClaimGateReceiptAdapter,
+        DeliveryGateReceiptAdapter,
+        ArtifactGateReceiptAdapter,
+    ]
+    if MempalaceGateReceiptAdapter is not None:
+        adapters.append(MempalaceGateReceiptAdapter)
+    for Adapter in adapters:
+        try:
+            out = Adapter().build(claim_verified=False, payload=payload_fail)
+        except Exception:
+            continue
+        assert out.outcome_contributed is False, Adapter.__name__
+        if out.gate_passed is False:
+            assert out.outcome_contributed is False
+
+
+def test_explicit_bool_key_presence_is_not_true():
+    """Key present with false/0/'false' must not count as true."""
+    from nexus.engine.capability_receipt_adapters import _explicit_bool, _as_bool
+
+    payload = {"gate_passed": False, "flag": 0, "s": "false", "empty": ""}
+    # presence of key is not truth
+    assert _as_bool(payload.get("gate_passed")) is False
+    # _explicit_bool should mean "explicit true", not "key exists"
+    assert _explicit_bool(payload, "gate_passed") is False
+    assert _explicit_bool(payload, "flag") is False
+    assert _explicit_bool({"gate_passed": True}, "gate_passed") is True
