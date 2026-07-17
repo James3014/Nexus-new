@@ -93,11 +93,13 @@ class ExecutorControls:
                             )
                             cap_receipt = executor_fn(_plan_with_ctx, task_desc)
                             if cap_receipt.invoked:
-                                elapsed_ms = max(1, int((time.monotonic() - cap_start) * 1000))
+                                # Real wall from stopwatch only — never invent floor=1 measured
+                                elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
                                 existing = dict(cap_receipt.telemetries or {})
                                 existing["wall_time_ms"] = elapsed_ms
                                 existing["overhead_ms"] = elapsed_ms
                                 existing["telemetry_source"] = "measured"
+                                existing["claimable"] = False
                                 return CapabilityReceipt(
                                     capability_name=cap_receipt.capability_name,
                                     selected=True,
@@ -142,7 +144,8 @@ class ExecutorControls:
                             if not has_evidence:
                                 gate_passed = False
 
-                    elapsed_ms = max(1, int((time.monotonic() - cap_start) * 1000))
+                    # Mock path still measures real wall for the mock body only.
+                    elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
                     mock_cap_evidence_id = f"ev_cap_{cap_name}_{os.urandom(4).hex()}"
                     return CapabilityReceipt(
                         capability_name=cap_name,
@@ -163,6 +166,7 @@ class ExecutorControls:
                             "provider_costs": 0.0,
                             "model_calls": 0,
                             "telemetry_source": "measured",
+                            "claimable": False,
                         },
                         timestamp=datetime.now(timezone.utc).isoformat(),
                     )

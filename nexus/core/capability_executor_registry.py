@@ -152,6 +152,65 @@ def apply_semantic_success_guard(
     return invoked, bool(gate_passed), out
 
 
+def _honest_structural_telemetries(
+    wall_time_ms: int | None,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build telemetries without inventing measured wall/tokens (RC-3).
+
+    - wall_time_ms is None → telemetry_source=unavailable, claimable=false
+    - wall_time_ms provided (real elapsed) → measured with that value (may be 0)
+    Never default wall to 1 or mark measured without a real wall sample.
+    """
+    if wall_time_ms is None:
+        tel: dict[str, Any] = {
+            "telemetry_source": "unavailable",
+            "wall_time_ms": None,
+            "token_usage": None,
+            "provider_costs": None,
+            "overhead_ms": None,
+            "model_calls": 0,
+            "claimable": False,
+            "missing_evidence_reason": "telemetry_unavailable",
+        }
+    else:
+        try:
+            wall = int(wall_time_ms)
+        except (TypeError, ValueError):
+            wall = None
+        if wall is None or wall < 0:
+            tel = {
+                "telemetry_source": "unavailable",
+                "wall_time_ms": None,
+                "token_usage": None,
+                "provider_costs": None,
+                "overhead_ms": None,
+                "model_calls": 0,
+                "claimable": False,
+                "missing_evidence_reason": "telemetry_unavailable",
+            }
+        else:
+            # Structural capability: model_calls=0 is allowed; wall is real elapsed.
+            tel = {
+                "telemetry_source": "measured",
+                "wall_time_ms": wall,
+                "overhead_ms": wall,
+                "token_usage": 0,
+                "provider_costs": 0.0,
+                "model_calls": 0,
+                "claimable": False,
+            }
+    if extra:
+        tel.update(extra)
+    # Fail-closed: cannot claim measured without a concrete wall sample
+    if tel.get("telemetry_source") == "measured" and tel.get("wall_time_ms") is None:
+        tel["telemetry_source"] = "unavailable"
+        tel["claimable"] = False
+        tel["missing_evidence_reason"] = "telemetry_unavailable"
+    return tel
+
+
 def _make_receipt(
     cap_name: str,
     plan: CapabilityExecutionPlan,
@@ -159,11 +218,10 @@ def _make_receipt(
     invoked: bool = True,
     gate_passed: bool = True,
     outcome: dict[str, Any] | None = None,
-    wall_time_ms: int = 1,
+    wall_time_ms: int | None = None,
     skill_receipts: list | None = None,
     **extra_telemetry: Any,
 ) -> CapabilityReceipt:
-    wall_time_ms = max(1, wall_time_ms) if isinstance(wall_time_ms, int) else 1
     out: dict[str, Any] = dict(outcome or {})
     # Fail closed: import/construct ≠ executed (never claim real success).
     if invoked and _is_shallow_outcome(out):
@@ -191,15 +249,7 @@ def _make_receipt(
         gate_passed=gate_passed,
         outcome=out,
         skill_receipts=skill_receipts or [],
-        telemetries={
-            "wall_time_ms": wall_time_ms,
-            "overhead_ms": max(1, wall_time_ms),
-            "token_usage": 0,
-            "provider_costs": 0.0,
-            "model_calls": 0,
-            "telemetry_source": "measured",
-            **extra_telemetry,
-        },
+        telemetries=_honest_structural_telemetries(wall_time_ms, extra=dict(extra_telemetry or {})),
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -2162,7 +2212,7 @@ def _exec_harness_preflight_sensor(
         plan,
         invoked=base.invoked,
         gate_passed=base.gate_passed,
-        wall_time_ms=int((base.telemetries or {}).get("wall_time_ms") or 1),
+        wall_time_ms=(base.telemetries or {}).get("wall_time_ms"),
         outcome={"delegated": "pregate", **(base.outcome or {})},
     )
 
@@ -2584,7 +2634,7 @@ def _exec_bdd_acceptance_skill(
         plan,
         invoked=base.invoked,
         gate_passed=base.gate_passed,
-        wall_time_ms=int((base.telemetries or {}).get("wall_time_ms") or 1),
+        wall_time_ms=(base.telemetries or {}).get("wall_time_ms"),
         outcome=_structured_outcome(
             action="acceptance_check",
             semantic_status="SUCCEEDED" if base.gate_passed else "FAILED",
@@ -2691,7 +2741,7 @@ def _exec_llm_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
         plan,
         invoked=base.invoked,
         gate_passed=base.gate_passed,
-        wall_time_ms=int((base.telemetries or {}).get("wall_time_ms") or 1),
+        wall_time_ms=(base.telemetries or {}).get("wall_time_ms"),
         outcome=_structured_outcome(
             action=str(base_out.get("action") or "rank"),
             semantic_status=str(base_out.get("semantic_status") or ("SUCCEEDED" if base.gate_passed else "FAILED")),
@@ -3753,7 +3803,7 @@ def _exec_oracle_shadow(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
     return _make_receipt(
         "oracle_shadow",
         plan,
-        wall_time_ms=max(1, elapsed),
+        wall_time_ms=elapsed if elapsed is not None else None,
         gate_passed=False,
         invoked=True,
         outcome=_structured_outcome(
