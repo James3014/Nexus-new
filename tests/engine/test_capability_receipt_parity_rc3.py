@@ -256,3 +256,94 @@ def test_envelope_roundtrip_migration_complete():
     assert rt["ok"] is True
     assert rt["source_hash_match"] is True
     assert rt["public_claim_allowed"] is False
+
+
+def test_tampered_source_payload_fails_envelope_roundtrip():
+    """Mutating source_payload after seal must fail migration (payload integrity)."""
+    from nexus.engine.capability_receipt_parity import (
+        to_canonical_envelope,
+        verify_envelope_roundtrip,
+    )
+
+    eng = EngineReceipt(
+        name="memory",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=False,
+        selection_source="planner",
+        executor_id="m1",
+        evidence_refs=("ev:1",),
+        failure_reason="",
+        telemetries={"telemetry_source": "unavailable"},
+    )
+    env = to_canonical_envelope(eng)
+    assert env["envelope_migration_complete"] is True
+    # Tamper audit payload after seal
+    env["source_payload"] = {"wiped": True, "name": "attacker"}
+    rt = verify_envelope_roundtrip(env)
+    assert rt["ok"] is False
+    assert rt["source_hash_match"] is False or "source_payload_tampered" in (rt.get("blockers") or [])
+    assert "source_payload_tampered" in (rt.get("blockers") or [])
+    # Migration flag must not stay true on a tampered envelope when re-checked
+    env2 = dict(env)
+    env2["envelope_migration_complete"] = bool(rt.get("ok"))
+    assert env2["envelope_migration_complete"] is False
+
+
+def test_forged_source_content_hash_fails_envelope_roundtrip():
+    """Forged source_content_hash must not verify even if payload looks intact."""
+    from nexus.engine.capability_receipt_parity import (
+        to_canonical_envelope,
+        verify_envelope_roundtrip,
+    )
+
+    eng = EngineReceipt(
+        name="belief",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        selection_source="planner",
+        executor_id="b1",
+        evidence_refs=("ev:b",),
+        failure_reason="",
+        telemetries={"telemetry_source": "unavailable"},
+    )
+    env = to_canonical_envelope(eng)
+    assert env["envelope_migration_complete"] is True
+    env["source_content_hash"] = "0" * 64  # forged seal
+    rt = verify_envelope_roundtrip(env)
+    assert rt["ok"] is False
+    assert rt["source_hash_match"] is False
+    assert "source_hash_mismatch" in (rt.get("blockers") or [])
+
+
+def test_empty_source_payload_without_structured_fields_fails():
+    """Wiping structured fields must fail reverse; identity source_payload alone is not enough."""
+    from nexus.engine.capability_receipt_parity import (
+        from_canonical_envelope,
+        to_canonical_envelope,
+        verify_envelope_roundtrip,
+    )
+
+    eng = EngineReceipt(
+        name="x",
+        selected=True,
+        invoked=False,
+        evidence_present=False,
+        gate_passed=False,
+        outcome_contributed=False,
+    )
+    env = to_canonical_envelope(eng)
+    # Wipe rebuildable parts + payload
+    env["shared_fields"] = {}
+    env["extensions"] = {}
+    env["source_payload"] = {}
+    env["receipt_base"] = {}
+    rev = from_canonical_envelope(env)
+    assert rev["ok"] is False
+    rt = verify_envelope_roundtrip(env)
+    assert rt["ok"] is False

@@ -277,16 +277,23 @@ def to_canonical_envelope(
         else:
             extensions[k] = v
 
-    # Full source payload preserved for roundtrip (no silent drop)
+    # Full source payload preserved for audit; seal hash is over rebuildable projection
+    # (shared_fields + extensions + receipt_base) so reverse path can be verified without
+    # trusting identity-return of source_payload alone.
     source_payload = dict(data)
-    # drop nested receipt_base from source payload copy to avoid double-embed size blowups
-    # but keep a hash of full serialized source for migration proof
+    rebuildable = dict(shared_fields)
+    rebuildable.update(extensions)
+    if isinstance(rb, Mapping) and rb:
+        rebuildable["receipt_base"] = dict(rb)
+    rebuildable["public_claim_allowed"] = False
     try:
         from nexus.evidence.receipt_base import canonical_json_hash
 
-        source_content_hash = canonical_json_hash(source_payload)
+        source_content_hash = canonical_json_hash(rebuildable)
+        payload_integrity_hash = canonical_json_hash(source_payload)
     except Exception:
         source_content_hash = ""
+        payload_integrity_hash = ""
 
     loss_ledger = [
         row
@@ -318,6 +325,7 @@ def to_canonical_envelope(
         "extensions": extensions,
         "source_payload": source_payload,
         "source_content_hash": source_content_hash,
+        "payload_integrity_hash": payload_integrity_hash,
         "loss_ledger": loss_ledger,
         "shared_base_parity_complete": shared_base_parity_complete,
         "full_type_parity": full_type_parity,
@@ -346,7 +354,12 @@ def to_canonical_envelope(
 
 
 def from_canonical_envelope(envelope: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Reverse project envelope → source-shaped dict (no class alias)."""
+    """Reverse project envelope → source-shaped dict (no class alias).
+
+    Always rebuilds from shared_fields + extensions + receipt_base.
+    Does **not** identity-return ``source_payload`` (that would allow tampered
+    audit copies to fake a roundtrip without matching the sealed hash).
+    """
     if not isinstance(envelope, Mapping) or not envelope:
         return {
             "ok": False,
@@ -354,16 +367,32 @@ def from_canonical_envelope(envelope: Mapping[str, Any] | None) -> dict[str, Any
             "source": {},
             "public_claim_allowed": False,
         }
-    src = envelope.get("source_payload")
-    if isinstance(src, Mapping) and src:
-        restored = dict(src)
-    else:
-        restored = {}
-        restored.update(dict(envelope.get("shared_fields") or {}))
-        restored.update(dict(envelope.get("extensions") or {}))
-        if isinstance(envelope.get("receipt_base"), Mapping):
-            restored["receipt_base"] = dict(envelope["receipt_base"])
+    shared = envelope.get("shared_fields")
+    extensions = envelope.get("extensions")
+    if not isinstance(shared, Mapping) and not isinstance(extensions, Mapping):
+        # Fail closed if structured projection missing (cannot rebuild)
+        return {
+            "ok": False,
+            "blockers": ["structured_fields_missing"],
+            "source": {},
+            "public_claim_allowed": False,
+        }
+    restored: dict[str, Any] = {}
+    if isinstance(shared, Mapping):
+        restored.update(dict(shared))
+    if isinstance(extensions, Mapping):
+        restored.update(dict(extensions))
+    rb = envelope.get("receipt_base")
+    if isinstance(rb, Mapping) and rb:
+        restored["receipt_base"] = dict(rb)
     restored["public_claim_allowed"] = False
+    if not restored or set(restored.keys()) <= {"public_claim_allowed"}:
+        return {
+            "ok": False,
+            "blockers": ["empty_reverse_projection"],
+            "source": {},
+            "public_claim_allowed": False,
+        }
     return {
         "ok": True,
         "source": restored,
@@ -374,46 +403,95 @@ def from_canonical_envelope(envelope: Mapping[str, Any] | None) -> dict[str, Any
 
 
 def verify_envelope_roundtrip(envelope: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Hash-verify source → envelope → source integrity."""
+    """Hash-verify source→envelope→source integrity (fail closed).
+
+    Requires:
+    - non-empty ``source_content_hash``
+    - reverse projection hash == ``source_content_hash`` (no fallback)
+    - if ``source_payload`` present and ``payload_integrity_hash`` set, payload
+      must still match that integrity hash (tamper detect)
+    Never accepts restored_hash == hash(current source_payload) as a substitute
+    for a missing/mismatched seal hash.
+    """
     if not isinstance(envelope, Mapping):
-        return {"ok": False, "blockers": ["envelope_missing"], "source_hash_match": False}
+        return {
+            "ok": False,
+            "blockers": ["envelope_missing"],
+            "source_hash_match": False,
+            "public_claim_allowed": False,
+        }
     blockers: list[str] = []
     original_hash = str(envelope.get("source_content_hash") or "").strip()
+    if not original_hash:
+        blockers.append("source_content_hash_missing")
+        return {
+            "ok": False,
+            "blockers": blockers,
+            "source_hash_match": False,
+            "public_claim_allowed": False,
+        }
+    if len(original_hash) != 64 or any(c not in "0123456789abcdef" for c in original_hash):
+        blockers.append("source_content_hash_not_sha256")
+        return {
+            "ok": False,
+            "blockers": blockers,
+            "source_hash_match": False,
+            "public_claim_allowed": False,
+        }
+
+    # Optional audit payload tamper check
     src = envelope.get("source_payload")
-    if not isinstance(src, Mapping):
-        blockers.append("source_payload_missing")
-        return {"ok": False, "blockers": blockers, "source_hash_match": False}
+    payload_integrity = str(envelope.get("payload_integrity_hash") or "").strip()
+    if isinstance(src, Mapping) and payload_integrity:
+        try:
+            from nexus.evidence.receipt_base import canonical_json_hash
+
+            current_payload_hash = canonical_json_hash(dict(src))
+        except Exception as exc:  # noqa: BLE001
+            blockers.append(f"payload_hash_failed:{exc}"[:200])
+            return {
+                "ok": False,
+                "blockers": blockers,
+                "source_hash_match": False,
+                "public_claim_allowed": False,
+            }
+        if current_payload_hash != payload_integrity:
+            blockers.append("source_payload_tampered")
+
     rev = from_canonical_envelope(envelope)
     if not rev.get("ok"):
         blockers.extend(rev.get("blockers") or ["reverse_failed"])
-        return {"ok": False, "blockers": blockers, "source_hash_match": False}
+        return {
+            "ok": False,
+            "blockers": blockers,
+            "source_hash_match": False,
+            "public_claim_allowed": False,
+        }
     restored = rev.get("source") or {}
     try:
         from nexus.evidence.receipt_base import canonical_json_hash
 
         restored_hash = canonical_json_hash(dict(restored))
-        re_env = to_canonical_envelope_raw_hash_only(dict(src))
-        # Compare original source payload hash to restored hash
-        match = bool(original_hash) and original_hash == restored_hash
-        if not match:
-            # recompute from stored source_payload
-            recomputed = canonical_json_hash(dict(src))
-            match = restored_hash == recomputed
-            if not original_hash:
-                original_hash = recomputed
-                match = restored_hash == original_hash
     except Exception as exc:  # noqa: BLE001
-        blockers.append(f"hash_failed:{exc}"[:200])
-        return {"ok": False, "blockers": blockers, "source_hash_match": False}
+        blockers.append(f"restored_hash_failed:{exc}"[:200])
+        return {
+            "ok": False,
+            "blockers": blockers,
+            "source_hash_match": False,
+            "public_claim_allowed": False,
+        }
+
+    # STRICT: restored must equal sealed source_content_hash — no fallback
+    match = restored_hash == original_hash
     if not match:
         blockers.append("source_hash_mismatch")
-    # Ensure extensions preserved keys from original that are not shared
+
     return {
         "ok": not blockers and match,
         "blockers": blockers,
         "source_hash_match": match,
         "original_hash": original_hash,
-        "restored_hash": restored_hash if "restored_hash" in dir() else "",
+        "restored_hash": restored_hash,
         "public_claim_allowed": False,
     }
 
