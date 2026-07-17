@@ -142,3 +142,39 @@ def test_I_forged_or_wrong_formal_schema_cannot_keep():
         "formal_eligible"
     ) is False
     assert demo_dec["public_claim_allowed"] is False
+
+
+def test_missing_provider_or_verifier_receipt_is_experiment_invalid():
+    """Phase5: absent provider/verifier receipts must not yield REVISE/KEEP."""
+    from nexus.services.formal_fused_projection import formal_from_pilot
+
+    pilot = {
+        "schema": "nexus.fused_live_pilot.v1",
+        "task_id": "t1",
+        "treatment_fingerprint": "tf1",
+        "pair_count": 4,
+        "comparable_count": 4,
+        "infra_invalid_count": 0,
+        "safety_violations": 0,
+        "b_solve_mean": 0.5,
+        "d_solve_mean": 0.9,
+        "token_samples": {"b": [100, 110, 90, 105], "d": [70, 75, 80, 65]},
+        "pairs": [
+            {
+                "pair_id": f"p{i}",
+                "task_id": "t1",
+                "comparable": True,
+                "treatment_equal": True,
+                "d_assist_credited": True,
+                "packet_consumption_proof": {"packet_hash": "p" * 64, "consumed": True},
+                "b_infra": False,
+                "d_infra": False,
+            }
+            for i in range(4)
+        ],
+        # intentionally missing provider_receipt and verifier_receipt
+    }
+    decision = formal_from_pilot(pilot)
+    assert decision["verdict"] == "EXPERIMENT_INVALID"
+    assert decision["public_claim_allowed"] is False
+    assert decision.get("formal_eligible") is False

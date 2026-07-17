@@ -592,3 +592,49 @@ def test_L_context_trace_route_projects_into_receipt_base():
     assert base.get("route_freeze") is True
     assert base.get("mainchain_route_version") == "mainchain.v1"
     assert base.get("with_nexus_armor") is True
+
+
+def test_strict_forged_receipt_hash_fails_closed():
+    """Phase1: validator recomputes receipt_hash; 64-zero forged hash fails."""
+    from nexus.evidence.receipt_base import (
+        attach_r3_receipt_base,
+        compute_receipt_hash,
+        validate_receipt_base,
+    )
+
+    receipt = {
+        "task_id": "tamper-task",
+        "workspace_revision": "wr",
+        "planner_decision_id": "pd",
+        "local": {"invoked": True, "x": 1},
+    }
+    attach_r3_receipt_base(receipt)
+    base = dict(receipt["receipt_base"])
+    assert len(base["receipt_hash"]) == 64
+    # Honest recompute should match
+    ok = validate_receipt_base(base, mode="strict")
+    assert ok["ok"] is True, ok.get("blockers")
+    # Forge receipt_hash with valid SHA-256 hex that is not the real aggregate
+    forged = dict(base)
+    forged["receipt_hash"] = "0" * 64
+    bad = validate_receipt_base(forged, mode="strict")
+    assert bad["ok"] is False
+    assert any("receipt_hash_tamper" in b for b in bad["blockers"])
+    # Ensure forged is not equal to a recompute of empty children alone accidentally
+    assert forged["receipt_hash"] != base["receipt_hash"]
+
+
+def test_bare_shared_bundle_hash_not_verified():
+    """project_child must not mark unsealed bare hash as verified."""
+    from nexus.evidence.receipt_base import project_child_receipt_base
+
+    base = project_child_receipt_base(
+        source_world="C",
+        source_component="local_executor",
+        task_id="t-bundle",
+        shared_bundle_hash="a" * 64,  # bare non-empty, no seal proof
+        stage_payload={"invoked": True},
+        stage_name="local",
+    )
+    assert base.get("shared_bundle_verified") is False
+    assert base.get("shared_bundle_hash_status") in {"UNSEALED", "EMPTY", "UNAVAILABLE"}

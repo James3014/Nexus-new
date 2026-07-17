@@ -544,7 +544,10 @@ def attach_r3_receipt_base(
                 if isinstance(stage, Mapping):
                     children.append(hash_stage_payload(stage, stage_name=f"cap:{cap_name}"))
 
-    claim = claim_boundary_projection(receipt.get("claim_boundary"))
+    # Double-project so hashed claim_boundary matches build_receipt_base_dict storage
+    claim = claim_boundary_projection(
+        claim_boundary_projection(receipt.get("claim_boundary"))
+    )
     consumed_ids = list(receipt.get("consumed_evidence_ids") or [])
     contributed = list(receipt.get("contributed_capabilities") or [])
     executed = list(receipt.get("executed_capabilities") or [])
@@ -764,10 +767,11 @@ def project_child_receipt_base(
     consumer_payload_hash = str(cons.get("consumer_payload_hash") or "")
     # Never impersonate artifact with stage hash
     art_h = str(artifact_hash or "").strip()
+    claim_stable = claim_boundary_projection(claim_boundary_projection(claim_boundary))
     r_hash = compute_receipt_hash(
         run_anchor_hash=run_anchor,
         ordered_child_hashes=[stage_hash],
-        claim_boundary=claim_boundary_projection(claim_boundary),
+        claim_boundary=claim_stable,
         shared_bundle_hash=shared_bundle_hash,
         consumer_payload_hash=consumer_payload_hash,
         artifact_hash=art_h,
@@ -792,7 +796,7 @@ def project_child_receipt_base(
         applied_candidate_hash=applied_candidate_hash,
         consumption_chain=chain,
         structured_evidence_refs=structured,
-        claim_boundary=claim_boundary,
+        claim_boundary=claim_stable,
         source_world=source_world,
         source_component=source_component,
         selection_authority=selection_authority,
@@ -804,7 +808,36 @@ def project_child_receipt_base(
     base["parent_refs"] = [{"type": "run_anchor", "hash": run_anchor}]
     base["stage_hash"] = stage_hash
     base["consumer_payload_hash_status"] = str(cons.get("status") or "UNAVAILABLE")
-    base["shared_bundle_verified"] = bool(shared_bundle_hash)
+    # Sealed-only verified flag: bare non-empty hash is NEVER verified without seal proof.
+    # Identity may still carry the string for run_anchor binding; verified stays false.
+    seal_proof = False
+    if isinstance(stage_payload, Mapping):
+        seal_proof = bool(
+            stage_payload.get("shared_bundle_verified")
+            or stage_payload.get("sealed")
+            or stage_payload.get("seal_verified")
+            or str(stage_payload.get("seal_status") or "").lower()
+            in {"sealed", "verified", "ok", "pass"}
+        )
+    bare = str(shared_bundle_hash or "").strip()
+    if seal_proof and bare:
+        seal_res = resolve_shared_bundle_hash(
+            {"sealed": True, "seal_hash": bare, "bundle_hash": bare},
+            explicit_hash=bare,
+        )
+        base["shared_bundle_hash"] = str(seal_res.get("shared_bundle_hash") or bare)
+        base["shared_bundle_verified"] = True
+        base["shared_bundle_hash_status"] = "VERIFIED"
+        base["computed_bundle_content_hash"] = str(
+            seal_res.get("computed_bundle_content_hash") or ""
+        )
+    else:
+        # Do not promote unsealed hash to verified; keep string only as non-verified identity
+        base["shared_bundle_hash"] = bare  # identity lineage only
+        base["shared_bundle_verified"] = False
+        base["shared_bundle_hash_status"] = "UNSEALED" if bare else "EMPTY"
+        if bare:
+            base["computed_bundle_content_hash"] = bare
     return base
 
 
@@ -1150,17 +1183,40 @@ def validate_receipt_base(
             )
             if ra != expected_anchor:
                 blockers.append("run_anchor_hash_tamper")
+        # Recompute receipt_hash from lineage fields; forged 64-hex must fail closed
+        if ra and rh and _is_sha256_hex(ra) and _is_sha256_hex(rh):
+            children = base.get("ordered_child_hashes") or base.get("child_hashes") or []
+            if not isinstance(children, (list, tuple)):
+                children = []
+            stage_h = str(base.get("stage_hash") or "").strip()
+            if not children and stage_h:
+                children = [stage_h]
+            cb_map = base.get("claim_boundary") if isinstance(base.get("claim_boundary"), Mapping) else {}
+            claim_for_hash = claim_boundary_projection(dict(cb_map) if cb_map else None)
+            expected_receipt = compute_receipt_hash(
+                run_anchor_hash=ra,
+                ordered_child_hashes=[str(h) for h in children if str(h).strip()],
+                claim_boundary=claim_for_hash,
+                shared_bundle_hash=str(base.get("shared_bundle_hash") or ""),
+                consumer_payload_hash=str(base.get("consumer_payload_hash") or ""),
+                artifact_hash=str(base.get("artifact_hash") or ""),
+                source_candidate_hash=str(base.get("source_candidate_hash") or ""),
+                applied_candidate_hash=str(base.get("applied_candidate_hash") or ""),
+                structured_evidence_refs=list(base.get("structured_evidence_refs") or ()),
+                consumption_chain=list(base.get("consumption_chain") or ()),
+            )
+            if rh != expected_receipt:
+                blockers.append("receipt_hash_tamper")
 
-    if mode_norm == "strict":
         if base.get("public_claim_allowed") is True:
             blockers.append("public_claim_not_false")
         cb = base.get("claim_boundary")
         if cb is not None and not isinstance(cb, Mapping):
             blockers.append("claim_boundary_not_mapping")
         # Acyclic hint: receipt_hash must not appear in parent_receipt_hashes
-        rh = str(base.get("receipt_hash") or "")
+        rh2 = str(base.get("receipt_hash") or "")
         parents = [str(p) for p in (base.get("parent_receipt_hashes") or [])]
-        if rh and rh in parents:
+        if rh2 and rh2 in parents:
             blockers.append("cyclic_parent_includes_self_hash")
         # claim boundary must stay fail-closed projection
         if isinstance(cb, Mapping) and cb.get("public_claim_allowed") is True:

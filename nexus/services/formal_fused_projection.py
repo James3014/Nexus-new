@@ -84,21 +84,58 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
 
     # Require pair identity / treatment fingerprint / provider-verifier receipts
     pairs = list(pilot.get("pairs") or [])
+    if not pairs and int(pilot.get("pair_count") or 0) <= 0:
+        return _formal_invalid("missing_pairs", pilot)
+
+    # Fail closed: absent/empty provider or verifier receipt → INVALID (not REVISE)
+    prov = pilot.get("provider_receipt")
+    ver = pilot.get("verifier_receipt")
+    if prov is False or ver is False or prov in (None, "", {}, []) or ver in (None, "", {}, []):
+        return _formal_invalid(
+            "missing_provider_or_verifier_receipt",
+            pilot,
+            token_samples_numeric={"b": [], "d": []},
+        )
+    if not isinstance(prov, Mapping) or not isinstance(ver, Mapping):
+        return _formal_invalid(
+            "provider_or_verifier_receipt_not_mapping",
+            pilot,
+            token_samples_numeric={"b": [], "d": []},
+        )
+    # Minimal non-empty identity fields on receipts
+    if not (prov.get("provider") or prov.get("provider_id") or prov.get("confirmed") is True):
+        return _formal_invalid("provider_receipt_identity_missing", pilot)
+    if not (
+        ver.get("artifact_hash")
+        or ver.get("verifier_artifact")
+        or ver.get("source_hash")
+        or str(ver.get("status") or "").upper() in {"PASS", "PASSED", "OK", "VERIFIED"}
+    ):
+        return _formal_invalid("verifier_receipt_identity_missing", pilot)
+
+    pilot_task = str(pilot.get("task_id") or "").strip()
+    pilot_tf = str(pilot.get("treatment_fingerprint") or "").strip()
+    if not pilot_task and not pilot_tf:
+        # require per-pair identity if pilot-level missing
+        for p in pairs:
+            if not isinstance(p, Mapping):
+                return _formal_invalid("pair_not_mapping", pilot)
+            if not (p.get("task_id") or p.get("pair_id")):
+                return _formal_invalid("missing_pair_identity", pilot)
+            if not (p.get("treatment_fingerprint") or p.get("treatment_equal") is True):
+                return _formal_invalid("missing_treatment_fingerprint", pilot)
+
     for i, p in enumerate(pairs):
         if not isinstance(p, Mapping):
             return _formal_invalid("pair_not_mapping", pilot)
-        if not (p.get("task_id") or p.get("pair_id") or pilot.get("task_id")):
-            # allow aggregate identity if pairs share pilot-level task identity later
-            if not pilot.get("task_id") and not pilot.get("treatment_fingerprint"):
-                if not p.get("treatment_equal") is True:
-                    pass
-        # For forged-quality KEEP paths, require real receipt linkage fields when claiming credit
+        if not (p.get("task_id") or p.get("pair_id") or pilot_task):
+            return _formal_invalid("missing_pair_identity", pilot)
+        # d_assist_credited requires packet consumption proof
         if p.get("d_assist_credited") and not (
             p.get("packet_consumption_proof")
             or p.get("packet_hash")
             or pilot.get("packet_consumption_proof")
         ):
-            # Mark credit false for decision — do not invent proof
             p = dict(p)
             p["d_assist_credited"] = False
             pairs[i] = p
@@ -110,11 +147,10 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
         else (
             schema in ALLOWED_LIVE_PILOT_SCHEMAS
             and not pilot.get("contract_path_broken")
-            and (pilot.get("provider_receipt") or pilot.get("verifier_receipt") or pairs)
+            and isinstance(prov, Mapping)
+            and isinstance(ver, Mapping)
         )
     )
-    if pilot.get("provider_receipt") is False or pilot.get("verifier_receipt") is False:
-        return _formal_invalid("missing_provider_or_verifier_receipt", pilot)
 
     n = int(pilot.get("pair_count") or len(pairs) or 0)
     comp = int(
