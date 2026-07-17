@@ -158,41 +158,265 @@ def resolve_shared_bundle_hash(
 
 
 def resolve_consumer_payload_hash(
-    payload: Mapping[str, Any] | Sequence[Any] | None,
+    payload: Mapping[str, Any] | Sequence[Any] | None = None,
     *,
     consumed: bool = False,
+    verified_bundle: Mapping[str, Any] | None = None,
+    explicit_hash: str = "",
+    used: bool = False,
 ) -> dict[str, Any]:
-    """Hash only a real bounded consumed payload; empty → UNAVAILABLE."""
-    if payload is None:
-        return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
-    if isinstance(payload, Mapping):
-        # Drop empty collections
-        meaningful = {
-            k: v
-            for k, v in payload.items()
-            if v not in (None, "", [], (), {}, False)
-        }
-        if not meaningful or not consumed:
+    """Hash real bounded consumer payloads only — never ID/index lists alone.
+
+    Prefer verified bundle entries[*].consumer_payload via hash_consumer_payloads.
+    ID-only inputs (consumed_evidence_ids / executed_capabilities lists) yield
+    empty hash and ID_ONLY_NOT_CONSUMED. CONSUMED requires used/consumed proof.
+    """
+    explicit = str(explicit_hash or "").strip()
+
+    # --- Primary: verified bundle entries ---
+    if isinstance(verified_bundle, Mapping) and verified_bundle:
+        seal = resolve_shared_bundle_hash(verified_bundle)
+        if not seal.get("shared_bundle_verified"):
             return {
                 "consumer_payload_hash": "",
                 "status": "UNAVAILABLE",
                 "consumed": False,
+                "blockers": list(seal.get("blockers") or ["bundle_not_verified"]),
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": "",
+            }
+        entries = verified_bundle.get("entries")
+        payloads: list[Mapping[str, Any]] = []
+        if isinstance(entries, list):
+            for e in entries:
+                if not isinstance(e, Mapping):
+                    continue
+                cp = e.get("consumer_payload")
+                if isinstance(cp, Mapping) and cp:
+                    payloads.append(cp)
+        if not payloads:
+            # Bundle verified but no consumer payloads present
+            status = "ID_ONLY_NOT_CONSUMED" if not (used or consumed) else "UNAVAILABLE"
+            return {
+                "consumer_payload_hash": "",
+                "status": status,
+                "consumed": False,
+                "blockers": ["no_consumer_payloads_in_bundle"],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": str(seal.get("shared_bundle_hash") or ""),
+            }
+        try:
+            from nexus.services.capability_evidence_bundle import hash_consumer_payloads
+
+            recomputed = hash_consumer_payloads(payloads)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": [f"hash_consumer_payloads_failed:{exc}"[:200]],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": str(seal.get("shared_bundle_hash") or ""),
+            }
+        # Bounded input identity: same for Local/Online when same verified bundle
+        try:
+            bounded_input = canonical_json_hash(
+                {
+                    "shared_bundle_hash": seal.get("shared_bundle_hash"),
+                    "consumer_payload_hash": recomputed,
+                }
+            )
+        except TypeError:
+            bounded_input = recomputed
+        if explicit and explicit != recomputed:
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": ["explicit_consumer_hash_mismatch"],
+                "expected_consumer_payload_hash": recomputed,
+                "bounded_input_payload_hash": bounded_input,
+                "shared_bundle_hash": str(seal.get("shared_bundle_hash") or ""),
+            }
+        if not (used or consumed):
+            # Payloads exist but no consumption proof → hash available but not CONSUMED
+            return {
+                "consumer_payload_hash": recomputed,
+                "status": "PRESENT_NOT_CONSUMED",
+                "consumed": False,
+                "blockers": [],
+                "bounded_input_payload_hash": bounded_input,
+                "shared_bundle_hash": str(seal.get("shared_bundle_hash") or ""),
+            }
+        return {
+            "consumer_payload_hash": recomputed,
+            "status": "CONSUMED",
+            "consumed": True,
+            "blockers": [],
+            "bounded_input_payload_hash": bounded_input,
+            "shared_bundle_hash": str(seal.get("shared_bundle_hash") or ""),
+        }
+
+    # --- No verified bundle: detect ID-only index summaries ---
+    if payload is None:
+        return {
+            "consumer_payload_hash": "",
+            "status": "UNAVAILABLE",
+            "consumed": False,
+            "blockers": [],
+            "bounded_input_payload_hash": "",
+            "shared_bundle_hash": "",
+        }
+    if isinstance(payload, Mapping):
+        id_only_keys = {
+            "consumed_evidence_ids",
+            "contributed_capabilities",
+            "executed_capabilities",
+            "evidence_ids",
+            "evidence_refs",
+        }
+        keys = set(payload.keys())
+        # Pure ID/index summary → never a consumer payload hash
+        if keys and keys.issubset(id_only_keys | {"stage", "used", "injected"}):
+            has_ids = any(
+                payload.get(k) not in (None, "", [], (), {})
+                for k in id_only_keys
+                if k in payload
+            )
+            return {
+                "consumer_payload_hash": "",
+                "status": "ID_ONLY_NOT_CONSUMED" if has_ids else "UNAVAILABLE",
+                "consumed": False,
+                "blockers": ["id_only_not_consumer_payload"] if has_ids else [],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": "",
+            }
+        # Reject if only index-like lists without consumer_payload field
+        if "consumer_payload" not in payload and "consumer_payloads" not in payload:
+            list_vals = [
+                payload.get(k)
+                for k in id_only_keys
+                if isinstance(payload.get(k), (list, tuple))
+            ]
+            if list_vals and not any(
+                isinstance(payload.get(k), Mapping) and payload.get(k)
+                for k in ("fields", "payload", "bounded_payload")
+            ):
+                return {
+                    "consumer_payload_hash": "",
+                    "status": "ID_ONLY_NOT_CONSUMED",
+                    "consumed": False,
+                    "blockers": ["id_only_not_consumer_payload"],
+                    "bounded_input_payload_hash": "",
+                    "shared_bundle_hash": "",
+                }
+        meaningful = {
+            k: v
+            for k, v in payload.items()
+            if v not in (None, "", [], (), {}, False)
+            and k not in id_only_keys
+        }
+        if not meaningful or not (consumed or used):
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": [],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": "",
             }
         try:
             h = canonical_json_hash(meaningful)
         except TypeError:
-            return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
-        return {"consumer_payload_hash": h, "status": "CONSUMED", "consumed": True}
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": ["non_json_payload"],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": "",
+            }
+        if explicit and explicit != h:
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": ["explicit_consumer_hash_mismatch"],
+                "expected_consumer_payload_hash": h,
+                "bounded_input_payload_hash": h,
+                "shared_bundle_hash": "",
+            }
+        return {
+            "consumer_payload_hash": h,
+            "status": "CONSUMED",
+            "consumed": True,
+            "blockers": [],
+            "bounded_input_payload_hash": h,
+            "shared_bundle_hash": "",
+        }
     if isinstance(payload, (list, tuple)):
-        items = [x for x in payload if x not in (None, "")]
-        if not items or not consumed:
-            return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+        # list of strings = IDs only
+        if payload and all(isinstance(x, str) for x in payload):
+            return {
+                "consumer_payload_hash": "",
+                "status": "ID_ONLY_NOT_CONSUMED",
+                "consumed": False,
+                "blockers": ["id_only_not_consumer_payload"],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": "",
+            }
+        items = [x for x in payload if isinstance(x, Mapping) and x]
+        if not items or not (consumed or used):
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": [],
+                "bounded_input_payload_hash": "",
+                "shared_bundle_hash": "",
+            }
         try:
-            h = canonical_json_hash(list(items))
-        except TypeError:
-            return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
-        return {"consumer_payload_hash": h, "status": "CONSUMED", "consumed": True}
-    return {"consumer_payload_hash": "", "status": "UNAVAILABLE", "consumed": False}
+            from nexus.services.capability_evidence_bundle import hash_consumer_payloads
+
+            h = hash_consumer_payloads(items)
+        except Exception:
+            try:
+                h = canonical_json_hash(list(items))
+            except TypeError:
+                return {
+                    "consumer_payload_hash": "",
+                    "status": "UNAVAILABLE",
+                    "consumed": False,
+                    "blockers": ["payload_hash_failed"],
+                    "bounded_input_payload_hash": "",
+                    "shared_bundle_hash": "",
+                }
+        if explicit and explicit != h:
+            return {
+                "consumer_payload_hash": "",
+                "status": "UNAVAILABLE",
+                "consumed": False,
+                "blockers": ["explicit_consumer_hash_mismatch"],
+                "expected_consumer_payload_hash": h,
+                "bounded_input_payload_hash": h,
+                "shared_bundle_hash": "",
+            }
+        return {
+            "consumer_payload_hash": h,
+            "status": "CONSUMED",
+            "consumed": True,
+            "blockers": [],
+            "bounded_input_payload_hash": h,
+            "shared_bundle_hash": "",
+        }
+    return {
+        "consumer_payload_hash": "",
+        "status": "UNAVAILABLE",
+        "consumed": False,
+        "blockers": [],
+        "bounded_input_payload_hash": "",
+        "shared_bundle_hash": "",
+    }
 
 
 def resolve_artifact_hash(
@@ -588,25 +812,29 @@ def attach_r3_receipt_base(
     consumed_ids = list(receipt.get("consumed_evidence_ids") or [])
     contributed = list(receipt.get("contributed_capabilities") or [])
     executed = list(receipt.get("executed_capabilities") or [])
-    has_consumption = bool(consumed_ids or contributed)
+    # Index lists alone never prove consumption of bounded payloads
+    used_proof = bool(
+        receipt.get("consumer_used")
+        or receipt.get("payload_consumed")
+        or any(
+            isinstance(c, Mapping) and c.get("used")
+            for c in (consumption_chain or ())
+        )
+    )
     consumer_res = resolve_consumer_payload_hash(
         {
             "consumed_evidence_ids": consumed_ids,
             "contributed_capabilities": contributed,
             "executed_capabilities": executed,
-        }
-        if has_consumption
-        else None,
-        consumed=has_consumption,
+        },
+        consumed=used_proof,
+        used=used_proof,
+        verified_bundle=bundle_map if shared_bundle_verified else None,
+        explicit_hash=str(receipt.get("consumer_payload_hash") or ""),
     )
-    # Honor explicit only when non-empty and consumption proven
-    explicit_consumer = str(receipt.get("consumer_payload_hash") or "").strip()
-    if explicit_consumer and has_consumption:
-        consumer_payload_hash = explicit_consumer
-        consumer_status = "CONSUMED"
-    else:
-        consumer_payload_hash = str(consumer_res.get("consumer_payload_hash") or "")
-        consumer_status = str(consumer_res.get("status") or "UNAVAILABLE")
+    consumer_payload_hash = str(consumer_res.get("consumer_payload_hash") or "")
+    consumer_status = str(consumer_res.get("status") or "UNAVAILABLE")
+    # Mismatch / id-only → empty hash already handled in resolver
 
     chain = [dict(c) for c in (consumption_chain or ())]
     if not chain:
@@ -705,6 +933,11 @@ def attach_r3_receipt_base(
     base["computed_bundle_content_hash"] = computed_bundle_content_hash
     base["consumer_payload_hash_status"] = consumer_status
     base["artifact_hash_status"] = str(art_res.get("status") or "UNAVAILABLE")
+    base["bounded_input_payload_hash"] = str(
+        consumer_res.get("bounded_input_payload_hash") or ""
+    )
+    if consumer_res.get("blockers"):
+        base["consumer_payload_blockers"] = list(consumer_res.get("blockers") or [])
 
     receipt["receipt_base"] = base
     receipt["run_anchor_hash"] = run_anchor

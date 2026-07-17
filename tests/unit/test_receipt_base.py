@@ -745,3 +745,155 @@ def test_tampered_bundle_cannot_enter_run_anchor():
     assert receipt["run_anchor_hash"] != anchor_with_forged or not base.get(
         "shared_bundle_verified"
     )
+
+
+def test_id_only_evidence_not_consumer_payload():
+    """ID lists alone must not produce a consumer_payload_hash."""
+    from nexus.evidence.receipt_base import resolve_consumer_payload_hash
+
+    res = resolve_consumer_payload_hash(
+        {
+            "consumed_evidence_ids": ["ev:1", "ev:2"],
+            "executed_capabilities": ["codeintel"],
+            "contributed_capabilities": ["codeintel"],
+        },
+        consumed=True,
+        used=True,
+    )
+    assert (res.get("consumer_payload_hash") or "") == ""
+    assert res.get("status") in {"ID_ONLY_NOT_CONSUMED", "UNAVAILABLE"}
+    assert res.get("consumed") is False
+
+
+def test_explicit_consumer_hash_mismatch_fails():
+    """Explicit consumer_payload_hash must match recompute from verified bundle."""
+    from nexus.evidence.receipt_base import resolve_consumer_payload_hash
+    from nexus.services.capability_evidence_bundle import (
+        build_capability_evidence_bundle,
+        hash_consumer_payloads,
+    )
+
+    bundle = build_capability_evidence_bundle(
+        task_id="t-cons",
+        workspace_revision="wr",
+        task_statement="stmt",
+        plan_payload={"p": 1},
+        plan_hash="ph",
+        planner_decision_id="pd",
+        capability_results={
+            "codeintel": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "evidence_refs": ["ev:c1"],
+                "physical_callable": "registry:codeintel",
+                "consumer_payload": {
+                    "schema": "nexus.consumer_payload.v1",
+                    "capability": "codeintel",
+                    "markers": ["codeintel:result"],
+                    "fields": {"summary": "findings", "markers": ["codeintel:result"]},
+                    "payload_hash": "x",
+                },
+            }
+        },
+        selected_capabilities=["codeintel"],
+    )
+    # Ensure entry has real consumer_payload
+    payloads = [
+        e["consumer_payload"]
+        for e in bundle["entries"]
+        if isinstance(e.get("consumer_payload"), dict) and e["consumer_payload"]
+    ]
+    assert payloads
+    expected = hash_consumer_payloads(payloads)
+    bad = resolve_consumer_payload_hash(
+        verified_bundle=bundle,
+        used=True,
+        consumed=True,
+        explicit_hash="0" * 64,
+    )
+    assert (bad.get("consumer_payload_hash") or "") == ""
+    assert "explicit_consumer_hash_mismatch" in (bad.get("blockers") or [])
+    good = resolve_consumer_payload_hash(
+        verified_bundle=bundle,
+        used=True,
+        consumed=True,
+        explicit_hash=expected,
+    )
+    assert good.get("consumed") is True
+    assert good.get("consumer_payload_hash") == expected
+    assert good.get("status") == "CONSUMED"
+
+
+def test_local_online_hash_from_actual_bounded_payload():
+    """Local/Online share verified bundle + bounded input; consumption chains independent."""
+    from nexus.evidence.receipt_base import (
+        project_child_receipt_base,
+        resolve_consumer_payload_hash,
+        resolve_shared_bundle_hash,
+    )
+    from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+
+    bundle = build_capability_evidence_bundle(
+        task_id="t-lo",
+        workspace_revision="wr",
+        task_statement="shared task",
+        plan_payload={"plan": True},
+        plan_hash="ph",
+        planner_decision_id="pd",
+        capability_results={
+            "belief": {
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "evidence_refs": ["ev:b1"],
+                "physical_callable": "belief",
+                "response": {"outcome": {"score": 0.9, "result": "ok"}},
+            }
+        },
+        selected_capabilities=["belief"],
+    )
+    seal = resolve_shared_bundle_hash(bundle)
+    assert seal["shared_bundle_verified"] is True
+    local_c = resolve_consumer_payload_hash(
+        verified_bundle=bundle, used=True, consumed=True
+    )
+    online_c = resolve_consumer_payload_hash(
+        verified_bundle=bundle, used=True, consumed=True
+    )
+    assert local_c["shared_bundle_hash"] == online_c["shared_bundle_hash"] == seal["shared_bundle_hash"]
+    assert local_c["consumer_payload_hash"] == online_c["consumer_payload_hash"]
+    assert local_c["bounded_input_payload_hash"] == online_c["bounded_input_payload_hash"]
+    assert local_c["status"] == "CONSUMED"
+    # Independent consumption chains (selected/used differ per consumer)
+    local_base = project_child_receipt_base(
+        source_world="C",
+        source_component="local",
+        task_id="t-lo",
+        shared_bundle_hash=seal["shared_bundle_hash"],
+        stage_payload={"shared_bundle_verified": True, "sealed": True, "consumer": "local"},
+        stage_name="local",
+        selected=True,
+        used=True,
+        injected=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        consumer="local",
+    )
+    online_base = project_child_receipt_base(
+        source_world="A",
+        source_component="online",
+        task_id="t-lo",
+        shared_bundle_hash=seal["shared_bundle_hash"],
+        stage_payload={"shared_bundle_verified": True, "sealed": True, "consumer": "online"},
+        stage_name="online",
+        selected=True,
+        used=False,  # online did not use
+        injected=True,
+        evidence_present=True,
+        gate_passed=False,
+        outcome_contributed=False,
+        consumer="online",
+    )
+    assert local_base["consumption_chain"][0]["used"] is True
+    assert online_base["consumption_chain"][0]["used"] is False
+    assert online_base["consumption_chain"][0]["outcome_contributed"] is False

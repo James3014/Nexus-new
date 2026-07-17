@@ -3151,3 +3151,26 @@ def test_explicit_bool_key_presence_is_not_true():
     assert _explicit_bool(payload, "gate_passed") is False
     assert _explicit_bool(payload, "flag") is False
     assert _explicit_bool({"gate_passed": True}, "gate_passed") is True
+
+
+def test_id_only_lists_cannot_mark_consumer_consumed_on_r3():
+    """attach_r3 must not mark CONSUMED from consumed_evidence_ids alone."""
+    from nexus.evidence.receipt_base import attach_r3_receipt_base
+
+    receipt = {
+        "task_id": "id-only-task",
+        "workspace_revision": "wr",
+        "planner_decision_id": "pd",
+        "consumed_evidence_ids": ["ev:1"],
+        "executed_capabilities": ["codeintel"],
+        "contributed_capabilities": ["codeintel"],
+    }
+    attach_r3_receipt_base(receipt)
+    base = receipt["receipt_base"]
+    status = base.get("consumer_payload_hash_status") or ""
+    assert (base.get("consumer_payload_hash") or "") == "" or status in {
+        "ID_ONLY_NOT_CONSUMED",
+        "UNAVAILABLE",
+        "PRESENT_NOT_CONSUMED",
+    }
+    assert status != "CONSUMED"
