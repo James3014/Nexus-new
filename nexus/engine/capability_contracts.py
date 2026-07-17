@@ -330,10 +330,41 @@ class CapabilityReceipt:
         return True
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self) | {
+        base = asdict(self) | {
             "evidence_refs": list(self.evidence_refs),
             "public_claim_safe": self.public_claim_safe,
+            "public_claim_allowed": False,
         }
+        # RC product: additive receipt_base projection (JSON-safe; no class alias)
+        try:
+            from nexus.evidence.receipt_base import project_child_receipt_base
+
+            base["receipt_base"] = project_child_receipt_base(
+                source_world="B",
+                source_component="capability_receipt_engine",
+                task_id="",
+                stage_payload={
+                    "name": self.name,
+                    "selected": self.selected,
+                    "invoked": self.invoked,
+                    "gate_passed": self.gate_passed,
+                    "outcome_contributed": self.outcome_contributed,
+                    "executor_id": self.executor_id,
+                },
+                stage_name=str(self.name or "capability"),
+                evidence_refs=list(self.evidence_refs),
+                consumer="engine",
+                selected=bool(self.selected),
+                injected=bool(self.invoked),
+                used=bool(self.invoked and self.outcome_contributed),
+                evidence_present=bool(self.evidence_present),
+                gate_passed=bool(self.gate_passed),
+                outcome_contributed=bool(self.outcome_contributed),
+                claim_boundary={"public_claim_allowed": False},
+            )
+        except Exception as exc:  # noqa: BLE001
+            base["receipt_base_error"] = str(exc)[:200]
+        return base
 
 
 @dataclass(frozen=True)
