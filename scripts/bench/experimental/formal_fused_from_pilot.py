@@ -16,6 +16,7 @@ if str(_REPO) not in sys.path:
 
 from nexus.services.formal_fused_projection import (  # noqa: E402
     efficiency_revise_demo_pilot,
+    efficiency_revise_live_shaped_pilot,
     formal_from_pilot,
 )
 
@@ -27,11 +28,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--synthetic-demo",
         action="store_true",
-        help="Emit a deterministic formal path without live cloud (honest REVISE on efficiency)",
+        help="Emit simulated/demo pilot (formal EXPERIMENT_INVALID / ineligible; not M0 PASS)",
     )
     args = p.parse_args(argv)
 
     if args.synthetic_demo:
+        # Demo/synthetic is intentionally ineligible for formal M0 KEEP
         pilot = efficiency_revise_demo_pilot()
     else:
         if not args.pilot or not args.pilot.exists():

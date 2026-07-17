@@ -3,12 +3,21 @@ from __future__ import annotations
 
 from nexus.services.formal_fused_projection import (
     efficiency_revise_demo_pilot,
+    efficiency_revise_live_shaped_pilot,
     formal_from_pilot,
 )
 
 
 def test_formal_from_demo_pilot_pair_count_and_honest_revise():
-    pilot = efficiency_revise_demo_pilot()
+    # Demo/synthetic pilot is ineligible for formal M0
+    demo = efficiency_revise_demo_pilot()
+    demo_dec = formal_from_pilot(demo)
+    assert demo_dec["phase"] == "formal"
+    assert demo_dec.get("simulated") is True or demo_dec.get("formal_eligible") is False
+    assert demo_dec["verdict"] == "EXPERIMENT_INVALID"
+    assert demo_dec["public_claim_allowed"] is False
+
+    pilot = efficiency_revise_live_shaped_pilot()
     decision = formal_from_pilot(pilot)
     assert decision["phase"] == "formal"
     assert int(decision["pair_count"]) > 0
@@ -32,7 +41,7 @@ def test_formal_from_demo_pilot_pair_count_and_honest_revise():
 
 
 def test_formal_unavailable_tokens_do_not_count_as_numeric():
-    pilot = efficiency_revise_demo_pilot()
+    pilot = efficiency_revise_live_shaped_pilot()
     pilot["token_samples"] = {"b": ["UNAVAILABLE", None], "d": ["UNAVAILABLE"]}
     decision = formal_from_pilot(pilot)
     assert decision["token_samples_numeric"] == {"b": [], "d": []}
@@ -83,3 +92,53 @@ def test_formal_keep_still_blocks_public_claim():
     # If decision logic returns KEEP, claim still false
     if decision["verdict"] in {"KEEP_PACKET", "KEEP_PACKET_SELECTIVE"}:
         assert decision["public_claim_allowed"] is False
+
+
+def test_I_forged_or_wrong_formal_schema_cannot_keep():
+    """I: arbitrary/forged formal schema must not yield KEEP."""
+    from nexus.services.formal_fused_projection import formal_from_pilot
+
+    forged = {
+        "schema": "totally.forged.pilot.v99",
+        "pair_count": 4,
+        "comparable_count": 4,
+        "infra_invalid_count": 0,
+        "safety_violations": 0,
+        "b_solve_mean": 0.1,
+        "d_solve_mean": 0.99,
+        "token_samples": {"b": [100, 110, 90, 105], "d": [40, 45, 50, 35]},
+        "pairs": [
+            {
+                "comparable": True,
+                "treatment_equal": True,
+                "d_assist_credited": True,
+                "b_infra": False,
+                "d_infra": False,
+            }
+            for _ in range(4)
+        ],
+    }
+    decision = formal_from_pilot(forged)
+    assert decision["verdict"] not in {"KEEP_PACKET", "KEEP_PACKET_SELECTIVE"}
+    assert decision["verdict"] in {
+        "EXPERIMENT_INVALID",
+        "REVISE_PACKET",
+        "STOP_PACKET",
+    } or "INVALID" in str(decision["verdict"])
+    assert decision["public_claim_allowed"] is False
+    # Demo pilot must be simulated/ineligible for formal M0
+    demo = {
+        "schema": "nexus.fused_live_pilot.demo.v1",
+        "pair_count": 4,
+        "comparable_count": 4,
+        "pairs": [{"comparable": True, "treatment_equal": True, "d_assist_credited": True}] * 4,
+        "b_solve_mean": 0.2,
+        "d_solve_mean": 0.9,
+        "token_samples": {"b": [10, 11, 12, 13], "d": [5, 6, 7, 8]},
+    }
+    demo_dec = formal_from_pilot(demo)
+    assert demo_dec.get("simulated") is True or demo_dec.get("formal_eligible") is False
+    assert demo_dec["verdict"] not in {"KEEP_PACKET", "KEEP_PACKET_SELECTIVE"} or demo_dec.get(
+        "formal_eligible"
+    ) is False
+    assert demo_dec["public_claim_allowed"] is False
