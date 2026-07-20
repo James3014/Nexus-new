@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -304,9 +305,22 @@ def _run_family_canary(
     if positive and name in {"semantic_searcher", "lancedb"}:
         from nexus.services.memory_repository import MemoryRepository
 
-        MemoryRepository(
-            canary_root / ".nexus" / "knowledge" / "lancedb"
-        ).ensure_table(
+        memory_root = canary_root / ".nexus" / "knowledge" / "lancedb"
+        memory_repository = MemoryRepository(memory_root)
+        # A prior interrupted canary can leave an empty ``policy.lance``
+        # directory that LanceDB lists but cannot open.  Repair only this
+        # generated /tmp canary artifact, then recreate the bounded fixture
+        # input; never touch a user workspace database.
+        try:
+            memory_repository.search_fts(
+                "policy", "capability closure", limit=1, fallback_columns=["condition"]
+            )
+        except Exception:
+            stale_table = memory_root / "policy.lance"
+            if stale_table.exists():
+                shutil.rmtree(stale_table)
+            memory_repository = MemoryRepository(memory_root)
+        memory_repository.ensure_table(
             "policy",
             initial_data=[
                 {
