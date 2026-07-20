@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from concurrent.futures import ThreadPoolExecutor
+import signal
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from nexus.services.product_capability_closure import PRODUCT_CAPABILITIES
 from nexus.services.product_capability_closure_harness import (
@@ -59,9 +60,33 @@ def run_68_matrix_and_generate_receipt() -> dict[str, Any]:
     if errors:
         raise ValueError("invalid closure task catalog: " + ",".join(errors))
 
-    # Parallelize execution across 8 worker threads for speed
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        rows = list(executor.map(lambda task: run_closure_task(task, _unified_68_runner, output_dir=runtime_dir), catalog))
+    # Sequential execution to avoid agy subprocess TTY/quota contention.
+    # Online calls use real agy subprocess; parallel brings timeout risk.
+    rows = []
+    for task in catalog:
+        try:
+            row = run_closure_task(task, _unified_68_runner, output_dir=runtime_dir)
+        except Exception as exc:  # noqa: BLE001
+            row = {
+                "task_id": task.task_id,
+                "capability": task.capability,
+                "origin": task.origin,
+                "record": {
+                    "task_id": task.task_id,
+                    "origin": task.origin,
+                    "capability": task.capability,
+                    "error": str(exc),
+                    "live_pass": False,
+                    "evidence_refs": [],
+                },
+                "closure_verdict": {
+                    "live_pass": False,
+                    "missing_evidence_reasons": [str(exc)],
+                },
+            }
+        rows.append(row)
+        pass_count = sum(1 for r in rows if r.get("closure_verdict", {}).get("live_pass"))
+        print(f"[{len(rows)}/{len(catalog)}] {task.origin}:{task.capability} pass={pass_count}", flush=True)
 
     summary = summarize_origin_matrix(row["record"] for row in rows)
     matrix_path = runtime_dir / "nexus_product_capability_origin_matrix.json"
