@@ -2610,17 +2610,57 @@ def coverage_counts_from_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
 
     real_invoked: list[str] = []
     stub_invoked: list[str] = []
+    synthetic_invoked: list[str] = []
+    blocker_evidence: list[str] = []
+    missing_physical_callable: list[str] = []
     consumer_proven: list[str] = []
     verified_ok: list[str] = []
     for name in invoked:
         row = by_name.get(name) or {}
-        stub = bool(row.get("stub")) or str(row.get("physical_callable") or "").endswith(
+        physical = str(row.get("physical_callable") or "")
+        provider = str(row.get("provider") or "")
+        stub = bool(row.get("stub")) or physical.endswith(
             f"structural_stub:{name}"
-        ) or "structural_stub" in str(row.get("physical_callable") or "")
+        ) or "structural_stub" in physical
         if stub:
             stub_invoked.append(name)
             continue
-        if not row.get("evidence_refs") and not row.get("evidence_ids"):
+        if not physical.strip():
+            missing_physical_callable.append(name)
+            continue
+        execution_identity = f"{physical} {provider}".lower()
+        if any(
+            marker in execution_identity
+            for marker in ("fixture", "fakecloud", "fake_cloud", "shadow", "test:", "synthetic")
+        ):
+            synthetic_invoked.append(name)
+            continue
+        evidence = list(row.get("evidence_refs") or row.get("evidence_ids") or [])
+        if any(
+            (isinstance(ref, str) and ref.lower().startswith("blocker:"))
+            or (
+                isinstance(ref, Mapping)
+                and (
+                    str(ref.get("status") or ref.get("type") or "").lower() == "blocker"
+                    or str(ref.get("ref") or "").lower().startswith("blocker:")
+                )
+            )
+            for ref in evidence
+        ):
+            blocker_evidence.append(name)
+            continue
+        if any(
+            (isinstance(ref, str) and any(marker in ref.lower() for marker in ("fixture:", "test:", "synthetic:")))
+            or (
+                isinstance(ref, Mapping)
+                and str(ref.get("status") or ref.get("type") or "").lower()
+                in {"fixture", "test", "synthetic"}
+            )
+            for ref in evidence
+        ):
+            synthetic_invoked.append(name)
+            continue
+        if not evidence:
             continue
         real_invoked.append(name)
         if row.get("outcome_contributed") or row.get("consumer_proof"):
@@ -2632,8 +2672,18 @@ def coverage_counts_from_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         }:
             verified_ok.append(name)
 
-    real_execution_coverage_ok = surface_ok and len(stub_invoked) == 0 and (
-        len(real_invoked) + len(skipped) == len(selected) or len(selected) == 0
+    # Surface coverage may include policy skips, but live execution coverage may
+    # not.  Every selected capability must have a non-stub, non-fixture,
+    # non-blocker physical invocation.
+    real_execution_coverage_ok = bool(
+        surface_ok
+        and len(selected) > 0
+        and len(real_invoked) == len(selected)
+        and not skipped
+        and not stub_invoked
+        and not synthetic_invoked
+        and not blocker_evidence
+        and not missing_physical_callable
     )
     # Consumer proof: at least one real capability with non-empty evidence when any real ran
     consumer_coverage_ok = True
@@ -2641,9 +2691,16 @@ def coverage_counts_from_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         consumer_coverage_ok = len(consumer_proven) > 0 or any(
             bool((by_name.get(n) or {}).get("evidence_refs")) for n in real_invoked
         )
-    verified_outcome_ok = all(
-        bool((by_name.get(n) or {}).get("gate_passed")) for n in real_invoked
-    ) if real_invoked else surface_ok
+    verified_outcome_ok = bool(
+        len(selected) > 0
+        and len(verified_ok) == len(selected)
+        and real_execution_coverage_ok
+    )
+    strict_closure_complete = bool(
+        real_execution_coverage_ok
+        and verified_outcome_ok
+        and consumer_coverage_ok
+    )
 
     return {
         "selected_count": len(selected),
@@ -2652,14 +2709,23 @@ def coverage_counts_from_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         "missing_count": len(missing),
         "coverage_ok": surface_ok,  # surface only — not real/claim success
         "surface_coverage_ok": surface_ok,
-        "real_execution_coverage_ok": real_execution_coverage_ok and len(stub_invoked) == 0,
+        "real_execution_coverage_ok": real_execution_coverage_ok,
         "consumer_coverage_ok": consumer_coverage_ok,
         "verified_outcome_ok": verified_outcome_ok,
+        "strict_closure_complete": strict_closure_complete,
+        "live_execution_pass_count": len(verified_ok),
+        "policy_skip_count": len(skipped),
+        "blocker_evidence_count": len(blocker_evidence),
+        "synthetic_execution_count": len(synthetic_invoked),
+        "missing_physical_callable_count": len(missing_physical_callable),
         "selected": selected,
         "invoked": invoked,
         "skipped": skipped,
         "missing": missing,
         "real_invoked": real_invoked,
         "stub_invoked": stub_invoked,
+        "synthetic_invoked": synthetic_invoked,
+        "blocker_evidence": blocker_evidence,
+        "missing_physical_callable": missing_physical_callable,
         "public_claim_allowed": False,
     }
