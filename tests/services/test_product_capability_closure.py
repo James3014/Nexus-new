@@ -13,6 +13,7 @@ from nexus.services.product_capability_closure import (
     PRODUCT_CAPABILITIES,
     VERIFIER_FAILED,
     summarize_origin_matrix,
+    expected_resolution_type,
     verify_product_capability_resolution,
 )
 from nexus.services.capability_registry import coverage_counts_from_receipt
@@ -28,7 +29,7 @@ def _valid_record(
     *,
     origin: str = "online",
 ) -> dict[str, object]:
-    resolution = "ONLINE_NATIVE" if origin == "online" else "LOCAL_TO_ONLINE_GOVERNED_BRIDGE"
+    resolution = expected_resolution_type(origin, capability)
     evidence_payload = {"capability": capability, "effect": "observed"}
     effect_payload = {"effect_type": "workspace_fingerprint", "value": "fp-1"}
     receipt_payload = {

@@ -81,6 +81,29 @@ _ASSIST_LINEAGE_FIELDS = (
     "final_receipt_hash",
 )
 
+_ONLINE_STAGE_OWNED = frozenset(
+    {"artifact_gate", "claim_gate", "delivery_gate", "prompt_compression"}
+)
+_LOCAL_NATIVE = frozenset({"local_model_executor", "repair_loop"})
+
+
+def expected_resolution_type(origin: str, capability: str) -> str:
+    """Return the one allowed resolution assigned to a 34×2 matrix cell."""
+
+    normalized_origin = str(origin or "").lower()
+    normalized_capability = str(capability or "")
+    if normalized_origin == "online":
+        if normalized_capability in _LOCAL_NATIVE:
+            return "ONLINE_TO_LOCAL_GOVERNED_BRIDGE"
+        if normalized_capability in _ONLINE_STAGE_OWNED:
+            return "ONLINE_STAGE_OWNED"
+        return "ONLINE_NATIVE"
+    if normalized_origin == "local":
+        if normalized_capability in _LOCAL_NATIVE:
+            return "LOCAL_NATIVE"
+        return "LOCAL_TO_ONLINE_GOVERNED_BRIDGE"
+    raise ValueError(f"unsupported origin: {origin!r}")
+
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
@@ -237,6 +260,8 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
         return _verdict(record, status=NOT_TESTED, reasons=["invalid_origin"])
     if resolution not in _ALLOWED_RESOLUTIONS[origin]:
         return _verdict(record, status=NOT_TESTED, reasons=["invalid_resolution_type"])
+    if resolution != expected_resolution_type(origin, capability):
+        return _verdict(record, status=NOT_TESTED, reasons=["unexpected_resolution_type"])
     if record.get("skipped") is True or status.startswith("SKIPPED"):
         return _verdict(record, status=POLICY_SKIP_VERIFIED, reasons=["policy_skip_not_live_pass"])
     if record.get("planner_selected") is not True:
@@ -257,8 +282,19 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
             status=EVIDENCE_INCOMPLETE,
             reasons=["synthetic_or_fixture_execution"],
         )
-    if record.get("route_surface_changed") is True:
-        return _verdict(record, status=EVIDENCE_INCOMPLETE, reasons=["route_surface_changed"])
+    consistency_errors = list(record.get("harness_consistency_errors") or [])
+    if consistency_errors:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"harness_consistency:{error}" for error in consistency_errors],
+        )
+    if record.get("route_surface_changed") is not False:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["route_surface_changed_or_unproven"],
+        )
     if record.get("public_claim_allowed") is not False:
         return _verdict(
             record,
