@@ -27,11 +27,15 @@ def _stage_result(row, capability: str):
     return mainchain_result, raw_receipt, stage
 
 
-def _online_codex_live_authorized() -> bool:
+def _online_live_authorized() -> bool:
+    provider = os.environ.get("NEXUS_ONLINE_PROVIDER", "").strip().lower()
     return bool(
         os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
-        and os.environ.get("NEXUS_ONLINE_PROVIDER", "").strip().lower() == "codex"
-        and os.environ.get("NEXUS_CODEX_COMMAND", "").strip()
+        and provider in {"agy", "codex"}
+        and (
+            os.environ.get("NEXUS_AGY_BIN", "").strip()
+            or os.environ.get("NEXUS_CODEX_COMMAND", "").strip()
+        )
     )
 
 
@@ -49,8 +53,8 @@ def test_stage_owned_capability_has_measured_execution_grade_closure(
     capability: str,
     tmp_path: Path,
 ) -> None:
-    if capability in LIVE_ONLINE_GATES and not _online_codex_live_authorized():
-        pytest.skip("claim/delivery require an authorized live Codex CLI call")
+    if capability in LIVE_ONLINE_GATES and not _online_live_authorized():
+        pytest.skip("claim/delivery require an authorized live registered CLI provider call")
     task = _online_task(capability, tmp_path / "workspace")
     # artifact_gate and prompt_compression do not require an Online provider
     # response.  Keep those deterministic even during an authorized live run.
@@ -94,7 +98,7 @@ def test_stage_owned_capability_has_measured_execution_grade_closure(
         assert mainchain_result["verifier_artifact"].startswith("sha256:")
 
     if capability in LIVE_ONLINE_GATES:
-        assert mainchain_result["online_provider"] == "codex"
+        assert mainchain_result["online_provider"] in {"agy", "codex"}
         assert mainchain_result["online_provider_call_count"] == 1
         assert mainchain_result["online_gate_passed"] is True
     assert row["public_claim_allowed"] is False
