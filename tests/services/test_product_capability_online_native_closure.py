@@ -34,7 +34,11 @@ def _online_task(capability: str, root: Path):
 
 
 def _production_canary_runner(task):
-    result = _run_family_canary(task.capability, positive=True)
+    result = _run_family_canary(
+        task.capability,
+        positive=True,
+        task_id_override=task.task_id,
+    )
     evidence_payload = {
         "schema": "nexus.product_capability_online_native_evidence.v1",
         "capability": task.capability,
@@ -132,6 +136,8 @@ def test_online_native_capability_has_execution_grade_mainchain_closure(
     assert verdict["live_pass"] is True
     assert verdict["missing_evidence_reasons"] == []
     assert row["harness_consistency_errors"] == []
+    evidence_payload = row["record"]["evidence_refs"][0]["payload"]
+    assert evidence_payload["mainchain_result"]["_raw_receipt"]["task_id"] == task.task_id
     assert row["handler_or_stage_callsite"].startswith("capability_executor_registry:")
     assert row["verifier_result"] is True
     effect = row["record"]["observable_effect"]["artifact_payload"]

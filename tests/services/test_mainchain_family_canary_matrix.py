@@ -225,11 +225,16 @@ _REQUEST_EVIDENCE_KEYS = (
 
 
 @lru_cache(maxsize=None)
-def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
+def _run_family_canary(
+    name: str,
+    *,
+    positive: bool,
+    task_id_override: str = "",
+) -> dict[str, Any]:
     """Single MainchainEntry canary — gate/status only from receipt capability row."""
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     family_ctx = _family_positive_context(name) if positive else {}
-    task_id = f"{'pos' if positive else 'neg'}-{name}"
+    task_id = str(task_id_override or f"{'pos' if positive else 'neg'}-{name}")
     canary_root = Path("/tmp/nexus_family_canary") / task_id
     canary_root.mkdir(parents=True, exist_ok=True)
     canary_target = canary_root / "target.py"
@@ -991,6 +996,9 @@ def _run_family_canary(name: str, *, positive: bool) -> dict[str, Any]:
             "physical_callable": physical,
             "selection_source": cap_row.get("selection_source"),
         },
+        # Test-only raw receipt handoff for stricter downstream closure
+        # adapters.  The production receipt remains the sole truth source.
+        "_raw_receipt": receipt,
     }
 
 
