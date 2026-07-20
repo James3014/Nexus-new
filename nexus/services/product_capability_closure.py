@@ -81,28 +81,57 @@ _ASSIST_LINEAGE_FIELDS = (
     "final_receipt_hash",
 )
 
-_ONLINE_STAGE_OWNED = frozenset(
-    {"artifact_gate", "claim_gate", "delivery_gate", "prompt_compression"}
+from nexus.services.capability_registry import (
+    CONSUMER_MODES,
+    PLANNER_EXECUTION_CONTRACTS,
+    REAL_EXECUTION_CLASSES,
+    project_consumer_execution_mode,
 )
-_LOCAL_NATIVE = frozenset({"local_model_executor", "repair_loop"})
+
+_ALLOWED_RESOLUTIONS = {
+    "online": frozenset(
+        CONSUMER_MODES
+        | {
+            "ONLINE_NATIVE",
+            "ONLINE_STAGE_OWNED",
+            "ONLINE_TO_LOCAL_GOVERNED_BRIDGE",
+        }
+    ),
+    "local": frozenset(
+        CONSUMER_MODES
+        | {
+            "LOCAL_NATIVE",
+            "LOCAL_STAGE_OWNED",
+            "LOCAL_TO_ONLINE_GOVERNED_BRIDGE",
+        }
+    ),
+}
+_RESOLUTION_EQUIVALENCE = {
+    "ONLINE_NATIVE": "CONSUME_SHARED_EVIDENCE",
+    "ONLINE_TO_LOCAL_GOVERNED_BRIDGE": "CONSUME_SHARED_EVIDENCE",
+    "ONLINE_STAGE_OWNED": "CONTROLLED_BY_POSTFLIGHT",
+    "LOCAL_NATIVE": "EXECUTE_HERE",
+    "LOCAL_STAGE_OWNED": "EXECUTE_HERE",
+    "LOCAL_TO_ONLINE_GOVERNED_BRIDGE": "CONSUME_SHARED_EVIDENCE",
+}
 
 
 def expected_resolution_type(origin: str, capability: str) -> str:
-    """Return the one allowed resolution assigned to a 34×2 matrix cell."""
-
+    """Return the allowed resolution assigned to a 34×2 matrix cell derived from SSOT."""
     normalized_origin = str(origin or "").lower()
     normalized_capability = str(capability or "")
-    if normalized_origin == "online":
-        if normalized_capability in _LOCAL_NATIVE:
-            return "ONLINE_TO_LOCAL_GOVERNED_BRIDGE"
-        if normalized_capability in _ONLINE_STAGE_OWNED:
-            return "ONLINE_STAGE_OWNED"
-        return "ONLINE_NATIVE"
-    if normalized_origin == "local":
-        if normalized_capability in _LOCAL_NATIVE:
-            return "LOCAL_NATIVE"
-        return "LOCAL_TO_ONLINE_GOVERNED_BRIDGE"
-    raise ValueError(f"unsupported origin: {origin!r}")
+    if normalized_origin not in {"online", "local"}:
+        raise ValueError(f"unsupported origin: {origin!r}")
+    if normalized_capability not in PLANNER_EXECUTION_CONTRACTS:
+        raise ValueError(f"unsupported capability: {capability!r}")
+    return project_consumer_execution_mode(normalized_capability, normalized_origin)
+
+
+def _is_equivalent_resolution(provided: str, expected_ssot_mode: str) -> bool:
+    if provided == expected_ssot_mode:
+        return True
+    return _RESOLUTION_EQUIVALENCE.get(provided) == expected_ssot_mode
+
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -260,7 +289,8 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
         return _verdict(record, status=NOT_TESTED, reasons=["invalid_origin"])
     if resolution not in _ALLOWED_RESOLUTIONS[origin]:
         return _verdict(record, status=NOT_TESTED, reasons=["invalid_resolution_type"])
-    if resolution != expected_resolution_type(origin, capability):
+    expected_resolution = expected_resolution_type(origin, capability)
+    if not _is_equivalent_resolution(resolution, expected_resolution):
         return _verdict(record, status=NOT_TESTED, reasons=["unexpected_resolution_type"])
     if record.get("skipped") is True or status.startswith("SKIPPED"):
         return _verdict(record, status=POLICY_SKIP_VERIFIED, reasons=["policy_skip_not_live_pass"])
@@ -330,9 +360,10 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
             return _verdict(record, status=EXECUTION_FAILED, reasons=execution_failures)
         missing.extend(local_missing)
 
-    if resolution == "LOCAL_TO_ONLINE_GOVERNED_BRIDGE" and not _assist_lineage_complete(
-        _mapping(record.get("assist_lineage"))
-    ):
+    if (
+        resolution == "LOCAL_TO_ONLINE_GOVERNED_BRIDGE"
+        or (origin == "local" and expected_resolution == "CONSUME_SHARED_EVIDENCE")
+    ) and not _assist_lineage_complete(_mapping(record.get("assist_lineage"))):
         missing.append("assist_lineage_incomplete")
 
     if missing:

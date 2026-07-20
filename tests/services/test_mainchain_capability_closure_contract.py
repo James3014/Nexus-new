@@ -173,7 +173,7 @@ def test_local_online_projection_covers_all_57() -> None:
 
     by_name = {row["canonical_id"]: row for row in proj["rows"]}
     assert by_name["local_model_executor"]["local_mode"] == "EXECUTE_HERE"
-    assert by_name["local_model_executor"]["online_mode"] == "NOT_TARGET"
+    assert by_name["local_model_executor"]["online_mode"] == "CONSUME_SHARED_EVIDENCE"
     assert by_name["external_doc_scout"]["local_mode"] == "EXTERNAL_NOT_LOCAL"
     assert (
         by_name["external_doc_scout"]["online_mode"]
@@ -202,7 +202,7 @@ def test_online_production_context_exposes_contract_derived_consumer_modes() -> 
     modes = ctx.lineage["consumer_execution_modes"]
     assert modes == {
         "codeintel": "CONSUME_SHARED_EVIDENCE",
-        "local_model_executor": "NOT_TARGET",
+        "local_model_executor": "CONSUME_SHARED_EVIDENCE",
         "external_doc_scout": "EXTERNAL_AUTHORIZED_EXECUTE",
     }
     assert ctx.lineage["consumer_contract_source"].endswith(

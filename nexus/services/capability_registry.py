@@ -381,7 +381,7 @@ def _build_planner_execution_contracts() -> dict[str, dict[str, Any]]:
             executor_key="local_model_executor",
             physical_callable=local_phys,
             consumer_effect=CONSUMER_EFFECT_EXECUTION_CONTROL,
-            consumer_targets=("local",),
+            consumer_targets=("local", "online"),
             provider_authorization_required=True,
         ),
         "memory": _ec(
@@ -1215,6 +1215,8 @@ ONLINE_EXECUTION_MODES = frozenset(
         CONSUMER_MODE_NOT_TARGET,
     }
 )
+
+CONSUMER_MODES = LOCAL_EXECUTION_MODES | ONLINE_EXECUTION_MODES
 
 
 def project_consumer_execution_mode(name: str, target: str) -> str:

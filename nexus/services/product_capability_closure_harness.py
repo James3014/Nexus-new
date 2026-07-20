@@ -17,7 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from nexus.services.capability_registry import PLANNER_EXECUTION_CONTRACTS
+from nexus.services.capability_registry import (
+    PLANNER_EXECUTION_CONTRACTS,
+    project_consumer_execution_mode,
+)
 from nexus.services.product_capability_closure import (
     PRODUCT_CAPABILITIES,
     expected_resolution_type,
@@ -58,12 +61,19 @@ class ClosureTaskSpec:
     timeout_sec: float
     verifier_contract: Mapping[str, Any]
     fixture: Mapping[str, Any]
+    consumer_mode: str = ""
+    execution_class: str = ""
+    consumer_effect: str = ""
+    consumer_targets: tuple[str, ...] = ()
+    provider_authorization_required: bool = False
+    contract_source: str = "PLANNER_EXECUTION_CONTRACTS"
     schema: str = TASK_SCHEMA
     public_claim_allowed: bool = False
 
     def unsigned_payload(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["allowed_files"] = list(self.allowed_files)
+        payload["consumer_targets"] = list(self.consumer_targets)
         return payload
 
     @property
@@ -238,6 +248,7 @@ def build_product_task_catalog(workspace_root: str | Path) -> tuple[ClosureTaskS
         for capability in PRODUCT_CAPABILITIES:
             contract = PLANNER_EXECUTION_CONTRACTS[capability]
             resolution = expected_resolution_type(origin, capability)
+            consumer_mode = project_consumer_execution_mode(capability, origin)
             resolution_provider = "local" if capability in {"local_model_executor", "repair_loop"} else "online"
             tasks.append(
                 ClosureTaskSpec(
@@ -245,6 +256,12 @@ def build_product_task_catalog(workspace_root: str | Path) -> tuple[ClosureTaskS
                     capability=capability,
                     task_id=f"closure-{origin}-{capability}",
                     expected_resolution=resolution,
+                    consumer_mode=consumer_mode,
+                    execution_class=str(contract["execution_class"]),
+                    consumer_effect=str(contract["consumer_effect"]),
+                    consumer_targets=tuple(contract.get("consumer_targets", ())),
+                    provider_authorization_required=bool(contract.get("provider_authorization_required", False)),
+                    contract_source="PLANNER_EXECUTION_CONTRACTS",
                     expected_effect={
                         "consumer_effect": contract["consumer_effect"],
                         "success_predicate": contract["success_predicate"],
