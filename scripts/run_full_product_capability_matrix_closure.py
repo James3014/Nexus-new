@@ -11,12 +11,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from concurrent.futures import ThreadPoolExecutor
+
 from nexus.services.product_capability_closure import PRODUCT_CAPABILITIES
 from nexus.services.product_capability_closure_harness import (
     ClosureTaskSpec,
     build_product_task_catalog,
     canonical_payload_hash,
-    run_origin_capability_matrix,
+    run_closure_task,
+    summarize_origin_matrix,
+    validate_task_catalog,
+    MATRIX_SCHEMA,
 )
 from tests.services.test_product_capability_local_native_closure import (
     _local_production_runner,
@@ -50,10 +55,33 @@ def run_68_matrix_and_generate_receipt() -> dict[str, Any]:
     )
 
     catalog = build_product_task_catalog(workspace_dir)
-    matrix = run_origin_capability_matrix(
-        catalog,
-        _unified_68_runner,
-        output_dir=runtime_dir,
+    errors = validate_task_catalog(catalog)
+    if errors:
+        raise ValueError("invalid closure task catalog: " + ",".join(errors))
+
+    # Parallelize execution across 8 worker threads for speed
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        rows = list(executor.map(lambda task: run_closure_task(task, _unified_68_runner, output_dir=runtime_dir), catalog))
+
+    summary = summarize_origin_matrix(row["record"] for row in rows)
+    matrix_path = runtime_dir / "nexus_product_capability_origin_matrix.json"
+    matrix = {
+        "schema": MATRIX_SCHEMA,
+        "generated_at": summary.get("generated_at", ""),
+        "catalog_hash": canonical_payload_hash([task.to_dict() for task in catalog]),
+        "task_count": len(catalog),
+        "rows": rows,
+        "summary": summary,
+        "route_surface_changed": any(
+            bool(row["record"].get("route_surface_changed")) for row in rows
+        ),
+        "matrix_path": str(matrix_path),
+        "public_claim_allowed": False,
+    }
+    matrix["matrix_hash"] = canonical_payload_hash(matrix)
+    matrix_path.write_text(
+        json.dumps(matrix, indent=2, sort_keys=True, ensure_ascii=False, default=str) + "\n",
+        encoding="utf-8",
     )
 
     rows_detail: list[dict[str, Any]] = []
