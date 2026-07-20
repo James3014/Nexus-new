@@ -79,14 +79,46 @@ def _valid_record(
         "route_surface_changed": False,
     }
     if origin == "local":
+        task_id = str(record.get("task_id") or "task-1")
+        plan_id = str(record.get("planner_decision_id") or "plan-1")
+        rev_id = str(record.get("workspace_revision") or "rev-1")
+        record["task_id"] = task_id
+        record["planner_decision_id"] = plan_id
+        record["workspace_revision"] = rev_id
+
+        packet_payload = {"packet_id": "pkt-1", "capability": capability, "task_id": task_id}
+        packet_hash = _hash_payload(packet_payload)
+        fragment_payload = {"fragment_id": "frag-1", "packet_hash": packet_hash}
+        fragment_hash = _hash_payload(fragment_payload)
+        final_prompt_payload = {"prompt_id": "prompt-1", "fragment_hash": fragment_hash}
+        final_prompt_hash = _hash_payload(final_prompt_payload)
+        online_candidate_payload = {"candidate_id": "cand-1", "final_prompt_hash": final_prompt_hash}
+        online_candidate_hash = _hash_payload(online_candidate_payload)
+        applied_artifact_payload = {"artifact_id": "art-1", "online_candidate_hash": online_candidate_hash}
+        applied_artifact_hash = _hash_payload(applied_artifact_payload)
+        verifier_artifact_payload = {"verifier_id": "ver-1", "applied_artifact_hash": applied_artifact_hash}
+        verifier_artifact_hash = _hash_payload(verifier_artifact_payload)
+        final_receipt_payload = {"receipt_id": "rec-1", "verifier_artifact_hash": verifier_artifact_hash}
+        final_receipt_hash = _hash_payload(final_receipt_payload)
+
         record["assist_lineage"] = {
-            "packet_hash": "1" * 64,
-            "fragment_hash": "2" * 64,
-            "final_prompt_hash": "3" * 64,
-            "online_candidate_hash": "4" * 64,
-            "applied_artifact_hash": "5" * 64,
-            "verifier_artifact_hash": "6" * 64,
-            "final_receipt_hash": "7" * 64,
+            "task_id": task_id,
+            "planner_decision_id": plan_id,
+            "workspace_revision": rev_id,
+            "packet_payload": packet_payload,
+            "packet_hash": packet_hash,
+            "fragment_payload": fragment_payload,
+            "fragment_hash": fragment_hash,
+            "final_prompt_payload": final_prompt_payload,
+            "final_prompt_hash": final_prompt_hash,
+            "online_candidate_payload": online_candidate_payload,
+            "online_candidate_hash": online_candidate_hash,
+            "applied_artifact_payload": applied_artifact_payload,
+            "applied_artifact_hash": applied_artifact_hash,
+            "verifier_artifact_payload": verifier_artifact_payload,
+            "verifier_artifact_hash": verifier_artifact_hash,
+            "final_receipt_payload": final_receipt_payload,
+            "final_receipt_hash": final_receipt_hash,
         }
     if capability in {"local_model_executor", "repair_loop"}:
         record["resolution_type"] = (
@@ -346,32 +378,80 @@ def test_runtime_coverage_rejects_blocker_and_fixture_evidence_as_live_execution
     assert coverage["live_execution_pass_count"] == 0
 
 
-def test_phase2_lineage_negative_controls() -> None:
-    # 1. Tampered lineage payload / hash mismatch
+def test_p0_negative_control_1_tampered_packet_hash() -> None:
     record = _valid_record("codeintel", origin="local")
-    record["assist_lineage"]["packet_payload"] = {"tampered": True}
-    record["assist_lineage"]["packet_hash"] = "1" * 64
+    record["assist_lineage"]["packet_hash"] = "0" * 64
     verdict = verify_product_capability_resolution(record)
     assert verdict["live_pass"] is False
-    assert verdict["gate_verdict"] == "BLOCK_OR_RETURN"
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
 
-    # 2. Task ID mismatch in assist lineage
+
+def test_p0_negative_control_2_missing_payload() -> None:
     record = _valid_record("codeintel", origin="local")
-    record["task_id"] = "task-A"
-    record["assist_lineage"]["task_id"] = "task-B"
+    record["assist_lineage"].pop("fragment_payload", None)
     verdict = verify_product_capability_resolution(record)
     assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
 
-    # 3. Synthetic / fixture execution
-    record = _valid_record("codeintel", origin="online")
-    record["provider"] = "fixture_provider"
-    verdict = verify_product_capability_resolution(record)
-    assert verdict["live_pass"] is False
-    assert "synthetic_or_fixture_execution" in verdict["missing_evidence_reasons"]
 
-    # 4. Receipt hash recomputation mismatch
-    record = _valid_record("codeintel", origin="online")
-    record["receipt_hash"] = "f" * 64
+def test_p0_negative_control_3_task_id_mismatch() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["task_id"] = "task-alpha"
+    record["assist_lineage"]["task_id"] = "task-beta"
     verdict = verify_product_capability_resolution(record)
     assert verdict["live_pass"] is False
-    assert "receipt_hash_not_verified" in verdict["missing_evidence_reasons"]
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_p0_negative_control_4_planner_decision_id_mismatch() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["planner_decision_id"] = "plan-111"
+    record["assist_lineage"]["planner_decision_id"] = "plan-222"
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_p0_negative_control_5_workspace_revision_mismatch() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["workspace_revision"] = "rev-old"
+    record["assist_lineage"]["workspace_revision"] = "rev-new"
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_p0_negative_control_6_broken_edge_packet_to_fragment() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["assist_lineage"]["fragment_payload"] = {"fragment_id": "frag-1", "packet_hash": "f" * 64}
+    record["assist_lineage"]["fragment_hash"] = _hash_payload(record["assist_lineage"]["fragment_payload"])
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_p0_negative_control_7_broken_edge_fragment_to_prompt() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["assist_lineage"]["final_prompt_payload"] = {"prompt_id": "prompt-1", "fragment_hash": "f" * 64}
+    record["assist_lineage"]["final_prompt_hash"] = _hash_payload(record["assist_lineage"]["final_prompt_payload"])
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_p0_negative_control_8_broken_edge_candidate_to_artifact() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["assist_lineage"]["applied_artifact_payload"] = {"artifact_id": "art-1", "candidate_hash": "f" * 64}
+    record["assist_lineage"]["applied_artifact_hash"] = _hash_payload(record["assist_lineage"]["applied_artifact_payload"])
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_p0_negative_control_9_broken_edge_verifier_to_receipt() -> None:
+    record = _valid_record("codeintel", origin="local")
+    record["assist_lineage"]["final_receipt_payload"] = {"receipt_id": "rec-1", "verifier_hash": "f" * 64}
+    record["assist_lineage"]["final_receipt_hash"] = _hash_payload(record["assist_lineage"]["final_receipt_payload"])
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]

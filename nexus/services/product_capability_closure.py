@@ -241,37 +241,96 @@ def _local_execution_reasons(
     return execution_failures, evidence_failures
 
 
+_MANDATORY_PAYLOAD_HASH_PAIRS = (
+    ("packet_payload", "packet_hash"),
+    ("fragment_payload", "fragment_hash"),
+    ("final_prompt_payload", "final_prompt_hash"),
+    ("online_candidate_payload", "online_candidate_hash"),
+    ("applied_artifact_payload", "applied_artifact_hash"),
+    ("verifier_artifact_payload", "verifier_artifact_hash"),
+    ("final_receipt_payload", "final_receipt_hash"),
+)
+
+
 def _assist_lineage_complete(lineage: Mapping[str, Any], record: Mapping[str, Any] | None = None) -> bool:
     if not isinstance(lineage, Mapping):
         return False
-    if not all(_valid_hash(lineage.get(field)) for field in _ASSIST_LINEAGE_FIELDS):
+
+    # 1. Require all 7 hash fields to be valid 64-hex
+    if not all(_valid_hash(lineage.get(hash_key)) for _, hash_key in _MANDATORY_PAYLOAD_HASH_PAIRS):
         return False
-    if record is not None:
-        rec_task_id = str(record.get("task_id") or "")
-        lin_task_id = str(lineage.get("task_id") or "")
-        if rec_task_id and lin_task_id and rec_task_id != lin_task_id:
+
+    # 2. Require all 7 payload dictionaries to be present
+    for payload_key, hash_key in _MANDATORY_PAYLOAD_HASH_PAIRS:
+        payload = lineage.get(payload_key)
+        if not isinstance(payload, Mapping) or not payload:
             return False
-        rec_plan_id = str(record.get("planner_decision_id") or "")
-        lin_plan_id = str(lineage.get("planner_decision_id") or "")
-        if rec_plan_id and lin_plan_id and rec_plan_id != lin_plan_id:
+        claimed_hash = str(lineage.get(hash_key) or "").lower()
+        if _canonical_hash(payload) != claimed_hash:
             return False
 
-    # Recompute hashes for attached payloads
-    payload_hash_pairs = (
-        ("packet_payload", "packet_hash"),
-        ("fragment_payload", "fragment_hash"),
-        ("final_prompt_payload", "final_prompt_hash"),
-        ("online_candidate_payload", "online_candidate_hash"),
-        ("applied_artifact_payload", "applied_artifact_hash"),
-        ("verifier_artifact_payload", "verifier_artifact_hash"),
-        ("final_receipt_payload", "final_receipt_hash"),
-    )
-    for payload_key, hash_key in payload_hash_pairs:
-        payload = lineage.get(payload_key)
-        claimed_hash = lineage.get(hash_key)
-        if payload is not None and _valid_hash(claimed_hash):
-            if _canonical_hash(payload) != str(claimed_hash).lower():
+    # 3. Identity binding: task_id, workspace_revision, planner_decision_id
+    if record is not None:
+        for field in ("task_id", "workspace_revision", "planner_decision_id"):
+            rec_val = str(record.get(field) or "").strip()
+            lin_val = str(lineage.get(field) or "").strip()
+            if rec_val and lin_val and rec_val != lin_val:
                 return False
+
+    # 4. Adjacent edge binding check
+    packet_hash = str(lineage.get("packet_hash") or "").lower()
+    fragment_payload = _mapping(lineage.get("fragment_payload"))
+    if not (
+        packet_hash in str(fragment_payload.get("packet_hash") or "").lower()
+        or packet_hash in str(fragment_payload.get("parent_hash") or "").lower()
+        or packet_hash in json.dumps(fragment_payload, default=str)
+    ):
+        return False
+
+    fragment_hash = str(lineage.get("fragment_hash") or "").lower()
+    final_prompt_payload = _mapping(lineage.get("final_prompt_payload"))
+    if not (
+        fragment_hash in str(final_prompt_payload.get("fragment_hash") or "").lower()
+        or fragment_hash in json.dumps(final_prompt_payload, default=str)
+    ):
+        return False
+
+    final_prompt_hash = str(lineage.get("final_prompt_hash") or "").lower()
+    online_candidate_payload = _mapping(lineage.get("online_candidate_payload"))
+    if not (
+        final_prompt_hash in str(online_candidate_payload.get("final_prompt_hash") or "").lower()
+        or final_prompt_hash in str(online_candidate_payload.get("prompt_hash") or "").lower()
+        or final_prompt_hash in json.dumps(online_candidate_payload, default=str)
+    ):
+        return False
+
+    online_candidate_hash = str(lineage.get("online_candidate_hash") or "").lower()
+    applied_artifact_payload = _mapping(lineage.get("applied_artifact_payload"))
+    if not (
+        online_candidate_hash in str(applied_artifact_payload.get("online_candidate_hash") or "").lower()
+        or online_candidate_hash in str(applied_artifact_payload.get("candidate_hash") or "").lower()
+        or online_candidate_hash in json.dumps(applied_artifact_payload, default=str)
+    ):
+        return False
+
+    applied_artifact_hash = str(lineage.get("applied_artifact_hash") or "").lower()
+    verifier_artifact_payload = _mapping(lineage.get("verifier_artifact_payload"))
+    if not (
+        applied_artifact_hash in str(verifier_artifact_payload.get("applied_artifact_hash") or "").lower()
+        or applied_artifact_hash in str(verifier_artifact_payload.get("applied_hash") or "").lower()
+        or applied_artifact_hash in json.dumps(verifier_artifact_payload, default=str)
+    ):
+        return False
+
+    verifier_artifact_hash = str(lineage.get("verifier_artifact_hash") or "").lower()
+    final_receipt_payload = _mapping(lineage.get("final_receipt_payload"))
+    if not (
+        verifier_artifact_hash in str(final_receipt_payload.get("verifier_artifact_hash") or "").lower()
+        or verifier_artifact_hash in str(final_receipt_payload.get("verifier_hash") or "").lower()
+        or verifier_artifact_hash in json.dumps(final_receipt_payload, default=str)
+    ):
+        return False
+
     return True
 
 
