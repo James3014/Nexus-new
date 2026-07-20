@@ -241,8 +241,38 @@ def _local_execution_reasons(
     return execution_failures, evidence_failures
 
 
-def _assist_lineage_complete(lineage: Mapping[str, Any]) -> bool:
-    return all(_valid_hash(lineage.get(field)) for field in _ASSIST_LINEAGE_FIELDS)
+def _assist_lineage_complete(lineage: Mapping[str, Any], record: Mapping[str, Any] | None = None) -> bool:
+    if not isinstance(lineage, Mapping):
+        return False
+    if not all(_valid_hash(lineage.get(field)) for field in _ASSIST_LINEAGE_FIELDS):
+        return False
+    if record is not None:
+        rec_task_id = str(record.get("task_id") or "")
+        lin_task_id = str(lineage.get("task_id") or "")
+        if rec_task_id and lin_task_id and rec_task_id != lin_task_id:
+            return False
+        rec_plan_id = str(record.get("planner_decision_id") or "")
+        lin_plan_id = str(lineage.get("planner_decision_id") or "")
+        if rec_plan_id and lin_plan_id and rec_plan_id != lin_plan_id:
+            return False
+
+    # Recompute hashes for attached payloads
+    payload_hash_pairs = (
+        ("packet_payload", "packet_hash"),
+        ("fragment_payload", "fragment_hash"),
+        ("final_prompt_payload", "final_prompt_hash"),
+        ("online_candidate_payload", "online_candidate_hash"),
+        ("applied_artifact_payload", "applied_artifact_hash"),
+        ("verifier_artifact_payload", "verifier_artifact_hash"),
+        ("final_receipt_payload", "final_receipt_hash"),
+    )
+    for payload_key, hash_key in payload_hash_pairs:
+        payload = lineage.get(payload_key)
+        claimed_hash = lineage.get(hash_key)
+        if payload is not None and _valid_hash(claimed_hash):
+            if _canonical_hash(payload) != str(claimed_hash).lower():
+                return False
+    return True
 
 
 def _verdict(
@@ -363,7 +393,7 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
     if (
         resolution == "LOCAL_TO_ONLINE_GOVERNED_BRIDGE"
         or (origin == "local" and expected_resolution == "CONSUME_SHARED_EVIDENCE")
-    ) and not _assist_lineage_complete(_mapping(record.get("assist_lineage"))):
+    ) and not _assist_lineage_complete(_mapping(record.get("assist_lineage")), record):
         missing.append("assist_lineage_incomplete")
 
     if missing:

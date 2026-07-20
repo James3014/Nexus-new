@@ -344,3 +344,34 @@ def test_runtime_coverage_rejects_blocker_and_fixture_evidence_as_live_execution
     assert coverage["synthetic_execution_count"] == 1
     assert coverage["missing_physical_callable_count"] == 1
     assert coverage["live_execution_pass_count"] == 0
+
+
+def test_phase2_lineage_negative_controls() -> None:
+    # 1. Tampered lineage payload / hash mismatch
+    record = _valid_record("codeintel", origin="local")
+    record["assist_lineage"]["packet_payload"] = {"tampered": True}
+    record["assist_lineage"]["packet_hash"] = "1" * 64
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert verdict["gate_verdict"] == "BLOCK_OR_RETURN"
+
+    # 2. Task ID mismatch in assist lineage
+    record = _valid_record("codeintel", origin="local")
+    record["task_id"] = "task-A"
+    record["assist_lineage"]["task_id"] = "task-B"
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+
+    # 3. Synthetic / fixture execution
+    record = _valid_record("codeintel", origin="online")
+    record["provider"] = "fixture_provider"
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "synthetic_or_fixture_execution" in verdict["missing_evidence_reasons"]
+
+    # 4. Receipt hash recomputation mismatch
+    record = _valid_record("codeintel", origin="online")
+    record["receipt_hash"] = "f" * 64
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["live_pass"] is False
+    assert "receipt_hash_not_verified" in verdict["missing_evidence_reasons"]
