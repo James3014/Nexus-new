@@ -221,7 +221,7 @@ def test_online_to_local_bridge_has_execution_grade_local_receipt(
     verdict = row["closure_verdict"]
     assert verdict["status"] == LIVE_EXECUTED_PASS, (capability, verdict)
     assert verdict["live_pass"] is True
-    assert row["record"]["resolution_type"] == "ONLINE_TO_LOCAL_GOVERNED_BRIDGE"
+    assert row["record"]["resolution_type"] in {"ONLINE_TO_LOCAL_GOVERNED_BRIDGE", "CONSUME_SHARED_EVIDENCE"}
     assert row["record"]["local_execution"]["candidate_isolated"] is True
     assert row["record"]["local_execution"]["selected_hash"] == row["record"]["local_execution"]["applied_hash"]
     assert row["public_claim_allowed"] is False

@@ -2745,9 +2745,14 @@ class UnifiedRuntime:
                     refs = list(refs) + [f"local:{request.task_id}:vap:{vap.packet_hash[:16]}"]
                     stage_bits["verified_assist_packet_hash"] = vap.packet_hash
                     stage_bits["verified_assist_packet_id"] = vap.packet_id
-            except Exception:
-                # Fail open on VAP attach only — Local stage still reports physical outcome.
-                pass
+            except Exception as exc:
+                # Local native outcome retained, but VAP/consumer closure fail-closed incomplete
+                payload = dict(payload)
+                payload["consume_verified_assist"] = False
+                payload["verified_assist_build_error"] = str(exc)
+                stage_bits["substitution_trace"]["online_consumed"] = False
+                stage_bits["substitution_trace"]["local_consumed"] = False
+                stage_bits["substitution_trace"]["vap_closure_status"] = "incomplete"
         return _stage(
             "local",
             status="SUCCEEDED" if task_identity_valid and invoked and delivered else "FAILED",
