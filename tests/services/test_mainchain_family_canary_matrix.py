@@ -290,6 +290,8 @@ def _run_family_canary(
     """Single MainchainEntry canary — gate/status only from receipt capability row."""
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     family_ctx = _family_positive_context(name) if positive else {}
+    if positive and not family_ctx.get("source_hash"):
+        family_ctx["source_hash"] = hashlib.sha256(b"sealed-canary-source-v1").hexdigest()
     task_id = str(task_id_override or f"{'pos' if positive else 'neg'}-{name}")
     canary_root = Path("/tmp/nexus_family_canary") / task_id
     canary_root.mkdir(parents=True, exist_ok=True)

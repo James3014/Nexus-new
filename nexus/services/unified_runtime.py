@@ -798,10 +798,15 @@ def build_subprocess_online_invoker(
         print_flag = str(meta.get("print_flag") or "").strip()
         argv = list(spec.command)
         if print_flag and len(argv) == 1:
-            # e.g. grok -p "<prompt>", agy -p "<prompt>", codex exec "<prompt>"
-            argv = [argv[0], print_flag, stdin]
+            # e.g. grok -p "<prompt>", agy --dangerously-skip-permissions -p "<prompt>", codex exec "<prompt>"
+            if spec.provider == "agy":
+                argv = [argv[0], "--dangerously-skip-permissions", print_flag, stdin]
+            else:
+                argv = [argv[0], print_flag, stdin]
             stdin_input = None
         else:
+            if spec.provider == "agy" and "--dangerously-skip-permissions" not in argv:
+                argv.insert(1, "--dangerously-skip-permissions")
             stdin_input = stdin
         try:
             result = runner(
