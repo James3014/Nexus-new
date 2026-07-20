@@ -200,6 +200,61 @@ def _consumer_proof(
     return proof
 
 
+def _local_live_proof_complete(
+    *,
+    name: str,
+    auth_local: bool,
+    invoked: bool,
+    skipped: bool,
+    gate: Any,
+    local_stage: Mapping[str, Any],
+    local_response: Mapping[str, Any],
+    physical_callable: str,
+) -> bool:
+    """Fail closed on a complete Local model, isolation, hash, verifier receipt."""
+
+    if name not in LOCAL_STAGE_CAPABILITIES or not auth_local:
+        return False
+    candidate = (
+        local_response.get("candidate_summary")
+        if isinstance(local_response.get("candidate_summary"), Mapping)
+        else {}
+    )
+    verifier = (
+        local_response.get("verifier_summary")
+        if isinstance(local_response.get("verifier_summary"), Mapping)
+        else {}
+    )
+    receipt_path = Path(str(local_response.get("receipt_path") or ""))
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        receipt = {}
+    return bool(
+        invoked
+        and not skipped
+        and gate is True
+        and str(local_stage.get("status") or "").upper()
+        in {"SUCCEEDED", "SUCCESS", "VERIFIED", "COMPLETED", "OK", "INVOKED"}
+        and not str(local_stage.get("reason") or "").strip()
+        and local_response.get("provider") == "ollama"
+        and str(local_response.get("physical_callable") or physical_callable)
+        == "LocalModelExecutor.run"
+        and local_response.get("local_model_invoked") is True
+        and local_response.get("output_delivered") is True
+        and not str(local_response.get("fallback_reason") or "").strip()
+        and candidate.get("isolation_status") == "isolated"
+        and candidate.get("selected_candidate_hash_matches_applied") is True
+        and bool(candidate.get("selected_candidate_hash"))
+        and candidate.get("selected_candidate_hash") == candidate.get("applied_patch_hash")
+        and verifier.get("verifier_reached") is True
+        and verifier.get("verifier_status") == "pass"
+        and receipt.get("receipt_complete") is True
+        and receipt.get("terminal_status") == "SUCCEEDED"
+        and not str(receipt.get("fallback_reason") or "").strip()
+    )
+
+
 _REQUEST_EVIDENCE_KEYS = (
     "semantic_status",
     "completion_status",
@@ -239,7 +294,11 @@ def _run_family_canary(
     canary_root.mkdir(parents=True, exist_ok=True)
     canary_target = canary_root / "target.py"
     canary_target.write_text(
-        "def family_canary_target():\n    return 'verified'\n",
+        (
+            "def family_canary_target():\n    return 'broken'\n"
+            if positive and name in LOCAL_STAGE_CAPABILITIES
+            else "def family_canary_target():\n    return 'verified'\n"
+        ),
         encoding="utf-8",
     )
     if positive and name in {"semantic_searcher", "lancedb"}:
@@ -279,6 +338,11 @@ def _run_family_canary(
             "Negative capability family canary with missing evidence.\n"
             f"Expected capability receipts: {name}"
         )
+    if positive and name in LOCAL_STAGE_CAPABILITIES:
+        statement = (
+            "Repair target.py so family_canary_target returns exactly 'verified'.\n"
+            f"Expected capability receipts: {name}"
+        )
     # Positive escalate: route flags; negative: no escalate flags.
     # When external live is authorized, allow Online so postflight can consume real online output.
     auth_ext_route = os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
@@ -307,7 +371,7 @@ def _run_family_canary(
     # makes an authorized Ollama run execute both positive and negative arms,
     # turning a valid live proof into a false negative (negative_not_skip_or_fail).
     local_enabled = positive and name in LOCAL_STAGE_CAPABILITIES
-    local_action = "verified-subtask" if name == "repair_loop" else "candidate"
+    local_action = "verified-subtask" if name in LOCAL_STAGE_CAPABILITIES else "candidate"
     from nexus.services.local_assist_service import LocalAssistRequest
 
     req = UnifiedRuntimeRequest(
@@ -333,9 +397,11 @@ def _run_family_canary(
             "evidence_refs": [f"family-canary:{name}"],
             "verifier_command": [
                 sys.executable,
-                "-m",
-                "py_compile",
-                "target.py",
+                "-c",
+                (
+                    "ns={}; exec(open('target.py', encoding='utf-8').read(), ns); "
+                    "assert ns['family_canary_target']() == 'verified'"
+                ),
             ]
             if local_action == "verified-subtask"
             else [],
@@ -484,10 +550,15 @@ def _run_family_canary(
             sys.executable,
             "-c",
             (
-                "from pathlib import Path; "
-                "source=Path('target.py').read_text(encoding='utf-8'); "
-                "compile(source, 'target.py', 'exec'); "
-                "assert 'family_canary_target' in source"
+                (
+                    "ns={}; exec(open('target.py', encoding='utf-8').read(), ns); "
+                    "assert ns['family_canary_target']() == 'broken'"
+                    if name in LOCAL_STAGE_CAPABILITIES
+                    else "from pathlib import Path; "
+                    "source=Path('target.py').read_text(encoding='utf-8'); "
+                    "compile(source, 'target.py', 'exec'); "
+                    "assert 'family_canary_target' in source"
+                )
                 if positive
                 else "raise SystemExit(1)"
             ),
@@ -742,31 +813,15 @@ def _run_family_canary(
             )
             auth_local = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "1"
             auth_ext = os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
-            lss = str(local_stage_status or "").upper()
-            observed_local_live_ok = bool(
-                name in LOCAL_STAGE_CAPABILITIES
-                and auth_local
-                and invoked
-                and not skipped
-                and gate is True
-                and (
-                    local_response.get("provider") == "ollama"
-                    or str(local_response.get("provider") or "") == "ollama"
-                )
-                and (
-                    str(local_response.get("physical_callable") or physical)
-                    == "LocalModelExecutor.run"
-                )
-                and local_response.get("fallback_reason") != "provider_not_configured"
-                and lss
-                in {
-                    "SUCCEEDED",
-                    "SUCCESS",
-                    "VERIFIED",
-                    "COMPLETED",
-                    "OK",
-                    "INVOKED",
-                }
+            observed_local_live_ok = _local_live_proof_complete(
+                name=name,
+                auth_local=auth_local,
+                invoked=invoked,
+                skipped=skipped,
+                gate=gate,
+                local_stage=local_stage,
+                local_response=local_response,
+                physical_callable=physical,
             )
             observed_external_live_ok = bool(
                 auth_ext
@@ -1323,6 +1378,34 @@ def test_family_canary_verifier_executes_real_isolated_command() -> None:
     assert result["verifier_exit_code"] == 0
     assert result["verifier_status"] == "pass"
     assert result["verifier_artifact"].startswith("sha256:")
+
+
+def test_authorized_local_exception_cannot_be_promoted_to_live_ok(tmp_path: Path) -> None:
+    response = {
+        "provider": "ollama",
+        "physical_callable": "LocalModelExecutor.run",
+        "local_model_invoked": True,
+        "output_delivered": True,
+        "fallback_reason": "local_assist_exception:artifact_root_ephemeral",
+        "candidate_summary": {
+            "isolation_status": "isolated",
+            "selected_candidate_hash_matches_applied": True,
+            "selected_candidate_hash": "a" * 64,
+            "applied_patch_hash": "a" * 64,
+        },
+        "verifier_summary": {"verifier_reached": True, "verifier_status": "pass"},
+        "receipt_path": str(tmp_path / "missing-receipt.json"),
+    }
+    assert _local_live_proof_complete(
+        name="local_model_executor",
+        auth_local=True,
+        invoked=True,
+        skipped=False,
+        gate=True,
+        local_stage={"status": "SUCCEEDED", "reason": ""},
+        local_response=response,
+        physical_callable="local_stage:LocalModelExecutor",
+    ) is False
 
 
 def test_family_canary_reads_production_executor_outcome_not_wrapper_shell() -> None:

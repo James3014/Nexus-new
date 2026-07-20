@@ -61,6 +61,7 @@ def test_isolated_workspace_apply_success_and_mismatch() -> None:
             unified_diff=diff,
             selected_candidate_hash=diff_hash,
             mutation_allowed=True,
+            work_dir=os.path.join(src_root, "artifacts"),
         )
 
         receipt_match = run_isolated_workspace_apply(request_match)
@@ -79,6 +80,7 @@ def test_isolated_workspace_apply_success_and_mismatch() -> None:
             unified_diff=diff,
             selected_candidate_hash="wrong_hash_provenance",
             mutation_allowed=True,
+            work_dir=os.path.join(src_root, "artifacts-mismatch"),
         )
         receipt_mismatch = run_isolated_workspace_apply(request_mismatch)
         assert receipt_mismatch.patch_apply_status == "applied"
@@ -119,9 +121,14 @@ def test_isolated_workspace_apply_metadata_diff_but_canonical_matches() -> None:
                 if line_rstrip.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
                     continue
                 if line_rstrip.startswith("@@"):
-                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line_rstrip)
+                    m = re.match(
+                        r"^@@\s+-\d+(?:,(\d+))?\s+\+\d+(?:,(\d+))?\s+@@",
+                        line_rstrip,
+                    )
                     if m:
-                        lines.append(m.group(1))
+                        lines.append(
+                            f"@@ -0,{m.group(1) or '1'} +0,{m.group(2) or '1'} @@"
+                        )
                     continue
                 if line_rstrip.startswith(("-", "+", " ")):
                     op = line_rstrip[0]
@@ -140,6 +147,7 @@ def test_isolated_workspace_apply_metadata_diff_but_canonical_matches() -> None:
             unified_diff=diff_no_header,
             selected_candidate_hash=canon_hash,
             mutation_allowed=True,
+            work_dir=os.path.join(src_root, "artifacts-canonical"),
         )
 
         receipt = run_isolated_workspace_apply(request)
@@ -165,3 +173,37 @@ def test_isolated_workspace_apply_metadata_diff_but_canonical_matches() -> None:
         diff_with_blank_line = "@@ -1 +1 @@\n-print('hello')\n+\n+print('world')\n"
         diff_without_blank_line = "@@ -1 +1 @@\n-print('hello')\n+print('world')\n"
         assert canonicalize_diff(diff_with_blank_line) != canonicalize_diff(diff_without_blank_line)
+
+def test_apply_hash_ignores_stale_hunk_line_start(tmp_path) -> None:
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    target = source / "target.py"
+    target.write_text("def target():\n    return 'broken'\n", encoding="utf-8")
+
+    patch = (
+        "--- a/target.py\n"
+        "+++ b/target.py\n"
+        "@@ -2,2 +2,2 @@\n"
+        " def target():\n"
+        "-    return 'broken'\n"
+        "+    return 'verified'\n"
+    )
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="stale-hunk-start",
+            source_root=str(source),
+            target_file="target.py",
+            unified_diff=patch,
+            selected_candidate_hash=_canonical_candidate_hash(patch),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts"),
+        )
+    )
+
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.candidate_output_isolated is True
+    assert receipt.selected_candidate_hash_matches_applied is True
+    assert receipt.applied_patch_hash == receipt.selected_candidate_hash
+    assert receipt.selected_candidate_hash != hashlib.sha256(patch.encode()).hexdigest()

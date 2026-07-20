@@ -157,11 +157,20 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
                 if line_rstrip.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
                     continue
 
-                # 4. Standardize hunk headers: keep only the unified diff coordinate part, drop function context
+                # 4. Standardize hunk headers without trusting model-provided line
+                # starts.  ``git apply`` may validly relocate a hunk when the
+                # candidate's coordinates are stale, while the changed/context
+                # lines remain identical.  Counts stay bound so a different
+                # patch shape cannot silently compare equal.
                 if line_rstrip.startswith("@@"):
-                    m = re.match(r"^(@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@)", line_rstrip)
+                    m = re.match(
+                        r"^@@\s+-\d+(?:,(\d+))?\s+\+\d+(?:,(\d+))?\s+@@",
+                        line_rstrip,
+                    )
                     if m:
-                        lines.append(m.group(1))
+                        old_count = m.group(1) or "1"
+                        new_count = m.group(2) or "1"
+                        lines.append(f"@@ -0,{old_count} +0,{new_count} @@")
                     continue
 
                 # 5. For code modifications (+, -, space context), keep the exact indentation and whitespaces
