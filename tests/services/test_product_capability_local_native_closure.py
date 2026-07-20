@@ -26,6 +26,14 @@ def _local_task(capability: str, root: Path):
     )
 
 
+def _online_bridge_task(capability: str, root: Path):
+    return next(
+        task
+        for task in build_product_task_catalog(root)
+        if task.origin == "online" and task.capability == capability
+    )
+
+
 def _local_live_enabled() -> bool:
     root = str(os.environ.get("NEXUS_ARMOR_ARTIFACT_ROOT") or "").strip()
     return bool(
@@ -192,4 +200,28 @@ def test_local_native_capability_has_execution_grade_mainchain_closure(
     assert local_execution["output_delivered"] is True
     assert local_execution["candidate_hash"] == local_execution["selected_hash"]
     assert local_execution["selected_hash"] == local_execution["applied_hash"]
+    assert row["public_claim_allowed"] is False
+
+
+@pytest.mark.parametrize("capability", LOCAL_NATIVE)
+def test_online_to_local_bridge_has_execution_grade_local_receipt(
+    capability: str,
+    tmp_path: Path,
+) -> None:
+    if not _local_live_enabled():
+        pytest.skip(
+            "requires authorized Ollama and a durable NEXUS_ARMOR_ARTIFACT_ROOT"
+        )
+    task = _online_bridge_task(capability, tmp_path / "workspace")
+    row = run_closure_task(
+        task,
+        _local_production_runner,
+        output_dir=tmp_path / "runs",
+    )
+    verdict = row["closure_verdict"]
+    assert verdict["status"] == LIVE_EXECUTED_PASS, (capability, verdict)
+    assert verdict["live_pass"] is True
+    assert row["record"]["resolution_type"] == "ONLINE_TO_LOCAL_GOVERNED_BRIDGE"
+    assert row["record"]["local_execution"]["candidate_isolated"] is True
+    assert row["record"]["local_execution"]["selected_hash"] == row["record"]["local_execution"]["applied_hash"]
     assert row["public_claim_allowed"] is False
