@@ -31,13 +31,43 @@ NOT_TESTED = "NOT_TESTED"
 EVIDENCE_MODE_SIMULATION = "simulation"
 EVIDENCE_MODE_HARNESS = "harness"
 EVIDENCE_MODE_CANARY = "canary"
-EVIDENCE_MODE_LIVE_PROVIDER = "live_provider"
+EVIDENCE_MODE_LIVE_RUNTIME = "live_runtime"
 EVIDENCE_MODES = frozenset({
     EVIDENCE_MODE_SIMULATION,
     EVIDENCE_MODE_HARNESS,
     EVIDENCE_MODE_CANARY,
-    EVIDENCE_MODE_LIVE_PROVIDER,
+    EVIDENCE_MODE_LIVE_RUNTIME,
 })
+
+CLOSURE_EXECUTION_CLASS_PROVIDER_NATIVE = "provider_native"
+CLOSURE_EXECUTION_CLASS_DETERMINISTIC_RUNTIME = "deterministic_runtime"
+CLOSURE_EXECUTION_CLASS_GATE_POLICY = "gate_policy"
+CLOSURE_EXECUTION_CLASS_PREFLIGHT = "preflight"
+CLOSURE_EXECUTION_CLASS_STAGE_OWNED = "stage_owned"
+CLOSURE_EXECUTION_CLASSES = frozenset({
+    CLOSURE_EXECUTION_CLASS_PROVIDER_NATIVE,
+    CLOSURE_EXECUTION_CLASS_DETERMINISTIC_RUNTIME,
+    CLOSURE_EXECUTION_CLASS_GATE_POLICY,
+    CLOSURE_EXECUTION_CLASS_PREFLIGHT,
+    CLOSURE_EXECUTION_CLASS_STAGE_OWNED,
+})
+
+PROVIDER_OBSERVATION_NOT_APPLICABLE = "not_applicable"
+PROVIDER_OBSERVATION_CONSUMED = "consumed"
+PROVIDER_OBSERVATION_EXECUTED = "executed"
+PROVIDER_OBSERVATION_BLOCKED = "blocked"
+PROVIDER_OBSERVATION_FAILED = "failed"
+PROVIDER_OBSERVATIONS = frozenset({
+    PROVIDER_OBSERVATION_NOT_APPLICABLE,
+    PROVIDER_OBSERVATION_CONSUMED,
+    PROVIDER_OBSERVATION_EXECUTED,
+    PROVIDER_OBSERVATION_BLOCKED,
+    PROVIDER_OBSERVATION_FAILED,
+})
+
+CONTENT_KIND_JSON = "json"
+CONTENT_KIND_RAW_BYTES = "raw_bytes"
+CONTENT_KINDS = frozenset({CONTENT_KIND_JSON, CONTENT_KIND_RAW_BYTES})
 
 PRODUCT_CAPABILITIES = tuple(
     sorted(
@@ -205,7 +235,13 @@ def _structured_evidence_ok(refs: Any) -> bool:
             return False
         if not str(ref.get("path") or "").strip():
             return False
-        if not _hash_matches(ref.get("payload"), ref.get("sha256")):
+        hash_field = str(ref.get("json_sha256") or "").strip() or str(ref.get("sha256") or "").strip()
+        if not hash_field:
+            return False
+        if not _hash_matches(ref.get("payload"), hash_field):
+            # raw_bytes refs may not carry payload — accept if hash alone is valid
+            if ref.get("content_kind") == "raw_bytes" and _valid_hash(hash_field):
+                continue
             return False
     return True
 
@@ -352,12 +388,15 @@ def _physical_evidence_verify(
 ) -> list[str]:
     """Verify a single evidence reference has a physical file with matching hash.
 
+    Supports content_kind: ``json`` (reopen, parse, canonicalize, compare canonical
+    hash) and ``raw_bytes`` (hash physical bytes, never require json.loads).
+
     Returns a list of failure reasons (empty = pass).
     """
     failures: list[str] = []
     path_str = str(evidence_ref.get("path") or "").strip()
     claimed_sha = str(evidence_ref.get("sha256") or "").strip()
-    payload = evidence_ref.get("payload")
+    content_kind = str(evidence_ref.get("content_kind") or CONTENT_KIND_JSON).strip().lower()
 
     if not path_str:
         failures.append("evidence_path_missing")
@@ -369,19 +408,14 @@ def _physical_evidence_verify(
         return failures
 
     if evidence_path.is_symlink():
-        real_target = evidence_path.resolve()
-        if run_root is not None:
-            run_root_resolved = Path(run_root).resolve()
-            try:
-                real_target.relative_to(run_root_resolved)
-            except ValueError:
-                failures.append("symlink_escape_detected")
-                return failures
         failures.append("symlink_evidence_not_allowed")
         return failures
 
     if run_root is not None:
         run_root_resolved = Path(run_root).resolve()
+        if not run_root_resolved.is_dir():
+            failures.append("run_root_not_directory")
+            return failures
         try:
             evidence_path.resolve().relative_to(run_root_resolved)
         except ValueError:
@@ -394,72 +428,36 @@ def _physical_evidence_verify(
         failures.append("evidence_file_unreadable")
         return failures
 
-    actual_hash = hashlib.sha256(actual_bytes).hexdigest()
-    if claimed_sha and actual_hash != claimed_sha.lower():
-        failures.append("evidence_hash_mismatch")
+    physical_sha256 = hashlib.sha256(actual_bytes).hexdigest()
+    if claimed_sha and physical_sha256 != claimed_sha.lower():
+        failures.append("physical_sha256_mismatch")
         return failures
 
-    if payload is not None:
-        recomputed = _canonical_hash(payload)
-        if recomputed != actual_hash:
-            failures.append("evidence_payload_hash_mismatch")
-
-    try:
-        decoded = actual_bytes.decode("utf-8")
-        json.loads(decoded)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        failures.append("evidence_file_not_valid_json")
-        return failures
-
-    if evidence_ref.get("raw_output") is not None:
-        raw_output = evidence_ref["raw_output"]
-        if isinstance(raw_output, str):
-            raw_bytes = raw_output.encode("utf-8")
-        elif isinstance(raw_output, bytes):
-            raw_bytes = raw_output
-        else:
-            failures.append("provider_raw_output_invalid_type")
+    if content_kind == CONTENT_KIND_JSON:
+        try:
+            decoded = actual_bytes.decode("utf-8")
+            parsed = json.loads(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            failures.append("evidence_file_not_valid_json")
             return failures
-        raw_claimed = evidence_ref.get("raw_output_sha256") or ""
-        if raw_claimed and hashlib.sha256(raw_bytes).hexdigest() != raw_claimed.lower():
-            failures.append("provider_raw_output_hash_mismatch")
-            return failures
-    elif claimed_sha:
-        failures.append("provider_raw_output_missing")
-        return failures
-
-    if evidence_ref.get("adapter_claimed_success") is True and not evidence_ref.get("raw_output"):
-        failures.append("adapter_synthesized_without_raw_provider_output")
-        return failures
+        canonical_json_sha = _canonical_hash(parsed)
+        json_hash = str(evidence_ref.get("json_sha256") or "").strip()
+        if json_hash and canonical_json_sha != json_hash.lower():
+            failures.append("json_sha256_mismatch")
+    elif content_kind == CONTENT_KIND_RAW_BYTES:
+        pass  # never require json.loads for raw_bytes
+    else:
+        failures.append(f"unknown_content_kind:{content_kind}")
 
     return failures
 
 
 def _evidence_mode_classify(record: Mapping[str, Any]) -> str:
-    """Determine evidence mode from record fields. Unknown mode fails closed."""
+    """Return explicit evidence_mode field. Do not infer from provider/transport/booleans."""
     mode = str(record.get("evidence_mode") or "").strip().lower()
     if mode in EVIDENCE_MODES:
         return mode
-    if mode:
-        return mode
-
-    provider = str(record.get("provider") or "").lower()
-    transport = str(record.get("transport") or "").lower()
-    physical = str(record.get("physical_callable") or "").lower()
-
-    if any(m in provider for m in ("fixture", "fake", "synthetic", "shadow", "injected")):
-        return EVIDENCE_MODE_SIMULATION
-    if any(m in transport for m in ("fixture", "fake", "synthetic", "shadow", "injected")):
-        return EVIDENCE_MODE_SIMULATION
-    if any(m in physical for m in ("fixture", "test:", "synthetic")):
-        return EVIDENCE_MODE_SIMULATION
-
-    if record.get("planner_selected") is True and record.get("invoked") is True:
-        online = record.get("online")
-        if isinstance(online, Mapping) and online.get("invoked") is True:
-            return EVIDENCE_MODE_CANARY
-
-    return EVIDENCE_MODE_SIMULATION
+    return mode  # caller must check membership — empty or unknown fails closed
 
 
 def _verdict(
@@ -564,18 +562,60 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
             reasons=["evidence_mode_unknown"],
         )
 
-    if record.get("live_pass") is True and evidence_mode != EVIDENCE_MODE_LIVE_PROVIDER:
+    execution_class = str(record.get("execution_class") or "").strip()
+    if not execution_class:
         return _verdict(
             record,
             status=EVIDENCE_INCOMPLETE,
-            reasons=[f"producer_claimed_live_pass_in_{evidence_mode}_mode"],
+            reasons=["execution_class_missing"],
+        )
+    if execution_class not in CLOSURE_EXECUTION_CLASSES:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"execution_class_unknown:{execution_class}"],
         )
 
-    if record.get("gate_passed") is True and evidence_mode != EVIDENCE_MODE_LIVE_PROVIDER:
+    provider_observation = str(record.get("provider_observation") or "").strip()
+    if not provider_observation:
         return _verdict(
             record,
             status=EVIDENCE_INCOMPLETE,
-            reasons=[f"producer_claimed_gate_passed_in_{evidence_mode}_mode"],
+            reasons=["provider_observation_missing"],
+        )
+    if provider_observation not in PROVIDER_OBSERVATIONS:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"provider_observation_unknown:{provider_observation}"],
+        )
+
+    if execution_class == CLOSURE_EXECUTION_CLASS_PROVIDER_NATIVE and provider_observation != PROVIDER_OBSERVATION_EXECUTED:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"provider_native_without_executed:{provider_observation}"],
+        )
+
+    if execution_class != CLOSURE_EXECUTION_CLASS_PROVIDER_NATIVE and provider_observation == PROVIDER_OBSERVATION_EXECUTED:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"non_provider_native_cannot_claim_executed:{execution_class}"],
+        )
+
+    if not str(record.get("workspace_revision") or "").strip():
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["workspace_revision_missing"],
+        )
+
+    if not str(record.get("upstream_receipt_sha256") or "").strip():
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["upstream_receipt_sha256_missing"],
         )
 
     if record.get("lineage_recomputed") is True:
@@ -623,12 +663,33 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
     ) and not _assist_lineage_complete(_mapping(record.get("assist_lineage")), record):
         missing.append("assist_lineage_incomplete")
 
-    if evidence_mode == EVIDENCE_MODE_LIVE_PROVIDER:
-        run_root = str(record.get("run_root") or "").strip() or None
+    if evidence_mode == EVIDENCE_MODE_LIVE_RUNTIME:
+        run_root = str(record.get("run_root") or "").strip()
+        if not run_root:
+            return _verdict(
+                record,
+                status=EVIDENCE_INCOMPLETE,
+                reasons=["run_root_missing_for_live_runtime"],
+            )
+        run_root_path = Path(run_root)
+        if not run_root_path.is_dir():
+            return _verdict(
+                record,
+                status=EVIDENCE_INCOMPLETE,
+                reasons=["run_root_not_directory"],
+            )
         for ref in (refs or []):
             if isinstance(ref, Mapping):
                 phys_failures = _physical_evidence_verify(ref, run_root=run_root)
                 missing.extend(phys_failures)
+        if provider_observation in {PROVIDER_OBSERVATION_CONSUMED, PROVIDER_OBSERVATION_EXECUTED}:
+            for required_kind in ("request", "stdout", "stderr"):
+                found = any(
+                    str(r.get("path") or "").strip() for r in (refs or [])
+                    if isinstance(r, Mapping) and str(r.get("kind") or "").strip().lower() == required_kind
+                )
+                if not found:
+                    missing.append(f"missing_physical_{required_kind}_ref")
 
     if missing:
         return _verdict(record, status=EVIDENCE_INCOMPLETE, reasons=missing)

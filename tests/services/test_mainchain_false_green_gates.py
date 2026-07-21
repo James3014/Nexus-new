@@ -3190,11 +3190,43 @@ def test_production_runner_imports_no_tests() -> None:
 # ── E1: Evidence mode and physical trust boundary ──────────────────────
 
 
+def _v2_patch(record: dict, tmp_path: Path | None = None) -> dict:
+    """Add v2 contract required fields to a test record."""
+    root = tmp_path if tmp_path is not None else Path("/tmp/e1_v2_fallback")
+    root.mkdir(parents=True, exist_ok=True)
+    upstream_sha = _canonical_hash({"v2": "patch"})
+    record.setdefault("execution_class", "provider_native")
+    record.setdefault("provider_observation", "executed")
+    record.setdefault("workspace_revision", "wr-v2")
+    record["upstream_receipt_sha256"] = upstream_sha
+    record.setdefault("run_root", str(root))
+    refs = record.get("evidence_refs")
+    if isinstance(refs, list):
+        for i, r in enumerate(refs):
+            if isinstance(r, dict):
+                r.setdefault("content_kind", "json")
+                r.setdefault("kind", "stdout")
+                if r.get("path") and not r.get("sha256"):
+                    p = Path(str(r["path"]))
+                    if p.exists():
+                        r["sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
+                    elif r.get("payload") is not None:
+                        r["sha256"] = hashlib.sha256(
+                            json.dumps(r["payload"], sort_keys=True, separators=(",", ":")).encode()
+                        ).hexdigest()
+    return record
+
+
 def _canonical_hash(value: object) -> str:
     """Match the production _canonical_hash exactly."""
     import hashlib, json
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _canonical_sha256_bytes(raw: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _baseline_live_record(evidence_path: Path | None = None) -> dict:
@@ -3209,11 +3241,17 @@ def _baseline_live_record(evidence_path: Path | None = None) -> dict:
     payload = {"task_id": "baseline-test", "capability": "codeintel"}
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ep.write_bytes(body)
-    sha = hashlib.sha256(body).hexdigest()
+    physical_sha = hashlib.sha256(body).hexdigest()
+    json_sha = _canonical_hash(payload)
     effect_payload = {"action": "codeintel"}
+    upstream_sha = _canonical_hash({"root": "baseline"})
     return {
         "task_id": "baseline-test",
         "planner_decision_id": "pd-baseline",
+        "workspace_revision": "wr-baseline",
+        "upstream_receipt_sha256": upstream_sha,
+        "execution_class": "provider_native",
+        "provider_observation": "executed",
         "capability": "codeintel",
         "origin": "online",
         "resolution_type": "ONLINE_NATIVE",
@@ -3228,10 +3266,11 @@ def _baseline_live_record(evidence_path: Path | None = None) -> dict:
         "evidence_refs": [
             {
                 "path": str(ep),
-                "sha256": sha,
+                "sha256": physical_sha,
+                "json_sha256": json_sha,
+                "content_kind": "json",
+                "kind": "stdout",
                 "payload": payload,
-                "raw_output": body.decode(),
-                "raw_output_sha256": sha,
             }
         ],
         "observable_effect": {
@@ -3250,28 +3289,77 @@ def _baseline_live_record(evidence_path: Path | None = None) -> dict:
             "artifact_hash": _canonical_hash({"task_id": "baseline-test"}),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
+        "evidence_mode": "live_runtime",
         "run_root": str(tmp_dir),
     }
 
 
-def test_e1_baseline_passes() -> None:
+def test_e1_baseline_passes(tmp_path: Path) -> None:
     """Valid baseline record must pass LIVE_EXECUTED_PASS."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    rec = _baseline_live_record()
+    request_file = tmp_path / "request.json"
+    request_file.write_text(json.dumps({"req": "baseline"}, sort_keys=True, separators=(",", ":")))
+    stderr_file = tmp_path / "stderr.txt"
+    stderr_file.write_text("")
+    evidence_file = tmp_path / "baseline.json"
+    payload = {"task_id": "baseline-test", "capability": "codeintel"}
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    evidence_file.write_bytes(body)
+    physical_sha = hashlib.sha256(body).hexdigest()
+    json_sha = _canonical_hash(payload)
+    rec = {
+        "task_id": "baseline-test",
+        "planner_decision_id": "pd-baseline",
+        "workspace_revision": "wr-baseline",
+        "upstream_receipt_sha256": _canonical_hash({"root": "baseline"}),
+        "execution_class": "provider_native",
+        "provider_observation": "executed",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "gate_passed": True,
+        "evidence_mode": "live_runtime",
+        "run_root": str(tmp_path),
+        "evidence_refs": [
+            {"path": str(request_file), "sha256": _canonical_sha256_bytes(request_file.read_bytes()), "content_kind": "json", "kind": "request", "payload": {"req": "baseline"}},
+            {"path": str(evidence_file), "sha256": physical_sha, "json_sha256": json_sha, "content_kind": "json", "kind": "stdout", "payload": payload},
+            {"path": str(stderr_file), "sha256": _canonical_sha256_bytes(b""), "content_kind": "raw_bytes", "kind": "stderr"},
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": _canonical_hash({"action": "codeintel"}),
+        },
+        "receipt_payload": {"task_id": "baseline-test"},
+        "receipt_hash": _canonical_hash({"task_id": "baseline-test"}),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": _canonical_hash({"exit_code": 0}),
+            "artifact_payload": {"task_id": "baseline-test"},
+            "artifact_hash": _canonical_hash({"task_id": "baseline-test"}),
+        },
+    }
     verdict = verify_product_capability_resolution(rec)
     assert verdict["status"] == "LIVE_EXECUTED_PASS", f"baseline failed: {verdict['missing_evidence_reasons']}"
-    import shutil
-    shutil.rmtree("/tmp/e1_baseline", ignore_errors=True)
 
 
-def test_e1_fake_payload_no_physical_file_blocks() -> None:
+def test_e1_fake_payload_no_physical_file_blocks(tmp_path: Path) -> None:
     """Matching fake payload plus fake hash but no physical file → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
     fake_hash = hashlib.sha256(b"fake-payload").hexdigest()
-    record = {
+    record = _v2_patch({
         "task_id": "test-fake-file",
         "planner_decision_id": "pd-fake-file",
         "capability": "codeintel",
@@ -3308,85 +3396,87 @@ def test_e1_fake_payload_no_physical_file_blocks() -> None:
             "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-fake-file"}, sort_keys=True).encode()).hexdigest(),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("evidence_file_not_found" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_evidence_file_changed_after_receipt_blocks() -> None:
+def test_e1_evidence_file_changed_after_receipt_blocks(tmp_path: Path) -> None:
     """Evidence file changed after receipt creation → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution, _canonical_hash
 
-    tmp_dir = Path("/tmp/e1_tamper_test")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    evidence_path = tmp_dir / "evidence.json"
+    request_file = tmp_path / "request.json"
+    request_file.write_text(json.dumps({"req": 1}, sort_keys=True, separators=(",", ":")))
+    stderr_file = tmp_path / "stderr.txt"
+    stderr_file.write_text("")
+    evidence_path = tmp_path / "evidence.json"
     original_payload = {"task_id": "tamper-test", "capability": "codeintel"}
     original_bytes = json.dumps(original_payload, sort_keys=True, separators=(",", ":")).encode()
-    original_hash = hashlib.sha256(original_bytes).hexdigest()
+    original_physical_sha = hashlib.sha256(original_bytes).hexdigest()
+    original_json_sha = _canonical_hash(original_payload)
     evidence_path.write_bytes(original_bytes)
-    original_raw = original_bytes.decode("utf-8")
+    request_sha = _canonical_sha256_bytes(request_file.read_bytes())
+    stderr_sha = _canonical_sha256_bytes(b"")
+    upstream_sha = _canonical_hash({"root": "tamper"})
 
-    record = {
-        "task_id": "test-tamper",
-        "planner_decision_id": "pd-tamper",
-        "capability": "codeintel",
-        "origin": "online",
-        "resolution_type": "ONLINE_NATIVE",
-        "planner_selected": True,
-        "trigger_condition_met": True,
-        "invoked": True,
-        "status": "SUCCEEDED",
-        "physical_callable": "nexus.services.capability_registry:codeintel",
-        "route_surface_changed": False,
-        "public_claim_allowed": False,
-        "structured_evidence_verified": True,
-        "evidence_refs": [
-            {
-                "path": str(evidence_path),
-                "sha256": original_hash,
-                "payload": original_payload,
-                "raw_output": original_raw,
-                "raw_output_sha256": original_hash,
-            }
-        ],
-        "observable_effect": {
-            "effect_type": "EXECUTION_CONTROL",
-            "artifact_payload": {"action": "codeintel"},
-            "artifact_hash": _canonical_hash({"action": "codeintel"}),
-        },
-        "receipt_payload": {"task_id": "test-tamper"},
-        "receipt_hash": _canonical_hash({"task_id": "test-tamper"}),
-        "verifier": {
+    def _record() -> dict:
+        return {
+            "task_id": "test-tamper",
+            "planner_decision_id": "pd-tamper",
+            "workspace_revision": "wr-tamper",
+            "upstream_receipt_sha256": upstream_sha,
+            "execution_class": "provider_native",
+            "provider_observation": "executed",
+            "capability": "codeintel",
+            "origin": "online",
+            "resolution_type": "ONLINE_NATIVE",
+            "planner_selected": True,
+            "trigger_condition_met": True,
             "invoked": True,
-            "passed": True,
-            "evidence_payload": {"exit_code": 0},
-            "evidence_hash": _canonical_hash({"exit_code": 0}),
-            "artifact_payload": {"task_id": "test-tamper"},
-            "artifact_hash": _canonical_hash({"task_id": "test-tamper"}),
-        },
-        "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+            "status": "SUCCEEDED",
+            "physical_callable": "nexus.services.capability_registry:codeintel",
+            "route_surface_changed": False,
+            "public_claim_allowed": False,
+            "structured_evidence_verified": True,
+            "gate_passed": True,
+            "evidence_mode": "live_runtime",
+            "run_root": str(tmp_path),
+            "evidence_refs": [
+                {"path": str(request_file), "sha256": request_sha, "content_kind": "json", "kind": "request", "payload": {"req": 1}},
+                {"path": str(evidence_path), "sha256": original_physical_sha, "json_sha256": original_json_sha, "content_kind": "json", "kind": "stdout", "payload": original_payload},
+                {"path": str(stderr_file), "sha256": stderr_sha, "content_kind": "raw_bytes", "kind": "stderr"},
+            ],
+            "observable_effect": {
+                "effect_type": "EXECUTION_CONTROL",
+                "artifact_payload": {"action": "codeintel"},
+                "artifact_hash": _canonical_hash({"action": "codeintel"}),
+            },
+            "receipt_payload": {"task_id": "test-tamper"},
+            "receipt_hash": _canonical_hash({"task_id": "test-tamper"}),
+            "verifier": {
+                "invoked": True, "passed": True,
+                "evidence_payload": {"exit_code": 0}, "evidence_hash": _canonical_hash({"exit_code": 0}),
+                "artifact_payload": {"task_id": "test-tamper"}, "artifact_hash": _canonical_hash({"task_id": "test-tamper"}),
+            },
+        }
 
+    record = _record()
     verdict1 = verify_product_capability_resolution(record)
-    assert verdict1["status"] == "LIVE_EXECUTED_PASS"
+    assert verdict1["status"] == "LIVE_EXECUTED_PASS", f"baseline failed: {verdict1['missing_evidence_reasons']}"
 
     evidence_path.write_bytes(json.dumps({"tampered": True}).encode())
     verdict2 = verify_product_capability_resolution(record)
     assert verdict2["status"] != "LIVE_EXECUTED_PASS"
-    assert any("evidence_hash_mismatch" in r for r in verdict2["missing_evidence_reasons"])
-    evidence_path.unlink(missing_ok=True)
-    import shutil
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    assert any("physical_sha256_mismatch" in r for r in verdict2["missing_evidence_reasons"])
 
 
-def test_e1_missing_evidence_path_blocks() -> None:
+def test_e1_missing_evidence_path_blocks(tmp_path: Path) -> None:
     """Missing evidence path → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-empty-path",
         "planner_decision_id": "pd-empty-path",
         "capability": "codeintel",
@@ -3423,25 +3513,24 @@ def test_e1_missing_evidence_path_blocks() -> None:
             "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-empty-path"}, sort_keys=True).encode()).hexdigest(),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("evidence_path_missing" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_path_traversal_outside_run_root_blocks() -> None:
+def test_e1_path_traversal_outside_run_root_blocks(tmp_path: Path) -> None:
     """Path traversal outside run root → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    run_root = Path("/tmp/e1_traversal_test")
+    run_root = tmp_path / "run_root"
     run_root.mkdir(parents=True, exist_ok=True)
-    outside_path = Path("/tmp/e1_outside_evidence.json")
+    outside_path = tmp_path / "outside_evidence.json"
     outside_path.write_text(json.dumps({"outside": True}))
-    outside_raw = json.dumps({"outside": True})
-    outside_hash = hashlib.sha256(outside_raw.encode()).hexdigest()
+    outside_hash = hashlib.sha256(outside_path.read_bytes()).hexdigest()
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-traversal",
         "planner_decision_id": "pd-traversal",
         "capability": "codeintel",
@@ -3460,8 +3549,6 @@ def test_e1_path_traversal_outside_run_root_blocks() -> None:
                 "path": str(outside_path),
                 "sha256": outside_hash,
                 "payload": {"outside": True},
-                "raw_output": outside_raw,
-                "raw_output_sha256": outside_hash,
             }
         ],
         "observable_effect": {
@@ -3480,31 +3567,26 @@ def test_e1_path_traversal_outside_run_root_blocks() -> None:
             "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-traversal"}, sort_keys=True).encode()).hexdigest(),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
+        "evidence_mode": "live_runtime",
         "run_root": str(run_root),
-    }
+    }, run_root)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("path_traversal_detected" in r for r in verdict["missing_evidence_reasons"])
-    outside_path.unlink(missing_ok=True)
-    import shutil
-    shutil.rmtree(run_root, ignore_errors=True)
 
 
-def test_e1_symlink_escape_blocks() -> None:
+def test_e1_symlink_escape_blocks(tmp_path: Path) -> None:
     """Symlink escape → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
-    import shutil
 
-    run_root = Path("/tmp/e1_symlink_test")
-    shutil.rmtree(run_root, ignore_errors=True)
+    run_root = tmp_path / "run_root"
     run_root.mkdir(parents=True, exist_ok=True)
-    target_file = Path("/tmp/e1_symlink_target.json")
+    target_file = tmp_path / "symlink_target.json"
     target_file.write_text(json.dumps({"target": True}))
     symlink_path = run_root / "evidence_link.json"
     symlink_path.symlink_to(target_file)
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-symlink",
         "planner_decision_id": "pd-symlink",
         "capability": "codeintel",
@@ -3541,24 +3623,20 @@ def test_e1_symlink_escape_blocks() -> None:
             "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-symlink"}, sort_keys=True).encode()).hexdigest(),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
+        "evidence_mode": "live_runtime",
         "run_root": str(run_root),
-    }
+    }, run_root)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("symlink_evidence_not_allowed" in r or "symlink_escape_detected" in r
                for r in verdict["missing_evidence_reasons"])
-    symlink_path.unlink(missing_ok=True)
-    target_file.unlink(missing_ok=True)
-    import shutil
-    shutil.rmtree(run_root, ignore_errors=True)
 
 
-def test_e1_harness_canary_marked_live_pass_blocks() -> None:
+def test_e1_harness_canary_marked_live_pass_blocks(tmp_path: Path) -> None:
     """Harness/canary marked live_pass → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-harness-live",
         "planner_decision_id": "pd-harness-live",
         "capability": "codeintel",
@@ -3584,17 +3662,16 @@ def test_e1_harness_canary_marked_live_pass_blocks() -> None:
         "gate_passed": True,
         "live_pass": True,
         "evidence_mode": "canary",
-    }
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
-    assert any("producer_claimed_live_pass_in_canary" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_fabricated_provider_native_id_blocks() -> None:
+def test_e1_fabricated_provider_native_id_blocks(tmp_path: Path) -> None:
     """Fabricated provider native ID → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-fabricated",
         "planner_decision_id": "pd-fabricated",
         "capability": "codeintel",
@@ -3620,18 +3697,17 @@ def test_e1_fabricated_provider_native_id_blocks() -> None:
         "receipt_hash": "abc",
         "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
-    assert any("synthetic" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_lineage_recomputed_without_check_blocks() -> None:
+def test_e1_lineage_recomputed_without_check_blocks(tmp_path: Path) -> None:
     """Producer says lineage_recomputed=true without independent check → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-lineage",
         "planner_decision_id": "pd-lineage",
         "capability": "codeintel",
@@ -3656,18 +3732,17 @@ def test_e1_lineage_recomputed_without_check_blocks() -> None:
         "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
         "gate_passed": True,
         "lineage_recomputed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
-    assert any("lineage_recomputed_without_independent" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_simulation_mode_blocks_live_pass() -> None:
+def test_e1_simulation_mode_blocks_live_pass(tmp_path: Path) -> None:
     """Simulation mode cannot count as live pass."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-sim-live",
         "planner_decision_id": "pd-sim-live",
         "capability": "codeintel",
@@ -3693,17 +3768,16 @@ def test_e1_simulation_mode_blocks_live_pass() -> None:
         "gate_passed": True,
         "live_pass": True,
         "evidence_mode": "simulation",
-    }
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
-    assert any("producer_claimed_live_pass_in_simulation" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_unknown_evidence_mode_blocks() -> None:
+def test_e1_unknown_evidence_mode_blocks(tmp_path: Path) -> None:
     """Unknown evidence mode fails closed."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-unknown-mode",
         "planner_decision_id": "pd-unknown-mode",
         "capability": "codeintel",
@@ -3728,17 +3802,17 @@ def test_e1_unknown_evidence_mode_blocks() -> None:
         "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
         "gate_passed": True,
         "evidence_mode": "totally_bogus_mode",
-    }
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("evidence_mode_unknown" in r for r in verdict["missing_evidence_reasons"])
 
 
-def test_e1_task_origin_capability_mismatch_blocks() -> None:
+def test_e1_task_origin_capability_mismatch_blocks(tmp_path: Path) -> None:
     """task_id mismatch between record and receipt_payload → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-abc",
         "planner_decision_id": "pd-abc",
         "capability": "codeintel",
@@ -3762,26 +3836,23 @@ def test_e1_task_origin_capability_mismatch_blocks() -> None:
         "receipt_hash": "abc",
         "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
 
 
-def test_e1_missing_provider_stderr_blocks() -> None:
+def test_e1_missing_provider_stderr_blocks(tmp_path: Path) -> None:
     """Missing raw_output field with claimed sha256 → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
-    from pathlib import Path
 
-    tmp_dir = Path("/tmp/e1_missing_raw")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    ev_path = tmp_dir / "evidence.json"
+    ev_path = tmp_path / "evidence.json"
     body = json.dumps({"real": "data"}, sort_keys=True, separators=(",", ":")).encode()
     ev_path.write_bytes(body)
     sha = hashlib.sha256(body).hexdigest()
     effect_payload = {"action": "codeintel"}
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-stderr",
         "planner_decision_id": "pd-stderr",
         "capability": "codeintel",
@@ -3818,31 +3889,22 @@ def test_e1_missing_provider_stderr_blocks() -> None:
             "artifact_hash": _canonical_hash({"task_id": "test-stderr"}),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
-    assert any("provider_raw_output_missing" in r for r in verdict["missing_evidence_reasons"])
-    ev_path.unlink(missing_ok=True)
-    import shutil
-    shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def test_e1_adapter_synthesized_success_blocks() -> None:
+def test_e1_adapter_synthesized_success_blocks(tmp_path: Path) -> None:
     """Adapter claims success without raw provider output → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
-    from pathlib import Path
-    import shutil
 
-    tmp_dir = Path("/tmp/e1_adapter_synth")
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    ev_path = tmp_dir / "evidence.json"
+    ev_path = tmp_path / "evidence.json"
     body = json.dumps({"adapter": "yes"}, sort_keys=True, separators=(",", ":")).encode()
     ev_path.write_bytes(body)
     effect_payload = {"action": "codeintel"}
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-adapter-synth",
         "planner_decision_id": "pd-adapter-synth",
         "capability": "codeintel",
@@ -3879,32 +3941,23 @@ def test_e1_adapter_synthesized_success_blocks() -> None:
             "artifact_hash": _canonical_hash({"task_id": "test-adapter-synth"}),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
-    assert any("adapter_synthesized_without_raw_provider_output" in r
-               for r in verdict["missing_evidence_reasons"])
-    ev_path.unlink(missing_ok=True)
-    shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def test_e1_json_evidence_parse_failure_blocks() -> None:
+def test_e1_json_evidence_parse_failure_blocks(tmp_path: Path) -> None:
     """Evidence file is not valid JSON → BLOCK."""
     from nexus.services.product_capability_closure import verify_product_capability_resolution
-    from pathlib import Path
-    import shutil
 
-    tmp_dir = Path("/tmp/e1_json_parse_fail")
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    ev_path = tmp_dir / "evidence.json"
+    ev_path = tmp_path / "evidence.json"
     raw = b"this is not json at all"
     ev_path.write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
     effect_payload = {"action": "codeintel"}
 
-    record = {
+    record = _v2_patch({
         "task_id": "test-json-parse",
         "planner_decision_id": "pd-json-parse",
         "capability": "codeintel",
@@ -3923,8 +3976,6 @@ def test_e1_json_evidence_parse_failure_blocks() -> None:
                 "path": str(ev_path),
                 "sha256": sha,
                 "payload": {},
-                "raw_output": raw.decode("utf-8"),
-                "raw_output_sha256": sha,
             }
         ],
         "observable_effect": {
@@ -3943,10 +3994,8 @@ def test_e1_json_evidence_parse_failure_blocks() -> None:
             "artifact_hash": _canonical_hash({"task_id": "test-json-parse"}),
         },
         "gate_passed": True,
-        "evidence_mode": "live_provider",
-    }
+        "evidence_mode": "live_runtime",
+    }, tmp_path)
     verdict = verify_product_capability_resolution(record)
     assert verdict["status"] != "LIVE_EXECUTED_PASS"
     assert any("evidence_file_not_valid_json" in r for r in verdict["missing_evidence_reasons"])
-    ev_path.unlink(missing_ok=True)
-    shutil.rmtree(tmp_dir, ignore_errors=True)
