@@ -1399,11 +1399,243 @@ def test_extract_online_stage_payload_is_canonical() -> None:
 
 
 def test_provider_neutral_cli_registry_is_explicit_and_non_invoking() -> None:
-    assert set(ONLINE_CLI_SPEC_REGISTRY) == {"gemini", "agy", "grok", "codex", "openai"}
+    assert set(ONLINE_CLI_SPEC_REGISTRY) == {"gemini", "agy", "grok", "codex", "openai", "opencode"}
     assert all(
         item["transport"] == "subprocess" and item["binary_env"] and item["binary_name"]
         for item in ONLINE_CLI_SPEC_REGISTRY.values()
     )
+
+
+def test_opencode_registered_invoker_constructs_correct_argv() -> None:
+    calls: list[list[str]] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = "opencode-output"
+        stderr = ""
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        return _Completed()
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-test",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["provider"] == "opencode"
+    assert result["task_id"] == "opencode-test"
+    assert result["invoked"] is True
+    assert result["gate_passed"] is True
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[0] == "/usr/local/bin/opencode"
+    assert "run" in argv
+    assert "--model" in argv
+    assert "opencode/deepseek-v4-flash-free" in argv
+
+
+def test_opencode_invoker_fails_closed_on_timeout() -> None:
+    calls: list[list[str]] = []
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        import subprocess
+        raise subprocess.TimeoutExpired(cmd=command, timeout=0.001, output="")
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+        timeout_sec=0.001,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-timeout",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["invoked"] is True
+    assert result["provider_call_count"] == 1
+    assert result["error"] == "provider_timeout"
+    assert result["gate_passed"] is False
+    assert len(calls) == 1
+
+
+def test_opencode_invoker_fails_closed_on_nonzero_exit() -> None:
+    calls: list[list[str]] = []
+
+    class _Completed:
+        returncode = 1
+        stdout = ""
+        stderr = "error"
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        return _Completed()
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-nonzero",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["invoked"] is True
+    assert result["provider_call_count"] == 1
+    assert result["error"] == "provider_subprocess_failed"
+    assert result["gate_passed"] is False
+
+
+def test_opencode_invoker_fails_closed_on_empty_stdout() -> None:
+    calls: list[list[str]] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        return _Completed()
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-empty",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["invoked"] is True
+    assert result["provider_call_count"] == 1
+    assert result["error"] == "provider_subprocess_failed"
+    assert result["gate_passed"] is False
+
+
+def test_opencode_invoker_fails_closed_on_oserror() -> None:
+    calls: list[list[str]] = []
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        raise OSError("binary not found")
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-oserror",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert result["error"] == "provider_not_invoked"
+    assert result["gate_passed"] is False
+
+
+def test_opencode_deny_causes_zero_subprocess_calls(monkeypatch) -> None:
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-deny",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert result["error"] == "online_execution_not_authorized"
+
+
+def test_opencode_request_stdout_stderr_physical_output() -> None:
+    captured: dict = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"response": "test"}'
+        stderr = ""
+
+    def _runner(command, **kwargs):
+        captured["argv"] = list(command)
+        return _Completed()
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-physical-output",
+            "task_statement": "test prompt",
+            "online_payload": '{"task": "test"}',
+        }
+    )
+    assert result["invoked"] is True
+    assert result["gate_passed"] is True
+    last_arg = captured["argv"][-1] if captured.get("argv") else ""
+    assert "test prompt" in last_arg
+    assert result["error"] == ""
+    assert result["provider"] == "opencode"
+    assert result["task_id"] == "opencode-physical-output"
+
+
+def test_opencode_no_fallback_or_model_substitution() -> None:
+    calls: list[list[str]] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = "output"
+        stderr = ""
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        return _Completed()
+
+    invoker = build_registered_online_invoker(
+        "opencode",
+        command=("/usr/local/bin/opencode",),
+        runner=_runner,
+    )
+    result = invoker(
+        {
+            "task_id": "opencode-no-fallback",
+            "task_statement": "test prompt",
+            "online_payload": "",
+        }
+    )
+    assert result["invoked"] is True
+    assert result["gate_passed"] is True
+    argv = calls[0]
+    model_idx = argv.index("--model") + 1 if "--model" in argv else -1
+    assert model_idx > 0
+    assert argv[model_idx] == "opencode/deepseek-v4-flash-free"
 
 
 def test_registered_cli_spec_resolver_is_edge_only() -> None:

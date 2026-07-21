@@ -176,6 +176,31 @@ def test_credentials_do_not_imply_authorization(tmp_path: Path) -> None:
     assert decision.claim_boundary.get("credentials_do_not_imply_authorization") is True
 
 
+def test_opencode_auto_authorizes_when_binary_present(tmp_path: Path) -> None:
+    decision = resolve_online_execution_decision(
+        task_online_policy="auto",
+        project_root=tmp_path,
+        planner_online_needed=True,
+        requested_provider="opencode",
+        environ={"PATH": "/usr/local/bin"},
+    )
+    assert decision.online_execution_authorized is True
+    assert decision.preflight_status == "ONLINE_READY"
+    assert "opencode" in decision.approved_online_providers
+
+
+def test_opencode_deny_blocks_before_binary_check(tmp_path: Path) -> None:
+    decision = resolve_online_execution_decision(
+        task_online_policy="deny",
+        project_root=tmp_path,
+        planner_online_needed=True,
+        requested_provider="opencode",
+        environ={"PATH": "/usr/local/bin"},
+    )
+    assert decision.online_execution_authorized is False
+    assert decision.preflight_status == ONLINE_DENIED_BY_POLICY
+
+
 def test_build_online_execution_context_fields(tmp_path: Path) -> None:
     fields = build_online_execution_context_fields(
         online_policy="auto",

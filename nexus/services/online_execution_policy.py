@@ -33,7 +33,7 @@ ONLINE_CONTEXT_TRANSFER_DENIED = "ONLINE_CONTEXT_TRANSFER_DENIED"
 ONLINE_BUDGET_EXCEEDED = "ONLINE_BUDGET_EXCEEDED"
 ONLINE_CONFIGURATION_INVALID = "ONLINE_CONFIGURATION_INVALID"
 
-DEFAULT_APPROVED_PROVIDERS = ("gemini", "agy", "grok", "codex", "openai")
+DEFAULT_APPROVED_PROVIDERS = ("gemini", "agy", "grok", "codex", "openai", "opencode")
 WORKSPACE_POLICY_RELATIVE = Path(".nexus") / "online_execution_policy.json"
 ENV_OVERRIDE = "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED"
 
@@ -376,14 +376,15 @@ def resolve_online_execution_decision(
     # authenticate via local OAuth/login sessions — binary presence is required
     # but API env keys are optional; unusable sessions fail at probe/runtime.
     # Binary presence alone is never treated as product authorization.
-    CLI_SESSION_PROVIDERS = frozenset({"gemini", "grok", "codex", "agy", "openai"})
-    if provider in {"gemini", "grok", "codex", "openai", "agy"}:
+    CLI_SESSION_PROVIDERS = frozenset({"gemini", "grok", "codex", "agy", "openai", "opencode"})
+    if provider in {"gemini", "grok", "codex", "openai", "agy", "opencode"}:
         cred_keys = {
             "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "NEXUS_GEMINI_API_KEY"),
             "agy": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "NEXUS_GEMINI_API_KEY"),
             "grok": ("XAI_API_KEY", "GROK_API_KEY", "NEXUS_GROK_API_KEY"),
             "codex": ("OPENAI_API_KEY", "CODEX_API_KEY", "NEXUS_CODEX_API_KEY"),
             "openai": ("OPENAI_API_KEY", "NEXUS_OPENAI_API_KEY"),
+            "opencode": (),
         }.get(provider, ())
         has_cred = any(str(env.get(k, "") or "").strip() for k in cred_keys)
         import shutil as _shutil
@@ -394,6 +395,7 @@ def resolve_online_execution_decision(
             "grok": "grok",
             "codex": "codex",
             "openai": "openai",
+            "opencode": "opencode",
         }.get(provider, provider)
         binary_present = bool(_shutil.which(binary_name))
         # API-key-only path (openai without CLI session): require env key on require.

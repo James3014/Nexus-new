@@ -62,6 +62,14 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "binary_name": "openai",
         "print_flag": "",
     },
+    "opencode": {
+        "transport": "subprocess",
+        "binary_env": "NEXUS_OPENCODE_BIN",
+        "command_env": "NEXUS_OPENCODE_COMMAND",
+        "binary_name": "opencode",
+        "print_flag": "",
+        "default_model": "opencode/deepseek-v4-flash-free",
+    },
 }
 
 # Local-only providers may appear on Gateway defaults (auto-detect) but are not
@@ -803,6 +811,10 @@ def build_subprocess_online_invoker(
                 argv = [argv[0], "--dangerously-skip-permissions", print_flag, stdin]
             else:
                 argv = [argv[0], print_flag, stdin]
+        elif spec.provider == "opencode" and len(argv) == 1:
+            model = str(meta.get("default_model", "") or "").strip()
+            argv = [argv[0], "run", "--model", model, stdin]
+            stdin_input = None
             stdin_input = None
         else:
             if spec.provider == "agy" and "--dangerously-skip-permissions" not in argv:
