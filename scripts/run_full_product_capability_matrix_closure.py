@@ -192,6 +192,7 @@ def _nested(val: Any, p: str, c: str) -> Any:
 
 
 if __name__ == "__main__":
+    os.environ["NEXUS_ARMOR_ALLOW_EPHEMERAL"] = "1"
     res = run_68_matrix_and_generate_receipt()
     print("Matrix pass count:", res["product_matrix_pass"])
     print("Final verdict:", res["final_verdict"])

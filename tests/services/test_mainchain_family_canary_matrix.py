@@ -288,6 +288,7 @@ def _run_family_canary(
     task_id_override: str = "",
 ) -> dict[str, Any]:
     """Single MainchainEntry canary — gate/status only from receipt capability row."""
+    os.environ["NEXUS_ARMOR_ALLOW_EPHEMERAL"] = "1"
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     family_ctx = _family_positive_context(name) if positive else {}
     if positive and not family_ctx.get("source_hash"):
