@@ -7,9 +7,9 @@ logger = logging.getLogger(__name__)
 class XRayService:
     """👁️ v23 X-Ray Service: 全域多維度依賴觀測 (Cross-Repo/Multi-Dir)"""
     
-    def __init__(self, project_root: str):
+    def __init__(self, project_root: str, report_path: str | None = None):
         self.project_root = Path(project_root)
-        self.report_path = self.project_root / "xray_report_full.md"
+        self.report_path = Path(report_path) if report_path else self.project_root / "xray_report_full.md"
 
     def run(self, targets: List[str], recursive: bool = True, docker: bool = False) -> str:
         """執行掃描並產出報告"""

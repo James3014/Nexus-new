@@ -59,15 +59,16 @@ class LearnClaim:
 
 
 class LearnModeService:
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, run_root: Path | None = None):
         self.project_root = Path(project_root)
-        self.knowledge_dir = self.project_root / ".nexus" / "knowledge"
+        self._run_root = Path(run_root) if run_root is not None else self.project_root
+        self.knowledge_dir = self._run_root / ".nexus" / "knowledge"
         self.raw_dir = self.knowledge_dir / "raw_sources"
         self.claims_path = self.knowledge_dir / "learn_claims.jsonl"
         self.sources_path = self.knowledge_dir / "learn_sources.jsonl"
         self.benchmark_candidates_path = self.knowledge_dir / "learn_benchmark_candidates.jsonl"
         self.benchmark_bank_path = self.knowledge_dir / "learn_benchmark_bank.json"
-        self.reports_dir = self.project_root / ".nexus" / "reports" / "learn"
+        self.reports_dir = self._run_root / ".nexus" / "reports" / "learn"
         self.phase_writeback_path = self.reports_dir / "phase_writeback.jsonl"
         self.phase_slo_summary_path = self.reports_dir / "phase_slo_summary.json"
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
