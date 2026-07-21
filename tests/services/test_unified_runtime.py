@@ -917,12 +917,43 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
 
 
 def test_negative_control_deny_missing_provider_binary(monkeypatch) -> None:
-    """deny + missing provider binary: binary resolution must NOT occur."""
-    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
-    invoker = build_registered_online_invoker("gemini")
+    """deny + missing provider binary: zero forbidden calls."""
+    import shutil
+    from nexus.services.unified_runtime import (
+        build_subprocess_online_invoker,
+        resolve_registered_online_cli_spec,
+    )
 
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+
+    counts: dict[str, int] = {"which": 0, "resolve": 0, "build_invoker": 0}
+
+    def _which_sentinel(*_a, **_kw):
+        counts["which"] += 1
+        raise AssertionError("shutil.which called during deny path")
+
+    def _resolve_sentinel(*_a, **_kw):
+        counts["resolve"] += 1
+        raise AssertionError("resolve_registered_online_cli_spec called during deny path")
+
+    def _build_sentinel(*_a, **_kw):
+        counts["build_invoker"] += 1
+        raise AssertionError("build_subprocess_online_invoker called during deny path")
+
+    monkeypatch.setattr(shutil, "which", _which_sentinel)
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.resolve_registered_online_cli_spec",
+        _resolve_sentinel,
+    )
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.build_subprocess_online_invoker",
+        _build_sentinel,
+    )
+
+    invoker = build_registered_online_invoker("gemini")
     result = invoker({"task_id": "nc-1", "task_statement": "do not run"})
 
+    assert counts == {"which": 0, "resolve": 0, "build_invoker": 0}
     assert result["invoked"] is False
     assert result["provider_call_count"] == 0
     assert result["error"] == "online_execution_not_authorized"
@@ -930,12 +961,43 @@ def test_negative_control_deny_missing_provider_binary(monkeypatch) -> None:
 
 
 def test_negative_control_deny_invalid_provider(monkeypatch) -> None:
-    """deny + invalid/unregistered provider: must not raise at build time."""
-    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
-    invoker = build_registered_online_invoker("nonexistent_provider")
+    """deny + invalid/unregistered provider: zero forbidden calls."""
+    import shutil
+    from nexus.services.unified_runtime import (
+        build_subprocess_online_invoker,
+        resolve_registered_online_cli_spec,
+    )
 
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+
+    counts: dict[str, int] = {"which": 0, "resolve": 0, "build_invoker": 0}
+
+    def _which_sentinel(*_a, **_kw):
+        counts["which"] += 1
+        raise AssertionError("shutil.which called during deny path")
+
+    def _resolve_sentinel(*_a, **_kw):
+        counts["resolve"] += 1
+        raise AssertionError("resolve_registered_online_cli_spec called during deny path")
+
+    def _build_sentinel(*_a, **_kw):
+        counts["build_invoker"] += 1
+        raise AssertionError("build_subprocess_online_invoker called during deny path")
+
+    monkeypatch.setattr(shutil, "which", _which_sentinel)
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.resolve_registered_online_cli_spec",
+        _resolve_sentinel,
+    )
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.build_subprocess_online_invoker",
+        _build_sentinel,
+    )
+
+    invoker = build_registered_online_invoker("nonexistent_provider")
     result = invoker({"task_id": "nc-2", "task_statement": "do not run"})
 
+    assert counts == {"which": 0, "resolve": 0, "build_invoker": 0}
     assert result["invoked"] is False
     assert result["provider_call_count"] == 0
     assert result["error"] == "online_execution_not_authorized"
@@ -943,19 +1005,34 @@ def test_negative_control_deny_invalid_provider(monkeypatch) -> None:
 
 
 def test_negative_control_authorized_missing_provider_binary(monkeypatch) -> None:
-    """authorized + missing provider binary: fail closed with binary-not-found."""
+    """authorized + missing provider binary: subprocess adapter not executed."""
     import shutil
+    from nexus.services.unified_runtime import build_subprocess_online_invoker
 
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.setattr(shutil, "which", lambda _name: None)
-    invoker = build_registered_online_invoker("gemini")
 
+    build_calls: list[object] = []
+
+    def _build_sentinel(*a, **kw):
+        build_calls.append((a, kw))
+        # Fall through to real function so the exception is properly caught.
+        return build_subprocess_online_invoker(*a, **kw)
+
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.build_subprocess_online_invoker",
+        _build_sentinel,
+    )
+
+    invoker = build_registered_online_invoker("gemini")
     result = invoker({
         "task_id": "nc-3",
         "task_statement": "try to run",
         "online_execution_authorized": True,
     })
 
+    # shutil.which returning None → resolve fails before build_subprocess_online_invoker.
+    assert len(build_calls) == 0, "build_subprocess_online_invoker should not be called"
     assert result["invoked"] is False
     assert result["provider_call_count"] == 0
     assert result["error"] == "provider_binary_not_found"
@@ -982,33 +1059,87 @@ def test_negative_control_required_memory_missing_context() -> None:
         assert "PROJECT_MEMORY_CONTEXT_REQUIRED" in error, f"unexpected error: {error}"
 
 
-def test_negative_control_required_memory_valid_context() -> None:
-    """Required memory capability with valid context: passes."""
+def test_negative_control_required_memory_valid_project_context(tmp_path: Path) -> None:
+    """Required memory via build_local_memory_capability_invoker with production adapter boundary."""
+    from types import SimpleNamespace
+
     planner = _Planner()
     runtime = UnifiedRuntime(planner=planner)
+
+    class _Adapter:
+        last_metadata = {"status": "ok", "retrieval_sources": ["test_fixture"]}
+
+        def retrieve(self, *, query_text: str, limit: int):
+            return [
+                SimpleNamespace(
+                    finding_id="nc-memory-1",
+                    summary="bounded memory result for negative control",
+                    relevance_score=0.95,
+                    provenance="receipt:nc-memory-1",
+                    source="test_fixture",
+                    pattern_type="success",
+                    task_id="nc-task",
+                )
+            ]
+
+    memory_invoker = build_local_memory_capability_invoker(
+        tmp_path,
+        adapter=_Adapter(),
+        limit=3,
+    )
+
+    invokers = dict(_DETERMINISTIC_CAPABILITY_INVOKERS)
+    invokers["memory"] = memory_invoker
+
     receipt = runtime.run(
         _request(),
-        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        capability_invokers=invokers,
         online_invoker=_online,
         verifier=_verifier,
+        learning=_learning,
     )
 
     mem_result = receipt.get("capability_results", {}).get("memory", {})
-    assert mem_result.get("gate_passed") is True, f"memory failed: {mem_result}"
+    assert mem_result.get("invoked") is True, f"memory not invoked: {mem_result}"
+    assert mem_result.get("gate_passed") is True, f"memory not passed: {mem_result}"
 
+    ev_refs = mem_result.get("evidence_refs", [])
+    assert any("memory" in r for r in ev_refs), f"missing memory evidence_refs: {ev_refs}"
+    assert any("retrieval" in r for r in ev_refs), f"missing retrieval evidence_refs: {ev_refs}"
 
-def test_negative_control_optional_non_selected_memory() -> None:
-    """Non-selected memory capability: no impact on receipt."""
-    runtime = UnifiedRuntime(planner=CapabilityPlanner())
-    receipt = runtime.run(
-        _request(),
-        online_invoker=_online,
-        verifier=_verifier,
+    assert receipt["receipt_complete"] is True, (
+        f"receipt not complete: blockers={receipt.get('capability_closure_blockers')}"
     )
 
-    # Real CapabilityPlanner does not select memory in standard route.
+
+def test_negative_control_optional_non_selected_memory(monkeypatch, tmp_path: Path) -> None:
+    """Non-selected memory with real CapabilityPlanner: receipt_complete=True."""
+    from nexus.services.gateway import BattlesuitGateway
+
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    monkeypatch.setattr(
+        gateway,
+        "ask_structured",
+        lambda *_args, **_kwargs: ({"summary": "online"}, "online-response"),
+    )
+
+    # Real CapabilityPlanner selects harness_preflight_sensor, repair_loop, etc.
+    # Provide deterministic fixtures for all selected caps.
+    receipt = gateway.ask_unified(
+        _request(),
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
     caps = receipt.get("capability_results", {})
-    assert "memory" not in caps
+    assert "memory" not in caps, "memory should not be selected by real planner"
+    assert receipt["receipt_complete"] is True, (
+        f"receipt not complete: blockers={receipt.get('capability_closure_blockers')}"
+    )
 
 
 def test_explicit_committee_route_enters_unified_receipt_fail_closed(tmp_path: Path, monkeypatch) -> None:
