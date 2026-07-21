@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from nexus.services.capability_registry import (
@@ -26,6 +27,17 @@ EVIDENCE_INCOMPLETE = "EVIDENCE_INCOMPLETE"
 VERIFIER_FAILED = "VERIFIER_FAILED"
 EXECUTION_FAILED = "EXECUTION_FAILED"
 NOT_TESTED = "NOT_TESTED"
+
+EVIDENCE_MODE_SIMULATION = "simulation"
+EVIDENCE_MODE_HARNESS = "harness"
+EVIDENCE_MODE_CANARY = "canary"
+EVIDENCE_MODE_LIVE_PROVIDER = "live_provider"
+EVIDENCE_MODES = frozenset({
+    EVIDENCE_MODE_SIMULATION,
+    EVIDENCE_MODE_HARNESS,
+    EVIDENCE_MODE_CANARY,
+    EVIDENCE_MODE_LIVE_PROVIDER,
+})
 
 PRODUCT_CAPABILITIES = tuple(
     sorted(
@@ -334,6 +346,122 @@ def _assist_lineage_complete(lineage: Mapping[str, Any], record: Mapping[str, An
     return True
 
 
+def _physical_evidence_verify(
+    evidence_ref: Mapping[str, Any],
+    run_root: str | Path | None = None,
+) -> list[str]:
+    """Verify a single evidence reference has a physical file with matching hash.
+
+    Returns a list of failure reasons (empty = pass).
+    """
+    failures: list[str] = []
+    path_str = str(evidence_ref.get("path") or "").strip()
+    claimed_sha = str(evidence_ref.get("sha256") or "").strip()
+    payload = evidence_ref.get("payload")
+
+    if not path_str:
+        failures.append("evidence_path_missing")
+        return failures
+
+    evidence_path = Path(path_str)
+    if not evidence_path.exists():
+        failures.append("evidence_file_not_found")
+        return failures
+
+    if evidence_path.is_symlink():
+        real_target = evidence_path.resolve()
+        if run_root is not None:
+            run_root_resolved = Path(run_root).resolve()
+            try:
+                real_target.relative_to(run_root_resolved)
+            except ValueError:
+                failures.append("symlink_escape_detected")
+                return failures
+        failures.append("symlink_evidence_not_allowed")
+        return failures
+
+    if run_root is not None:
+        run_root_resolved = Path(run_root).resolve()
+        try:
+            evidence_path.resolve().relative_to(run_root_resolved)
+        except ValueError:
+            failures.append("path_traversal_detected")
+            return failures
+
+    try:
+        actual_bytes = evidence_path.read_bytes()
+    except OSError:
+        failures.append("evidence_file_unreadable")
+        return failures
+
+    actual_hash = hashlib.sha256(actual_bytes).hexdigest()
+    if claimed_sha and actual_hash != claimed_sha.lower():
+        failures.append("evidence_hash_mismatch")
+        return failures
+
+    if payload is not None:
+        recomputed = _canonical_hash(payload)
+        if recomputed != actual_hash:
+            failures.append("evidence_payload_hash_mismatch")
+
+    try:
+        decoded = actual_bytes.decode("utf-8")
+        json.loads(decoded)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        failures.append("evidence_file_not_valid_json")
+        return failures
+
+    if evidence_ref.get("raw_output") is not None:
+        raw_output = evidence_ref["raw_output"]
+        if isinstance(raw_output, str):
+            raw_bytes = raw_output.encode("utf-8")
+        elif isinstance(raw_output, bytes):
+            raw_bytes = raw_output
+        else:
+            failures.append("provider_raw_output_invalid_type")
+            return failures
+        raw_claimed = evidence_ref.get("raw_output_sha256") or ""
+        if raw_claimed and hashlib.sha256(raw_bytes).hexdigest() != raw_claimed.lower():
+            failures.append("provider_raw_output_hash_mismatch")
+            return failures
+    elif claimed_sha:
+        failures.append("provider_raw_output_missing")
+        return failures
+
+    if evidence_ref.get("adapter_claimed_success") is True and not evidence_ref.get("raw_output"):
+        failures.append("adapter_synthesized_without_raw_provider_output")
+        return failures
+
+    return failures
+
+
+def _evidence_mode_classify(record: Mapping[str, Any]) -> str:
+    """Determine evidence mode from record fields. Unknown mode fails closed."""
+    mode = str(record.get("evidence_mode") or "").strip().lower()
+    if mode in EVIDENCE_MODES:
+        return mode
+    if mode:
+        return mode
+
+    provider = str(record.get("provider") or "").lower()
+    transport = str(record.get("transport") or "").lower()
+    physical = str(record.get("physical_callable") or "").lower()
+
+    if any(m in provider for m in ("fixture", "fake", "synthetic", "shadow", "injected")):
+        return EVIDENCE_MODE_SIMULATION
+    if any(m in transport for m in ("fixture", "fake", "synthetic", "shadow", "injected")):
+        return EVIDENCE_MODE_SIMULATION
+    if any(m in physical for m in ("fixture", "test:", "synthetic")):
+        return EVIDENCE_MODE_SIMULATION
+
+    if record.get("planner_selected") is True and record.get("invoked") is True:
+        online = record.get("online")
+        if isinstance(online, Mapping) and online.get("invoked") is True:
+            return EVIDENCE_MODE_CANARY
+
+    return EVIDENCE_MODE_SIMULATION
+
+
 def _verdict(
     record: Mapping[str, Any],
     *,
@@ -349,6 +477,7 @@ def _verdict(
         "capability": str(record.get("capability") or ""),
         "origin": str(record.get("origin") or ""),
         "resolution_type": str(record.get("resolution_type") or ""),
+        "evidence_mode": str(record.get("evidence_mode") or ""),
         "status": status,
         "live_pass": live_pass,
         "gate_verdict": "PASS" if live_pass else "BLOCK_OR_RETURN",
@@ -421,6 +550,45 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
             reasons=["claim_boundary_not_fail_closed"],
         )
 
+    task_id = str(record.get("task_id") or "").strip()
+    if not task_id:
+        return _verdict(record, status=EVIDENCE_INCOMPLETE, reasons=["task_id_missing"])
+    if not str(record.get("planner_decision_id") or "").strip():
+        return _verdict(record, status=EVIDENCE_INCOMPLETE, reasons=["planner_decision_id_missing"])
+
+    evidence_mode = _evidence_mode_classify(record)
+    if evidence_mode not in EVIDENCE_MODES:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["evidence_mode_unknown"],
+        )
+
+    if record.get("live_pass") is True and evidence_mode != EVIDENCE_MODE_LIVE_PROVIDER:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"producer_claimed_live_pass_in_{evidence_mode}_mode"],
+        )
+
+    if record.get("gate_passed") is True and evidence_mode != EVIDENCE_MODE_LIVE_PROVIDER:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"producer_claimed_gate_passed_in_{evidence_mode}_mode"],
+        )
+
+    if record.get("lineage_recomputed") is True:
+        independent_check = _hash_matches(
+            record.get("receipt_payload"), record.get("receipt_hash")
+        )
+        if not independent_check:
+            return _verdict(
+                record,
+                status=EVIDENCE_INCOMPLETE,
+                reasons=["lineage_recomputed_without_independent_verification"],
+            )
+
     missing: list[str] = []
     if not str(record.get("physical_callable") or "").strip():
         missing.append("physical_callable_missing")
@@ -454,6 +622,13 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
         or (origin == "local" and expected_resolution == "CONSUME_SHARED_EVIDENCE")
     ) and not _assist_lineage_complete(_mapping(record.get("assist_lineage")), record):
         missing.append("assist_lineage_incomplete")
+
+    if evidence_mode == EVIDENCE_MODE_LIVE_PROVIDER:
+        run_root = str(record.get("run_root") or "").strip() or None
+        for ref in (refs or []):
+            if isinstance(ref, Mapping):
+                phys_failures = _physical_evidence_verify(ref, run_root=run_root)
+                missing.extend(phys_failures)
 
     if missing:
         return _verdict(record, status=EVIDENCE_INCOMPLETE, reasons=missing)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+from pathlib import Path
 
 from nexus.services.product_capability_closure import (
     BLOCKED_DEPENDENCY,
@@ -39,7 +40,11 @@ def _valid_record(
     }
     verifier_evidence = {"command": "pytest -q", "exit_code": 0}
     verifier_artifact = {"status": "VERIFIED", "capability": capability}
+    task_id = "task-1"
+    plan_id = "plan-1"
     record: dict[str, object] = {
+        "task_id": task_id,
+        "planner_decision_id": plan_id,
         "capability": capability,
         "origin": origin,
         "resolution_type": resolution,
@@ -51,11 +56,14 @@ def _valid_record(
         "gate_passed": True,
         "physical_callable": "nexus.core.capability_executor_registry:codeintel",
         "provider": "production",
+        "evidence_mode": "live_provider",
         "evidence_refs": [
             {
-                "path": "/tmp/evidence/codeintel.json",
+                "path": f"/tmp/evidence/{capability}.json",
                 "sha256": _hash_payload(evidence_payload),
                 "payload": evidence_payload,
+                "raw_output": json.dumps(evidence_payload, sort_keys=True, separators=(",", ":")),
+                "raw_output_sha256": _hash_payload(evidence_payload),
             }
         ],
         "observable_effect": {
@@ -78,9 +86,14 @@ def _valid_record(
         "public_claim_allowed": False,
         "route_surface_changed": False,
     }
+    # Ensure evidence file exists on disk (compact separators to match _canonical_hash)
+    ev_dir = Path("/tmp/evidence")
+    ev_dir.mkdir(parents=True, exist_ok=True)
+    ev_path = ev_dir / f"{capability}.json"
+    ev_path.write_text(json.dumps(evidence_payload, sort_keys=True, separators=(",", ":")))
     if origin == "local":
-        task_id = str(record.get("task_id") or "task-1")
-        plan_id = str(record.get("planner_decision_id") or "plan-1")
+        task_id = str(record.get("task_id") or task_id)
+        plan_id = str(record.get("planner_decision_id") or plan_id)
         rev_id = str(record.get("workspace_revision") or "rev-1")
         record["task_id"] = task_id
         record["planner_decision_id"] = plan_id

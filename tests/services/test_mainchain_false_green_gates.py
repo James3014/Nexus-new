@@ -3174,3 +3174,779 @@ def test_id_only_lists_cannot_mark_consumer_consumed_on_r3():
         "PRESENT_NOT_CONSUMED",
     }
     assert status != "CONSUMED"
+
+
+def test_production_runner_imports_no_tests() -> None:
+    """Production closure runner must import only production modules — no tests.* imports allowed."""
+    import sys
+    from nexus.services import product_capability_closure_runner
+
+    closure_runner_path = Path(product_capability_closure_runner.__file__)
+    content = closure_runner_path.read_text(encoding="utf-8")
+    assert "from tests" not in content, "Production closure runner must not import tests.*"
+    assert "import tests" not in content, "Production closure runner must not import tests.*"
+
+
+# ── E1: Evidence mode and physical trust boundary ──────────────────────
+
+
+def _canonical_hash(value: object) -> str:
+    """Match the production _canonical_hash exactly."""
+    import hashlib, json
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _baseline_live_record(evidence_path: Path | None = None) -> dict:
+    """Return a valid baseline record that passes LIVE_EXECUTED_PASS."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    tmp_dir = Path("/tmp/e1_baseline")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ep = evidence_path or (tmp_dir / "baseline.json")
+    payload = {"task_id": "baseline-test", "capability": "codeintel"}
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ep.write_bytes(body)
+    sha = hashlib.sha256(body).hexdigest()
+    effect_payload = {"action": "codeintel"}
+    return {
+        "task_id": "baseline-test",
+        "planner_decision_id": "pd-baseline",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(ep),
+                "sha256": sha,
+                "payload": payload,
+                "raw_output": body.decode(),
+                "raw_output_sha256": sha,
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": effect_payload,
+            "artifact_hash": _canonical_hash(effect_payload),
+        },
+        "receipt_payload": {"task_id": "baseline-test"},
+        "receipt_hash": _canonical_hash({"task_id": "baseline-test"}),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": _canonical_hash({"exit_code": 0}),
+            "artifact_payload": {"task_id": "baseline-test"},
+            "artifact_hash": _canonical_hash({"task_id": "baseline-test"}),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+        "run_root": str(tmp_dir),
+    }
+
+
+def test_e1_baseline_passes() -> None:
+    """Valid baseline record must pass LIVE_EXECUTED_PASS."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    rec = _baseline_live_record()
+    verdict = verify_product_capability_resolution(rec)
+    assert verdict["status"] == "LIVE_EXECUTED_PASS", f"baseline failed: {verdict['missing_evidence_reasons']}"
+    import shutil
+    shutil.rmtree("/tmp/e1_baseline", ignore_errors=True)
+
+
+def test_e1_fake_payload_no_physical_file_blocks() -> None:
+    """Matching fake payload plus fake hash but no physical file → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    fake_hash = hashlib.sha256(b"fake-payload").hexdigest()
+    record = {
+        "task_id": "test-fake-file",
+        "planner_decision_id": "pd-fake-file",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": "/tmp/nonexistent_evidence_file.json",
+                "sha256": fake_hash,
+                "payload": {"fake": True},
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": hashlib.sha256(json.dumps({"action": "codeintel"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "receipt_payload": {"task_id": "test-fake-file"},
+        "receipt_hash": hashlib.sha256(json.dumps({"task_id": "test-fake-file"}, sort_keys=True).encode()).hexdigest(),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": hashlib.sha256(json.dumps({"exit_code": 0}, sort_keys=True).encode()).hexdigest(),
+            "artifact_payload": {"task_id": "test-fake-file"},
+            "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-fake-file"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("evidence_file_not_found" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_evidence_file_changed_after_receipt_blocks() -> None:
+    """Evidence file changed after receipt creation → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution, _canonical_hash
+
+    tmp_dir = Path("/tmp/e1_tamper_test")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    evidence_path = tmp_dir / "evidence.json"
+    original_payload = {"task_id": "tamper-test", "capability": "codeintel"}
+    original_bytes = json.dumps(original_payload, sort_keys=True, separators=(",", ":")).encode()
+    original_hash = hashlib.sha256(original_bytes).hexdigest()
+    evidence_path.write_bytes(original_bytes)
+    original_raw = original_bytes.decode("utf-8")
+
+    record = {
+        "task_id": "test-tamper",
+        "planner_decision_id": "pd-tamper",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(evidence_path),
+                "sha256": original_hash,
+                "payload": original_payload,
+                "raw_output": original_raw,
+                "raw_output_sha256": original_hash,
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": _canonical_hash({"action": "codeintel"}),
+        },
+        "receipt_payload": {"task_id": "test-tamper"},
+        "receipt_hash": _canonical_hash({"task_id": "test-tamper"}),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": _canonical_hash({"exit_code": 0}),
+            "artifact_payload": {"task_id": "test-tamper"},
+            "artifact_hash": _canonical_hash({"task_id": "test-tamper"}),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+
+    verdict1 = verify_product_capability_resolution(record)
+    assert verdict1["status"] == "LIVE_EXECUTED_PASS"
+
+    evidence_path.write_bytes(json.dumps({"tampered": True}).encode())
+    verdict2 = verify_product_capability_resolution(record)
+    assert verdict2["status"] != "LIVE_EXECUTED_PASS"
+    assert any("evidence_hash_mismatch" in r for r in verdict2["missing_evidence_reasons"])
+    evidence_path.unlink(missing_ok=True)
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_e1_missing_evidence_path_blocks() -> None:
+    """Missing evidence path → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-empty-path",
+        "planner_decision_id": "pd-empty-path",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": "",
+                "sha256": "abc",
+                "payload": {},
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": hashlib.sha256(json.dumps({"action": "codeintel"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "receipt_payload": {"task_id": "test-empty-path"},
+        "receipt_hash": hashlib.sha256(json.dumps({"task_id": "test-empty-path"}, sort_keys=True).encode()).hexdigest(),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": hashlib.sha256(json.dumps({"exit_code": 0}, sort_keys=True).encode()).hexdigest(),
+            "artifact_payload": {"task_id": "test-empty-path"},
+            "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-empty-path"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("evidence_path_missing" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_path_traversal_outside_run_root_blocks() -> None:
+    """Path traversal outside run root → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    run_root = Path("/tmp/e1_traversal_test")
+    run_root.mkdir(parents=True, exist_ok=True)
+    outside_path = Path("/tmp/e1_outside_evidence.json")
+    outside_path.write_text(json.dumps({"outside": True}))
+    outside_raw = json.dumps({"outside": True})
+    outside_hash = hashlib.sha256(outside_raw.encode()).hexdigest()
+
+    record = {
+        "task_id": "test-traversal",
+        "planner_decision_id": "pd-traversal",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(outside_path),
+                "sha256": outside_hash,
+                "payload": {"outside": True},
+                "raw_output": outside_raw,
+                "raw_output_sha256": outside_hash,
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": hashlib.sha256(json.dumps({"action": "codeintel"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "receipt_payload": {"task_id": "test-traversal"},
+        "receipt_hash": hashlib.sha256(json.dumps({"task_id": "test-traversal"}, sort_keys=True).encode()).hexdigest(),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": hashlib.sha256(json.dumps({"exit_code": 0}, sort_keys=True).encode()).hexdigest(),
+            "artifact_payload": {"task_id": "test-traversal"},
+            "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-traversal"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+        "run_root": str(run_root),
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("path_traversal_detected" in r for r in verdict["missing_evidence_reasons"])
+    outside_path.unlink(missing_ok=True)
+    import shutil
+    shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_e1_symlink_escape_blocks() -> None:
+    """Symlink escape → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+    import shutil
+
+    run_root = Path("/tmp/e1_symlink_test")
+    shutil.rmtree(run_root, ignore_errors=True)
+    run_root.mkdir(parents=True, exist_ok=True)
+    target_file = Path("/tmp/e1_symlink_target.json")
+    target_file.write_text(json.dumps({"target": True}))
+    symlink_path = run_root / "evidence_link.json"
+    symlink_path.symlink_to(target_file)
+
+    record = {
+        "task_id": "test-symlink",
+        "planner_decision_id": "pd-symlink",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(symlink_path),
+                "sha256": hashlib.sha256(target_file.read_bytes()).hexdigest(),
+                "payload": {"target": True},
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": hashlib.sha256(json.dumps({"action": "codeintel"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "receipt_payload": {"task_id": "test-symlink"},
+        "receipt_hash": hashlib.sha256(json.dumps({"task_id": "test-symlink"}, sort_keys=True).encode()).hexdigest(),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": hashlib.sha256(json.dumps({"exit_code": 0}, sort_keys=True).encode()).hexdigest(),
+            "artifact_payload": {"task_id": "test-symlink"},
+            "artifact_hash": hashlib.sha256(json.dumps({"task_id": "test-symlink"}, sort_keys=True).encode()).hexdigest(),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+        "run_root": str(run_root),
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("symlink_evidence_not_allowed" in r or "symlink_escape_detected" in r
+               for r in verdict["missing_evidence_reasons"])
+    symlink_path.unlink(missing_ok=True)
+    target_file.unlink(missing_ok=True)
+    import shutil
+    shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_e1_harness_canary_marked_live_pass_blocks() -> None:
+    """Harness/canary marked live_pass → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-harness-live",
+        "planner_decision_id": "pd-harness-live",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [{"path": "/tmp/x", "sha256": "abc", "payload": {}}],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": "abc",
+        },
+        "receipt_payload": {"task_id": "test-harness-live"},
+        "receipt_hash": "abc",
+        "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
+        "gate_passed": True,
+        "live_pass": True,
+        "evidence_mode": "canary",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("producer_claimed_live_pass_in_canary" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_fabricated_provider_native_id_blocks() -> None:
+    """Fabricated provider native ID → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-fabricated",
+        "planner_decision_id": "pd-fabricated",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "provider": "fake_provider_with_native_id",
+        "transport": "injected_transport",
+        "evidence_refs": [{"path": "/tmp/x", "sha256": "abc", "payload": {}}],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": "abc",
+        },
+        "receipt_payload": {"task_id": "test-fabricated"},
+        "receipt_hash": "abc",
+        "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("synthetic" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_lineage_recomputed_without_check_blocks() -> None:
+    """Producer says lineage_recomputed=true without independent check → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-lineage",
+        "planner_decision_id": "pd-lineage",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [{"path": "/tmp/x", "sha256": "abc", "payload": {}}],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": "abc",
+        },
+        "receipt_payload": {"task_id": "test-lineage"},
+        "receipt_hash": "wrong_hash",
+        "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
+        "gate_passed": True,
+        "lineage_recomputed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("lineage_recomputed_without_independent" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_simulation_mode_blocks_live_pass() -> None:
+    """Simulation mode cannot count as live pass."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-sim-live",
+        "planner_decision_id": "pd-sim-live",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [{"path": "/tmp/x", "sha256": "abc", "payload": {}}],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": "abc",
+        },
+        "receipt_payload": {"task_id": "test-sim-live"},
+        "receipt_hash": "abc",
+        "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
+        "gate_passed": True,
+        "live_pass": True,
+        "evidence_mode": "simulation",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("producer_claimed_live_pass_in_simulation" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_unknown_evidence_mode_blocks() -> None:
+    """Unknown evidence mode fails closed."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-unknown-mode",
+        "planner_decision_id": "pd-unknown-mode",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [{"path": "/tmp/x", "sha256": "abc", "payload": {}}],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": "abc",
+        },
+        "receipt_payload": {"task_id": "test-unknown-mode"},
+        "receipt_hash": "abc",
+        "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
+        "gate_passed": True,
+        "evidence_mode": "totally_bogus_mode",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("evidence_mode_unknown" in r for r in verdict["missing_evidence_reasons"])
+
+
+def test_e1_task_origin_capability_mismatch_blocks() -> None:
+    """task_id mismatch between record and receipt_payload → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    record = {
+        "task_id": "test-abc",
+        "planner_decision_id": "pd-abc",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [{"path": "/tmp/x", "sha256": "abc", "payload": {}}],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": {"action": "codeintel"},
+            "artifact_hash": "abc",
+        },
+        "receipt_payload": {"task_id": "different-task"},
+        "receipt_hash": "abc",
+        "verifier": {"invoked": True, "passed": True, "evidence_payload": {}, "evidence_hash": "abc", "artifact_payload": {}, "artifact_hash": "abc"},
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+
+
+def test_e1_missing_provider_stderr_blocks() -> None:
+    """Missing raw_output field with claimed sha256 → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+    from pathlib import Path
+
+    tmp_dir = Path("/tmp/e1_missing_raw")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ev_path = tmp_dir / "evidence.json"
+    body = json.dumps({"real": "data"}, sort_keys=True, separators=(",", ":")).encode()
+    ev_path.write_bytes(body)
+    sha = hashlib.sha256(body).hexdigest()
+    effect_payload = {"action": "codeintel"}
+
+    record = {
+        "task_id": "test-stderr",
+        "planner_decision_id": "pd-stderr",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(ev_path),
+                "sha256": sha,
+                "payload": {"real": "data"},
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": effect_payload,
+            "artifact_hash": _canonical_hash(effect_payload),
+        },
+        "receipt_payload": {"task_id": "test-stderr"},
+        "receipt_hash": _canonical_hash({"task_id": "test-stderr"}),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": _canonical_hash({"exit_code": 0}),
+            "artifact_payload": {"task_id": "test-stderr"},
+            "artifact_hash": _canonical_hash({"task_id": "test-stderr"}),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("provider_raw_output_missing" in r for r in verdict["missing_evidence_reasons"])
+    ev_path.unlink(missing_ok=True)
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_e1_adapter_synthesized_success_blocks() -> None:
+    """Adapter claims success without raw provider output → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+    from pathlib import Path
+    import shutil
+
+    tmp_dir = Path("/tmp/e1_adapter_synth")
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ev_path = tmp_dir / "evidence.json"
+    body = json.dumps({"adapter": "yes"}, sort_keys=True, separators=(",", ":")).encode()
+    ev_path.write_bytes(body)
+    effect_payload = {"action": "codeintel"}
+
+    record = {
+        "task_id": "test-adapter-synth",
+        "planner_decision_id": "pd-adapter-synth",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(ev_path),
+                "payload": {"adapter": "yes"},
+                "adapter_claimed_success": True,
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": effect_payload,
+            "artifact_hash": _canonical_hash(effect_payload),
+        },
+        "receipt_payload": {"task_id": "test-adapter-synth"},
+        "receipt_hash": _canonical_hash({"task_id": "test-adapter-synth"}),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": _canonical_hash({"exit_code": 0}),
+            "artifact_payload": {"task_id": "test-adapter-synth"},
+            "artifact_hash": _canonical_hash({"task_id": "test-adapter-synth"}),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("adapter_synthesized_without_raw_provider_output" in r
+               for r in verdict["missing_evidence_reasons"])
+    ev_path.unlink(missing_ok=True)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_e1_json_evidence_parse_failure_blocks() -> None:
+    """Evidence file is not valid JSON → BLOCK."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+    from pathlib import Path
+    import shutil
+
+    tmp_dir = Path("/tmp/e1_json_parse_fail")
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ev_path = tmp_dir / "evidence.json"
+    raw = b"this is not json at all"
+    ev_path.write_bytes(raw)
+    sha = hashlib.sha256(raw).hexdigest()
+    effect_payload = {"action": "codeintel"}
+
+    record = {
+        "task_id": "test-json-parse",
+        "planner_decision_id": "pd-json-parse",
+        "capability": "codeintel",
+        "origin": "online",
+        "resolution_type": "ONLINE_NATIVE",
+        "planner_selected": True,
+        "trigger_condition_met": True,
+        "invoked": True,
+        "status": "SUCCEEDED",
+        "physical_callable": "nexus.services.capability_registry:codeintel",
+        "route_surface_changed": False,
+        "public_claim_allowed": False,
+        "structured_evidence_verified": True,
+        "evidence_refs": [
+            {
+                "path": str(ev_path),
+                "sha256": sha,
+                "payload": {},
+                "raw_output": raw.decode("utf-8"),
+                "raw_output_sha256": sha,
+            }
+        ],
+        "observable_effect": {
+            "effect_type": "EXECUTION_CONTROL",
+            "artifact_payload": effect_payload,
+            "artifact_hash": _canonical_hash(effect_payload),
+        },
+        "receipt_payload": {"task_id": "test-json-parse"},
+        "receipt_hash": _canonical_hash({"task_id": "test-json-parse"}),
+        "verifier": {
+            "invoked": True,
+            "passed": True,
+            "evidence_payload": {"exit_code": 0},
+            "evidence_hash": _canonical_hash({"exit_code": 0}),
+            "artifact_payload": {"task_id": "test-json-parse"},
+            "artifact_hash": _canonical_hash({"task_id": "test-json-parse"}),
+        },
+        "gate_passed": True,
+        "evidence_mode": "live_provider",
+    }
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] != "LIVE_EXECUTED_PASS"
+    assert any("evidence_file_not_valid_json" in r for r in verdict["missing_evidence_reasons"])
+    ev_path.unlink(missing_ok=True)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
