@@ -21,6 +21,8 @@ class XRayService:
         observer = XRayObserver(targets)
         report = observer.scan(recursive=recursive)
         
+        self.report_path.parent.mkdir(parents=True, exist_ok=True)
+        
         # 產出報告
         with open(self.report_path, "w") as f:
             f.write(f"# v23 X-Ray Full Analysis Report\n\n")

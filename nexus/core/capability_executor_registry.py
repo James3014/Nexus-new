@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -342,6 +343,26 @@ def _auth_blocked_receipt(
             auth_required=True,
         ),
     )
+
+
+def _resolve_run_root(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str]:
+    constraints = plan.constraints or {}
+    project_root = Path(str(constraints.get("project_root", ".")))
+    run_id = str(constraints.get("run_id") or plan.task_id)
+    raw = constraints.get("run_root") or constraints.get("runtime_root")
+    if raw:
+        run_root = Path(str(raw))
+    else:
+        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", run_id)[:120]
+        run_root = project_root / ".nexus" / "runtime" / safe_id
+    return project_root, run_root, run_id
+
+
+def _assert_outputs_in_run_root(output_paths: list[Path], run_root: Path) -> None:
+    rr = run_root.resolve()
+    for p in output_paths:
+        if not str(p.resolve()).startswith(str(rr)):
+            raise RuntimeError(f"output path {p} resolves outside run_root {rr}")
 
 
 # ─── S-phase ──────────────────────────────────────────────────────────────────
@@ -2301,10 +2322,8 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             ),
         )
     try:
-        from pathlib import Path
-
-        inst = cls(project_root=Path("."))
-        # Real production method — not construct/bind probe.
+        project_root, run_root, run_id = _resolve_run_root(plan)
+        inst = cls(project_root=project_root, run_root=run_root)
         if hasattr(inst, "build_report") and callable(inst.build_report):
             result = inst.build_report()
             action = "build_report"
@@ -2315,6 +2334,8 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             raise RuntimeError("LearnModeService has no production report method")
         elapsed = int((time.monotonic() - start) * 1000)
         ok = result is not None
+        output_paths = [run_root / ".nexus" / "reports" / "learn"]
+        _assert_outputs_in_run_root(output_paths, run_root)
         return _make_receipt(
             "learn_mode",
             plan,
@@ -2327,6 +2348,9 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
                 result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
                 physical_callable=f"nexus.research.learn_mode.LearnModeService.{action}",
                 task_hint=str(task_desc or "")[:80],
+                run_id=run_id,
+                resolved_run_root=str(run_root),
+                output_paths=[str(p) for p in output_paths],
             ),
         )
     except Exception as exc:
@@ -2348,31 +2372,16 @@ def _exec_learn_mode(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
 def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from pathlib import Path
+        from nexus.research.learn_mode import LearnModeService
 
-        from nexus.research.learn_mode import LearnModeService, PhaseSLOService
-
-        # Prefer LearnModeService physical path; PhaseSLOService as fallback.
-        try:
-            lm = LearnModeService(project_root=Path("."))
-            result = lm.build_phase_slo_report(window=1)
-            physical = "nexus.research.learn_mode.LearnModeService.build_phase_slo_report"
-        except Exception:
-            class _Ctx:
-                def __init__(self) -> None:
-                    self.repo_root = "."
-                    self.task_id = plan.task_id
-                    self.window = 1
-
-            try:
-                inst = PhaseSLOService(_Ctx())  # type: ignore[arg-type]
-            except Exception:
-                inst = object.__new__(PhaseSLOService)
-                inst.ctx = _Ctx()  # type: ignore[attr-defined]
-            result = PhaseSLOService.build_phase_slo_report(inst, window=1)
-            physical = "nexus.research.learn_mode.PhaseSLOService.build_phase_slo_report"
+        project_root, run_root, run_id = _resolve_run_root(plan)
+        lm = LearnModeService(project_root=project_root, run_root=run_root)
+        result = lm.build_phase_slo_report(window=1)
+        physical = "nexus.research.learn_mode.LearnModeService.build_phase_slo_report"
         elapsed = int((time.monotonic() - start) * 1000)
         ok = result is not None
+        output_paths = [run_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"]
+        _assert_outputs_in_run_root(output_paths, run_root)
         return _make_receipt(
             "learn_phase_slo",
             plan,
@@ -2384,6 +2393,9 @@ def _exec_learn_phase_slo(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
                 evidence_refs=[f"ev_learn_phase_slo_{plan.task_id}"],
                 result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
                 physical_callable=physical,
+                run_id=run_id,
+                resolved_run_root=str(run_root),
+                output_paths=[str(p) for p in output_paths],
             ),
         )
     except Exception as exc:
@@ -3415,8 +3427,12 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
     try:
         from nexus.services.xray_service import XRayService
 
-        inst = XRayService(project_root=".")
-        # Bounded target list — single known file, no docker.
+        project_root, run_root, run_id = _resolve_run_root(plan)
+        report_path = run_root / "xray_report_full.md"
+        output_paths = [report_path]
+        _assert_outputs_in_run_root(output_paths, run_root)
+
+        inst = XRayService(project_root=str(project_root), report_path=str(report_path))
         result = inst.run(targets=["nexus/services/capability_registry.py"], recursive=False, docker=False)
         elapsed = int((time.monotonic() - start) * 1000)
         ok = result is not None
@@ -3431,6 +3447,9 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
                 evidence_refs=[f"ev_xray_{plan.task_id}"],
                 result={"report_type": type(result).__name__, "report_preview": str(result)[:200]},
                 physical_callable="nexus.services.xray_service.XRayService.run",
+                run_id=run_id,
+                resolved_run_root=str(run_root),
+                output_paths=[str(p) for p in output_paths],
             ),
         )
     except Exception as exc:
