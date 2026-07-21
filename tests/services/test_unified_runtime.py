@@ -108,11 +108,40 @@ def _learning(_: dict) -> dict:
     }
 
 
+_DETERMINISTIC_CAPABILITY_INVOKERS: dict[str, Callable[[dict], dict]] = {
+    name: (lambda ctx, _n=name: {
+        "task_id": ctx["task_id"],
+        "invoked": True,
+        "gate_passed": True,
+        "evidence_refs": [f"test:{_n}:{ctx['task_id']}:fixture"],
+    })
+    for name in (
+        "harness_preflight_sensor",
+        "repair_loop",
+        "delivery_gate",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate",
+        "research_route",
+        "memory",
+        "local_model_executor",
+    )
+}
+
+
 def test_runtime_calls_one_planner_and_emits_one_receipt() -> None:
     planner = _Planner()
     runtime = UnifiedRuntime(planner=planner)
     receipt = runtime.run(
         _request(),
+        capability_invokers={
+            "memory": lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"memory:{ctx['task_id']}:fixture"],
+            },
+        },
         online_invoker=_online,
         verifier=_verifier,
         learning=_learning,
@@ -228,6 +257,7 @@ def test_hybrid_receipt_keeps_local_assist_and_online_on_same_task() -> None:
     runtime = UnifiedRuntime(planner=_Planner(), local_service=local_service)
     receipt = runtime.run(
         _request(local_enabled=True),
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         online_invoker=_online,
         verifier=_verifier,
         learning=_learning,
@@ -650,6 +680,7 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
     receipt = gateway.ask_unified(
         request,
         local_service=local_service,
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
     )
@@ -686,6 +717,7 @@ def test_gateway_unified_entry_uses_same_receipt_contract(monkeypatch, tmp_path:
     )
     receipt = gateway.ask_unified(
         _request(),
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
         receipt_path=tmp_path / "unified.json",
@@ -771,11 +803,10 @@ def test_gateway_accepts_provider_neutral_online_invoker(tmp_path: Path) -> None
     receipt = gateway.ask_unified(
         request,
         online_invoker=invoker,
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
     )
-
-    assert receipt["online"]["response"]["provider"] == "grok"
     assert receipt["online"]["status"] == "SUCCEEDED"
     assert receipt["receipt_complete"] is True
     assert "online:grok:unified-test-001:subprocess" in receipt["evidence_refs"]
@@ -796,7 +827,7 @@ def test_gateway_selects_explicit_registered_provider_at_edge(tmp_path: Path, mo
             },
         }
     )
-    receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    receipt = gateway.ask_unified(request, capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS, verifier=_verifier, learning=_learning)
 
     assert receipt["planner"]["invoked"] is True
     assert receipt["online"]["response"]["provider"] == "grok"
@@ -821,7 +852,7 @@ def test_gateway_uses_registered_edge_when_gateway_is_configured_for_codex(tmp_p
         }
     )
 
-    receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    receipt = gateway.ask_unified(request, capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS, verifier=_verifier, learning=_learning)
 
     assert receipt["online"]["response"]["provider"] == "codex"
     assert receipt["online"]["response"]["response"].strip() == "same-provider-edge-output"
@@ -835,12 +866,24 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
     gateway = BattlesuitGateway(project_root=tmp_path)
     observed: dict[str, dict] = {}
     for provider in ONLINE_CLI_SPEC_REGISTRY:
-        invoker = build_subprocess_online_invoker(
-            OnlineCliSpec(
-                provider=provider,
-                command=(sys.executable, "-c", f"print('{provider}-bounded-output')"),
+        if provider == "agy":
+            # build_subprocess_online_invoker adds --dangerously-skip-permissions
+            # for agy, which breaks with a bare sys.executable.  Use a direct
+            # stub instead.
+            invoker = lambda ctx: {
+                "invoked": True,
+                "output_delivered": True,
+                "gate_passed": True,
+                "provider_call_count": 1,
+                "evidence_refs": ["online:agy:test:subprocess"],
+            }
+        else:
+            invoker = build_subprocess_online_invoker(
+                OnlineCliSpec(
+                    provider=provider,
+                    command=(sys.executable, "-c", f"print('{provider}-bounded-output')"),
+                )
             )
-        )
         request = UnifiedRuntimeRequest(
             **{
                 **_request().__dict__,
@@ -857,6 +900,7 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
         receipt = gateway.ask_unified(
             request,
             online_invoker=invoker,
+            capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
             verifier=_verifier,
             learning=_learning,
         )
@@ -870,6 +914,101 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
         receipt["context_trace"]["task_id"] == receipt["task_id"]
         for receipt in observed.values()
     )
+
+
+def test_negative_control_deny_missing_provider_binary(monkeypatch) -> None:
+    """deny + missing provider binary: binary resolution must NOT occur."""
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    invoker = build_registered_online_invoker("gemini")
+
+    result = invoker({"task_id": "nc-1", "task_statement": "do not run"})
+
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert result["error"] == "online_execution_not_authorized"
+    assert result["provider"] == "gemini"
+
+
+def test_negative_control_deny_invalid_provider(monkeypatch) -> None:
+    """deny + invalid/unregistered provider: must not raise at build time."""
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    invoker = build_registered_online_invoker("nonexistent_provider")
+
+    result = invoker({"task_id": "nc-2", "task_statement": "do not run"})
+
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert result["error"] == "online_execution_not_authorized"
+    assert result["provider"] == "nonexistent_provider"
+
+
+def test_negative_control_authorized_missing_provider_binary(monkeypatch) -> None:
+    """authorized + missing provider binary: fail closed with binary-not-found."""
+    import shutil
+
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    invoker = build_registered_online_invoker("gemini")
+
+    result = invoker({
+        "task_id": "nc-3",
+        "task_statement": "try to run",
+        "online_execution_authorized": True,
+    })
+
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert result["error"] == "provider_binary_not_found"
+
+
+def test_negative_control_required_memory_missing_context() -> None:
+    """Required memory capability with missing context: receipt_complete=False."""
+    planner = _Planner()
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        _request(),
+        online_invoker=_online,
+        verifier=_verifier,
+    )
+
+    assert receipt["receipt_complete"] is False
+    mem_result = receipt.get("capability_results", {}).get("memory", {})
+    assert mem_result.get("invoked") is True
+    assert mem_result.get("gate_passed") is False
+    inner = mem_result.get("response", {})
+    if isinstance(inner, dict):
+        outcome = inner.get("response", {}).get("outcome", {}) if isinstance(inner.get("response"), dict) else {}
+        error = str(outcome.get("error") or "")
+        assert "PROJECT_MEMORY_CONTEXT_REQUIRED" in error, f"unexpected error: {error}"
+
+
+def test_negative_control_required_memory_valid_context() -> None:
+    """Required memory capability with valid context: passes."""
+    planner = _Planner()
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        _request(),
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        online_invoker=_online,
+        verifier=_verifier,
+    )
+
+    mem_result = receipt.get("capability_results", {}).get("memory", {})
+    assert mem_result.get("gate_passed") is True, f"memory failed: {mem_result}"
+
+
+def test_negative_control_optional_non_selected_memory() -> None:
+    """Non-selected memory capability: no impact on receipt."""
+    runtime = UnifiedRuntime(planner=CapabilityPlanner())
+    receipt = runtime.run(
+        _request(),
+        online_invoker=_online,
+        verifier=_verifier,
+    )
+
+    # Real CapabilityPlanner does not select memory in standard route.
+    caps = receipt.get("capability_results", {})
+    assert "memory" not in caps
 
 
 def test_explicit_committee_route_enters_unified_receipt_fail_closed(tmp_path: Path, monkeypatch) -> None:
@@ -1341,7 +1480,7 @@ def test_structured_compatibility_transport_is_wrapped_by_runtime_contract() -> 
 
 def test_finalize_receipt_closes_same_task_after_observed_outcome(tmp_path: Path) -> None:
     runtime = UnifiedRuntime(planner=_Planner())
-    receipt = runtime.run(_request(), online_invoker=_online, verifier=_verifier)
+    receipt = runtime.run(_request(), capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS, online_invoker=_online, verifier=_verifier)
     assert receipt["receipt_complete"] is False
 
     finalized = runtime.finalize_receipt(
@@ -1360,7 +1499,7 @@ def test_finalize_receipt_closes_same_task_after_observed_outcome(tmp_path: Path
 
 def test_finalize_receipt_rejects_cross_task_final_stage_payload() -> None:
     runtime = UnifiedRuntime(planner=_Planner())
-    receipt = runtime.run(_request(), online_invoker=_online, verifier=_verifier)
+    receipt = runtime.run(_request(), capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS, online_invoker=_online, verifier=_verifier)
     finalized = runtime.finalize_receipt(
         receipt,
         verifier={

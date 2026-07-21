@@ -895,66 +895,125 @@ def build_registered_online_invoker(
     The returned callable has the same contract for Gemini, Grok, Codex, and
     OpenAI and is consumed by :class:`UnifiedRuntime`; it does not create a
     second planner, receipt, verifier, or learning path.
+
+    Binary resolution (``shutil.which``) and registry validation are deferred
+    past the authorization check so that ``online_policy=deny`` never fails
+    due to a missing binary or unregistered provider that would never be
+    invoked — *deny-lazy*.
     """
-    spec = resolve_registered_online_cli_spec(
-        provider,
-        command=command,
-        timeout_sec=timeout_sec,
-        environ=environ,
-    )
-    invoker = build_subprocess_online_invoker(
-        spec,
-        runner=runner,
-        include_local_context=include_local_context,
-    )
+    key = str(provider or "").strip().lower()
 
-    # Real provider subprocesses require a canonical OnlineExecutionDecision.
-    # Injected/deterministic runners (selection_source=injected_transport) may
-    # execute only when authorized as inject — never as a live provider claim.
-    if runner is subprocess.run:
-        def guarded_invoke(context: Mapping[str, Any]) -> dict[str, Any]:
-            from nexus.services.online_execution_policy import (
-                decision_from_context,
-                physical_online_authorized,
+    # Non-subprocess (test/deterministic) runners resolve eagerly; they never
+    # hit the physical authorization gate and always supply an explicit argv.
+    if runner is not subprocess.run:
+        spec = resolve_registered_online_cli_spec(
+            key,
+            command=command,
+            timeout_sec=timeout_sec,
+            environ=environ,
+        )
+        return build_subprocess_online_invoker(
+            spec,
+            runner=runner,
+            include_local_context=include_local_context,
+        )
+
+    # Real provider subprocesses: lazy registry validation + binary resolution
+    # after authorization.  Exceptions from the resolver never escape the
+    # invoker boundary; they produce a fail-closed receipt instead.
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        from nexus.services.online_execution_policy import (
+            decision_from_context,
+            physical_online_authorized,
+        )
+
+        task_id = str(context.get("task_id", ""))
+        decision = decision_from_context(context if isinstance(context, Mapping) else {})
+        inject_authorized = bool(
+            decision is not None
+            and decision.online_execution_authorized
+            and decision.online_authorization_source == "injected_test_transport"
+        )
+        physical_ok = physical_online_authorized(context, injected_transport=False)
+        if not inject_authorized and not physical_ok:
+            return normalize_online_invoker_payload(
+                provider=key,
+                task_id=task_id,
+                invoked=False,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=0,
+                response="",
+                raw_response="",
+                usage={},
+                error="online_execution_not_authorized",
+                evidence_refs=[f"online:{key}:{task_id}:authorization_required"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"live_provider_claim": False},
             )
 
-            task_id = str(context.get("task_id", ""))
-            decision = decision_from_context(context if isinstance(context, Mapping) else {})
-            inject_authorized = bool(
-                decision is not None
-                and decision.online_execution_authorized
-                and decision.online_authorization_source == "injected_test_transport"
+        try:
+            spec = resolve_registered_online_cli_spec(
+                key,
+                command=command,
+                timeout_sec=timeout_sec,
+                environ=environ,
             )
-            physical_ok = physical_online_authorized(context, injected_transport=False)
-            if not inject_authorized and not physical_ok:
-                return normalize_online_invoker_payload(
-                    provider=spec.provider,
-                    task_id=task_id,
-                    invoked=False,
-                    output_delivered=False,
-                    gate_passed=False,
-                    provider_call_count=0,
-                    response="",
-                    raw_response="",
-                    usage={},
-                    error="online_execution_not_authorized",
-                    evidence_refs=[f"online:{spec.provider}:{task_id}:authorization_required"],
-                    transport=TRANSPORT_REGISTERED_CLI,
-                    selection_source=SELECTION_EXPLICIT_REQUEST,
-                    extra={"live_provider_claim": False},
-                )
-            payload = invoker(context)
-            if inject_authorized and isinstance(payload, dict):
-                # Never promote injected command runners to live provider claims.
-                payload = dict(payload)
-                payload["selection_source"] = SELECTION_INJECTED_TRANSPORT
-                payload["live_provider_claim"] = False
-                if payload.get("transport") in {"", None, TRANSPORT_REGISTERED_CLI}:
-                    payload["transport"] = TRANSPORT_STRUCTURED_CALLABLE
-            return payload
+        except ValueError as exc:
+            error_code = str(exc)
+            return normalize_online_invoker_payload(
+                provider=key,
+                task_id=task_id,
+                invoked=False,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=0,
+                response="",
+                raw_response="",
+                usage={},
+                error=error_code,
+                evidence_refs=[f"online:{key}:{task_id}:{error_code}"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"live_provider_claim": False},
+            )
 
-        return guarded_invoke
-    return invoker
+        try:
+            invoker = build_subprocess_online_invoker(
+                spec,
+                runner=runner,
+                include_local_context=include_local_context,
+            )
+        except (TypeError, OSError) as exc:
+            error_code = f"{exc.__class__.__name__}:{exc}"
+            return normalize_online_invoker_payload(
+                provider=key,
+                task_id=task_id,
+                invoked=False,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=0,
+                response="",
+                raw_response="",
+                usage={},
+                error=error_code,
+                evidence_refs=[f"online:{key}:{task_id}:build_failed"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"live_provider_claim": False},
+            )
+
+        payload = invoker(context)
+        if inject_authorized and isinstance(payload, dict):
+            payload = dict(payload)
+            payload["selection_source"] = SELECTION_INJECTED_TRANSPORT
+            payload["live_provider_claim"] = False
+            if payload.get("transport") in {"", None, TRANSPORT_REGISTERED_CLI}:
+                payload["transport"] = TRANSPORT_STRUCTURED_CALLABLE
+        return payload
+
+    return invoke
 
 
 def _build_default_memory_retrieval_adapter(project_root: str | Path) -> Any:
