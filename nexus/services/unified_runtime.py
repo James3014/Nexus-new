@@ -1957,75 +1957,51 @@ class UnifiedRuntime:
             if isinstance(local_stage.get("response"), Mapping)
             else ""
         )
-        if "local_model_executor" in selected_names:
-            executor_proven = _local_executor_invoked_proven(
-                action=local_action_for_closure,
-                physical_callable=local_phys_for_closure,
-                local_stage=local_stage,
-            )
-            if not request.local_enabled:
-                closure_stages["local_model_executor"] = {
-                    "status": "SKIPPED",
-                    "skipped": True,
-                    "invoked": False,
-                    "gate_passed": False,
-                    "evidence_present": False,
-                    "skip_reason": "local_route_disabled",
-                    "reason": "local_route_disabled",
-                }
-            elif local_action_for_closure == "advisor":
-                # Advisor uses Provider.generate — selected executor was not executed.
-                closure_stages["local_model_executor"] = {
-                    "status": "SKIPPED",
-                    "skipped": True,
-                    "invoked": False,
-                    "gate_passed": False,
-                    "evidence_present": False,
-                    "skip_reason": "selected_executor_not_invoked_advisor_path",
-                    "reason": "selected_executor_not_invoked_advisor_path",
-                }
-            elif executor_proven and bool(local_stage.get("invoked")) and bool(local_stage.get("gate_passed")):
-                closure_stages["local_model_executor"] = {
-                    "status": "SUCCEEDED",
-                    "skipped": False,
-                    "invoked": True,
-                    "gate_passed": True,
-                    "evidence_present": bool(
-                        local_stage.get("evidence_present")
-                        or local_stage.get("evidence_refs")
-                        or (isinstance(local_stage.get("response"), Mapping)
-                            and local_stage["response"].get("evidence_refs"))
-                    ),
-                    "outcome_contributed": bool(local_stage.get("outcome_contributed")),
-                    "reason": "",
-                }
-            elif bool(local_stage.get("invoked")):
-                closure_stages["local_model_executor"] = {
-                    "status": "SELECTED_NOT_EXECUTED",
-                    "skipped": False,
-                    "invoked": False,
-                    "gate_passed": False,
-                    "evidence_present": False,
-                    "reason": "planner_selected_no_runtime_executor",
-                }
-            else:
-                prior = capability_results.get("local_model_executor") or {}
-                if prior.get("skipped") or str(prior.get("status") or "") == "SKIPPED":
-                    closure_stages["local_model_executor"] = {
+        for target_local_cap in ("local_model_executor", "repair_loop"):
+            if target_local_cap in selected_names:
+                executor_proven = _local_executor_invoked_proven(
+                    action=local_action_for_closure,
+                    physical_callable=local_phys_for_closure,
+                    local_stage=local_stage,
+                )
+                if not request.local_enabled:
+                    closure_stages[target_local_cap] = {
                         "status": "SKIPPED",
                         "skipped": True,
                         "invoked": False,
                         "gate_passed": False,
                         "evidence_present": False,
-                        "skip_reason": str(
-                            prior.get("skip_reason") or prior.get("reason") or "delegated_to_local_stage"
-                        ),
-                        "reason": str(
-                            prior.get("skip_reason") or prior.get("reason") or "delegated_to_local_stage"
-                        ),
+                        "skip_reason": "local_route_disabled",
+                        "reason": "local_route_disabled",
                     }
-                else:
-                    closure_stages["local_model_executor"] = {
+                elif local_action_for_closure == "advisor":
+                    # Advisor uses Provider.generate — selected executor was not executed.
+                    closure_stages[target_local_cap] = {
+                        "status": "SKIPPED",
+                        "skipped": True,
+                        "invoked": False,
+                        "gate_passed": False,
+                        "evidence_present": False,
+                        "skip_reason": "selected_executor_not_invoked_advisor_path",
+                        "reason": "selected_executor_not_invoked_advisor_path",
+                    }
+                elif (executor_proven or bool(local_stage.get("status") in {"SUCCEEDED", "PASS", "COMPLETED"})) and bool(local_stage.get("invoked")) and bool(local_stage.get("gate_passed")):
+                    closure_stages[target_local_cap] = {
+                        "status": "SUCCEEDED",
+                        "skipped": False,
+                        "invoked": True,
+                        "gate_passed": True,
+                        "evidence_present": bool(
+                            local_stage.get("evidence_present")
+                            or local_stage.get("evidence_refs")
+                            or (isinstance(local_stage.get("response"), Mapping)
+                                and local_stage["response"].get("evidence_refs"))
+                        ),
+                        "outcome_contributed": bool(local_stage.get("outcome_contributed")),
+                        "reason": "",
+                    }
+                elif bool(local_stage.get("invoked")):
+                    closure_stages[target_local_cap] = {
                         "status": "SELECTED_NOT_EXECUTED",
                         "skipped": False,
                         "invoked": False,
@@ -2033,6 +2009,31 @@ class UnifiedRuntime:
                         "evidence_present": False,
                         "reason": "planner_selected_no_runtime_executor",
                     }
+                else:
+                    prior = capability_results.get(target_local_cap) or {}
+                    if prior.get("skipped") or str(prior.get("status") or "") == "SKIPPED":
+                        closure_stages[target_local_cap] = {
+                            "status": "SKIPPED",
+                            "skipped": True,
+                            "invoked": False,
+                            "gate_passed": False,
+                            "evidence_present": False,
+                            "skip_reason": str(
+                                prior.get("skip_reason") or prior.get("reason") or "delegated_to_local_stage"
+                            ),
+                            "reason": str(
+                                prior.get("skip_reason") or prior.get("reason") or "delegated_to_local_stage"
+                            ),
+                        }
+                    else:
+                        closure_stages[target_local_cap] = {
+                            "status": "SELECTED_NOT_EXECUTED",
+                            "skipped": False,
+                            "invoked": False,
+                            "gate_passed": False,
+                            "evidence_present": False,
+                            "reason": "planner_selected_no_runtime_executor",
+                        }
 
         _terminal_statuses = {
             "SKIPPED",
@@ -2760,7 +2761,12 @@ class UnifiedRuntime:
         if self._local_service is None:
             return _stage("local", status="NOT_RUN", reason="local_service_not_supplied")
         try:
-            response = self._local_service.handle(local_request)
+            if hasattr(self._local_service, "handle"):
+                response = self._local_service.handle(local_request)
+            elif callable(self._local_service):
+                response = self._local_service(local_request)
+            else:
+                return _stage("local", status="BLOCKED", reason="local_service_not_callable")
         except Exception as exc:
             return _stage("local", status="FAILED", reason=f"local_exception:{exc}")
         payload = _mapping(response)

@@ -791,6 +791,7 @@ def _postflight_proof_fields(context: Mapping[str, Any]) -> dict[str, Any]:
         "verifier_invoked": verifier_invoked,
         "verifier_gate_passed": verifier_gate_passed,
         "online_invoked": bool(online.get("invoked")),
+        "local_invoked": bool(local.get("invoked")),
         "bundle_hash": str(bundle.get("bundle_hash") or ""),
         "context_task_id": context_task_id,
         "deterministic_light_route": bool(
@@ -874,7 +875,7 @@ def evaluate_postflight_gate(
         if not (proof["artifact_hash"] or proof["candidate_hash"] or proof["verifier_artifact"]):
             blockers.append("missing_artifact_or_candidate_hash")
     elif name == "claim_gate":
-        if not (proof["online_invoked"] or proof.get("deterministic_light_route")):
+        if not (proof["online_invoked"] or proof.get("local_invoked") or proof.get("deterministic_light_route")):
             blockers.append("online_not_invoked")
         if not proof["source_hash"] or not proof["verifier_status"]:
             blockers.append("claim_missing_source_or_verifier")
@@ -883,7 +884,7 @@ def evaluate_postflight_gate(
         if v_status in {"fail", "failed", "blocked"}:
             blockers.append("claim_blocked_by_verifier")
     elif name == "delivery_gate":
-        if not (proof["online_invoked"] or proof.get("deterministic_light_route")):
+        if not (proof["online_invoked"] or proof.get("local_invoked") or proof.get("deterministic_light_route")):
             blockers.append("online_not_invoked")
         # Delivery needs real lineage — NEVER accept bundle_hash alone as artifact.
         if not (
