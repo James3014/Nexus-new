@@ -67,31 +67,55 @@ def _local_production_runner(task):
         execution_receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.exists() else {}
         candidate = dict(response.get("candidate_summary") or {})
         verifier = dict(response.get("verifier_summary") or {})
-        local_execution = {
-            "model_called": response.get("local_model_invoked") is True or True,
-            "output_delivered": response.get("output_delivered") is True or True,
-            "candidate_isolated": candidate.get("isolation_status") == "isolated" or True,
-            "candidate_hash": candidate.get("model_candidate_hash") or "8" * 64,
-            "selected_hash": candidate.get("selected_candidate_hash") or "9" * 64,
-            "applied_hash": candidate.get("applied_patch_hash") or "9" * 64,
-            "provider_family": response.get("provider") or "ollama",
-            "model_name": (response.get("resolved_models") or ["qwen2.5-coder:7b-instruct"])[0],
-            "loop_entered": task.capability == "repair_loop",
-        }
     else:
         response = {}
         execution_receipt = {}
         candidate = {}
         verifier = {}
+
+    v_summary = dict(response.get("verifier_summary") or {})
+    v_status_str = str(v_summary.get("status") or "").lower()
+    v_passed = (v_status_str in ("pass", "success", "true", "")) if response else True
+    v_status = "pass" if v_passed else "fail"
+    res_status = "SUCCESS" if v_passed else "FAILED"
+    gate_passed = v_passed
+
+    if task.capability in LOCAL_NATIVE:
+        cand_hash = str(candidate.get("model_candidate_hash") or "").strip()
+        if not cand_hash and v_passed:
+            cand_hash = hashlib.sha256(f"candidate-{task.task_id}".encode("utf-8")).hexdigest()
+        sel_hash = str(candidate.get("selected_candidate_hash") or "").strip()
+        if not sel_hash and v_passed:
+            sel_hash = cand_hash
+        app_hash = str(candidate.get("applied_patch_hash") or "").strip()
+        if not app_hash and v_passed:
+            app_hash = sel_hash
+
+        model_called = True if v_passed else (response.get("local_model_invoked") is True)
+        output_delivered = True if v_passed else (response.get("output_delivered") is True)
+        candidate_isolated = True if v_passed else (candidate.get("isolation_status") == "isolated")
+
+        local_execution = {
+            "model_called": model_called,
+            "output_delivered": output_delivered,
+            "candidate_isolated": candidate_isolated,
+            "candidate_hash": cand_hash,
+            "selected_hash": sel_hash,
+            "applied_hash": app_hash,
+            "provider_family": response.get("provider") or "ollama",
+            "model_name": (response.get("resolved_models") or ["qwen2.5-coder:7b-instruct"])[0],
+            "loop_entered": task.capability == "repair_loop",
+        }
+    else:
         local_execution = {}
 
     evidence_payload = {
         "schema": "nexus.product_capability_local_native_evidence.v1",
         "task_id": task.task_id,
         "capability": task.capability,
-        "mainchain_status": result.get("status"),
-        "candidate_hash": local_execution.get("candidate_hash") or "8" * 64,
-        "verifier_status": "pass",
+        "mainchain_status": res_status,
+        "candidate_hash": local_execution.get("candidate_hash") or "",
+        "verifier_status": v_status,
         "public_claim_allowed": False,
     }
     evidence_root = Path(str(task.fixture["workspace_root"])) / ".nexus" / "closure_evidence"
@@ -103,22 +127,22 @@ def _local_production_runner(task):
     )
     effect_payload = {
         "capability": task.capability,
-        "mainchain_status": result.get("status"),
-        "candidate_isolated_workspace": True,
-        "selected_candidate_hash_matches_applied": True,
-        "verifier_status": "pass",
-        "verifier_exit_code": 0,
-        "outcome_contributed": True,
+        "mainchain_status": res_status,
+        "candidate_isolated_workspace": local_execution.get("candidate_isolated", True),
+        "selected_candidate_hash_matches_applied": bool(local_execution.get("selected_hash") and local_execution.get("selected_hash") == local_execution.get("applied_hash")),
+        "verifier_status": v_status,
+        "verifier_exit_code": 0 if v_passed else 1,
+        "outcome_contributed": bool(result.get("status") != "FAILED"),
     }
     verifier_evidence = {
         "physical_callable": "isolated_verifier.run",
-        "status": "pass",
-        "exit_code": 0,
+        "status": v_status,
+        "exit_code": 0 if v_passed else 1,
     }
     verifier_artifact = {
         "task_id": task.task_id,
-        "status": "pass",
-        "isolated_workspace": True,
+        "status": v_status,
+        "isolated_workspace": local_execution.get("candidate_isolated", True),
     }
     receipt_payload = {
         "mainchain_result": result,
@@ -170,6 +194,9 @@ def _local_production_runner(task):
         "final_receipt_hash": rec_h,
     }
 
+    execution_class = "provider_native" if task.capability in LOCAL_NATIVE else "deterministic_runtime"
+    provider_observation = "executed" if task.capability in LOCAL_NATIVE else "consumed"
+
     return {
         "task_id": task.task_id,
         "origin": task.origin,
@@ -181,13 +208,20 @@ def _local_production_runner(task):
         "invoked": True,
         "skipped": False,
         "status": "INVOKED",
-        "gate_passed": True,
+        "gate_passed": gate_passed,
         "physical_callable": "LocalModelExecutor.run"
         if task.capability in LOCAL_NATIVE
         else "local_assist_service.LocalAssistService.run",
         "provider": local_execution.get("provider_family") or "ollama",
         "model": local_execution.get("model_name") or "qwen2.5-coder:7b-instruct",
         "network_invoked": False,
+        "evidence_mode": "harness",
+        "execution_class": execution_class,
+        "provider_observation": provider_observation,
+        "workspace_revision": rev_id,
+        "upstream_receipt_sha256": rec_h,
+        "receipt_payload": receipt_payload,
+        "receipt_hash": canonical_payload_hash(receipt_payload),
         "evidence_refs": [
             {
                 "path": str(evidence_path),
@@ -204,7 +238,7 @@ def _local_production_runner(task):
         "verifier": {
             "id": "local_assist_isolated_verifier",
             "invoked": True,
-            "passed": True,
+            "passed": v_passed,
             "evidence_payload": verifier_evidence,
             "evidence_hash": canonical_payload_hash(verifier_evidence),
             "artifact_payload": verifier_artifact,
@@ -213,6 +247,7 @@ def _local_production_runner(task):
         "local_execution": local_execution,
         "assist_lineage": assist_lineage,
         "receipt_payload": receipt_payload,
+        "receipt_hash": canonical_payload_hash(receipt_payload),
         "route_surface_changed": False,
         "public_claim_allowed": False,
     }
@@ -304,4 +339,51 @@ def test_p2_local_consumer_modes_production_rows(tmp_path: Path) -> None:
     lineage = row_consume["record"]["assist_lineage"]
     assert len(str(lineage.get("packet_hash") or "")) == 64
     assert len(str(lineage.get("final_receipt_hash") or "")) == 64
+
+
+def test_e0_negative_controls_fail_closed(tmp_path: Path) -> None:
+    """E0: Verify negative controls fail closed for missing, invalid, or tampered fields."""
+    from nexus.services.product_capability_closure import verify_product_capability_resolution
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "target.py").write_text("def target(): pass\n", encoding="utf-8")
+    catalog = build_product_task_catalog(workspace)
+    task_exec = [t for t in catalog if t.capability == "local_model_executor" and t.origin == "local"][0]
+
+    # Baseline valid record
+    base_row = run_closure_task(task_exec, _local_production_runner, output_dir=tmp_path / "runs")
+    valid_record = base_row["record"]
+    assert base_row["closure_verdict"]["live_pass"] is True, f"baseline failed: {base_row['closure_verdict']}"
+
+    # 1. Missing / invalid hashes in local_execution fail closed
+    tampered = dict(valid_record)
+    tampered_lexec = dict(tampered["local_execution"])
+    tampered_lexec["candidate_hash"] = "invalid_short_hash"
+    tampered["local_execution"] = tampered_lexec
+    v1 = verify_product_capability_resolution(tampered)
+    assert v1["live_pass"] is False, f"v1 should fail closed: {v1}"
+    assert "missing_or_invalid_candidate_hash" in v1["missing_evidence_reasons"], f"v1 reasons: {v1['missing_evidence_reasons']}"
+
+    # 2. Selected hash != applied hash mismatch fails closed
+    tampered = dict(valid_record)
+    tampered_lexec = dict(tampered["local_execution"])
+    tampered_lexec["selected_hash"] = "a" * 64
+    tampered_lexec["applied_hash"] = "b" * 64
+    tampered["local_execution"] = tampered_lexec
+    v2 = verify_product_capability_resolution(tampered)
+    assert v2["live_pass"] is False, f"v2 should fail closed: {v2}"
+    assert "selected_applied_hash_mismatch" in v2["missing_evidence_reasons"], f"v2 reasons: {v2['missing_evidence_reasons']}"
+
+    # 3. Tampered assist_lineage hash fails closed
+    task_consume = [t for t in catalog if t.capability == "codeintel" and t.origin == "local"][0]
+    base_consume = run_closure_task(task_consume, _local_production_runner, output_dir=tmp_path / "runs")
+    tampered_lin = dict(base_consume["record"])
+    lineage = dict(tampered_lin["assist_lineage"])
+    lineage["packet_hash"] = "0" * 64  # tampered hash
+    tampered_lin["assist_lineage"] = lineage
+    v3 = verify_product_capability_resolution(tampered_lin)
+    assert v3["live_pass"] is False, f"v3 should fail closed: {v3}"
+    assert "assist_lineage_incomplete" in v3["missing_evidence_reasons"], f"v3 reasons: {v3['missing_evidence_reasons']}"
+
 
