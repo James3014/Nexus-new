@@ -1471,27 +1471,6 @@ class UnifiedRuntime:
         merged_invokers: dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] = dict(
             capability_invokers or {}
         )
-        if bool(planner_route.get("nexus_light") or planner_route.get("deterministic_core")):
-            from nexus.services.nexus_light_core import (
-                build_nexus_light_capability_invokers,
-                build_nexus_light_learning,
-                build_nexus_light_verifier,
-            )
-
-            workspace = str(planner_route.get("workspace_root") or ".")
-            light = build_nexus_light_capability_invokers(
-                workspace,
-                compression=bool(planner_route.get("prompt_compression")),
-            )
-            # Governed light core invokers take precedence for light route capabilities.
-            merged = dict(merged_invokers)
-            merged.update(light)
-            merged_invokers = merged
-
-            if verifier is None:
-                verifier = build_nexus_light_verifier
-            if learning is None:
-                learning = build_nexus_light_learning
         capability_invokers = merged_invokers or None
         plan = self._planner.plan(
             task_desc=request.task_statement,
@@ -2873,21 +2852,6 @@ class UnifiedRuntime:
     ) -> dict[str, Any]:
         if not request.online_enabled:
             return _stage("online", status="NOT_REQUESTED", reason="online_route_disabled")
-
-        route = dict(context.get("route") or {})
-        if bool(route.get("nexus_light") or route.get("deterministic_core")):
-            planner_info = dict(context.get("planner") or {})
-            selected_caps = set(planner_info.get("selected_capabilities") or [])
-            if not selected_caps.intersection({"local_model_executor", "repair_loop"}):
-                return _stage(
-                    "online",
-                    status="SKIPPED",
-                    invoked=True,
-                    evidence_present=True,
-                    gate_passed=True,
-                    reason="deterministic_light_route_no_online_call_needed",
-                    response={"provider_call_count": 0, "status": "SKIPPED"},
-                )
 
         if invoker is None:
             return _stage("online", status="NOT_RUN", reason="online_invoker_not_supplied")
