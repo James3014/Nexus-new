@@ -585,6 +585,28 @@ def hash_stage_payload(stage: Mapping[str, Any] | None, *, stage_name: str) -> s
     return canonical_json_hash({"stage": stage_name, "payload": body})
 
 
+def build_execution_attempt_id(
+    *,
+    task_id: str,
+    workspace_revision: str,
+    attempt_number: int,
+    parent_receipt_hash: str,
+    source_replan_request_id: str,
+    planner_decision_id: str,
+    execution_depth: str,
+) -> str:
+    payload = {
+        "task_id": str(task_id),
+        "workspace_revision": str(workspace_revision),
+        "attempt_number": int(attempt_number),
+        "parent_receipt_hash": str(parent_receipt_hash),
+        "source_replan_request_id": str(source_replan_request_id),
+        "planner_decision_id": str(planner_decision_id),
+        "execution_depth": str(execution_depth),
+    }
+    return f"sha256:{canonical_json_hash(payload)}"
+
+
 def compute_receipt_hash(
     *,
     run_anchor_hash: str,
@@ -597,6 +619,7 @@ def compute_receipt_hash(
     applied_candidate_hash: str = "",
     structured_evidence_refs: Sequence[Mapping[str, Any]] = (),
     consumption_chain: Sequence[Mapping[str, Any]] = (),
+    execution_attempt_hash: str = "",
 ) -> str:
     """Aggregate hash for a receipt node. Does not include the resulting hash itself."""
     payload = {
@@ -610,6 +633,7 @@ def compute_receipt_hash(
         "applied_candidate_hash": str(applied_candidate_hash or ""),
         "structured_evidence_refs": [dict(r) for r in structured_evidence_refs],
         "consumption_chain": [dict(c) for c in consumption_chain],
+        "execution_attempt_hash": str(execution_attempt_hash or ""),
     }
     return canonical_json_hash(payload)
 
@@ -646,6 +670,7 @@ def build_receipt_base_dict(
     consumption_chain: Sequence[Mapping[str, Any]] = (),
     structured_evidence_refs: Sequence[Mapping[str, Any]] = (),
     claim_boundary: Mapping[str, Any] | ClaimBoundary | None = None,
+    execution_attempt_hash: str = "",
     source_world: str = "",
     source_component: str = "",
     execution_topology: str = "",
@@ -678,6 +703,7 @@ def build_receipt_base_dict(
         "artifact_hash": str(artifact_hash or ""),
         "source_candidate_hash": str(source_candidate_hash or ""),
         "applied_candidate_hash": str(applied_candidate_hash or ""),
+        "execution_attempt_hash": str(execution_attempt_hash or ""),
         "consumption_chain": [dict(c) for c in consumption_chain],
         "structured_evidence_refs": [dict(r) for r in structured_evidence_refs],
         "claim_boundary": cb,
@@ -886,6 +912,9 @@ def attach_r3_receipt_base(
     ):
         applied_candidate_hash = ""
 
+    attempt_obj = receipt.get("execution_attempt") if isinstance(receipt.get("execution_attempt"), Mapping) else None
+    execution_attempt_hash = canonical_json_hash(attempt_obj) if attempt_obj is not None else ""
+
     r_hash = compute_receipt_hash(
         run_anchor_hash=run_anchor,
         ordered_child_hashes=children,
@@ -897,6 +926,7 @@ def attach_r3_receipt_base(
         applied_candidate_hash=applied_candidate_hash,
         structured_evidence_refs=structured,
         consumption_chain=chain,
+        execution_attempt_hash=execution_attempt_hash,
     )
 
     # Final R3 parents = typed run_anchor only (not self, not circular child binding)
@@ -914,6 +944,7 @@ def attach_r3_receipt_base(
         artifact_hash=artifact_hash,
         source_candidate_hash=source_candidate_hash,
         applied_candidate_hash=applied_candidate_hash,
+        execution_attempt_hash=execution_attempt_hash,
         consumption_chain=chain,
         structured_evidence_refs=structured,
         claim_boundary=claim,
@@ -1431,6 +1462,53 @@ def validate_receipt_base(
                         break
 
     if mode_norm == "strict":
+        if base is not payload and isinstance(payload, Mapping):
+            if str(payload.get("task_id") or "").strip() != str(base.get("task_id") or "").strip():
+                blockers.append("envelope_task_id_mismatch")
+            if str(payload.get("workspace_revision") or "").strip() != str(base.get("workspace_revision") or "").strip():
+                blockers.append("envelope_workspace_revision_mismatch")
+            if str(payload.get("planner_decision_id") or "").strip() != str(base.get("planner_decision_id") or "").strip():
+                blockers.append("envelope_planner_decision_id_mismatch")
+            if str(payload.get("run_anchor_hash") or "").strip() != str(base.get("run_anchor_hash") or "").strip():
+                blockers.append("envelope_run_anchor_hash_mismatch")
+            if str(payload.get("receipt_hash") or "").strip() != str(base.get("receipt_hash") or "").strip():
+                blockers.append("envelope_receipt_hash_mismatch")
+
+        root_attempt = payload.get("execution_attempt") if isinstance(payload, Mapping) and isinstance(payload.get("execution_attempt"), Mapping) else None
+        planner_map = payload.get("planner") if isinstance(payload, Mapping) and isinstance(payload.get("planner"), Mapping) else None
+        planner_attempt = planner_map.get("execution_attempt") if planner_map and isinstance(planner_map.get("execution_attempt"), Mapping) else None
+        ctx_map = payload.get("context_trace") if isinstance(payload, Mapping) and isinstance(payload.get("context_trace"), Mapping) else None
+        ctx_attempt = ctx_map.get("execution_attempt") if ctx_map and isinstance(ctx_map.get("execution_attempt"), Mapping) else None
+
+        if base is not payload and isinstance(payload, Mapping):
+            if root_attempt is not None or planner_attempt is not None or ctx_attempt is not None:
+                if planner_attempt is None:
+                    blockers.append("execution_attempt_missing_from_planner")
+                if ctx_attempt is None:
+                    blockers.append("execution_attempt_missing_from_context_trace")
+                if root_attempt is not None and planner_attempt is not None and root_attempt != planner_attempt:
+                    blockers.append("execution_attempt_planner_mismatch")
+                if root_attempt is not None and ctx_attempt is not None and root_attempt != ctx_attempt:
+                    blockers.append("execution_attempt_context_trace_mismatch")
+
+        target_attempt = root_attempt or planner_attempt or ctx_attempt or (base.get("execution_attempt") if isinstance(base.get("execution_attempt"), Mapping) else None)
+        if target_attempt is not None:
+            expected_att_hash = canonical_json_hash(target_attempt)
+            if str(base.get("execution_attempt_hash") or "") != expected_att_hash:
+                blockers.append("execution_attempt_hash_mismatch")
+
+            expected_attempt_id = build_execution_attempt_id(
+                task_id=str(target_attempt.get("task_id") or base.get("task_id") or ""),
+                workspace_revision=str(target_attempt.get("workspace_revision") or base.get("workspace_revision") or ""),
+                attempt_number=int(target_attempt.get("attempt_number") or 1),
+                parent_receipt_hash=str(target_attempt.get("parent_receipt_hash") or ""),
+                source_replan_request_id=str(target_attempt.get("source_replan_request_id") or ""),
+                planner_decision_id=str(target_attempt.get("planner_decision_id") or base.get("planner_decision_id") or ""),
+                execution_depth=str(target_attempt.get("execution_depth") or ""),
+            )
+            if str(target_attempt.get("attempt_id") or "") != expected_attempt_id:
+                blockers.append("execution_attempt_id_mismatch")
+
         tid = str(base.get("task_id") or "").strip()
         ra = str(base.get("run_anchor_hash") or "").strip()
         rh = str(base.get("receipt_hash") or "").strip()
@@ -1474,6 +1552,7 @@ def validate_receipt_base(
                 applied_candidate_hash=str(base.get("applied_candidate_hash") or ""),
                 structured_evidence_refs=list(base.get("structured_evidence_refs") or ()),
                 consumption_chain=list(base.get("consumption_chain") or ()),
+                execution_attempt_hash=str(base.get("execution_attempt_hash") or ""),
             )
             if rh != expected_receipt:
                 blockers.append("receipt_hash_tamper")
