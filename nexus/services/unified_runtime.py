@@ -21,10 +21,12 @@ from nexus.engine.capability_contracts import (
     EXECUTION_DEPTH_FULL,
     EXECUTION_DEPTH_LIGHT,
     EXECUTION_DEPTH_STANDARD,
+    ExecutionReplanAuthorization,
+    apply_execution_depth_floor,
     next_execution_depth_after_failure,
 )
 from nexus.engine.capability_planner import CapabilityPlanner
-from nexus.evidence.receipt_base import attach_r3_receipt_base
+from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
 
 REQUEST_SCHEMA = "nexus.unified_runtime.request.v1"
 RECEIPT_SCHEMA = "nexus.unified_runtime.receipt.v1"
@@ -1565,6 +1567,127 @@ class UnifiedRuntime:
         learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
         receipt_path: str | Path | None = None,
     ) -> dict[str, Any]:
+        return self._run_once(
+            request=request,
+            online_invoker=online_invoker,
+            capability_invokers=capability_invokers,
+            verifier=verifier,
+            learning=learning,
+            receipt_path=receipt_path,
+            replan_authorization=None,
+            attempt_number=1,
+            parent_receipt=None,
+        )
+
+    def run_replan(
+        self,
+        previous_receipt: Mapping[str, Any],
+        request: UnifiedRuntimeRequest,
+        *,
+        online_invoker: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        capability_invokers: Mapping[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] | None = None,
+        verifier: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        receipt_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        res = validate_receipt_base(previous_receipt, mode="strict")
+        if not res.get("ok"):
+            blockers = res.get("blockers") or ["validation_failed"]
+            raise ValueError(f"prior_receipt_base_invalid:{','.join(blockers)}")
+
+        if previous_receipt.get("schema") != RECEIPT_SCHEMA:
+            raise ValueError("unsupported_prior_receipt_schema")
+        if bool(previous_receipt.get("receipt_complete")):
+            raise ValueError("prior_receipt_not_incomplete")
+        if str(previous_receipt.get("terminal_status", "")) != "INCOMPLETE":
+            raise ValueError("prior_receipt_not_incomplete")
+        if bool(previous_receipt.get("public_claim_allowed")):
+            raise ValueError("prior_receipt_public_claim_not_false")
+
+        if str(previous_receipt.get("task_id", "")) != str(request.task_id):
+            raise ValueError("replan_task_id_mismatch")
+        if str(previous_receipt.get("workspace_revision", "")) != str(request.workspace_revision):
+            raise ValueError("replan_workspace_revision_mismatch")
+
+        replan_req = previous_receipt.get("execution_replan_request")
+        if not isinstance(replan_req, Mapping) or replan_req.get("schema") != "nexus.execution_replan_request.v1":
+            raise ValueError("replan_request_missing")
+        if str(replan_req.get("task_id", "")) != str(request.task_id):
+            raise ValueError("replan_task_id_mismatch")
+        if str(replan_req.get("source_planner_decision_id", "")) != str(previous_receipt.get("planner_decision_id", "")):
+            raise ValueError("replan_request_integrity_mismatch")
+        if not bool(replan_req.get("verifier_outcome_trusted")):
+            raise ValueError("replan_request_not_trusted")
+        if not bool(replan_req.get("replan_required")):
+            raise ValueError("replan_not_required")
+        if bool(replan_req.get("manual_review_required")):
+            raise ValueError("replan_manual_review_required")
+        if bool(replan_req.get("public_claim_allowed")):
+            raise ValueError("replan_request_not_trusted")
+
+        recomputed = build_execution_replan_request(
+            task_id=request.task_id,
+            planner_decision_id=str(previous_receipt.get("planner_decision_id", "")),
+            current_execution_depth=str(previous_receipt.get("execution_depth", "")),
+            verifier_stage=previous_receipt.get("verifier"),
+        )
+        if str(replan_req.get("replan_request_id", "")) != str(recomputed.get("replan_request_id", "")):
+            raise ValueError("replan_request_integrity_mismatch")
+        if str(replan_req.get("requested_execution_depth", "")) != str(recomputed.get("requested_execution_depth", "")):
+            raise ValueError("replan_request_integrity_mismatch")
+        if str(replan_req.get("trigger", "")) != str(recomputed.get("trigger", "")):
+            raise ValueError("replan_request_integrity_mismatch")
+
+        current_depth = str(previous_receipt.get("execution_depth") or "LIGHT")
+        if current_depth == EXECUTION_DEPTH_FULL:
+            raise ValueError("replan_manual_review_required")
+
+        expected_next_depth = next_execution_depth_after_failure(current_depth)
+        if str(replan_req.get("requested_execution_depth", "")) != expected_next_depth:
+            raise ValueError("replan_depth_transition_invalid")
+
+        prior_attempt_info = previous_receipt.get("execution_attempt")
+        prior_attempt_num = int(prior_attempt_info.get("attempt_number", 1)) if isinstance(prior_attempt_info, Mapping) else 1
+        if prior_attempt_num >= 2:
+            raise ValueError("replan_attempt_budget_exhausted")
+
+        authorization = ExecutionReplanAuthorization(
+            task_id=request.task_id,
+            workspace_revision=request.workspace_revision,
+            source_planner_decision_id=str(previous_receipt.get("planner_decision_id", "")),
+            source_replan_request_id=str(replan_req.get("replan_request_id", "")),
+            source_receipt_hash=str(previous_receipt.get("receipt_hash", "")),
+            source_run_anchor_hash=str(previous_receipt.get("run_anchor_hash", "")),
+            requested_execution_depth=str(replan_req.get("requested_execution_depth", "")),
+            attempt_number=2,
+            max_attempts=2,
+        )
+
+        return self._run_once(
+            request=request,
+            online_invoker=online_invoker,
+            capability_invokers=capability_invokers,
+            verifier=verifier,
+            learning=learning,
+            receipt_path=receipt_path,
+            replan_authorization=authorization,
+            attempt_number=2,
+            parent_receipt=previous_receipt,
+        )
+
+    def _run_once(
+        self,
+        request: UnifiedRuntimeRequest,
+        *,
+        online_invoker: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        capability_invokers: Mapping[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] | None = None,
+        verifier: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        receipt_path: str | Path | None = None,
+        replan_authorization: ExecutionReplanAuthorization | None = None,
+        attempt_number: int = 1,
+        parent_receipt: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         request.validate()
         planner_route = dict(request.route)
         planner_route.setdefault("local_enabled", request.local_enabled)
@@ -1583,12 +1706,65 @@ class UnifiedRuntime:
             phase_trace=dict(request.phase_trace),
             budget=dict(request.budget),
             skills=[dict(item) for item in request.skills],
+            replan_authorization=replan_authorization,
         )
         plan_payload = plan.to_dict()
         plan_hash = _hash_json(plan_payload)
         # Single stable decision id from actual plan payload/hash — never invent
         # a second id downstream on receipt, context_trace, or capability rows.
         planner_decision_id = plan_hash
+
+        if attempt_number == 1:
+            attempt_payload_for_id = {
+                "task_id": str(request.task_id),
+                "workspace_revision": str(request.workspace_revision),
+                "attempt_number": 1,
+                "parent_receipt_hash": "",
+                "source_replan_request_id": "",
+                "planner_decision_id": str(planner_decision_id),
+                "execution_depth": str(plan.execution_depth),
+            }
+            parent_attempt_id = ""
+            parent_receipt_hash = ""
+            parent_run_anchor_hash = ""
+            source_replan_request_id = ""
+            source_planner_decision_id = ""
+        else:
+            parent_attempt_info = (parent_receipt or {}).get("execution_attempt") or {}
+            parent_attempt_id = str(parent_attempt_info.get("attempt_id") or "")
+            parent_receipt_hash = str((parent_receipt or {}).get("receipt_hash") or "")
+            parent_run_anchor_hash = str((parent_receipt or {}).get("run_anchor_hash") or "")
+            source_replan_request_id = str(((parent_receipt or {}).get("execution_replan_request") or {}).get("replan_request_id") or "")
+            source_planner_decision_id = str((parent_receipt or {}).get("planner_decision_id") or "")
+            attempt_payload_for_id = {
+                "task_id": str(request.task_id),
+                "workspace_revision": str(request.workspace_revision),
+                "attempt_number": 2,
+                "parent_receipt_hash": parent_receipt_hash,
+                "source_replan_request_id": source_replan_request_id,
+                "planner_decision_id": str(planner_decision_id),
+                "execution_depth": str(plan.execution_depth),
+            }
+
+        attempt_id = "sha256:" + hashlib.sha256(json.dumps(attempt_payload_for_id, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+        execution_attempt = {
+            "schema": "nexus.execution_attempt.v1",
+            "attempt_number": attempt_number,
+            "max_attempts": 2,
+            "attempt_id": attempt_id,
+            "is_replan": (attempt_number > 1),
+            "parent_attempt_id": parent_attempt_id,
+            "parent_receipt_hash": parent_receipt_hash,
+            "parent_run_anchor_hash": parent_run_anchor_hash,
+            "source_replan_request_id": source_replan_request_id,
+            "source_planner_decision_id": source_planner_decision_id,
+            "planner_decision_id": str(planner_decision_id),
+            "execution_depth": str(plan.execution_depth),
+        }
+
+        plan_payload["execution_attempt"] = execution_attempt
+
         snapshot = plan_payload.get("signal_snapshot")
         if isinstance(snapshot, Mapping):
             snapshot_with_id = dict(snapshot)
@@ -1617,6 +1793,7 @@ class UnifiedRuntime:
             plan_hash=plan_hash,
             planner_decision_id=planner_decision_id,
             execution_depth=plan.execution_depth,
+            execution_attempt=execution_attempt,
         )
 
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
@@ -1982,6 +2159,12 @@ class UnifiedRuntime:
             verifier_stage=verifier_stage,
         )
         context["execution_replan_request"] = replan_request
+        context["execution_attempt"] = execution_attempt
+        if replan_authorization is not None:
+            context["replan_authorization"] = replan_authorization.to_dict()
+            context["source_replan_request_id"] = replan_authorization.source_replan_request_id
+            context["parent_receipt_hash"] = replan_authorization.source_receipt_hash
+
 
 
         # Postflight gates after Online + verifier so proof fields are visible.
@@ -2274,6 +2457,11 @@ class UnifiedRuntime:
             "public_claim_allowed": False,
             "replan_required": replan_request["replan_required"],
             "requested_execution_depth": replan_request["requested_execution_depth"],
+            "attempt_number": execution_attempt["attempt_number"],
+            "max_attempts": execution_attempt["max_attempts"],
+            "replan_attempt": execution_attempt["is_replan"],
+            "parent_receipt_hash": execution_attempt["parent_receipt_hash"],
+            "source_replan_request_id": execution_attempt["source_replan_request_id"],
         }
 
         capability_receipts: list[dict[str, Any]] = []
@@ -2563,6 +2751,9 @@ class UnifiedRuntime:
             "planner_decision_id": planner_decision_id,
             "execution_depth": plan.execution_depth,
             "execution_replan_request_id": replan_request["replan_request_id"],
+            "execution_attempt": execution_attempt,
+            "parent_receipt_hash": execution_attempt["parent_receipt_hash"],
+            "source_replan_request_id": execution_attempt["source_replan_request_id"],
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
             "online_prompt_hash": _hash_json(effective_online_prompt),
             "online_payload_hash": _hash_json(request.online_payload),
@@ -2606,7 +2797,9 @@ class UnifiedRuntime:
             "planner_decision_id": planner_decision_id,
             "execution_depth": plan.execution_depth,
             "execution_replan_request": replan_request,
+            "execution_attempt": execution_attempt,
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
+
 
             "context_trace": context_trace,
             "planner": planner_stage,

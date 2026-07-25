@@ -11,6 +11,7 @@ import pytest
 
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.evidence.receipt_base import validate_receipt_base
 from nexus.services.local_assist_service import (
     REQUEST_SCHEMA,
     LocalAssistRequest,
@@ -2607,3 +2608,893 @@ def test_runtime_deterministic_replan_request_id():
 
     assert id1 == id2
     assert id1 != id3
+
+
+def test_normal_runtime_receipt_has_attempt_one_identity():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-1",
+        workspace_revision="rev-1",
+        task_statement="Normal run attempt 1 test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    attempt = receipt["execution_attempt"]
+    assert attempt["schema"] == "nexus.execution_attempt.v1"
+    assert attempt["attempt_number"] == 1
+    assert attempt["max_attempts"] == 2
+    assert attempt["is_replan"] is False
+    assert attempt["parent_receipt_hash"] == ""
+    assert attempt["parent_run_anchor_hash"] == ""
+    assert attempt["source_replan_request_id"] == ""
+    assert receipt["claim_boundary"]["attempt_number"] == 1
+    assert receipt["claim_boundary"]["replan_attempt"] is False
+
+
+def test_controlled_replan_light_to_standard_succeeds(tmp_path):
+    runtime = UnifiedRuntime()
+    p1_path = tmp_path / "receipt_attempt_1.json"
+    p2_path = tmp_path / "receipt_attempt_2.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-replan-flow-1",
+        workspace_revision="rev-1",
+        task_statement="Task for light to standard replan",
+        task_type="public_bugfix",
+        route={
+            "online_policy": "auto",
+            "injected_transport": True,
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "output_delivered": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["online:ok"]},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:ok"]},
+        receipt_path=p1_path,
+    )
+
+    assert r1["execution_depth"] == "LIGHT"
+    assert r1["terminal_status"] == "INCOMPLETE"
+
+    invs = {cap: (lambda ctx, c=cap: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence": "ok", "evidence_refs": [f"cap:{c}:ok"]}) for cap in ["harness_preflight_sensor", "bdd_acceptance_skill", "acceptance_check", "claim_gate", "delivery_gate", "mempalace_gate", "research_route", "artifact_gate"]}
+
+    r2 = runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "output_delivered": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["online:ok"]},
+        capability_invokers=invs,
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok2"]},
+        learning=lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:ok"]},
+        receipt_path=p2_path,
+    )
+
+    assert r2["execution_depth"] == "STANDARD"
+    assert r2["terminal_status"] == "SUCCEEDED"
+    assert r2["receipt_complete"] is True
+    assert r2["execution_attempt"]["attempt_number"] == 2
+    assert r2["execution_attempt"]["is_replan"] is True
+    assert r2["execution_attempt"]["parent_receipt_hash"] == r1["receipt_hash"]
+    assert r2["execution_attempt"]["parent_run_anchor_hash"] == r1["run_anchor_hash"]
+    assert r2["execution_attempt"]["source_replan_request_id"] == r1["execution_replan_request"]["replan_request_id"]
+    assert r2["claim_boundary"]["attempt_number"] == 2
+    assert r2["claim_boundary"]["replan_attempt"] is True
+
+
+def test_controlled_replan_standard_to_full_succeeds(tmp_path):
+    runtime = UnifiedRuntime()
+    p1_path = tmp_path / "r1_std.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-replan-std-1",
+        workspace_revision="rev-1",
+        task_statement="Hardened L2 task replan to full",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L2_hardened",
+            "execution_depth": "STANDARD",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 50},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err std", "evidence_refs": ["v:std_fail"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        receipt_path=p1_path,
+    )
+
+    assert r1["execution_depth"] == "STANDARD"
+
+    r2 = runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r2["execution_depth"] == "FULL"
+    assert r2["execution_attempt"]["attempt_number"] == 2
+    assert r2["execution_attempt"]["is_replan"] is True
+
+
+def test_controlled_replan_floor_does_not_downgrade_natural_full():
+    runtime = UnifiedRuntime()
+
+    req_l1 = UnifiedRuntimeRequest(
+        task_id="task-replan-nat-full-1",
+        workspace_revision="rev-1",
+        task_statement="Low risk task for attempt 1",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req_l1,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r1["execution_replan_request"]["requested_execution_depth"] == "STANDARD"
+
+    req_l2 = UnifiedRuntimeRequest(
+        task_id="task-replan-nat-full-1",
+        workspace_revision="rev-1",
+        task_statement="Now deep swarm signals on attempt 2",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L3_swarm_deep",
+            "execution_depth": "FULL",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 86},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r2 = runtime.run_replan(
+        r1,
+        req_l2,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r2["execution_depth"] == "FULL"
+
+
+def test_controlled_replan_uses_new_planner_decision_id():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-replan-dec-1",
+        workspace_revision="rev-1",
+        task_statement="Replan new decision ID test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    r2 = runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r1["planner_decision_id"] != r2["planner_decision_id"]
+    assert r2["execution_attempt"]["planner_decision_id"] == r2["planner_decision_id"]
+    assert r2["execution_attempt"]["source_planner_decision_id"] == r1["planner_decision_id"]
+
+
+def test_controlled_replan_preserves_first_receipt_unchanged(tmp_path):
+    runtime = UnifiedRuntime()
+    p1 = tmp_path / "receipt_attempt_1_orig.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-preserve-r1",
+        workspace_revision="rev-1",
+        task_statement="Preserve first receipt test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        receipt_path=p1,
+    )
+
+    r1_bytes_before = p1.read_bytes()
+
+    runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        receipt_path=tmp_path / "receipt_attempt_2.json",
+    )
+
+    r1_bytes_after = p1.read_bytes()
+    assert r1_bytes_before == r1_bytes_after
+
+
+def test_controlled_replan_links_parent_receipt_and_run_anchor():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-link-anchor-1",
+        workspace_revision="rev-1",
+        task_statement="Link anchor test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    r2 = runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r2["context_trace"]["parent_receipt_hash"] == r1["receipt_hash"]
+    assert r2["context_trace"]["source_replan_request_id"] == r1["execution_replan_request"]["replan_request_id"]
+    assert r2["planner"]["execution_attempt"]["parent_receipt_hash"] == r1["receipt_hash"]
+    assert r2["planner"]["execution_attempt"]["parent_run_anchor_hash"] == r1["run_anchor_hash"]
+
+
+def test_controlled_replan_learning_observes_lineage():
+    runtime = UnifiedRuntime()
+
+    captured_learning_context = {}
+
+    def _learning_r2(ctx):
+        captured_learning_context.update(dict(ctx))
+        return {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True}
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-learning-lineage-1",
+        workspace_revision="rev-1",
+        task_statement="Learning lineage test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=_learning_r2,
+    )
+
+    assert captured_learning_context["execution_attempt"]["attempt_number"] == 2
+    assert captured_learning_context["parent_receipt_hash"] == r1["receipt_hash"]
+    assert captured_learning_context["source_replan_request_id"] == r1["execution_replan_request"]["replan_request_id"]
+
+
+def test_controlled_replan_invokes_each_stage_exactly_twice_total():
+    runtime = UnifiedRuntime()
+
+    invocations = {"online": 0, "verifier": 0, "learning": 0}
+
+    def _online(ctx):
+        invocations["online"] += 1
+        return {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True}
+
+    def _verifier_r1(ctx):
+        invocations["verifier"] += 1
+        return {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "f", "evidence_refs": ["v:f"]}
+
+    def _verifier_r2(ctx):
+        invocations["verifier"] += 1
+        return {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]}
+
+    def _learning(ctx):
+        invocations["learning"] += 1
+        return {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True}
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-count-2",
+        workspace_revision="rev-1",
+        task_statement="Invocation count test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=_online,
+        verifier=_verifier_r1,
+        learning=_learning,
+    )
+
+    runtime.run_replan(
+        r1,
+        req,
+        online_invoker=_online,
+        verifier=_verifier_r2,
+        learning=_learning,
+    )
+
+    assert invocations["online"] == 2
+    assert invocations["verifier"] == 2
+    assert invocations["learning"] == 2
+
+
+def test_controlled_replan_rejects_caller_route_spoof():
+    runtime = UnifiedRuntime()
+
+    req1 = UnifiedRuntimeRequest(
+        task_id="task-spoof-1",
+        workspace_revision="rev-1",
+        task_statement="Spoof test attempt 1",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req1,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req_spoof = UnifiedRuntimeRequest(
+        task_id="task-spoof-1",
+        workspace_revision="rev-1",
+        task_statement="Spoof test attempt 2",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "execution_replan_request": {"requested_execution_depth": "FULL"},
+            "replan_authorization": {"requested_execution_depth": "FULL"},
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r2 = runtime.run_replan(
+        r1,
+        req_spoof,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r2["execution_depth"] == "STANDARD"
+
+
+def test_controlled_replan_rejects_tampered_replan_request():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-tamper-req-1",
+        workspace_revision="rev-1",
+        task_statement="Tamper replan req test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    tampered_r1 = dict(r1)
+    tampered_r1["execution_replan_request"] = dict(r1["execution_replan_request"])
+    tampered_r1["execution_replan_request"]["replan_request_id"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+    with pytest.raises(ValueError, match="replan_request_integrity_mismatch"):
+        runtime.run_replan(
+            tampered_r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_tampered_prior_receipt_hash():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-tamper-hash-1",
+        workspace_revision="rev-1",
+        task_statement="Tamper prior receipt hash test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    tampered_r1 = dict(r1)
+    tampered_r1["receipt_base"] = dict(r1["receipt_base"])
+    tampered_r1["receipt_base"]["receipt_hash"] = "f" * 64
+
+    with pytest.raises(ValueError, match="prior_receipt_base_invalid"):
+        runtime.run_replan(
+            tampered_r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_cross_task_receipt():
+    runtime = UnifiedRuntime()
+
+    req1 = UnifiedRuntimeRequest(
+        task_id="task-orig-1",
+        workspace_revision="rev-1",
+        task_statement="Cross task test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req1,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req2 = UnifiedRuntimeRequest(
+        task_id="different-task-id-2",
+        workspace_revision="rev-1",
+        task_statement="Different task ID",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="replan_task_id_mismatch"):
+        runtime.run_replan(
+            r1,
+            req2,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_cross_revision_receipt():
+    runtime = UnifiedRuntime()
+
+    req1 = UnifiedRuntimeRequest(
+        task_id="task-rev-1",
+        workspace_revision="rev-1",
+        task_statement="Cross rev test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req1,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req2 = UnifiedRuntimeRequest(
+        task_id="task-rev-1",
+        workspace_revision="rev-different-2",
+        task_statement="Cross rev test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="replan_workspace_revision_mismatch"):
+        runtime.run_replan(
+            r1,
+            req2,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_completed_prior_receipt():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-comp-1",
+        workspace_revision="rev-1",
+        task_statement="Completed receipt test",
+        task_type="public_bugfix",
+        route={
+            "online_policy": "auto",
+            "injected_transport": True,
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    invs = {cap: (lambda ctx, c=cap: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence": "ok", "evidence_refs": [f"cap:{c}:ok"]}) for cap in ["harness_preflight_sensor", "bdd_acceptance_skill", "acceptance_check", "claim_gate", "delivery_gate", "mempalace_gate", "research_route", "artifact_gate"]}
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "output_delivered": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["online:ok"]},
+        capability_invokers=invs,
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"task_id": ctx["task_id"], "status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:ok"]},
+    )
+
+    assert r1["receipt_complete"] is True
+
+    with pytest.raises(ValueError, match="prior_receipt_not_incomplete"):
+        runtime.run_replan(
+            r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_untrusted_verifier_request():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-untrusted-ver-1",
+        workspace_revision="rev-1",
+        task_statement="Untrusted verifier test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "", "evidence_refs": []},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r1["execution_replan_request"]["verifier_outcome_trusted"] is False
+
+    with pytest.raises(ValueError, match="replan_request_not_trusted"):
+        runtime.run_replan(
+            r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_full_manual_review():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-full-man-1",
+        workspace_revision="rev-1",
+        task_statement="Full manual review test",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L3_swarm_deep",
+            "execution_depth": "FULL",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 86},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "deep fail", "evidence_refs": ["v:dfail"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r1["execution_replan_request"]["manual_review_required"] is True
+
+    with pytest.raises(ValueError, match="replan_manual_review_required"):
+        runtime.run_replan(
+            r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_rejects_third_attempt():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-budget-3",
+        workspace_revision="rev-1",
+        task_statement="Budget exhausted test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "f1", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    r2 = runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "f2", "evidence_refs": ["v:f2"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r2["execution_attempt"]["attempt_number"] == 2
+
+    with pytest.raises(ValueError, match="replan_attempt_budget_exhausted"):
+        runtime.run_replan(
+            r2,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_controlled_replan_second_failure_stops_without_auto_chain():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-fail-twice-1",
+        workspace_revision="rev-1",
+        task_statement="Double failure test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "f1", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    r2 = runtime.run_replan(
+        r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "f2", "evidence_refs": ["v:f2"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert r2["receipt_complete"] is False
+    assert r2["terminal_status"] == "INCOMPLETE"
+    assert r2["execution_attempt"]["attempt_number"] == 2
+    assert "execution_replan_request" in r2
+
+
+def test_controlled_replan_physical_receipts_validate_strict(tmp_path):
+    runtime = UnifiedRuntime()
+    p1 = tmp_path / "attempt_1_disk.json"
+    p2 = tmp_path / "attempt_2_disk.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-phys-strict-1",
+        workspace_revision="rev-1",
+        task_statement="Physical receipts strict validation test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "f1", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        receipt_path=p1,
+    )
+
+    assert p1.exists()
+    disk_r1 = json.loads(p1.read_text(encoding="utf-8"))
+    v1_res = validate_receipt_base(disk_r1, mode="strict")
+    assert v1_res["ok"] is True
+
+    r2 = runtime.run_replan(
+        disk_r1,
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        receipt_path=p2,
+    )
+
+    assert p2.exists()
+    disk_r2 = json.loads(p2.read_text(encoding="utf-8"))
+    v2_res = validate_receipt_base(disk_r2, mode="strict")
+    assert v2_res["ok"] is True
+
+    assert disk_r2["execution_attempt"]["attempt_number"] == 2
+    assert disk_r2["execution_attempt"]["parent_receipt_hash"] == disk_r1["receipt_hash"]
+    assert disk_r2["execution_attempt"]["parent_run_anchor_hash"] == disk_r1["run_anchor_hash"]
