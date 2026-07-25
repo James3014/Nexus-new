@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from nexus.services.capability_registry import (
+    CONSUMER_MODES,
     PLANNER_EXECUTION_CONTRACTS,
     REAL_EXECUTION_CLASSES,
+    project_consumer_execution_mode,
 )
 
 
@@ -121,13 +123,6 @@ _ASSIST_LINEAGE_FIELDS = (
     "applied_artifact_hash",
     "verifier_artifact_hash",
     "final_receipt_hash",
-)
-
-from nexus.services.capability_registry import (
-    CONSUMER_MODES,
-    PLANNER_EXECUTION_CONTRACTS,
-    REAL_EXECUTION_CLASSES,
-    project_consumer_execution_mode,
 )
 
 _ALLOWED_RESOLUTIONS = {
@@ -278,6 +273,13 @@ def _local_execution_reasons(
             evidence_failures.append(f"missing_or_invalid_{field}")
     selected_hash = str(local_execution.get("selected_hash") or "")
     applied_hash = str(local_execution.get("applied_hash") or "")
+    candidate_hash = str(local_execution.get("candidate_hash") or "")
+    if (
+        _valid_hash(candidate_hash)
+        and _valid_hash(selected_hash)
+        and candidate_hash != selected_hash
+    ):
+        evidence_failures.append("candidate_selected_hash_mismatch")
     if _valid_hash(selected_hash) and _valid_hash(applied_hash) and selected_hash != applied_hash:
         evidence_failures.append("selected_applied_hash_mismatch")
     if not str(local_execution.get("provider_family") or "").strip():
@@ -287,6 +289,109 @@ def _local_execution_reasons(
     if capability == "repair_loop" and local_execution.get("loop_entered") is not True:
         execution_failures.append("repair_loop_not_entered")
     return execution_failures, evidence_failures
+
+
+def _local_execution_receipt_reasons(
+    record: Mapping[str, Any],
+    local_execution: Mapping[str, Any],
+    verifier: Mapping[str, Any],
+) -> list[str]:
+    """Bind LocalModelExecutor claims to its physical execution receipt.
+
+    The closure adapter must not turn producer booleans into execution proof.
+    Every positive claim below is recomputed from the receipt payload that is
+    also present as a physical ``receipt`` evidence reference.
+    """
+
+    reasons: list[str] = []
+    receipt_ref = next(
+        (
+            ref
+            for ref in record.get("evidence_refs") or []
+            if isinstance(ref, Mapping) and str(ref.get("kind") or "").lower() == "receipt"
+        ),
+        None,
+    )
+    receipt = _mapping(receipt_ref.get("payload")) if receipt_ref else {}
+    if receipt.get("schema") != "nexus.local_assist.execution_receipt.v1":
+        return ["local_execution_receipt_incomplete"]
+
+    for field in ("task_id", "planner_decision_id", "workspace_revision"):
+        if not str(record.get(field) or "").strip() or str(receipt.get(field) or "") != str(
+            record.get(field) or ""
+        ):
+            reasons.append(f"local_receipt_{field}_mismatch")
+
+    source_hash = str(receipt.get("source_snapshot_hash") or "").lower()
+    if not _valid_hash(source_hash):
+        reasons.append("local_receipt_source_hash_invalid")
+
+    if (
+        receipt.get("receipt_complete") is not True
+        or receipt.get("executor_invoked") is not True
+        or str(receipt.get("terminal_status") or "").upper() != "SUCCEEDED"
+    ):
+        reasons.append("local_receipt_not_successful")
+
+    try:
+        provider_call_count = int(receipt.get("provider_call_count") or 0)
+    except (TypeError, ValueError):
+        provider_call_count = 0
+    ledger = receipt.get("provider_call_ledger")
+    if provider_call_count < 1 or not isinstance(ledger, list) or len(ledger) != provider_call_count:
+        reasons.append("local_provider_call_not_proven")
+    elif any(
+        not isinstance(call, Mapping)
+        or str(call.get("status") or "").lower() != "ok"
+        or bool(str(call.get("error") or "").strip())
+        for call in ledger
+    ):
+        reasons.append("local_provider_call_failed")
+
+    candidate_hash = str(local_execution.get("candidate_hash") or "").lower()
+    candidate_hashes = [str(value or "").lower() for value in receipt.get("candidate_hashes") or []]
+    verified_artifact = _mapping(receipt.get("verified_artifact"))
+    if (
+        int(receipt.get("candidate_count") or 0) < 1
+        or candidate_hash not in candidate_hashes
+        or str(verified_artifact.get("candidate_hash") or "").lower() != candidate_hash
+    ):
+        reasons.append("local_candidate_receipt_mismatch")
+
+    if (
+        str(receipt.get("isolation_status") or "").lower() != "isolated"
+        or receipt.get("verifier_reached") is not True
+        or str(receipt.get("verifier_result") or "").lower() != "pass"
+        or verified_artifact.get("hash_matched") is not True
+        or verified_artifact.get("verifier_reached") is not True
+        or str(verified_artifact.get("verifier_status") or "").lower() != "pass"
+        or verified_artifact.get("model_invoked") is not True
+        or verified_artifact.get("output_delivered") is not True
+        or str(verified_artifact.get("isolation_status") or "").lower() != "isolated"
+    ):
+        reasons.append("local_verifier_artifact_incomplete")
+
+    verifier_artifact = _mapping(verifier.get("artifact_payload"))
+    if (
+        str(verifier_artifact.get("task_id") or "") != str(record.get("task_id") or "")
+        or str(verifier_artifact.get("candidate_hash") or "").lower() != candidate_hash
+        or str(verifier_artifact.get("verifier_status") or "").lower() != "pass"
+        or str(verifier_artifact.get("source_hash") or "").lower() != source_hash
+    ):
+        reasons.append("local_verifier_source_candidate_mismatch")
+
+    if (
+        receipt_ref is None
+        or not _hash_matches(receipt_ref.get("payload"), receipt_ref.get("json_sha256"))
+        or _canonical_hash(receipt) != str(receipt_ref.get("json_sha256") or "").lower()
+        or str(record.get("upstream_receipt_sha256") or "").lower()
+        != str(receipt_ref.get("sha256") or "").lower()
+    ):
+        reasons.append("local_physical_receipt_unbound")
+
+    if reasons:
+        return ["local_execution_receipt_incomplete", *reasons]
+    return []
 
 
 _MANDATORY_PAYLOAD_HASH_PAIRS = (
@@ -319,10 +424,15 @@ def _assist_lineage_complete(lineage: Mapping[str, Any], record: Mapping[str, An
 
     # 3. Identity binding: task_id, workspace_revision, planner_decision_id
     if record is not None:
-        for field in ("task_id", "workspace_revision", "planner_decision_id"):
+        for field in (
+            "task_id",
+            "workspace_revision",
+            "planner_decision_id",
+            "upstream_receipt_sha256",
+        ):
             rec_val = str(record.get(field) or "").strip()
             lin_val = str(lineage.get(field) or "").strip()
-            if rec_val and lin_val and rec_val != lin_val:
+            if not rec_val or not lin_val or rec_val != lin_val:
                 return False
 
     # 4. Adjacent edge binding check
@@ -561,6 +671,12 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
             status=EVIDENCE_INCOMPLETE,
             reasons=["evidence_mode_unknown"],
         )
+    if evidence_mode != EVIDENCE_MODE_LIVE_RUNTIME:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=[f"non_live_evidence_mode:{evidence_mode}"],
+        )
 
     execution_class = str(record.get("execution_class") or "").strip()
     if not execution_class:
@@ -617,6 +733,12 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
             status=EVIDENCE_INCOMPLETE,
             reasons=["upstream_receipt_sha256_missing"],
         )
+    if not _valid_hash(record.get("upstream_receipt_sha256")):
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["upstream_receipt_sha256_invalid"],
+        )
 
     if record.get("lineage_recomputed") is True:
         independent_check = _hash_matches(
@@ -650,12 +772,16 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
         return _verdict(record, status=VERIFIER_FAILED, reasons=["gate_not_passed", *missing])
 
     if capability in {"local_model_executor", "repair_loop"}:
+        local_execution = _mapping(record.get("local_execution"))
         execution_failures, local_missing = _local_execution_reasons(
-            capability, _mapping(record.get("local_execution"))
+            capability, local_execution
         )
         if execution_failures:
             return _verdict(record, status=EXECUTION_FAILED, reasons=execution_failures)
         missing.extend(local_missing)
+        missing.extend(
+            _local_execution_receipt_reasons(record, local_execution, verifier)
+        )
 
     if (
         resolution == "LOCAL_TO_ONLINE_GOVERNED_BRIDGE"
@@ -663,33 +789,32 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
     ) and not _assist_lineage_complete(_mapping(record.get("assist_lineage")), record):
         missing.append("assist_lineage_incomplete")
 
-    if evidence_mode == EVIDENCE_MODE_LIVE_RUNTIME:
-        run_root = str(record.get("run_root") or "").strip()
-        if not run_root:
-            return _verdict(
-                record,
-                status=EVIDENCE_INCOMPLETE,
-                reasons=["run_root_missing_for_live_runtime"],
+    run_root = str(record.get("run_root") or "").strip()
+    if not run_root:
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["run_root_missing_for_live_runtime"],
+        )
+    run_root_path = Path(run_root)
+    if not run_root_path.is_dir():
+        return _verdict(
+            record,
+            status=EVIDENCE_INCOMPLETE,
+            reasons=["run_root_not_directory"],
+        )
+    for ref in (refs or []):
+        if isinstance(ref, Mapping):
+            phys_failures = _physical_evidence_verify(ref, run_root=run_root)
+            missing.extend(phys_failures)
+    if provider_observation in {PROVIDER_OBSERVATION_CONSUMED, PROVIDER_OBSERVATION_EXECUTED}:
+        for required_kind in ("request", "stdout", "stderr"):
+            found = any(
+                str(r.get("path") or "").strip() for r in (refs or [])
+                if isinstance(r, Mapping) and str(r.get("kind") or "").strip().lower() == required_kind
             )
-        run_root_path = Path(run_root)
-        if not run_root_path.is_dir():
-            return _verdict(
-                record,
-                status=EVIDENCE_INCOMPLETE,
-                reasons=["run_root_not_directory"],
-            )
-        for ref in (refs or []):
-            if isinstance(ref, Mapping):
-                phys_failures = _physical_evidence_verify(ref, run_root=run_root)
-                missing.extend(phys_failures)
-        if provider_observation in {PROVIDER_OBSERVATION_CONSUMED, PROVIDER_OBSERVATION_EXECUTED}:
-            for required_kind in ("request", "stdout", "stderr"):
-                found = any(
-                    str(r.get("path") or "").strip() for r in (refs or [])
-                    if isinstance(r, Mapping) and str(r.get("kind") or "").strip().lower() == required_kind
-                )
-                if not found:
-                    missing.append(f"missing_physical_{required_kind}_ref")
+            if not found:
+                missing.append(f"missing_physical_{required_kind}_ref")
 
     if missing:
         return _verdict(record, status=EVIDENCE_INCOMPLETE, reasons=missing)

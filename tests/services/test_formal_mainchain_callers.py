@@ -10,6 +10,8 @@ import ast
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.services.mainchain_entry import run_mainchain, stamp_mainchain_route
 from nexus.services.mainchain_route_freeze import (
@@ -375,6 +377,98 @@ def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_pat
     assert calls, "PipelineRepairMixin did not call run_mainchain"
     assert any("pr-runtime-1" in c for c in calls), calls
     assert res is not None or raw is not None
+
+
+@pytest.mark.parametrize("mode", ["disabled", "advisor"])
+def test_pipeline_repair_mainchain_exception_fails_closed_without_online_bypass(
+    monkeypatch, tmp_path: Path, mode: str
+) -> None:
+    """A broken canonical runtime must not fall through to the bare Online callable."""
+    import json
+
+    import nexus.services.mainchain_entry as me
+    from nexus.engine.pipeline_repair import PipelineRepairMixin
+
+    def _raise_mainchain(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("canonical boom")
+
+    monkeypatch.setattr(me, "run_mainchain", _raise_mainchain)
+
+    class _Gateway:
+        oauth_provider = "fixture"
+
+    class _Harness(PipelineRepairMixin):
+        def __init__(self) -> None:
+            self.engine = type(
+                "E",
+                (),
+                {
+                    "project_root": tmp_path,
+                    "run_dir": tmp_path / "runs",
+                    "_add_step_to_history": lambda *a, **k: None,
+                },
+            )()
+            self.registry = None
+            self._repair_gateway = _Gateway()
+
+        def _ensure_repair_gateway(self, ctx):  # type: ignore[no-untyped-def]
+            return self._repair_gateway
+
+        def _ensure_workspace_revision(self, ctx) -> str:  # type: ignore[no-untyped-def]
+            return "wr-mainchain-fail"
+
+    metadata = {
+        "task_id": f"mainchain-fail-{mode}",
+        "local_assist_mode": mode,
+        "oauth_provider": "fixture",
+        "injected_transport": True,
+        "online_policy": "auto",
+        "target_file": "demo.py",
+        "target_files": ["demo.py"],
+        "local_assist_service": object(),
+    }
+    state = type("State", (), {"metadata": metadata})()
+    ctx = type(
+        "Ctx",
+        (),
+        {
+            "state": state,
+            "task_id": metadata["task_id"],
+            "task_desc": "repair demo.py",
+        },
+    )()
+    online_prompts: list[str] = []
+
+    def _online_callable(prompt: str):
+        online_prompts.append(prompt)
+        return {"status": "APPROVED", "patch": "bypass"}, "bypass"
+
+    res, raw = _Harness()._run_unified_advisor_online(
+        ctx,
+        online_callable=_online_callable,
+        repair_attempts=1,
+    )
+
+    assert online_prompts == []
+    assert raw == ""
+    assert res == {
+        "status": "FAILED",
+        "patch": "",
+        "error": "mainchain_exception:RuntimeError:canonical boom",
+        "provider_call_count": 0,
+        "mainchain_entry": True,
+        "receipt_complete": False,
+    }
+    assert metadata["degraded_to_online"] is False
+    assert metadata["online_continued_without_local_assist"] is False
+    assert metadata["online_success"] is False
+    assert metadata["runtime_receipt_complete"] is False
+    pointer = json.loads(Path(metadata["unified_runtime_pointer_path"]).read_text(encoding="utf-8"))
+    assert pointer["degradation_reason"] == "mainchain_exception:RuntimeError:canonical boom"
+    assert pointer["claim_boundary"] == {
+        "production_ready": False,
+        "public_claim_allowed": False,
+    }
 
 
 def test_cli_module_uses_gateway_ask_unified() -> None:

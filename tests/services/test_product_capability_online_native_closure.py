@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from nexus.services.capability_registry import LOCAL_STAGE_CAPABILITIES
-from nexus.services.product_capability_closure import LIVE_EXECUTED_PASS, PRODUCT_CAPABILITIES
+from nexus.services.product_capability_closure import (
+    EVIDENCE_INCOMPLETE,
+    PRODUCT_CAPABILITIES,
+)
 from nexus.services.product_capability_closure_harness import (
     build_product_task_catalog,
     canonical_payload_hash,
@@ -35,7 +38,7 @@ def _online_task(capability: str, root: Path):
     )
 
 
-def _production_canary_runner(task):
+def _production_canary_runner(task, *, evidence_mode: str = ""):
     result = _run_family_canary(
         task.capability,
         positive=True,
@@ -48,6 +51,8 @@ def _production_canary_runner(task):
         "expected_effect": dict(task.expected_effect),
         "public_claim_allowed": False,
     }
+    if evidence_mode:
+        evidence_payload["evidence_mode"] = evidence_mode
     evidence_root = Path(str(task.fixture["workspace_root"])) / ".nexus" / "closure_evidence"
     evidence_root.mkdir(parents=True, exist_ok=True)
     evidence_path = evidence_root / f"online-{task.capability}.json"
@@ -109,7 +114,7 @@ def _production_canary_runner(task):
         gate_passed = result.get("gate_passed") is True
         physical_callable = result.get("physical_callable")
         local_execution = {}
-    return {
+    result_dict = {
         "task_id": task.task_id,
         "origin": task.origin,
         "capability": task.capability,
@@ -152,6 +157,9 @@ def _production_canary_runner(task):
         "route_surface_changed": False,
         "public_claim_allowed": False,
     }
+    if evidence_mode:
+        result_dict["evidence_mode"] = evidence_mode
+    return result_dict
 
 
 
@@ -161,20 +169,20 @@ def test_online_native_denominator_is_exactly_28() -> None:
 
 
 @pytest.mark.parametrize("capability", ONLINE_NATIVE)
-def test_online_native_capability_has_execution_grade_mainchain_closure(
+def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
     capability: str,
     tmp_path: Path,
 ) -> None:
     task = _online_task(capability, tmp_path / "workspace")
     row = run_closure_task(
         task,
-        _production_canary_runner,
+        lambda t: _production_canary_runner(t, evidence_mode="canary"),
         output_dir=tmp_path / "runs",
     )
     verdict = row["closure_verdict"]
-    assert verdict["status"] == LIVE_EXECUTED_PASS, (capability, verdict)
-    assert verdict["live_pass"] is True
-    assert verdict["missing_evidence_reasons"] == []
+    assert verdict["status"] == EVIDENCE_INCOMPLETE, (capability, verdict)
+    assert verdict["live_pass"] is False
+    assert "non_live_evidence_mode:canary" in verdict["missing_evidence_reasons"]
     assert row["harness_consistency_errors"] == []
     evidence_payload = row["record"]["evidence_refs"][0]["payload"]
     assert evidence_payload["mainchain_result"]["_raw_receipt"]["task_id"] == task.task_id

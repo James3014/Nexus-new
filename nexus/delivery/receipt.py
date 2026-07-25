@@ -5,13 +5,84 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+
+_PASS_STATUSES = {"PASS", "PASSED", "SUCCESS", "SUCCEEDED", "VERIFIED"}
 
 
 def sha256(path: Path) -> str | None:
-    if not path.exists():
+    if not path.is_file():
         return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _load_json_object(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) and payload else None
+
+
+def _claim_integrity_passed(acceptance: Mapping[str, Any]) -> bool:
+    criteria = acceptance.get("criteria")
+    if not isinstance(criteria, list):
+        return False
+    for item in criteria:
+        if not isinstance(item, Mapping) or item.get("name") != "report_claim_integrity":
+            continue
+        detail = item.get("detail")
+        return bool(
+            item.get("passed") is True
+            and isinstance(detail, Mapping)
+            and detail.get("passed") is True
+        )
+    return False
+
+
+def _delivery_gate_evidence(
+    *,
+    evidence_path: Path,
+    baseline_path: Path,
+    acceptance_report: Path,
+    acceptance_exit_code: int,
+    acceptance_status: str,
+    acceptance_gate: bool,
+) -> dict[str, Any]:
+    evidence = _load_json_object(evidence_path)
+    baseline = _load_json_object(baseline_path)
+    acceptance = _load_json_object(acceptance_report)
+    report_status = str((acceptance or {}).get("status") or "").strip().upper()
+    report_gate = (acceptance or {}).get("gate_passed") is True
+
+    checks = {
+        "evidence_json_valid": evidence is not None and sha256(evidence_path) is not None,
+        "baseline_json_valid": baseline is not None and sha256(baseline_path) is not None,
+        "acceptance_report_json_valid": acceptance is not None and sha256(acceptance_report) is not None,
+        "acceptance_exit_code_zero": acceptance_exit_code == 0,
+        "acceptance_status_pass": str(acceptance_status or "").strip().upper() in _PASS_STATUSES,
+        "acceptance_gate_passed": acceptance_gate is True,
+        "acceptance_report_status_pass": report_status in _PASS_STATUSES,
+        "acceptance_report_gate_passed": report_gate,
+        "acceptance_inputs_match_report": bool(
+            acceptance is not None
+            and report_gate == (acceptance_gate is True)
+            and report_status == str(acceptance_status or "").strip().upper()
+        ),
+        "claim_integrity_passed": bool(acceptance and _claim_integrity_passed(acceptance)),
+    }
+    blockers = sorted(name for name, passed in checks.items() if not passed)
+    return {
+        "status": "PASS" if not blockers else "FAIL",
+        "checks": checks,
+        "blockers": blockers,
+    }
 
 
 def load_delivery_receipt(path: Path) -> dict[str, Any]:
@@ -41,6 +112,15 @@ def build_delivery_receipt(
     if head is None:
         head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
 
+    delivery_evidence = _delivery_gate_evidence(
+        evidence_path=evidence_path,
+        baseline_path=baseline_path,
+        acceptance_report=acceptance_report,
+        acceptance_exit_code=acceptance_exit_code,
+        acceptance_status=acceptance_status,
+        acceptance_gate=acceptance_gate,
+    )
+
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "version": "v24.1-canonical",
@@ -67,7 +147,8 @@ def build_delivery_receipt(
             "gate_passed": acceptance_gate,
             "primary_cause": acceptance_primary,
         },
-        "delivery_gate_passed": True,
+        "delivery_evidence": delivery_evidence,
+        "delivery_gate_passed": delivery_evidence["status"] == "PASS",
     }
 
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
+from nexus.services.capability_registry import coverage_counts_from_receipt
 from nexus.services.product_capability_closure import (
     BLOCKED_DEPENDENCY,
     EVIDENCE_INCOMPLETE,
@@ -13,11 +14,10 @@ from nexus.services.product_capability_closure import (
     POLICY_SKIP_VERIFIED,
     PRODUCT_CAPABILITIES,
     VERIFIER_FAILED,
-    summarize_origin_matrix,
     expected_resolution_type,
+    summarize_origin_matrix,
     verify_product_capability_resolution,
 )
-from nexus.services.capability_registry import coverage_counts_from_receipt
 
 
 def _hash_payload(value: object) -> str:
@@ -146,6 +146,7 @@ def _valid_record(
             "task_id": task_id,
             "planner_decision_id": plan_id,
             "workspace_revision": rev_id,
+            "upstream_receipt_sha256": upstream_sha,
             "packet_payload": packet_payload,
             "packet_hash": packet_hash,
             "fragment_payload": fragment_payload,
@@ -172,13 +173,82 @@ def _valid_record(
             "output_delivered": True,
             "candidate_isolated": True,
             "candidate_hash": "8" * 64,
-            "selected_hash": "9" * 64,
-            "applied_hash": "9" * 64,
+            "selected_hash": "8" * 64,
+            "applied_hash": "8" * 64,
             "network_invoked": False,
             "loop_entered": capability == "repair_loop",
         }
-        if origin == "local":
-            record.pop("assist_lineage", None)
+        source_hash = _hash_payload({"source": task_id})
+        candidate_hash = str(record["local_execution"]["candidate_hash"])
+        local_receipt = {
+            "schema": "nexus.local_assist.execution_receipt.v1",
+            "task_id": task_id,
+            "planner_decision_id": plan_id,
+            "workspace_revision": rev_id,
+            "source_snapshot_hash": source_hash,
+            "terminal_status": "SUCCEEDED",
+            "receipt_complete": True,
+            "executor_invoked": True,
+            "provider_call_count": 1,
+            "provider_call_ledger": [{"status": "ok", "error": ""}],
+            "candidate_count": 1,
+            "candidate_hashes": [candidate_hash],
+            "isolation_status": "isolated",
+            "verifier_reached": True,
+            "verifier_result": "pass",
+            "verified_artifact": {
+                "task_id": task_id,
+                "candidate_hash": candidate_hash,
+                "verifier_status": "pass",
+                "hash_matched": True,
+                "verifier_reached": True,
+                "model_invoked": True,
+                "output_delivered": True,
+                "isolation_status": "isolated",
+            },
+        }
+        receipt_path = run_root / f"{capability}-local-execution-receipt.json"
+        receipt_path.write_text(
+            json.dumps(local_receipt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        record["receipt_payload"] = local_receipt
+        record["receipt_hash"] = _hash_payload(local_receipt)
+        record["receipt_path"] = str(receipt_path)
+        record["evidence_refs"].append(
+            {
+                "path": str(receipt_path),
+                "sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+                "json_sha256": _hash_payload(local_receipt),
+                "content_kind": "json",
+                "kind": "receipt",
+                "payload": local_receipt,
+            }
+        )
+        local_receipt_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+        record["upstream_receipt_sha256"] = local_receipt_sha
+        if isinstance(record.get("assist_lineage"), dict):
+            record["assist_lineage"]["upstream_receipt_sha256"] = local_receipt_sha
+        record["verifier"] = {
+            "invoked": True,
+            "passed": True,
+            "evidence_hash": _hash_payload(verifier_evidence),
+            "evidence_payload": verifier_evidence,
+            "artifact_hash": _hash_payload(
+                {
+                    "task_id": task_id,
+                    "candidate_hash": candidate_hash,
+                    "verifier_status": "pass",
+                    "source_hash": source_hash,
+                }
+            ),
+            "artifact_payload": {
+                "task_id": task_id,
+                "candidate_hash": candidate_hash,
+                "verifier_status": "pass",
+                "source_hash": source_hash,
+            },
+        }
     return record
 
 
@@ -549,6 +619,51 @@ def test_b1r_legacy_live_provider_mode_fails_closed(tmp_path: Path) -> None:
     verdict = verify_product_capability_resolution(record)
     assert verdict["live_pass"] is False
     assert "evidence_mode_unknown" in verdict["missing_evidence_reasons"]
+
+
+def test_only_live_runtime_mode_can_receive_live_executed_pass(tmp_path: Path) -> None:
+    for mode in ("simulation", "harness", "canary"):
+        record = _valid_record(tmp_path=tmp_path / mode)
+        record["evidence_mode"] = mode
+        verdict = verify_product_capability_resolution(record)
+        assert verdict["status"] == EVIDENCE_INCOMPLETE
+        assert verdict["live_pass"] is False
+        assert f"non_live_evidence_mode:{mode}" in verdict["missing_evidence_reasons"]
+
+
+def test_upstream_receipt_identifier_must_be_a_valid_sha256(tmp_path: Path) -> None:
+    record = _valid_record(tmp_path=tmp_path)
+    record["upstream_receipt_sha256"] = "not-a-sha256"
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] == EVIDENCE_INCOMPLETE
+    assert "upstream_receipt_sha256_invalid" in verdict["missing_evidence_reasons"]
+
+
+def test_local_execution_booleans_cannot_replace_physical_executor_receipt(
+    tmp_path: Path,
+) -> None:
+    record = _valid_record("local_model_executor", origin="local", tmp_path=tmp_path)
+    # The legacy fixture has internally consistent booleans and hashes but no
+    # execution-grade LocalModelExecutor receipt behind them.
+    record["receipt_payload"] = {"task_id": record["task_id"]}
+    record["receipt_hash"] = _hash_payload(record["receipt_payload"])
+    record["evidence_refs"] = [
+        ref for ref in record["evidence_refs"] if ref.get("kind") != "receipt"
+    ]
+    record["receipt_path"] = ""
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] == EVIDENCE_INCOMPLETE
+    assert "local_execution_receipt_incomplete" in verdict["missing_evidence_reasons"]
+
+
+def test_assist_lineage_requires_same_upstream_receipt(tmp_path: Path) -> None:
+    record = _valid_record(origin="local", tmp_path=tmp_path)
+    lineage = dict(record["assist_lineage"])
+    lineage["upstream_receipt_sha256"] = "0" * 64
+    record["assist_lineage"] = lineage
+    verdict = verify_product_capability_resolution(record)
+    assert verdict["status"] == EVIDENCE_INCOMPLETE
+    assert "assist_lineage_incomplete" in verdict["missing_evidence_reasons"]
 
 
 def test_b1r_missing_run_root_fails_closed(tmp_path: Path) -> None:

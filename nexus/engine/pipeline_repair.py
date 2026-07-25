@@ -311,9 +311,69 @@ class PipelineRepairMixin:
                 return denied
             return online_callable(prompt)
 
+        def _fail_closed_mainchain(exc: Exception, *, local_status: str) -> tuple[dict[str, Any], str]:
+            """Preserve the canonical failure without bypassing receipt/verifier gates."""
+            error = f"mainchain_exception:{type(exc).__name__}:{exc}"
+            truth = self._stamp_stage_truth(
+                meta,
+                local_assist_success=False,
+                online_success=False,
+                runtime_receipt_complete=False,
+                task_pipeline_success=False,
+            )
+            meta.update(
+                {
+                    "local_assist_status": local_status,
+                    "local_assist_reason": error,
+                    "degraded_to_online": False,
+                    "degradation_reason": error,
+                    "local_assist_contributed": False,
+                    "local_context_forwarded": False,
+                    "online_continued_without_local_assist": False,
+                    "local_assist_status_detail": "MAINCHAIN_FAILED_CLOSED",
+                    "mainchain_error": error,
+                    "with_nexus_armor": True,
+                }
+            )
+            self._write_unified_runtime_pointer(
+                ctx,
+                {
+                    "local_assist_mode": mode,
+                    "local_assist_status": local_status,
+                    "local_context_forwarded": False,
+                    "unified_runtime_receipt_path": "",
+                    "unified_runtime_task_id": task_id,
+                    "online_provider": "",
+                    "workspace_revision": revision,
+                    "degraded_to_online": False,
+                    "degradation_reason": error,
+                    "local_assist_contributed": False,
+                    "online_continued_without_local_assist": False,
+                    "mainchain_entry": True,
+                    "mainchain_error": error,
+                    "fail_closed": True,
+                    "claim_boundary": {
+                        "public_claim_allowed": False,
+                        "production_ready": False,
+                    },
+                    **truth,
+                },
+            )
+            return (
+                {
+                    "status": "FAILED",
+                    "patch": "",
+                    "error": error,
+                    "provider_call_count": 0,
+                    "mainchain_entry": True,
+                    "receipt_complete": False,
+                },
+                "",
+            )
+
         if mode == "disabled":
             # P4: Online-only World A still uses UnifiedRuntime + with_nexus armor
-            # (no Local). Bare online_callable only if UR path fails closed.
+            # (no Local). Canonical runtime failure must remain fail-closed.
             try:
                 from nexus.services.mainchain_entry import (
                     build_mainchain_capability_invokers,
@@ -437,32 +497,7 @@ class PipelineRepairMixin:
                 return res, raw
             except Exception as exc:
                 logger.warning("world_a_mainchain_online_only_failed: %s", exc)
-            res, raw = _guarded_online(str(ctx.task_desc or ""))
-            online_ok = bool(raw or (isinstance(res, dict) and res)) and str(raw) != "online_execution_not_authorized"
-            truth = self._stamp_stage_truth(
-                meta,
-                local_assist_success=False,
-                online_success=online_ok,
-                runtime_receipt_complete=False,
-                task_pipeline_success=False,
-            )
-            meta["local_assist_status"] = "NOT_REQUESTED"
-            meta["local_context_forwarded"] = False
-            meta["local_assist_contributed"] = False
-            self._write_unified_runtime_pointer(
-                ctx,
-                {
-                    "local_assist_mode": "disabled",
-                    "local_assist_status": "NOT_REQUESTED",
-                    "local_context_forwarded": False,
-                    "local_assist_contributed": False,
-                    "unified_runtime_receipt_path": "",
-                    "unified_runtime_task_id": task_id,
-                    "workspace_revision": revision,
-                    **truth,
-                },
-            )
-            return res, raw
+                return _fail_closed_mainchain(exc, local_status="NOT_REQUESTED")
 
         if mode == "shadow":
             try:
@@ -720,45 +755,8 @@ class PipelineRepairMixin:
                 with_nexus_armor=True,
             )
         except Exception as exc:
-            res, raw = online_callable(str(ctx.task_desc or ""))
-            online_ok = bool(raw or (isinstance(res, dict) and res))
-            truth = self._stamp_stage_truth(
-                meta,
-                local_assist_success=False,
-                online_success=online_ok,
-                runtime_receipt_complete=False,
-                task_pipeline_success=False,
-            )
-            meta.update(
-                {
-                    "local_assist_status": "FAILED",
-                    "local_assist_reason": f"unified_runtime_exception:{exc}",
-                    "degraded_to_online": True,
-                    "degradation_reason": f"unified_runtime_exception:{exc}",
-                    "local_assist_contributed": False,
-                    "local_context_forwarded": False,
-                    "online_continued_without_local_assist": True,
-                    "local_assist_status_detail": "ONLINE_CONTINUED_WITHOUT_LOCAL_ASSIST",
-                }
-            )
-            self._write_unified_runtime_pointer(
-                ctx,
-                {
-                    "local_assist_mode": "advisor",
-                    "local_assist_status": "FAILED",
-                    "local_context_forwarded": False,
-                    "unified_runtime_receipt_path": "",
-                    "unified_runtime_task_id": task_id,
-                    "online_provider": "",
-                    "workspace_revision": revision,
-                    "degraded_to_online": True,
-                    "degradation_reason": str(exc),
-                    "local_assist_contributed": False,
-                    "claim_boundary": {"public_claim_allowed": False},
-                    **truth,
-                },
-            )
-            return res, raw
+            logger.warning("advisor_mainchain_failed_closed: %s", exc)
+            return _fail_closed_mainchain(exc, local_status="FAILED")
 
         local_stage = receipt.get("local", {}) if isinstance(receipt, dict) else {}
         online_stage = receipt.get("online", {}) if isinstance(receipt, dict) else {}
