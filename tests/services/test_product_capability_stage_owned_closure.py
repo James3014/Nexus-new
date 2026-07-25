@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nexus.services.product_capability_closure import LIVE_EXECUTED_PASS
+from nexus.services.product_capability_closure import EVIDENCE_INCOMPLETE
 from nexus.services.product_capability_closure_harness import run_closure_task
 from tests.services.test_product_capability_online_native_closure import (
     STAGE_OWNED,
@@ -49,7 +49,7 @@ def test_stage_owned_denominator_is_exactly_four() -> None:
 
 
 @pytest.mark.parametrize("capability", sorted(STAGE_OWNED))
-def test_stage_owned_capability_has_measured_execution_grade_closure(
+def test_stage_owned_canary_is_structurally_valid_but_not_live_claimable(
     capability: str,
     tmp_path: Path,
 ) -> None:
@@ -66,13 +66,13 @@ def test_stage_owned_capability_has_measured_execution_grade_closure(
     with env:
         row = run_closure_task(
             task,
-            _production_canary_runner,
+            lambda t: _production_canary_runner(t, evidence_mode="canary"),
             output_dir=tmp_path / "runs",
         )
     verdict = row["closure_verdict"]
-    assert verdict["status"] == LIVE_EXECUTED_PASS, (capability, verdict)
-    assert verdict["live_pass"] is True
-    assert verdict["missing_evidence_reasons"] == []
+    assert verdict["status"] == EVIDENCE_INCOMPLETE, (capability, verdict)
+    assert verdict["live_pass"] is False
+    assert "non_live_evidence_mode:canary" in verdict["missing_evidence_reasons"]
     assert row["harness_consistency_errors"] == []
 
     mainchain_result, raw_receipt, stage = _stage_result(row, capability)
