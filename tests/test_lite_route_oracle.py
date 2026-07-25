@@ -1,7 +1,11 @@
 import os
 import unittest
 from unittest.mock import patch
-from nexus.core.lite_route_oracle import should_use_lite_route, LiteRouteDecision
+from nexus.core.lite_route_oracle import (
+    LiteRouteDecision,
+    lite_route_safety_blockers,
+    should_use_lite_route,
+)
 
 
 class TestLiteRouteOracle(unittest.TestCase):
@@ -274,6 +278,30 @@ class TestLiteRouteOracle(unittest.TestCase):
         )
         self.assertTrue(d5.is_lite)
 
+    def test_lite_route_safety_blockers_returns_all_blockers_in_order(self):
+        blockers = lite_route_safety_blockers(
+            risk_level="HIGH",
+            impact_complexity=4.5,
+            belief_confidence=0.5,
+            cross_module=True,
+            hard_signal=True,
+            candidate_count=2,
+            task_desc="Fix recursive stateful task",
+        )
+        self.assertEqual(
+            blockers,
+            (
+                "high_or_critical_risk",
+                "impact_complexity_gt_3",
+                "cross_module",
+                "hard_signal",
+                "candidate_count_gt_1",
+                "confidence_below_0_85",
+                "recursive_or_stateful_task",
+            ),
+        )
+
 
 if __name__ == "__main__":
+
     unittest.main()

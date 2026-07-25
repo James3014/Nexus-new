@@ -123,25 +123,24 @@ def should_use_lite_route(
             skipped_phases=["X", "D", "A"],
         )
 
-    # 4. Check block conditions: LITE mode is unsafe if any of these are True
-    is_blocked = (
-        risk_upper in ("HIGH", "CRITICAL")
-        or impact_complexity > 3.0
-        or cross_module
-        or hard_signal
-        or candidate_count > 1
-        or belief_confidence < 0.85
-        or "recursion" in task_desc_lower
-        or "recursive" in task_desc_lower
-        or "stateful" in task_desc_lower
+    # 4. Check block conditions: LITE mode is unsafe if any safety blockers present
+    safety_blockers = lite_route_safety_blockers(
+        risk_level=risk_level,
+        impact_complexity=impact_complexity,
+        belief_confidence=belief_confidence,
+        cross_module=cross_module,
+        hard_signal=hard_signal,
+        candidate_count=candidate_count,
+        task_desc=task_desc,
     )
 
-    if is_blocked:
+    if safety_blockers:
         return LiteRouteDecision(
             is_lite=False,
             reason="standard_heavy_route_blocked_lite",
             skipped_phases=[],
         )
+
 
     # 5. Check environment variable override
     if os.environ.get("NEXUS_LIGHT_ROUTE") == "1":
