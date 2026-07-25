@@ -3318,3 +3318,39 @@ def test_planner_records_replan_authorization_lineage():
     assert snap_auth["max_attempts"] == 2
     assert snap_auth["floor_applied"] is True
 
+
+def test_replan_authorization_rejects_invalid_schema():
+    from nexus.engine.capability_contracts import ExecutionReplanAuthorization
+
+    with pytest.raises(ValueError, match="invalid_replan_authorization_schema"):
+        ExecutionReplanAuthorization(
+            schema="evil.schema.v9",
+            task_id="task-1",
+            workspace_revision="rev-1",
+            source_planner_decision_id="dec-1",
+            source_replan_request_id="sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            source_receipt_hash="1" * 64,
+            source_run_anchor_hash="2" * 64,
+            requested_execution_depth="STANDARD",
+            attempt_number=2,
+            max_attempts=2,
+        )
+
+
+def test_replan_authorization_rejects_malformed_request_hash():
+    from nexus.engine.capability_contracts import ExecutionReplanAuthorization
+
+    with pytest.raises(ValueError, match="invalid_source_replan_request_id|malformed_replan_request_hash"):
+        ExecutionReplanAuthorization(
+            schema="nexus.execution_replan_authorization.v1",
+            task_id="task-1",
+            workspace_revision="rev-1",
+            source_planner_decision_id="dec-1",
+            source_replan_request_id="sha256:not-a-real-hash",
+            source_receipt_hash="1" * 64,
+            source_run_anchor_hash="2" * 64,
+            requested_execution_depth="STANDARD",
+            attempt_number=2,
+            max_attempts=2,
+        )
+

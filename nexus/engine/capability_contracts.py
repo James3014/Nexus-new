@@ -70,14 +70,20 @@ class ExecutionReplanAuthorization:
     max_attempts: int = 2
 
     def __post_init__(self) -> None:
+        if self.schema != "nexus.execution_replan_authorization.v1":
+            raise ValueError(f"invalid_replan_authorization_schema:{self.schema}")
         if not self.task_id or not str(self.task_id).strip():
             raise ValueError("task_id_required")
         if not self.workspace_revision or not str(self.workspace_revision).strip():
             raise ValueError("workspace_revision_required")
         if not self.source_planner_decision_id or not str(self.source_planner_decision_id).strip():
             raise ValueError("source_planner_decision_id_required")
-        if not str(self.source_replan_request_id).startswith("sha256:"):
-            raise ValueError("invalid_source_replan_request_id")
+        req_id = str(self.source_replan_request_id or "").strip()
+        if not req_id.startswith("sha256:"):
+            raise ValueError(f"invalid_source_replan_request_id:{self.source_replan_request_id}")
+        hex_part = req_id[7:]
+        if len(hex_part) != 64 or not all(c in "0123456789abcdef" for c in hex_part):
+            raise ValueError(f"invalid_source_replan_request_id:{self.source_replan_request_id}")
 
         rec_hash = str(self.source_receipt_hash).strip()
         if len(rec_hash) != 64 or not all(c in "0123456789abcdef" for c in rec_hash):

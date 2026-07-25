@@ -26,7 +26,11 @@ from nexus.engine.capability_contracts import (
     next_execution_depth_after_failure,
 )
 from nexus.engine.capability_planner import CapabilityPlanner
-from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+from nexus.evidence.receipt_base import (
+    attach_r3_receipt_base,
+    build_execution_attempt_id,
+    validate_receipt_base,
+)
 
 REQUEST_SCHEMA = "nexus.unified_runtime.request.v1"
 RECEIPT_SCHEMA = "nexus.unified_runtime.receipt.v1"
@@ -1651,13 +1655,20 @@ class UnifiedRuntime:
         if prior_attempt_num >= 2:
             raise ValueError("replan_attempt_budget_exhausted")
 
+        base = previous_receipt.get("receipt_base") if isinstance(previous_receipt.get("receipt_base"), Mapping) else previous_receipt
+        canonical_task_id = str(base.get("task_id") or previous_receipt.get("task_id") or "")
+        canonical_workspace_revision = str(base.get("workspace_revision") or previous_receipt.get("workspace_revision") or "")
+        canonical_planner_decision_id = str(base.get("planner_decision_id") or previous_receipt.get("planner_decision_id") or "")
+        canonical_receipt_hash = str(base.get("receipt_hash") or previous_receipt.get("receipt_hash") or "")
+        canonical_run_anchor_hash = str(base.get("run_anchor_hash") or previous_receipt.get("run_anchor_hash") or "")
+
         authorization = ExecutionReplanAuthorization(
-            task_id=request.task_id,
-            workspace_revision=request.workspace_revision,
-            source_planner_decision_id=str(previous_receipt.get("planner_decision_id", "")),
+            task_id=canonical_task_id,
+            workspace_revision=canonical_workspace_revision,
+            source_planner_decision_id=canonical_planner_decision_id,
             source_replan_request_id=str(replan_req.get("replan_request_id", "")),
-            source_receipt_hash=str(previous_receipt.get("receipt_hash", "")),
-            source_run_anchor_hash=str(previous_receipt.get("run_anchor_hash", "")),
+            source_receipt_hash=canonical_receipt_hash,
+            source_run_anchor_hash=canonical_run_anchor_hash,
             requested_execution_depth=str(replan_req.get("requested_execution_depth", "")),
             attempt_number=2,
             max_attempts=2,
@@ -1697,17 +1708,20 @@ class UnifiedRuntime:
             capability_invokers or {}
         )
         capability_invokers = merged_invokers or None
-        plan = self._planner.plan(
-            task_desc=request.task_statement,
-            task_type=request.task_type,
-            route=planner_route,
-            pillars=dict(request.pillars),
-            codeintel=dict(request.codeintel),
-            phase_trace=dict(request.phase_trace),
-            budget=dict(request.budget),
-            skills=[dict(item) for item in request.skills],
-            replan_authorization=replan_authorization,
-        )
+        planner_kwargs: dict[str, Any] = {
+            "task_desc": request.task_statement,
+            "task_type": request.task_type,
+            "route": planner_route,
+            "pillars": dict(request.pillars),
+            "codeintel": dict(request.codeintel),
+            "phase_trace": dict(request.phase_trace),
+            "budget": dict(request.budget),
+            "skills": [dict(item) for item in request.skills],
+        }
+        if replan_authorization is not None:
+            planner_kwargs["replan_authorization"] = replan_authorization
+
+        plan = self._planner.plan(**planner_kwargs)
         plan_payload = plan.to_dict()
         plan_hash = _hash_json(plan_payload)
         # Single stable decision id from actual plan payload/hash — never invent
@@ -1746,7 +1760,15 @@ class UnifiedRuntime:
                 "execution_depth": str(plan.execution_depth),
             }
 
-        attempt_id = "sha256:" + hashlib.sha256(json.dumps(attempt_payload_for_id, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        attempt_id = build_execution_attempt_id(
+            task_id=str(request.task_id),
+            workspace_revision=str(request.workspace_revision),
+            attempt_number=attempt_number,
+            parent_receipt_hash=parent_receipt_hash,
+            source_replan_request_id=source_replan_request_id,
+            planner_decision_id=str(planner_decision_id),
+            execution_depth=str(plan.execution_depth),
+        )
 
         execution_attempt = {
             "schema": "nexus.execution_attempt.v1",

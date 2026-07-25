@@ -3498,3 +3498,399 @@ def test_controlled_replan_physical_receipts_validate_strict(tmp_path):
     assert disk_r2["execution_attempt"]["attempt_number"] == 2
     assert disk_r2["execution_attempt"]["parent_receipt_hash"] == disk_r1["receipt_hash"]
     assert disk_r2["execution_attempt"]["parent_run_anchor_hash"] == disk_r1["run_anchor_hash"]
+
+
+class LegacyPlannerMock:
+    """Mock Planner with pre-P0-T4 signature (no replan_authorization keyword parameter)."""
+
+    def plan(
+        self,
+        *,
+        task_desc: str,
+        task_type: str,
+        route: Mapping[str, Any],
+        pillars: Mapping[str, Any],
+        codeintel: Mapping[str, Any],
+        phase_trace: Mapping[str, Any],
+        budget: Mapping[str, Any],
+        skills: Sequence[str],
+    ) -> CapabilityPlan:
+        return CapabilityPlan(
+            schema_version="nexus.capability_plan.v1",
+            selected_capabilities=["baseline"],
+            required_capabilities=[],
+            optional_capabilities=[],
+            conditional_capabilities=[],
+            pending_capabilities=[],
+            forbidden_capabilities=[],
+            constraints=[],
+            decision_trace=[],
+            replan_trace=[],
+            score=1.0,
+            planner_mode="dry_run",
+            signal_snapshot={},
+            execution_depth="LIGHT",
+        )
+
+
+def test_normal_runtime_supports_legacy_planner_signature():
+    runtime = UnifiedRuntime(planner=LegacyPlannerMock())
+    req = UnifiedRuntimeRequest(
+        task_id="task-legacy-planner-1",
+        workspace_revision="rev-1",
+        task_statement="Legacy planner signature test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    assert len(receipt["planner_decision_id"]) == 64
+    assert receipt["execution_depth"] == "LIGHT"
+
+
+def test_run_replan_rejects_top_level_receipt_hash_substitution():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-top-sub-1",
+        workspace_revision="rev-1",
+        task_statement="Top level receipt hash substitution test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged_r1 = dict(r1)
+    forged_r1["receipt_hash"] = "a" * 64
+
+    with pytest.raises(ValueError, match="prior_receipt_base_invalid"):
+        runtime.run_replan(
+            forged_r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_run_replan_rejects_top_level_run_anchor_substitution():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-top-sub-2",
+        workspace_revision="rev-1",
+        task_statement="Top level run anchor substitution test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:f1"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged_r1 = dict(r1)
+    forged_r1["run_anchor_hash"] = "b" * 64
+
+    with pytest.raises(ValueError, match="prior_receipt_base_invalid"):
+        runtime.run_replan(
+            forged_r1,
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+
+def test_strict_receipt_rejects_top_level_receipt_hash_substitution():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-strict-sub-1",
+        workspace_revision="rev-1",
+        task_statement="Strict receipt top level receipt hash substitution test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["receipt_hash"] = "c" * 64
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+    assert "envelope_receipt_hash_mismatch" in res["blockers"]
+
+
+def test_strict_receipt_rejects_top_level_run_anchor_substitution():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-strict-sub-2",
+        workspace_revision="rev-1",
+        task_statement="Strict receipt top level run anchor substitution test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["run_anchor_hash"] = "d" * 64
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+    assert "envelope_run_anchor_hash_mismatch" in res["blockers"]
+
+
+def test_strict_receipt_rejects_top_level_planner_decision_substitution():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-strict-sub-3",
+        workspace_revision="rev-1",
+        task_statement="Strict receipt top level planner decision substitution test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["planner_decision_id"] = "e" * 64
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+    assert "envelope_planner_decision_id_mismatch" in res["blockers"]
+
+
+def test_strict_receipt_rejects_root_execution_attempt_tamper():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-tamper-1",
+        workspace_revision="rev-1",
+        task_statement="Root execution attempt tamper test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["execution_attempt"] = dict(r1["execution_attempt"])
+    forged["execution_attempt"]["attempt_number"] = 2
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+
+
+def test_strict_receipt_rejects_planner_execution_attempt_tamper():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-tamper-2",
+        workspace_revision="rev-1",
+        task_statement="Planner execution attempt tamper test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["planner"] = dict(r1["planner"])
+    forged["planner"]["execution_attempt"] = dict(r1["execution_attempt"])
+    forged["planner"]["execution_attempt"]["attempt_number"] = 2
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+
+
+def test_strict_receipt_rejects_context_execution_attempt_tamper():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-tamper-3",
+        workspace_revision="rev-1",
+        task_statement="Context execution attempt tamper test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["context_trace"] = dict(r1["context_trace"])
+    forged["context_trace"]["execution_attempt"] = dict(r1["execution_attempt"])
+    forged["context_trace"]["execution_attempt"]["attempt_number"] = 2
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+
+
+def test_strict_receipt_rejects_attempt_number_tamper():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-tamper-4",
+        workspace_revision="rev-1",
+        task_statement="Attempt number tamper test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["execution_attempt"] = dict(r1["execution_attempt"])
+    forged["execution_attempt"]["attempt_number"] = 99
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+
+
+def test_strict_receipt_rejects_parent_lineage_tamper():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-tamper-5",
+        workspace_revision="rev-1",
+        task_statement="Parent lineage tamper test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["execution_attempt"] = dict(r1["execution_attempt"])
+    forged["execution_attempt"]["parent_receipt_hash"] = "9" * 64
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+
+
+def test_execution_attempt_hash_changes_receipt_hash():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-attempt-hash-1",
+        workspace_revision="rev-1",
+        task_statement="Execution attempt hash changes receipt hash test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["execution_attempt"] = dict(r1["execution_attempt"])
+    forged["execution_attempt"]["attempt_number"] = 2
+    forged["planner"] = dict(r1["planner"])
+    forged["planner"]["execution_attempt"] = dict(forged["execution_attempt"])
+    forged["context_trace"] = dict(r1["context_trace"])
+    forged["context_trace"]["execution_attempt"] = dict(forged["execution_attempt"])
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
