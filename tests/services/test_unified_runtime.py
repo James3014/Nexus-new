@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.local_assist_service import (
@@ -2114,3 +2117,493 @@ def test_runtime_physical_receipt_uses_effective_execution_depth(tmp_path):
     assert disk_receipt["execution_depth"] == "STANDARD"
     assert disk_receipt["planner"]["execution_depth"] == "STANDARD"
     assert disk_receipt["context_trace"]["execution_depth"] == "STANDARD"
+
+
+def test_next_execution_depth_after_failure_contract():
+    from nexus.engine.capability_contracts import next_execution_depth_after_failure
+
+    assert next_execution_depth_after_failure("LIGHT") == "STANDARD"
+    assert next_execution_depth_after_failure("STANDARD") == "FULL"
+    assert next_execution_depth_after_failure("FULL") == "FULL"
+
+    with pytest.raises(ValueError, match="invalid_execution_depth:INVALID"):
+        next_execution_depth_after_failure("INVALID")
+
+
+def test_runtime_light_trusted_verifier_failure_escalates_to_standard():
+    runtime = UnifiedRuntime()
+
+    def _verifier(ctx):
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "failed",
+            "evidence": "semantic assertion failed",
+            "evidence_refs": ["verifier:test:semantic_failure"],
+        }
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-light-fail-1",
+        workspace_revision="rev-1",
+        task_statement="Safe low risk task",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=_verifier,
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert receipt["execution_depth"] == "LIGHT"
+    assert receipt["receipt_complete"] is False
+    assert receipt["terminal_status"] == "INCOMPLETE"
+
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["schema"] == "nexus.execution_replan_request.v1"
+    assert req_contract["current_execution_depth"] == "LIGHT"
+    assert req_contract["requested_execution_depth"] == "STANDARD"
+    assert req_contract["trigger"] == "verifier_failed"
+    assert req_contract["replan_required"] is True
+    assert req_contract["depth_escalated"] is True
+    assert req_contract["manual_review_required"] is False
+    assert req_contract["verifier_outcome_trusted"] is True
+    assert req_contract["verifier_status"] == "FAILED"
+    assert req_contract["verifier_evidence_refs"] == ["verifier:test:semantic_failure"]
+    assert req_contract["public_claim_allowed"] is False
+
+    assert receipt["context_trace"]["execution_replan_request_id"] == req_contract["replan_request_id"]
+    assert receipt["claim_boundary"]["replan_required"] is True
+    assert receipt["claim_boundary"]["requested_execution_depth"] == "STANDARD"
+
+
+def test_runtime_standard_trusted_verifier_failure_escalates_to_full():
+    runtime = UnifiedRuntime()
+
+    def _verifier(ctx):
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "failed",
+            "evidence": "hardened validation failed",
+            "evidence_refs": ["verifier:test:hardened_fail"],
+        }
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-standard-fail-1",
+        workspace_revision="rev-1",
+        task_statement="Hardened L2 task",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L2_hardened",
+            "execution_depth": "STANDARD",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 50,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=_verifier,
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert receipt["execution_depth"] == "STANDARD"
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["current_execution_depth"] == "STANDARD"
+    assert req_contract["requested_execution_depth"] == "FULL"
+    assert req_contract["trigger"] == "verifier_failed"
+    assert req_contract["replan_required"] is True
+    assert req_contract["depth_escalated"] is True
+    assert req_contract["manual_review_required"] is False
+    assert req_contract["verifier_outcome_trusted"] is True
+
+
+def test_runtime_full_trusted_verifier_failure_requires_manual_review():
+    runtime = UnifiedRuntime()
+
+    def _verifier(ctx):
+        return {
+            "task_id": ctx["task_id"],
+            "invoked": True,
+            "gate_passed": False,
+            "status": "failed",
+            "evidence": "deep swarm failure",
+            "evidence_refs": ["verifier:test:full_fail"],
+        }
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-full-fail-1",
+        workspace_revision="rev-1",
+        task_statement="Deep swarm task",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L3_swarm_deep",
+            "execution_depth": "FULL",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 86,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=_verifier,
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    assert receipt["execution_depth"] == "FULL"
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["current_execution_depth"] == "FULL"
+    assert req_contract["requested_execution_depth"] == "FULL"
+    assert req_contract["trigger"] == "verifier_failed_at_full_depth"
+    assert req_contract["replan_required"] is True
+    assert req_contract["depth_escalated"] is False
+    assert req_contract["manual_review_required"] is True
+    assert req_contract["verifier_outcome_trusted"] is True
+
+
+def test_runtime_passed_verifier_requests_no_replan():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-pass-1",
+        workspace_revision="rev-1",
+        task_statement="Safe low risk task",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "succeeded", "evidence": "ok", "evidence_refs": ["v:ok"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["replan_required"] is False
+    assert req_contract["depth_escalated"] is False
+    assert req_contract["manual_review_required"] is False
+    assert req_contract["requested_execution_depth"] == "LIGHT"
+    assert req_contract["trigger"] == "verifier_passed"
+    assert req_contract["verifier_outcome_trusted"] is True
+
+
+def test_runtime_missing_verifier_requests_no_replan():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-no-verifier-1",
+        workspace_revision="rev-1",
+        task_statement="Task without verifier",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=None,
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["replan_required"] is False
+    assert req_contract["requested_execution_depth"] == "LIGHT"
+    assert req_contract["trigger"] == "verifier_not_observed"
+    assert req_contract["verifier_outcome_trusted"] is False
+
+
+def test_runtime_evidence_free_failed_verifier_requests_no_replan():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-evidence-free-1",
+        workspace_revision="rev-1",
+        task_statement="Task with evidence free failure",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "", "evidence_refs": []},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["replan_required"] is False
+    assert req_contract["requested_execution_depth"] == "LIGHT"
+    assert req_contract["trigger"] == "verifier_evidence_untrusted"
+    assert req_contract["verifier_outcome_trusted"] is False
+
+
+def test_runtime_cross_task_verifier_requests_no_replan():
+    runtime = UnifiedRuntime()
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-correct-id-1",
+        workspace_revision="rev-1",
+        task_statement="Task with identity mismatch",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": "different-task-id-2", "invoked": True, "gate_passed": False, "status": "failed", "evidence": "wrong task", "evidence_refs": ["v:wrong"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+
+    req_contract = receipt["execution_replan_request"]
+    assert req_contract["replan_required"] is False
+    assert req_contract["requested_execution_depth"] == "LIGHT"
+    assert req_contract["trigger"] == "verifier_identity_mismatch"
+    assert req_contract["verifier_outcome_trusted"] is False
+
+
+def test_runtime_learning_observes_same_execution_replan_request():
+    runtime = UnifiedRuntime()
+
+    captured_learning_context = {}
+
+    def _learning(ctx):
+        captured_learning_context.update(dict(ctx))
+        return {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True}
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-learning-obs-1",
+        workspace_revision="rev-1",
+        task_statement="Learning observation task",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "err", "evidence_refs": ["v:ref1"]},
+        learning=_learning,
+    )
+
+    assert "execution_replan_request" in captured_learning_context
+    assert captured_learning_context["execution_replan_request"] == receipt["execution_replan_request"]
+    assert captured_learning_context["execution_replan_request"]["replan_request_id"] == receipt["execution_replan_request"]["replan_request_id"]
+
+
+def test_runtime_physical_receipt_disk_contains_replan_fields(tmp_path):
+    runtime = UnifiedRuntime()
+    receipt_path = tmp_path / "unified-receipt-replan.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-disk-replan-1",
+        workspace_revision="rev-1",
+        task_statement="Task for physical receipt replan test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "disk err", "evidence_refs": ["v:disk"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        receipt_path=receipt_path,
+    )
+
+    assert receipt_path.exists()
+    disk_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+    assert disk_receipt["execution_replan_request"] == receipt["execution_replan_request"]
+    assert disk_receipt["context_trace"]["execution_replan_request_id"] == receipt["execution_replan_request"]["replan_request_id"]
+    assert disk_receipt["claim_boundary"]["replan_required"] is True
+    assert disk_receipt["claim_boundary"]["requested_execution_depth"] == "STANDARD"
+
+
+def test_runtime_finalize_receipt_parity_and_replan(tmp_path):
+    runtime = UnifiedRuntime()
+    receipt_path = tmp_path / "unified-receipt-finalized.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="task-finalize-replan-1",
+        workspace_revision="rev-1",
+        task_statement="Task for finalize receipt test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    init_receipt = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=None,
+        learning=None,
+    )
+
+    finalized = runtime.finalize_receipt(
+        init_receipt,
+        verifier={
+            "task_id": "task-finalize-replan-1",
+            "invoked": True,
+            "gate_passed": False,
+            "status": "failed",
+            "evidence": "postflight verifier failure",
+            "evidence_refs": ["v:postflight_fail"],
+        },
+        learning={
+            "task_id": "task-finalize-replan-1",
+            "invoked": True,
+            "gate_passed": True,
+            "status": "succeeded",
+        },
+        receipt_path=receipt_path,
+    )
+
+    assert finalized["execution_depth"] == "LIGHT"
+    req_contract = finalized["execution_replan_request"]
+    assert req_contract["current_execution_depth"] == "LIGHT"
+    assert req_contract["requested_execution_depth"] == "STANDARD"
+    assert req_contract["trigger"] == "verifier_failed"
+    assert req_contract["replan_required"] is True
+    assert req_contract["depth_escalated"] is True
+    assert req_contract["manual_review_required"] is False
+    assert req_contract["verifier_outcome_trusted"] is True
+
+    assert finalized["context_trace"]["execution_replan_request_id"] == req_contract["replan_request_id"]
+    assert finalized["claim_boundary"]["replan_required"] is True
+    assert finalized["claim_boundary"]["requested_execution_depth"] == "STANDARD"
+
+    assert receipt_path.exists()
+    disk_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert disk_receipt["execution_replan_request"]["replan_request_id"] == req_contract["replan_request_id"]
+
+
+def test_runtime_deterministic_replan_request_id():
+    runtime = UnifiedRuntime()
+
+    def make_run(refs):
+        req = UnifiedRuntimeRequest(
+            task_id="task-deterministic-1",
+            workspace_revision="rev-1",
+            task_statement="Deterministic test",
+            task_type="public_bugfix",
+            route={
+                "execution_depth": "LIGHT",
+                "recommended_flow": "baseline",
+                "route_features": {"risk_score": 10},
+                "capability_stack": {"selected_capabilities": ["baseline"]},
+            },
+            online_enabled=True,
+            local_enabled=False,
+        )
+        return runtime.run(
+            req,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "failed", "evidence": "fail", "evidence_refs": refs},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )
+
+    r1 = make_run(["refA", "refB"])
+    r2 = make_run(["refA", "refB"])
+    r3 = make_run(["refA", "refC"])
+
+    id1 = r1["execution_replan_request"]["replan_request_id"]
+    id2 = r2["execution_replan_request"]["replan_request_id"]
+    id3 = r3["execution_replan_request"]["replan_request_id"]
+
+    assert id1 == id2
+    assert id1 != id3

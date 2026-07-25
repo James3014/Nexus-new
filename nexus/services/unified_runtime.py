@@ -17,11 +17,113 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from nexus.engine.capability_contracts import (
+    EXECUTION_DEPTH_FULL,
+    EXECUTION_DEPTH_LIGHT,
+    EXECUTION_DEPTH_STANDARD,
+    next_execution_depth_after_failure,
+)
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.evidence.receipt_base import attach_r3_receipt_base
 
 REQUEST_SCHEMA = "nexus.unified_runtime.request.v1"
 RECEIPT_SCHEMA = "nexus.unified_runtime.receipt.v1"
+
+
+def build_execution_replan_request(
+    *,
+    task_id: str,
+    planner_decision_id: str,
+    current_execution_depth: str,
+    verifier_stage: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a machine-readable execution replan request based on trusted verifier outcome evidence."""
+    current_depth = str(current_execution_depth or "LIGHT")
+
+    stage_dict = verifier_stage if isinstance(verifier_stage, Mapping) else {}
+    invoked = bool(stage_dict.get("invoked", False)) if verifier_stage is not None else False
+    status_raw = str(stage_dict.get("status", "")).upper()
+    gate_passed = bool(stage_dict.get("gate_passed", False))
+    task_identity_shared = bool(stage_dict.get("task_identity_shared", True))
+    evidence_present = bool(stage_dict.get("evidence_present", False))
+    evidence_refs = [str(ref) for ref in stage_dict.get("evidence_refs", []) or []]
+
+    if verifier_stage is None or not invoked or status_raw in {"NOT_RUN", "NOT_REQUESTED", ""}:
+        trigger = "verifier_not_observed"
+        verifier_outcome_trusted = False
+        replan_required = False
+        depth_escalated = False
+        manual_review_required = False
+        requested_depth = current_depth
+        verifier_status = status_raw or "NOT_RUN"
+    elif not task_identity_shared:
+        trigger = "verifier_identity_mismatch"
+        verifier_outcome_trusted = False
+        replan_required = False
+        depth_escalated = False
+        manual_review_required = False
+        requested_depth = current_depth
+        verifier_status = "FAILED"
+    elif gate_passed and status_raw == "SUCCEEDED":
+        trigger = "verifier_passed"
+        verifier_outcome_trusted = True
+        replan_required = False
+        depth_escalated = False
+        manual_review_required = False
+        requested_depth = current_depth
+        verifier_status = "SUCCEEDED"
+    elif not evidence_present:
+        trigger = "verifier_evidence_untrusted"
+        verifier_outcome_trusted = False
+        replan_required = False
+        depth_escalated = False
+        manual_review_required = False
+        requested_depth = current_depth
+        verifier_status = "FAILED"
+    else:
+        # Trusted failure case
+        verifier_outcome_trusted = True
+        replan_required = True
+        verifier_status = "FAILED"
+        requested_depth = next_execution_depth_after_failure(current_depth)
+        if current_depth == EXECUTION_DEPTH_FULL:
+            trigger = "verifier_failed_at_full_depth"
+            depth_escalated = False
+            manual_review_required = True
+        else:
+            trigger = "verifier_failed"
+            depth_escalated = True
+            manual_review_required = False
+
+    payload_for_id = {
+        "task_id": str(task_id),
+        "source_planner_decision_id": str(planner_decision_id),
+        "current_execution_depth": current_depth,
+        "requested_execution_depth": requested_depth,
+        "trigger": trigger,
+        "verifier_status": verifier_status,
+        "verifier_evidence_refs": sorted(evidence_refs),
+    }
+    canonical_str = json.dumps(payload_for_id, sort_keys=True, separators=(",", ":"))
+    replan_request_id = "sha256:" + hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+
+    return {
+        "schema": "nexus.execution_replan_request.v1",
+        "task_id": str(task_id),
+        "source_planner_decision_id": str(planner_decision_id),
+        "current_execution_depth": current_depth,
+        "requested_execution_depth": requested_depth,
+        "trigger": trigger,
+        "verifier_outcome_trusted": verifier_outcome_trusted,
+        "replan_required": replan_required,
+        "depth_escalated": depth_escalated,
+        "manual_review_required": manual_review_required,
+        "verifier_status": verifier_status,
+        "verifier_evidence_refs": evidence_refs,
+        "replan_request_id": replan_request_id,
+        "public_claim_allowed": False,
+    }
+
 
 # Provider-neutral registration metadata.  Commands stay configurable at the
 # edge; this registry records the supported adapter contract without claiming
@@ -1873,6 +1975,15 @@ class UnifiedRuntime:
         stages["verifier"] = verifier_stage
         context["verifier"] = verifier_stage
 
+        replan_request = build_execution_replan_request(
+            task_id=request.task_id,
+            planner_decision_id=planner_decision_id,
+            current_execution_depth=plan.execution_depth,
+            verifier_stage=verifier_stage,
+        )
+        context["execution_replan_request"] = replan_request
+
+
         # Postflight gates after Online + verifier so proof fields are visible.
         # Online reply alone never satisfies artifact/claim/delivery.
         postflight_context = dict(context)
@@ -2161,7 +2272,10 @@ class UnifiedRuntime:
             "outcome_contributed": outcome_contributed,
             "value_measured": False,
             "public_claim_allowed": False,
+            "replan_required": replan_request["replan_required"],
+            "requested_execution_depth": replan_request["requested_execution_depth"],
         }
+
         capability_receipts: list[dict[str, Any]] = []
         online_capabilities = set()
         if isinstance(request.route, Mapping):
@@ -2448,6 +2562,7 @@ class UnifiedRuntime:
             "workspace_revision": request.workspace_revision,
             "planner_decision_id": planner_decision_id,
             "execution_depth": plan.execution_depth,
+            "execution_replan_request_id": replan_request["replan_request_id"],
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
             "online_prompt_hash": _hash_json(effective_online_prompt),
             "online_payload_hash": _hash_json(request.online_payload),
@@ -2490,7 +2605,9 @@ class UnifiedRuntime:
             "workspace_revision": request.workspace_revision,
             "planner_decision_id": planner_decision_id,
             "execution_depth": plan.execution_depth,
+            "execution_replan_request": replan_request,
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
+
             "context_trace": context_trace,
             "planner": planner_stage,
             "capabilities": capability_receipts,
@@ -2609,6 +2726,23 @@ class UnifiedRuntime:
         learning_stage = final_stage("learning", learning)
         finalized["verifier"] = verifier_stage
         finalized["learning"] = learning_stage
+
+        task_id = str(finalized.get("task_id", ""))
+        planner_decision_id = str(finalized.get("planner_decision_id", ""))
+        current_depth = str(finalized.get("execution_depth") or "LIGHT")
+
+        replan_request = build_execution_replan_request(
+            task_id=task_id,
+            planner_decision_id=planner_decision_id,
+            current_execution_depth=current_depth,
+            verifier_stage=verifier_stage,
+        )
+        finalized["execution_replan_request"] = replan_request
+
+        context_trace = dict(finalized.get("context_trace", {}) or {})
+        context_trace["execution_replan_request_id"] = replan_request["replan_request_id"]
+        finalized["context_trace"] = context_trace
+
         stages = [dict(stage) for stage in finalized.get("stages", []) if isinstance(stage, Mapping)]
         replaced: set[str] = set()
         for index, stage in enumerate(stages):
@@ -2681,8 +2815,11 @@ class UnifiedRuntime:
                 "value_measured": bool(outcome and outcome.get("value_measured", outcome.get("score") is not None)),
                 "public_claim_allowed": False,
                 "finalized": True,
+                "replan_required": replan_request["replan_required"],
+                "requested_execution_depth": replan_request["requested_execution_depth"],
             }
         )
+
         finalized["claim_boundary"] = claim_boundary
         finalized["finalization"] = {"verifier": "observed_payload", "learning": "observed_payload"}
         # RC-1: recompute receipt_base after finalization mutations (still acyclic)

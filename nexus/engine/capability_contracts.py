@@ -38,6 +38,25 @@ def execution_depth_for_routing_tier(routing_tier: str) -> str:
         raise ValueError(f"unsupported_routing_tier:{routing_tier}") from None
 
 
+def next_execution_depth_after_failure(current_depth: str) -> str:
+    """Derive the monotonic next execution_depth after a failure.
+
+    LIGHT    → STANDARD
+    STANDARD → FULL
+    FULL     → FULL
+
+    Raises ValueError("invalid_execution_depth:<value>") if current_depth is invalid.
+    """
+    if current_depth == EXECUTION_DEPTH_LIGHT:
+        return EXECUTION_DEPTH_STANDARD
+    if current_depth == EXECUTION_DEPTH_STANDARD:
+        return EXECUTION_DEPTH_FULL
+    if current_depth == EXECUTION_DEPTH_FULL:
+        return EXECUTION_DEPTH_FULL
+    raise ValueError(f"invalid_execution_depth:{current_depth}")
+
+
+
 class FlowState(str, Enum):
     INTAKE = "INTAKE"
     CLARIFY = "CLARIFY"
