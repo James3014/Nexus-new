@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from nexus.engine.capability_contracts import CapabilityPlan
+from nexus.engine.capability_contracts import (
+    CapabilityPlan,
+    ExecutionReplanAuthorization,
+    apply_execution_depth_floor,
+)
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.engine.learning_policy_loader import (
     audit_route_cost_policy,
@@ -3107,3 +3111,210 @@ def test_execution_depth_safety_ignores_caller_override():
 
     assert plan["execution_depth"] == "STANDARD"
     assert plan["signal_snapshot"]["execution_depth"] == "STANDARD"
+
+
+def test_replan_authorization_light_floor_to_standard():
+    auth = ExecutionReplanAuthorization(
+        task_id="task-replan-1",
+        workspace_revision="rev-1",
+        source_planner_decision_id="dec-1",
+        source_replan_request_id="sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        source_receipt_hash="a" * 64,
+        source_run_anchor_hash="b" * 64,
+        requested_execution_depth="STANDARD",
+        attempt_number=2,
+        max_attempts=2,
+    )
+    planner = CapabilityPlanner()
+    plan = planner.plan(
+        task_desc="Safe low risk task",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+            },
+        },
+        replan_authorization=auth,
+    ).to_dict()
+
+    assert plan["execution_depth"] == "STANDARD"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "LIGHT"
+    assert policy["effective_depth"] == "STANDARD"
+    assert policy["escalated"] is True
+    assert policy["reason"] == "replan_floor_applied"
+
+
+def test_replan_authorization_standard_floor_to_full():
+    auth = ExecutionReplanAuthorization(
+        task_id="task-replan-2",
+        workspace_revision="rev-1",
+        source_planner_decision_id="dec-2",
+        source_replan_request_id="sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        source_receipt_hash="c" * 64,
+        source_run_anchor_hash="d" * 64,
+        requested_execution_depth="FULL",
+        attempt_number=2,
+        max_attempts=2,
+    )
+    planner = CapabilityPlanner()
+    plan = planner.plan(
+        task_desc="Hardened L2 task",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L2_hardened",
+            "execution_depth": "STANDARD",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 50,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 1,
+            },
+        },
+        replan_authorization=auth,
+    ).to_dict()
+
+    assert plan["execution_depth"] == "FULL"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "STANDARD"
+    assert policy["effective_depth"] == "FULL"
+    assert policy["escalated"] is True
+
+
+def test_replan_authorization_never_downgrades_full():
+    auth = ExecutionReplanAuthorization(
+        task_id="task-replan-3",
+        workspace_revision="rev-1",
+        source_planner_decision_id="dec-3",
+        source_replan_request_id="sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        source_receipt_hash="e" * 64,
+        source_run_anchor_hash="f" * 64,
+        requested_execution_depth="STANDARD",
+        attempt_number=2,
+        max_attempts=2,
+    )
+    planner = CapabilityPlanner()
+    plan = planner.plan(
+        task_desc="Deep swarm task",
+        task_type="public_bugfix",
+        route={
+            "routing_tier": "L3_swarm_deep",
+            "execution_depth": "FULL",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 86,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 1,
+            },
+        },
+        replan_authorization=auth,
+    ).to_dict()
+
+    assert plan["execution_depth"] == "FULL"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "FULL"
+    assert policy["effective_depth"] == "FULL"
+
+
+def test_replan_authorization_rejects_invalid_hash():
+    with pytest.raises(ValueError, match="invalid_source_receipt_hash"):
+        ExecutionReplanAuthorization(
+            task_id="task-bad-hash-1",
+            workspace_revision="rev-1",
+            source_planner_decision_id="dec-1",
+            source_replan_request_id="sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            source_receipt_hash="invalid_short_hash",
+            source_run_anchor_hash="b" * 64,
+            requested_execution_depth="STANDARD",
+            attempt_number=2,
+            max_attempts=2,
+        )
+
+
+def test_replan_authorization_rejects_attempt_above_budget():
+    with pytest.raises(ValueError, match="attempt_number_must_be_2"):
+        ExecutionReplanAuthorization(
+            task_id="task-bad-attempt-1",
+            workspace_revision="rev-1",
+            source_planner_decision_id="dec-1",
+            source_replan_request_id="sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            source_receipt_hash="a" * 64,
+            source_run_anchor_hash="b" * 64,
+            requested_execution_depth="STANDARD",
+            attempt_number=3,
+            max_attempts=2,
+        )
+
+
+def test_planner_ignores_route_replan_spoof():
+    planner = CapabilityPlanner()
+    plan = planner.plan(
+        task_desc="Safe low risk task",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "execution_replan_request": {
+                "replan_required": True,
+                "requested_execution_depth": "FULL",
+            },
+            "replan_authorization": {
+                "requested_execution_depth": "FULL",
+            },
+            "requested_execution_depth": "FULL",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+            },
+        },
+    ).to_dict()
+
+    assert plan["execution_depth"] == "LIGHT"
+    assert "replan_authorization" not in plan["signal_snapshot"]
+
+
+def test_planner_records_replan_authorization_lineage():
+    auth = ExecutionReplanAuthorization(
+        task_id="task-replan-lineage-1",
+        workspace_revision="rev-1",
+        source_planner_decision_id="dec-lineage-1",
+        source_replan_request_id="sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        source_receipt_hash="1" * 64,
+        source_run_anchor_hash="2" * 64,
+        requested_execution_depth="STANDARD",
+        attempt_number=2,
+        max_attempts=2,
+    )
+    planner = CapabilityPlanner()
+    plan = planner.plan(
+        task_desc="Safe low risk task",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+            },
+        },
+        replan_authorization=auth,
+    ).to_dict()
+
+    snap_auth = plan["signal_snapshot"]["replan_authorization"]
+    assert snap_auth["schema"] == "nexus.execution_replan_authorization.v1"
+    assert snap_auth["authority"] == "UnifiedRuntime"
+    assert snap_auth["source_planner_decision_id"] == "dec-lineage-1"
+    assert snap_auth["source_replan_request_id"] == "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    assert snap_auth["source_receipt_hash"] == "1" * 64
+    assert snap_auth["source_run_anchor_hash"] == "2" * 64
+    assert snap_auth["requested_execution_depth"] == "STANDARD"
+    assert snap_auth["attempt_number"] == 2
+    assert snap_auth["max_attempts"] == 2
+    assert snap_auth["floor_applied"] is True
+

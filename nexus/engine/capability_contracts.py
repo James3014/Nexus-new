@@ -56,6 +56,97 @@ def next_execution_depth_after_failure(current_depth: str) -> str:
     raise ValueError(f"invalid_execution_depth:{current_depth}")
 
 
+@dataclass(frozen=True)
+class ExecutionReplanAuthorization:
+    schema: str = "nexus.execution_replan_authorization.v1"
+    task_id: str = ""
+    workspace_revision: str = ""
+    source_planner_decision_id: str = ""
+    source_replan_request_id: str = ""
+    source_receipt_hash: str = ""
+    source_run_anchor_hash: str = ""
+    requested_execution_depth: str = ""
+    attempt_number: int = 2
+    max_attempts: int = 2
+
+    def __post_init__(self) -> None:
+        if not self.task_id or not str(self.task_id).strip():
+            raise ValueError("task_id_required")
+        if not self.workspace_revision or not str(self.workspace_revision).strip():
+            raise ValueError("workspace_revision_required")
+        if not self.source_planner_decision_id or not str(self.source_planner_decision_id).strip():
+            raise ValueError("source_planner_decision_id_required")
+        if not str(self.source_replan_request_id).startswith("sha256:"):
+            raise ValueError("invalid_source_replan_request_id")
+
+        rec_hash = str(self.source_receipt_hash).strip()
+        if len(rec_hash) != 64 or not all(c in "0123456789abcdef" for c in rec_hash):
+            raise ValueError("invalid_source_receipt_hash")
+
+        anc_hash = str(self.source_run_anchor_hash).strip()
+        if len(anc_hash) != 64 or not all(c in "0123456789abcdef" for c in anc_hash):
+            raise ValueError("invalid_source_run_anchor_hash")
+
+        if self.requested_execution_depth not in VALID_EXECUTION_DEPTHS:
+            raise ValueError(f"invalid_execution_depth:{self.requested_execution_depth}")
+        if self.attempt_number != 2:
+            raise ValueError("attempt_number_must_be_2")
+        if self.max_attempts != 2:
+            raise ValueError("max_attempts_must_be_2")
+        if self.attempt_number > self.max_attempts:
+            raise ValueError("attempt_number_exceeds_max_attempts")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "task_id": self.task_id,
+            "workspace_revision": self.workspace_revision,
+            "source_planner_decision_id": self.source_planner_decision_id,
+            "source_replan_request_id": self.source_replan_request_id,
+            "source_receipt_hash": self.source_receipt_hash,
+            "source_run_anchor_hash": self.source_run_anchor_hash,
+            "requested_execution_depth": self.requested_execution_depth,
+            "attempt_number": self.attempt_number,
+            "max_attempts": self.max_attempts,
+        }
+
+
+def apply_execution_depth_floor(
+    current_depth: str,
+    requested_floor: str,
+) -> str:
+    """Apply requested_floor as a monotonic execution depth floor.
+
+    LIGHT + LIGHT       → LIGHT
+    LIGHT + STANDARD    → STANDARD
+    LIGHT + FULL        → FULL
+    STANDARD + LIGHT    → STANDARD
+    STANDARD + STANDARD → STANDARD
+    STANDARD + FULL     → FULL
+    FULL + any valid    → FULL
+
+    Raises ValueError("invalid_execution_depth:<value>") if either depth is invalid.
+    """
+    if current_depth not in VALID_EXECUTION_DEPTHS:
+        raise ValueError(f"invalid_execution_depth:{current_depth}")
+    if requested_floor not in VALID_EXECUTION_DEPTHS:
+        raise ValueError(f"invalid_execution_depth:{requested_floor}")
+
+    depth_rank = {
+        EXECUTION_DEPTH_LIGHT: 1,
+        EXECUTION_DEPTH_STANDARD: 2,
+        EXECUTION_DEPTH_FULL: 3,
+    }
+    rank_to_depth = {
+        1: EXECUTION_DEPTH_LIGHT,
+        2: EXECUTION_DEPTH_STANDARD,
+        3: EXECUTION_DEPTH_FULL,
+    }
+    max_rank = max(depth_rank[current_depth], depth_rank[requested_floor])
+    return rank_to_depth[max_rank]
+
+
+
 
 class FlowState(str, Enum):
     INTAKE = "INTAKE"

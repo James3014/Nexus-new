@@ -6,6 +6,8 @@ from nexus.engine.capability_contracts import (
     CapabilityNode,
     CapabilityPlan,
     CapabilityScoringConfig,
+    ExecutionReplanAuthorization,
+    apply_execution_depth_floor,
     execution_depth_for_routing_tier,
 )
 from nexus.engine.harness_route_policy import (
@@ -694,6 +696,7 @@ class CapabilityPlanner:
         phase_trace: dict[str, Any] | None = None,
         budget: dict[str, Any] | None = None,
         skills: list[dict[str, Any]] | None = None,
+        replan_authorization: ExecutionReplanAuthorization | None = None,
     ) -> CapabilityPlan:
         pillars = pillars or {}
         codeintel = codeintel or {}
@@ -748,15 +751,26 @@ class CapabilityPlanner:
         )
 
         if base_depth == "LIGHT" and len(safety_blockers) > 0:
-            effective_depth = "STANDARD"
+            base_effective_depth = "STANDARD"
             escalated = True
             reason = "lite_safety_floor_escalation"
         else:
-            effective_depth = base_depth
+            base_effective_depth = base_depth
             escalated = False
             reason = "base_depth_preserved"
 
-        execution_depth = effective_depth
+        if replan_authorization is not None:
+            if not isinstance(replan_authorization, ExecutionReplanAuthorization):
+                raise ValueError("invalid_replan_authorization_type")
+            final_effective_depth = apply_execution_depth_floor(
+                base_effective_depth,
+                replan_authorization.requested_execution_depth,
+            )
+        else:
+            final_effective_depth = base_effective_depth
+
+        execution_depth = final_effective_depth
+
         apply_signal_policies(
             signals=signals,
             task_desc=task_desc,
@@ -901,12 +915,28 @@ class CapabilityPlanner:
         signal_snapshot["execution_depth_policy"] = {
             "authority": "CapabilityPlanner",
             "base_depth": base_depth,
-            "effective_depth": effective_depth,
+            "effective_depth": final_effective_depth,
             "safety_advisor": "LiteRouteOracle",
             "safety_blockers": list(safety_blockers),
-            "escalated": escalated,
-            "reason": reason,
+            "escalated": escalated or (final_effective_depth != base_effective_depth),
+            "reason": reason if final_effective_depth == base_effective_depth else "replan_floor_applied",
         }
+        if replan_authorization is not None:
+            signal_snapshot["replan_authorization"] = {
+                "schema": "nexus.execution_replan_authorization.v1",
+                "authority": "UnifiedRuntime",
+                "source_planner_decision_id": replan_authorization.source_planner_decision_id,
+                "source_replan_request_id": replan_authorization.source_replan_request_id,
+                "source_receipt_hash": replan_authorization.source_receipt_hash,
+                "source_run_anchor_hash": replan_authorization.source_run_anchor_hash,
+                "requested_execution_depth": replan_authorization.requested_execution_depth,
+                "base_effective_depth": base_effective_depth,
+                "final_effective_depth": final_effective_depth,
+                "attempt_number": replan_authorization.attempt_number,
+                "max_attempts": replan_authorization.max_attempts,
+                "floor_applied": (final_effective_depth != base_effective_depth),
+            }
+
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
         signal_snapshot["route_truth_source"] = "CapabilityPlanner"
