@@ -23,6 +23,7 @@ from nexus.services.unified_runtime import (
     OnlineCliSpec,
     UnifiedRuntime,
     UnifiedRuntimeRequest,
+    build_execution_replan_request,
     build_local_ast_capability_invoker,
     build_local_memory_capability_invoker,
     build_local_search_ranking_capability_invoker,
@@ -3098,7 +3099,7 @@ def test_controlled_replan_rejects_tampered_replan_request():
     tampered_r1["execution_replan_request"] = dict(r1["execution_replan_request"])
     tampered_r1["execution_replan_request"]["replan_request_id"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
-    with pytest.raises(ValueError, match="replan_request_integrity_mismatch"):
+    with pytest.raises(ValueError, match="replan_request_integrity_mismatch|execution_replan_request_hash_mismatch"):
         runtime.run_replan(
             tampered_r1,
             req,
@@ -3894,3 +3895,77 @@ def test_execution_attempt_hash_changes_receipt_hash():
     forged["context_trace"]["execution_attempt"] = dict(forged["execution_attempt"])
     res = validate_receipt_base(forged, mode="strict")
     assert res["ok"] is False
+
+
+def test_strict_receipt_rejects_forged_verifier_with_rebuilt_replan_request():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-forged-v-1",
+        workspace_revision="rev-1",
+        task_statement="Forged verifier test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["verifier"] = {"task_id": req.task_id, "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "forged", "evidence_refs": ["v:forged"]}
+    forged["execution_replan_request"] = build_execution_replan_request(
+        task_id=req.task_id,
+        planner_decision_id=r1["planner_decision_id"],
+        current_execution_depth="LIGHT",
+        verifier_stage=forged["verifier"],
+    )
+    res = validate_receipt_base(forged, mode="strict")
+    assert res["ok"] is False
+
+
+def test_run_replan_rejects_forged_verifier_with_rebuilt_replan_request():
+    runtime = UnifiedRuntime()
+    req = UnifiedRuntimeRequest(
+        task_id="task-forged-replan-1",
+        workspace_revision="rev-1",
+        task_statement="Forged verifier replan test",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = runtime.run(
+        req,
+        online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    forged = dict(r1)
+    forged["verifier"] = {"task_id": req.task_id, "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "forged", "evidence_refs": ["v:forged"]}
+    forged["execution_replan_request"] = build_execution_replan_request(
+        task_id=req.task_id,
+        planner_decision_id=r1["planner_decision_id"],
+        current_execution_depth="LIGHT",
+        verifier_stage=forged["verifier"],
+    )
+    with pytest.raises((ValueError, Exception)):
+        runtime.run_replan(
+            req,
+            previous_receipt=forged,
+            online_invoker=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+            verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        )

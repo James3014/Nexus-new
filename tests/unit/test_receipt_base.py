@@ -897,3 +897,216 @@ def test_local_online_hash_from_actual_bounded_payload():
     assert local_base["consumption_chain"][0]["used"] is True
     assert online_base["consumption_chain"][0]["used"] is False
     assert online_base["consumption_chain"][0]["outcome_contributed"] is False
+
+
+def test_derive_receipt_child_hashes_matches_attached_children():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, derive_receipt_child_hashes
+
+    raw = {
+        "task_id": "task-derive-1",
+        "workspace_revision": "rev-1",
+        "local": {"invoked": True, "status": "SUCCEEDED"},
+        "online": {"invoked": True, "status": "SUCCEEDED"},
+        "verifier": {"invoked": True, "status": "FAILED", "gate_passed": False},
+        "learning": {"invoked": True, "status": "SUCCEEDED"},
+        "capability_results": {
+            "b_cap": {"invoked": True, "status": "SUCCEEDED"},
+            "a_cap": {"invoked": True, "status": "SUCCEEDED"},
+        },
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    derived = derive_receipt_child_hashes(r)
+    assert derived == r["receipt_base"]["ordered_child_hashes"]
+
+
+def test_strict_receipt_rejects_missing_root_execution_attempt():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-att-root-1",
+        "workspace_revision": "rev-1",
+        "execution_attempt": {
+            "schema": "nexus.execution_attempt.v1",
+            "attempt_number": 1,
+            "max_attempts": 2,
+            "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+        "planner": {
+            "execution_attempt": {
+                "schema": "nexus.execution_attempt.v1",
+                "attempt_number": 1,
+                "max_attempts": 2,
+                "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            }
+        },
+        "context_trace": {
+            "execution_attempt": {
+                "schema": "nexus.execution_attempt.v1",
+                "attempt_number": 1,
+                "max_attempts": 2,
+                "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            }
+        },
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    tampered = dict(r)
+    tampered.pop("execution_attempt", None)
+    res = validate_receipt_base(tampered, mode="strict")
+    assert res["ok"] is False
+    assert "execution_attempt_missing_from_root" in res["blockers"]
+
+
+def test_strict_receipt_rejects_missing_planner_execution_attempt():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-att-plan-1",
+        "workspace_revision": "rev-1",
+        "execution_attempt": {
+            "schema": "nexus.execution_attempt.v1",
+            "attempt_number": 1,
+            "max_attempts": 2,
+            "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+        "planner": {},
+        "context_trace": {
+            "execution_attempt": {
+                "schema": "nexus.execution_attempt.v1",
+                "attempt_number": 1,
+                "max_attempts": 2,
+                "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            }
+        },
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    res = validate_receipt_base(r, mode="strict")
+    assert res["ok"] is False
+    assert "execution_attempt_missing_from_planner" in res["blockers"]
+
+
+def test_strict_receipt_rejects_missing_context_execution_attempt():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-att-ctx-1",
+        "workspace_revision": "rev-1",
+        "execution_attempt": {
+            "schema": "nexus.execution_attempt.v1",
+            "attempt_number": 1,
+            "max_attempts": 2,
+            "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+        "planner": {
+            "execution_attempt": {
+                "schema": "nexus.execution_attempt.v1",
+                "attempt_number": 1,
+                "max_attempts": 2,
+                "attempt_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            }
+        },
+        "context_trace": {},
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    res = validate_receipt_base(r, mode="strict")
+    assert res["ok"] is False
+    assert "execution_attempt_missing_from_context_trace" in res["blockers"]
+
+
+def test_strict_receipt_rejects_online_stage_tamper():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-online-tamper-1",
+        "workspace_revision": "rev-1",
+        "online": {"invoked": True, "status": "SUCCEEDED", "output": "original"},
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    tampered = dict(r)
+    tampered["online"] = dict(r["online"])
+    tampered["online"]["output"] = "forged_online_output"
+    res = validate_receipt_base(tampered, mode="strict")
+    assert res["ok"] is False
+    assert "ordered_child_hashes_envelope_mismatch" in res["blockers"] or "receipt_hash_tamper" in res["blockers"]
+
+
+def test_strict_receipt_rejects_learning_stage_tamper():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-learning-tamper-1",
+        "workspace_revision": "rev-1",
+        "learning": {"invoked": True, "status": "SUCCEEDED", "outcome": "normal"},
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    tampered = dict(r)
+    tampered["learning"] = dict(r["learning"])
+    tampered["learning"]["outcome"] = "tampered"
+    res = validate_receipt_base(tampered, mode="strict")
+    assert res["ok"] is False
+    assert "ordered_child_hashes_envelope_mismatch" in res["blockers"] or "receipt_hash_tamper" in res["blockers"]
+
+
+def test_strict_receipt_rejects_capability_stage_tamper():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-cap-tamper-1",
+        "workspace_revision": "rev-1",
+        "capability_results": {
+            "baseline": {"invoked": True, "status": "SUCCEEDED"},
+        },
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    tampered = dict(r)
+    tampered["capability_results"] = {"baseline": {"invoked": True, "status": "FAILED"}}
+    res = validate_receipt_base(tampered, mode="strict")
+    assert res["ok"] is False
+    assert "ordered_child_hashes_envelope_mismatch" in res["blockers"] or "receipt_hash_tamper" in res["blockers"]
+
+
+def test_strict_receipt_rejects_replan_request_tamper():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base, validate_receipt_base
+
+    raw = {
+        "task_id": "task-req-tamper-1",
+        "workspace_revision": "rev-1",
+        "execution_replan_request": {
+            "schema": "nexus.execution_replan_request.v1",
+            "task_id": "task-req-tamper-1",
+            "replan_request_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "requested_execution_depth": "STANDARD",
+        },
+    }
+    r = attach_r3_receipt_base(dict(raw))
+    tampered = dict(r)
+    tampered["execution_replan_request"] = dict(r["execution_replan_request"])
+    tampered["execution_replan_request"]["requested_execution_depth"] = "FULL"
+    res = validate_receipt_base(tampered, mode="strict")
+    assert res["ok"] is False
+    assert "execution_replan_request_hash_mismatch" in res["blockers"] or "receipt_hash_tamper" in res["blockers"]
+
+
+def test_execution_replan_request_changes_receipt_hash():
+    from nexus.evidence.receipt_base import attach_r3_receipt_base
+
+    raw1 = {
+        "task_id": "task-req-hash-1",
+        "workspace_revision": "rev-1",
+        "execution_replan_request": {
+            "schema": "nexus.execution_replan_request.v1",
+            "task_id": "task-req-hash-1",
+            "requested_execution_depth": "STANDARD",
+        },
+    }
+    raw2 = {
+        "task_id": "task-req-hash-1",
+        "workspace_revision": "rev-1",
+        "execution_replan_request": {
+            "schema": "nexus.execution_replan_request.v1",
+            "task_id": "task-req-hash-1",
+            "requested_execution_depth": "FULL",
+        },
+    }
+    r1 = attach_r3_receipt_base(dict(raw1))
+    r2 = attach_r3_receipt_base(dict(raw2))
+    assert r1["receipt_base"]["receipt_hash"] != r2["receipt_base"]["receipt_hash"]

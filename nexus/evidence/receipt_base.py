@@ -607,6 +607,29 @@ def build_execution_attempt_id(
     return f"sha256:{canonical_json_hash(payload)}"
 
 
+def derive_receipt_child_hashes(receipt: Mapping[str, Any]) -> list[str]:
+    """Derive deterministic stage child hashes from envelope in canonical order:
+    local -> online -> verifier -> learning -> capabilities (sorted by name).
+    """
+    children: list[str] = []
+    if not isinstance(receipt, Mapping):
+        return children
+
+    for name in ("local", "online", "verifier", "learning"):
+        stage = receipt.get(name)
+        if isinstance(stage, Mapping) and stage:
+            children.append(hash_stage_payload(stage, stage_name=name))
+
+    caps = receipt.get("capability_results")
+    if isinstance(caps, Mapping):
+        for cap_name in sorted(caps.keys()):
+            stage = caps[cap_name]
+            if isinstance(stage, Mapping) and stage:
+                children.append(hash_stage_payload(stage, stage_name=f"cap:{cap_name}"))
+
+    return children
+
+
 def compute_receipt_hash(
     *,
     run_anchor_hash: str,
@@ -620,6 +643,7 @@ def compute_receipt_hash(
     structured_evidence_refs: Sequence[Mapping[str, Any]] = (),
     consumption_chain: Sequence[Mapping[str, Any]] = (),
     execution_attempt_hash: str = "",
+    execution_replan_request_hash: str = "",
 ) -> str:
     """Aggregate hash for a receipt node. Does not include the resulting hash itself."""
     payload = {
@@ -634,6 +658,7 @@ def compute_receipt_hash(
         "structured_evidence_refs": [dict(r) for r in structured_evidence_refs],
         "consumption_chain": [dict(c) for c in consumption_chain],
         "execution_attempt_hash": str(execution_attempt_hash or ""),
+        "execution_replan_request_hash": str(execution_replan_request_hash or ""),
     }
     return canonical_json_hash(payload)
 
@@ -671,6 +696,7 @@ def build_receipt_base_dict(
     structured_evidence_refs: Sequence[Mapping[str, Any]] = (),
     claim_boundary: Mapping[str, Any] | ClaimBoundary | None = None,
     execution_attempt_hash: str = "",
+    execution_replan_request_hash: str = "",
     source_world: str = "",
     source_component: str = "",
     execution_topology: str = "",
@@ -704,6 +730,7 @@ def build_receipt_base_dict(
         "source_candidate_hash": str(source_candidate_hash or ""),
         "applied_candidate_hash": str(applied_candidate_hash or ""),
         "execution_attempt_hash": str(execution_attempt_hash or ""),
+        "execution_replan_request_hash": str(execution_replan_request_hash or ""),
         "consumption_chain": [dict(c) for c in consumption_chain],
         "structured_evidence_refs": [dict(r) for r in structured_evidence_refs],
         "claim_boundary": cb,
@@ -820,16 +847,7 @@ def attach_r3_receipt_base(
     # Ordered child hashes: explicit stage_hashes or derive from local/online/capabilities
     children: list[str] = [str(h) for h in (stage_hashes or ()) if str(h).strip()]
     if not children:
-        for name in ("local", "online", "verifier", "learning"):
-            stage = receipt.get(name)
-            if isinstance(stage, Mapping) and stage:
-                children.append(hash_stage_payload(stage, stage_name=name))
-        caps = receipt.get("capability_results")
-        if isinstance(caps, Mapping):
-            for cap_name in sorted(caps.keys()):
-                stage = caps[cap_name]
-                if isinstance(stage, Mapping):
-                    children.append(hash_stage_payload(stage, stage_name=f"cap:{cap_name}"))
+        children = derive_receipt_child_hashes(receipt)
 
     # Double-project so hashed claim_boundary matches build_receipt_base_dict storage
     claim = claim_boundary_projection(
@@ -915,6 +933,9 @@ def attach_r3_receipt_base(
     attempt_obj = receipt.get("execution_attempt") if isinstance(receipt.get("execution_attempt"), Mapping) else None
     execution_attempt_hash = canonical_json_hash(attempt_obj) if attempt_obj is not None else ""
 
+    replan_req_obj = receipt.get("execution_replan_request") if isinstance(receipt.get("execution_replan_request"), Mapping) else None
+    execution_replan_request_hash = canonical_json_hash(replan_req_obj) if replan_req_obj is not None else ""
+
     r_hash = compute_receipt_hash(
         run_anchor_hash=run_anchor,
         ordered_child_hashes=children,
@@ -927,6 +948,7 @@ def attach_r3_receipt_base(
         structured_evidence_refs=structured,
         consumption_chain=chain,
         execution_attempt_hash=execution_attempt_hash,
+        execution_replan_request_hash=execution_replan_request_hash,
     )
 
     # Final R3 parents = typed run_anchor only (not self, not circular child binding)
@@ -945,6 +967,7 @@ def attach_r3_receipt_base(
         source_candidate_hash=source_candidate_hash,
         applied_candidate_hash=applied_candidate_hash,
         execution_attempt_hash=execution_attempt_hash,
+        execution_replan_request_hash=execution_replan_request_hash,
         consumption_chain=chain,
         structured_evidence_refs=structured,
         claim_boundary=claim,
@@ -1479,17 +1502,19 @@ def validate_receipt_base(
         planner_attempt = planner_map.get("execution_attempt") if planner_map and isinstance(planner_map.get("execution_attempt"), Mapping) else None
         ctx_map = payload.get("context_trace") if isinstance(payload, Mapping) and isinstance(payload.get("context_trace"), Mapping) else None
         ctx_attempt = ctx_map.get("execution_attempt") if ctx_map and isinstance(ctx_map.get("execution_attempt"), Mapping) else None
+        att_hash_base = str(base.get("execution_attempt_hash") or "").strip()
 
-        if base is not payload and isinstance(payload, Mapping):
-            if root_attempt is not None or planner_attempt is not None or ctx_attempt is not None:
-                if planner_attempt is None:
-                    blockers.append("execution_attempt_missing_from_planner")
-                if ctx_attempt is None:
-                    blockers.append("execution_attempt_missing_from_context_trace")
-                if root_attempt is not None and planner_attempt is not None and root_attempt != planner_attempt:
-                    blockers.append("execution_attempt_planner_mismatch")
-                if root_attempt is not None and ctx_attempt is not None and root_attempt != ctx_attempt:
-                    blockers.append("execution_attempt_context_trace_mismatch")
+        if root_attempt is not None or planner_attempt is not None or ctx_attempt is not None or att_hash_base:
+            if root_attempt is None:
+                blockers.append("execution_attempt_missing_from_root")
+            if planner_attempt is None:
+                blockers.append("execution_attempt_missing_from_planner")
+            if ctx_attempt is None:
+                blockers.append("execution_attempt_missing_from_context_trace")
+            if root_attempt is not None and planner_attempt is not None and root_attempt != planner_attempt:
+                blockers.append("execution_attempt_planner_mismatch")
+            if root_attempt is not None and ctx_attempt is not None and root_attempt != ctx_attempt:
+                blockers.append("execution_attempt_context_trace_mismatch")
 
         target_attempt = root_attempt or planner_attempt or ctx_attempt or (base.get("execution_attempt") if isinstance(base.get("execution_attempt"), Mapping) else None)
         if target_attempt is not None:
@@ -1508,6 +1533,25 @@ def validate_receipt_base(
             )
             if str(target_attempt.get("attempt_id") or "") != expected_attempt_id:
                 blockers.append("execution_attempt_id_mismatch")
+
+        replan_req_root = payload.get("execution_replan_request") if isinstance(payload, Mapping) and isinstance(payload.get("execution_replan_request"), Mapping) else None
+        replan_hash_base = str(base.get("execution_replan_request_hash") or "").strip()
+
+        if replan_req_root is not None:
+            if not replan_hash_base:
+                blockers.append("execution_replan_request_hash_missing")
+            else:
+                expected_req_hash = canonical_json_hash(replan_req_root)
+                if replan_hash_base != expected_req_hash:
+                    blockers.append("execution_replan_request_hash_mismatch")
+        elif replan_hash_base:
+            blockers.append("execution_replan_request_missing_from_root")
+
+        if base is not payload and isinstance(payload, Mapping):
+            envelope_children = derive_receipt_child_hashes(payload)
+            stored_children = [str(h) for h in (base.get("ordered_child_hashes") or base.get("child_hashes") or []) if str(h).strip()]
+            if envelope_children != stored_children:
+                blockers.append("ordered_child_hashes_envelope_mismatch")
 
         tid = str(base.get("task_id") or "").strip()
         ra = str(base.get("run_anchor_hash") or "").strip()
@@ -1553,6 +1597,7 @@ def validate_receipt_base(
                 structured_evidence_refs=list(base.get("structured_evidence_refs") or ()),
                 consumption_chain=list(base.get("consumption_chain") or ()),
                 execution_attempt_hash=str(base.get("execution_attempt_hash") or ""),
+                execution_replan_request_hash=str(base.get("execution_replan_request_hash") or ""),
             )
             if rh != expected_receipt:
                 blockers.append("receipt_hash_tamper")

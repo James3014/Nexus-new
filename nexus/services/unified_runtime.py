@@ -131,6 +131,38 @@ def build_execution_replan_request(
     }
 
 
+def execution_replan_request_authority_projection(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project all authority-bearing fields of an execution_replan_request."""
+    if not isinstance(value, Mapping):
+        return {}
+
+    v_stage = value.get("verifier_stage") if isinstance(value.get("verifier_stage"), Mapping) else {}
+    v_refs = value.get("verifier_evidence_refs") or v_stage.get("evidence_refs") or []
+    if isinstance(v_refs, (list, tuple)):
+        sorted_refs = sorted(str(r) for r in v_refs)
+    else:
+        sorted_refs = []
+
+    return {
+        "schema": str(value.get("schema") or ""),
+        "task_id": str(value.get("task_id") or ""),
+        "source_planner_decision_id": str(value.get("source_planner_decision_id") or ""),
+        "current_execution_depth": str(value.get("current_execution_depth") or ""),
+        "requested_execution_depth": str(value.get("requested_execution_depth") or ""),
+        "trigger": str(value.get("trigger") or ""),
+        "verifier_outcome_trusted": bool(value.get("verifier_outcome_trusted")),
+        "replan_required": bool(value.get("replan_required")),
+        "depth_escalated": bool(value.get("depth_escalated")),
+        "manual_review_required": bool(value.get("manual_review_required")),
+        "verifier_status": str(value.get("verifier_status") or ""),
+        "verifier_evidence_refs": sorted_refs,
+        "replan_request_id": str(value.get("replan_request_id") or ""),
+        "public_claim_allowed": bool(value.get("public_claim_allowed")),
+    }
+
+
 # Provider-neutral registration metadata.  Commands stay configurable at the
 # edge; this registry records the supported adapter contract without claiming
 # that a provider binary was invoked.
@@ -1635,11 +1667,9 @@ class UnifiedRuntime:
             current_execution_depth=str(previous_receipt.get("execution_depth", "")),
             verifier_stage=previous_receipt.get("verifier"),
         )
-        if str(replan_req.get("replan_request_id", "")) != str(recomputed.get("replan_request_id", "")):
-            raise ValueError("replan_request_integrity_mismatch")
-        if str(replan_req.get("requested_execution_depth", "")) != str(recomputed.get("requested_execution_depth", "")):
-            raise ValueError("replan_request_integrity_mismatch")
-        if str(replan_req.get("trigger", "")) != str(recomputed.get("trigger", "")):
+        stored_proj = execution_replan_request_authority_projection(replan_req)
+        rebuilt_proj = execution_replan_request_authority_projection(recomputed)
+        if stored_proj != rebuilt_proj:
             raise ValueError("replan_request_integrity_mismatch")
 
         current_depth = str(previous_receipt.get("execution_depth") or "LIGHT")
