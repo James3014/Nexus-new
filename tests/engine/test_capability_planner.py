@@ -2830,7 +2830,7 @@ def test_execution_depth_l1_green_lane_maps_to_light():
             "recommended_flow": "direct",
             "route_features": {
                 "risk_score": 15,
-                "adjusted_root_cause_confidence": 0.80,
+                "adjusted_root_cause_confidence": 0.90,
                 "candidate_count": 1,
                 "claim_uncertainty": False,
                 "is_cross_module_task": False,
@@ -2909,7 +2909,7 @@ def test_execution_depth_caller_cannot_override():
             "execution_depth": "FULL",
             "route_features": {
                 "risk_score": 15,
-                "adjusted_root_cause_confidence": 0.80,
+                "adjusted_root_cause_confidence": 0.90,
                 "candidate_count": 1,
                 "claim_uncertainty": False,
                 "is_cross_module_task": False,
@@ -2942,3 +2942,168 @@ def test_execution_depth_invalid_value_fail_closed():
             execution_depth="MAGIC",
         )
 
+
+# ── P0-T2: execution_depth safety floor tests ─────────────────────────────
+
+
+def test_execution_depth_safety_escalates_multi_candidate_light_to_standard():
+    """Unsafe multi-candidate LIGHT plan must escalate to STANDARD execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix minor bug with candidate count 2.",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 2,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L1_green_lane"
+    assert plan["execution_depth"] == "STANDARD"
+    snapshot = plan["signal_snapshot"]
+    assert snapshot["execution_depth"] == "STANDARD"
+    policy = snapshot["execution_depth_policy"]
+    assert policy["authority"] == "CapabilityPlanner"
+    assert policy["base_depth"] == "LIGHT"
+    assert policy["effective_depth"] == "STANDARD"
+    assert policy["safety_advisor"] == "LiteRouteOracle"
+    assert "candidate_count_gt_1" in policy["safety_blockers"]
+    assert policy["escalated"] is True
+    assert policy["reason"] == "lite_safety_floor_escalation"
+
+
+def test_execution_depth_safety_escalates_low_confidence_light_to_standard():
+    """Low-confidence LIGHT plan must escalate to STANDARD execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix minor bug with low confidence.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.80,
+                "candidate_count": 1,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["execution_depth"] == "STANDARD"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "LIGHT"
+    assert policy["effective_depth"] == "STANDARD"
+    assert "confidence_below_0_85" in policy["safety_blockers"]
+    assert policy["escalated"] is True
+    assert policy["reason"] == "lite_safety_floor_escalation"
+
+
+def test_execution_depth_safety_keeps_safe_light():
+    """Safe LIGHT plan without blockers remains LIGHT execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Simple variable rename in a single module.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 1,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["execution_depth"] == "LIGHT"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "LIGHT"
+    assert policy["effective_depth"] == "LIGHT"
+    assert policy["safety_blockers"] == []
+    assert policy["escalated"] is False
+    assert policy["reason"] == "base_depth_preserved"
+
+
+def test_execution_depth_safety_never_downgrades_standard():
+    """L2_hardened (STANDARD base depth) must never be downgraded by safe parameters or caller suggestions."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Moderate task with L2 routing.",
+        task_type="refactor",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 50,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L2_hardened"
+    assert plan["execution_depth"] == "STANDARD"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "STANDARD"
+    assert policy["effective_depth"] == "STANDARD"
+    assert policy["escalated"] is False
+    assert policy["reason"] == "base_depth_preserved"
+
+
+def test_execution_depth_safety_never_downgrades_full():
+    """L3_swarm_deep (FULL base depth) must never be downgraded by safe parameters or caller suggestions."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Complex swarm task with L3 routing.",
+        task_type="bug",
+        route={
+            "execution_depth": "LIGHT",
+            "should_research": True,
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 86,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+                "is_cross_module_task": True,
+                "has_hard_signal": True,
+            },
+        },
+        pillars={"lancedb": {"hits": 0}},
+        codeintel={"impact_report_present": True},
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L3_swarm_deep"
+    assert plan["execution_depth"] == "FULL"
+    policy = plan["signal_snapshot"]["execution_depth_policy"]
+    assert policy["base_depth"] == "FULL"
+    assert policy["effective_depth"] == "FULL"
+    assert policy["escalated"] is False
+    assert policy["reason"] == "base_depth_preserved"
+
+
+def test_execution_depth_safety_ignores_caller_override():
+    """Caller override cannot downgrade elevated effective depth or force invalid depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix bug with candidate count 2.",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 2,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["execution_depth"] == "STANDARD"
+    assert plan["signal_snapshot"]["execution_depth"] == "STANDARD"

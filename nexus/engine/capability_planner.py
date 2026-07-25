@@ -25,6 +25,7 @@ from nexus.engine.planner.skill_mount_evidence import (
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 from nexus.engine.local_assist_recommendation import build_local_assist_recommendation
+from nexus.core.lite_route_oracle import lite_route_safety_blockers
 from nexus.research.isolation_policy import decide_research_isolation
 
 PENDING_EXECUTOR_CAPABILITIES: set[str] = set()
@@ -729,7 +730,33 @@ class CapabilityPlanner:
             reasons[name].append(reason)
 
         routing_tier, routing_tier_reason = self._decide_routing_tier(signals)
-        execution_depth = execution_depth_for_routing_tier(routing_tier)
+        base_depth = execution_depth_for_routing_tier(routing_tier)
+        route_features = route.get("route_features", {}) if isinstance(route.get("route_features", {}), dict) else {}
+        try:
+            impact_complexity = float(route_features.get("impact_complexity") or 0.0)
+        except (TypeError, ValueError):
+            impact_complexity = 0.0
+
+        safety_blockers = lite_route_safety_blockers(
+            risk_level=signals.risk_band,
+            impact_complexity=impact_complexity,
+            belief_confidence=signals.confidence,
+            cross_module=signals.cross_module,
+            hard_signal=signals.hard_signal,
+            candidate_count=signals.candidate_count,
+            task_desc=task_desc,
+        )
+
+        if base_depth == "LIGHT" and len(safety_blockers) > 0:
+            effective_depth = "STANDARD"
+            escalated = True
+            reason = "lite_safety_floor_escalation"
+        else:
+            effective_depth = base_depth
+            escalated = False
+            reason = "base_depth_preserved"
+
+        execution_depth = effective_depth
         apply_signal_policies(
             signals=signals,
             task_desc=task_desc,
@@ -871,6 +898,15 @@ class CapabilityPlanner:
         )
         signal_snapshot["execution_depth"] = execution_depth
         signal_snapshot["execution_depth_source"] = "CapabilityPlanner:routing_tier"
+        signal_snapshot["execution_depth_policy"] = {
+            "authority": "CapabilityPlanner",
+            "base_depth": base_depth,
+            "effective_depth": effective_depth,
+            "safety_advisor": "LiteRouteOracle",
+            "safety_blockers": list(safety_blockers),
+            "escalated": escalated,
+            "reason": reason,
+        }
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
         signal_snapshot["route_truth_source"] = "CapabilityPlanner"

@@ -35,6 +35,43 @@ class LiteRouteDecision:
     skipped_phases: List[str]
 
 
+def lite_route_safety_blockers(
+    *,
+    risk_level: str,
+    impact_complexity: float,
+    belief_confidence: float,
+    cross_module: bool = False,
+    hard_signal: bool = False,
+    candidate_count: int = 1,
+    task_desc: str = "",
+) -> tuple[str, ...]:
+    """Pure function returning tuple of stable safety blocker codes for LiteRoute safety evaluation."""
+    risk_upper = str(risk_level).upper()
+    task_desc_lower = str(task_desc or "").lower()
+    blockers: list[str] = []
+
+    if risk_upper in ("HIGH", "CRITICAL"):
+        blockers.append("high_or_critical_risk")
+    if float(impact_complexity) > 3.0:
+        blockers.append("impact_complexity_gt_3")
+    if cross_module:
+        blockers.append("cross_module")
+    if hard_signal:
+        blockers.append("hard_signal")
+    if int(candidate_count) > 1:
+        blockers.append("candidate_count_gt_1")
+    if float(belief_confidence) < 0.85:
+        blockers.append("confidence_below_0_85")
+    if (
+        "recursion" in task_desc_lower
+        or "recursive" in task_desc_lower
+        or "stateful" in task_desc_lower
+    ):
+        blockers.append("recursive_or_stateful_task")
+
+    return tuple(blockers)
+
+
 def should_use_lite_route(
     risk_level: str,
     impact_complexity: float,
@@ -107,9 +144,7 @@ def should_use_lite_route(
         )
 
     # 5. Check environment variable override
-    if (
-        os.environ.get("NEXUS_LIGHT_ROUTE") == "1"
-    ):
+    if os.environ.get("NEXUS_LIGHT_ROUTE") == "1":
         return LiteRouteDecision(
             is_lite=True,
             reason="env_override_light_route",

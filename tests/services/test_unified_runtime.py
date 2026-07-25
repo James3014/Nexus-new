@@ -2068,3 +2068,49 @@ def test_runtime_physical_json_receipt_contains_execution_depth(tmp_path):
     assert disk_receipt["execution_depth"] == "LIGHT"
     assert disk_receipt["planner"]["execution_depth"] == "LIGHT"
     assert disk_receipt["context_trace"]["execution_depth"] == "LIGHT"
+
+
+def test_runtime_physical_receipt_uses_effective_execution_depth(tmp_path):
+    """UnifiedRuntime physical receipt must record effective execution_depth from CapabilityPlanner."""
+    runtime = UnifiedRuntime(planner=CapabilityPlanner())
+    receipt_path = tmp_path / "unified-receipt.json"
+
+    req = UnifiedRuntimeRequest(
+        task_id="p0-t2-receipt-test",
+        workspace_revision="rev-1",
+        task_statement="Fix minor bug with candidate count 2.",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.90,
+                "candidate_count": 2,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+
+    receipt = runtime.run(
+        req,
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+        receipt_path=receipt_path,
+    )
+
+    assert receipt["execution_depth"] == "STANDARD"
+    assert receipt["planner"]["execution_depth"] == "STANDARD"
+    assert receipt["context_trace"]["execution_depth"] == "STANDARD"
+
+    assert receipt_path.exists()
+    disk_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert disk_receipt["execution_depth"] == "STANDARD"
+    assert disk_receipt["planner"]["execution_depth"] == "STANDARD"
+    assert disk_receipt["context_trace"]["execution_depth"] == "STANDARD"
