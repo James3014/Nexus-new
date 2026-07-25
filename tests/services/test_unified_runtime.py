@@ -1883,3 +1883,188 @@ def test_finalize_receipt_rejects_cross_task_final_stage_payload() -> None:
     assert finalized["verifier"]["reason"] == "verifier_task_id_mismatch"
     assert finalized["claim_boundary"]["public_claim_allowed"] is False
     assert finalized["receipt_complete"] is False
+
+
+# ── P0-T1: execution_depth consumption tests ────────────────────────────────
+
+
+@dataclass
+class _DepthPlanner:
+    """Planner fixture that explicitly outputs execution_depth='LIGHT'."""
+    calls: int = 0
+
+    def plan(self, **_: object) -> CapabilityPlan:
+        self.calls += 1
+        return CapabilityPlan(
+            schema_version="nexus_capability_plan_v1",
+            selected_capabilities=["memory", "local_model_executor"],
+            required_capabilities=["memory", "local_model_executor"],
+            optional_capabilities=[],
+            conditional_capabilities=[],
+            pending_capabilities=[],
+            forbidden_capabilities=[],
+            constraints=["claim_fail_closed"],
+            decision_trace=[],
+            replan_trace=[],
+            score=1.0,
+            execution_depth="LIGHT",
+            signal_snapshot={
+                "route_truth_source": "CapabilityPlanner",
+                "execution_depth": "LIGHT",
+                "execution_depth_source": "CapabilityPlanner:routing_tier",
+            },
+        )
+
+
+@dataclass
+class _DepthLocalService:
+    """Fake local service that records the planner_snapshot it receives."""
+    seen_snapshot: dict = None
+
+    def __post_init__(self):
+        if self.seen_snapshot is None:
+            self.seen_snapshot = {}
+
+    def handle(self, request):
+        if isinstance(request, dict):
+            snap = request.get("planner_snapshot")
+            if isinstance(snap, dict):
+                self.seen_snapshot = dict(snap)
+        elif hasattr(request, "planner_snapshot") and isinstance(request.planner_snapshot, dict):
+            self.seen_snapshot = dict(request.planner_snapshot)
+        return {
+            "task_id": getattr(request, "task_id", "") if not isinstance(request, dict) else request.get("task_id", ""),
+            "invoked": True,
+            "output_delivered": True,
+            "action": "candidate",
+            "evidence_refs": ["local:test:fixture"],
+            "verifier_summary": {"verifier_status": "pass", "verifier_reached": True, "exit_code": 0},
+            "candidate_summary": {
+                "isolation_status": "isolated",
+                "selected_candidate_hash": "abc123",
+                "selected_candidate_hash_matches_applied": True,
+            },
+            "receipt_path": "",
+            "outcome_contributed": True,
+        }
+
+
+def test_runtime_receipt_contains_execution_depth():
+    """Receipt must contain execution_depth from planner."""
+    planner = _DepthPlanner()
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        _request(),
+        capability_invokers={
+            "memory": lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"memory:{ctx['task_id']}:fixture"],
+            },
+        },
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    assert receipt["execution_depth"] == "LIGHT"
+    assert receipt["planner"]["execution_depth"] == "LIGHT"
+    assert receipt["context_trace"]["execution_depth"] == "LIGHT"
+
+
+def test_runtime_planner_stage_contains_execution_depth():
+    """Planner stage must contain execution_depth."""
+    planner = _DepthPlanner()
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        _request(),
+        capability_invokers={
+            "memory": lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"memory:{ctx['task_id']}:fixture"],
+            },
+        },
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    planner_stage = receipt["planner"]
+    assert planner_stage["execution_depth"] == "LIGHT"
+
+
+def test_runtime_context_trace_contains_execution_depth():
+    """Context trace must contain execution_depth."""
+    planner = _DepthPlanner()
+    runtime = UnifiedRuntime(planner=planner)
+    receipt = runtime.run(
+        _request(),
+        capability_invokers={
+            "memory": lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"memory:{ctx['task_id']}:fixture"],
+            },
+        },
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    context_trace = receipt["context_trace"]
+    assert context_trace["execution_depth"] == "LIGHT"
+
+
+def test_runtime_local_snapshot_contains_execution_depth():
+    """Local planner snapshot must contain execution_depth."""
+    planner = _DepthPlanner()
+    local_service = _DepthLocalService()
+    runtime = UnifiedRuntime(planner=planner, local_service=local_service)
+    runtime.run(
+        _request(local_enabled=True),
+        capability_invokers={
+            "memory": lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"memory:{ctx['task_id']}:fixture"],
+            },
+        },
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    assert local_service.seen_snapshot.get("execution_depth") == "LIGHT"
+
+
+def test_runtime_physical_json_receipt_contains_execution_depth(tmp_path):
+    """Physical JSON receipt on disk must contain execution_depth."""
+    planner = _DepthPlanner()
+    runtime = UnifiedRuntime(planner=planner)
+    receipt_path = tmp_path / "unified-receipt.json"
+    receipt = runtime.run(
+        _request(),
+        capability_invokers={
+            "memory": lambda ctx: {
+                "task_id": ctx["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"memory:{ctx['task_id']}:fixture"],
+            },
+        },
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+        receipt_path=receipt_path,
+    )
+
+    assert receipt_path.exists()
+    disk_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert disk_receipt["execution_depth"] == "LIGHT"
+    assert disk_receipt["planner"]["execution_depth"] == "LIGHT"
+    assert disk_receipt["context_trace"]["execution_depth"] == "LIGHT"

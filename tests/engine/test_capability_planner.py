@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.engine.learning_policy_loader import (
     audit_route_cost_policy,
@@ -2788,4 +2791,154 @@ def test_capability_planner_local_committee_topology_metadata(monkeypatch):
     assert snapshot.get("execution_topology") == "local_committee_only"
     assert snapshot.get("committee_profile") == "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
     assert snapshot.get("local_committee_enabled") is True
+
+
+# ── P0-T1: execution_depth contract tests ──────────────────────────────────
+
+
+def test_execution_depth_l0_micro_patch_maps_to_light():
+    """L0_micro_patch routing_tier must produce LIGHT execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a small hidden bug in one local file.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.92,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L0_micro_patch"
+    assert plan["execution_depth"] == "LIGHT"
+    assert plan["signal_snapshot"]["execution_depth"] == "LIGHT"
+    assert plan["signal_snapshot"]["execution_depth_source"] == "CapabilityPlanner:routing_tier"
+
+
+def test_execution_depth_l1_green_lane_maps_to_light():
+    """L1_green_lane routing_tier must produce LIGHT execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Rename a variable in a single file for clarity.",
+        task_type="refactor",
+        route={
+            "recommended_flow": "direct",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.80,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L1_green_lane"
+    assert plan["execution_depth"] == "LIGHT"
+    assert plan["signal_snapshot"]["execution_depth"] == "LIGHT"
+
+
+def test_execution_depth_l2_hardened_maps_to_standard():
+    """L2_hardened routing_tier must produce STANDARD execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor auth module with moderate risk changes.",
+        task_type="refactor",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 50,
+                "adjusted_root_cause_confidence": 0.60,
+                "candidate_count": 2,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L2_hardened"
+    assert plan["execution_depth"] == "STANDARD"
+    assert plan["signal_snapshot"]["execution_depth"] == "STANDARD"
+
+
+def test_execution_depth_l3_swarm_deep_maps_to_full():
+    """L3_swarm_deep routing_tier must produce FULL execution_depth."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Use research to fix cross-module websocket timeout race with split worker validation.",
+        task_type="bug",
+        route={
+            "should_research": True,
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 86,
+                "adjusted_root_cause_confidence": 0.42,
+                "candidate_count": 4,
+                "memory_hits": 1,
+                "findings_hits": 1,
+                "is_cross_module_task": True,
+                "has_hard_signal": True,
+            },
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+        pillars={"lancedb": {"hits": 0}},
+        codeintel={"impact_report_present": True},
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L3_swarm_deep"
+    assert plan["execution_depth"] == "FULL"
+    assert plan["signal_snapshot"]["execution_depth"] == "FULL"
+
+
+def test_execution_depth_caller_cannot_override():
+    """Caller-provided route['execution_depth'] must not override planner derivation."""
+    plan = CapabilityPlanner().plan(
+        task_desc="Rename a variable in a single file for clarity.",
+        task_type="refactor",
+        route={
+            "recommended_flow": "direct",
+            "execution_depth": "FULL",
+            "route_features": {
+                "risk_score": 15,
+                "adjusted_root_cause_confidence": 0.80,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] in ("L0_micro_patch", "L1_green_lane")
+    assert plan["execution_depth"] == "LIGHT"
+
+
+def test_execution_depth_invalid_value_fail_closed():
+    """CapabilityPlan with invalid execution_depth must raise ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="invalid_execution_depth"):
+        CapabilityPlan(
+            schema_version="nexus_capability_plan_v1",
+            selected_capabilities=[],
+            required_capabilities=[],
+            optional_capabilities=[],
+            conditional_capabilities=[],
+            pending_capabilities=[],
+            forbidden_capabilities=[],
+            constraints=[],
+            decision_trace=[],
+            replan_trace=[],
+            score=0.0,
+            execution_depth="MAGIC",
+        )
 

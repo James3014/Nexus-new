@@ -1514,6 +1514,7 @@ class UnifiedRuntime:
             plan_schema=plan.schema_version,
             plan_hash=plan_hash,
             planner_decision_id=planner_decision_id,
+            execution_depth=plan.execution_depth,
         )
 
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
@@ -1689,6 +1690,7 @@ class UnifiedRuntime:
                 "task_id": request.task_id,
                 "workspace_revision": request.workspace_revision,
                 "planner_decision_id": planner_decision_id,
+                "execution_depth": plan.execution_depth,
                 "planner": planner_stage,
                 "capabilities": [],
                 "capability_results": capability_results,
@@ -2445,6 +2447,7 @@ class UnifiedRuntime:
             "task_id": request.task_id,
             "workspace_revision": request.workspace_revision,
             "planner_decision_id": planner_decision_id,
+            "execution_depth": plan.execution_depth,
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
             "online_prompt_hash": _hash_json(effective_online_prompt),
             "online_payload_hash": _hash_json(request.online_payload),
@@ -2486,6 +2489,7 @@ class UnifiedRuntime:
             "task_id": request.task_id,
             "workspace_revision": request.workspace_revision,
             "planner_decision_id": planner_decision_id,
+            "execution_depth": plan.execution_depth,
             "task_statement_hash": hashlib.sha256(request.task_statement.encode("utf-8")).hexdigest(),
             "context_trace": context_trace,
             "planner": planner_stage,

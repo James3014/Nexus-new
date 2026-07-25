@@ -7,6 +7,36 @@ from typing import Any
 
 PHASES = ("S", "P", "X", "D", "R", "A", "C")
 
+# ── Execution depth constants ──────────────────────────────────────────────
+EXECUTION_DEPTH_LIGHT = "LIGHT"
+EXECUTION_DEPTH_STANDARD = "STANDARD"
+EXECUTION_DEPTH_FULL = "FULL"
+
+VALID_EXECUTION_DEPTHS = frozenset({
+    EXECUTION_DEPTH_LIGHT,
+    EXECUTION_DEPTH_STANDARD,
+    EXECUTION_DEPTH_FULL,
+})
+
+_ROUTING_TIER_TO_EXECUTION_DEPTH: dict[str, str] = {
+    "L0_micro_patch": EXECUTION_DEPTH_LIGHT,
+    "L1_green_lane": EXECUTION_DEPTH_LIGHT,
+    "L2_hardened": EXECUTION_DEPTH_STANDARD,
+    "L3_swarm_deep": EXECUTION_DEPTH_FULL,
+}
+
+
+def execution_depth_for_routing_tier(routing_tier: str) -> str:
+    """Map a routing_tier to its canonical execution_depth.
+
+    This is the single source of truth for the routing_tier → execution_depth
+    mapping. It does not read caller input, provider type, or local/online mode.
+    """
+    try:
+        return _ROUTING_TIER_TO_EXECUTION_DEPTH[routing_tier]
+    except KeyError:
+        raise ValueError(f"unsupported_routing_tier:{routing_tier}") from None
+
 
 class FlowState(str, Enum):
     INTAKE = "INTAKE"
@@ -253,6 +283,11 @@ class CapabilityPlan:
     score: float
     planner_mode: str = "dry_run"
     signal_snapshot: dict[str, Any] = field(default_factory=dict)
+    execution_depth: str = EXECUTION_DEPTH_STANDARD
+
+    def __post_init__(self) -> None:
+        if self.execution_depth not in VALID_EXECUTION_DEPTHS:
+            raise ValueError(f"invalid_execution_depth:{self.execution_depth}")
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

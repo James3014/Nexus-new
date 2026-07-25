@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig
+from nexus.engine.capability_contracts import (
+    CapabilityNode,
+    CapabilityPlan,
+    CapabilityScoringConfig,
+    execution_depth_for_routing_tier,
+)
 from nexus.engine.harness_route_policy import (
     apply_harness_cost_lane_policy,
     apply_harness_relevance_policy,
@@ -724,6 +729,7 @@ class CapabilityPlanner:
             reasons[name].append(reason)
 
         routing_tier, routing_tier_reason = self._decide_routing_tier(signals)
+        execution_depth = execution_depth_for_routing_tier(routing_tier)
         apply_signal_policies(
             signals=signals,
             task_desc=task_desc,
@@ -863,6 +869,8 @@ class CapabilityPlanner:
             routing_tier=routing_tier,
             routing_tier_reason=routing_tier_reason,
         )
+        signal_snapshot["execution_depth"] = execution_depth
+        signal_snapshot["execution_depth_source"] = "CapabilityPlanner:routing_tier"
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
         signal_snapshot["route_truth_source"] = "CapabilityPlanner"
@@ -1011,6 +1019,7 @@ class CapabilityPlanner:
             replan_trace=replan_trace,
             score=score,
             signal_snapshot=signal_snapshot,
+            execution_depth=execution_depth,
         )
 
     @staticmethod
