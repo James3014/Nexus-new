@@ -1,4 +1,8 @@
-"""Structural tests for the atomic live vertical proof runner (no live provider)."""
+"""Structural tests for the atomic live vertical proof runner (no live provider).
+
+These tests verify command wiring and structural artifacts only.
+A unit-test fixture must NOT produce LIVE_PROOF_PASS or REAL_LOCAL_ONLINE_VERTICAL_PROVEN.
+"""
 
 from __future__ import annotations
 
@@ -59,7 +63,7 @@ def test_count_live_pairs_from_jsonl(tmp_path: Path) -> None:
     assert stats["fixture_rows"] == 0
 
 
-def test_run_vertical_proof_wires_pointer_and_validator(tmp_path: Path, monkeypatch) -> None:
+def test_run_vertical_proof_wires_pointer_without_live_claim(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     scratch = tmp_path / "scratch"
     camp = repo / ".nexus" / "reports" / "local_assist_live_paired" / "live_paired_20260713T2311Z"
@@ -171,6 +175,7 @@ def test_run_vertical_proof_wires_pointer_and_validator(tmp_path: Path, monkeypa
         runner=fake_run,
         campaign_dir=camp,
         selected_provider="grok",
+        evidence_mode="canary",
     )
     assert result["cmd"][2] == "run"
     assert result["cmd"][3] == task
@@ -179,14 +184,15 @@ def test_run_vertical_proof_wires_pointer_and_validator(tmp_path: Path, monkeypa
     assert "live-vertical-cli-r2e" in log
     assert "grok" in log
     assert "ollama" in log
-    assert result["validation"]["status"] == "LIVE_PROOF_PASS"
+    assert result["validation"]["status"] != "LIVE_PROOF_PASS"
+    assert result["summary"]["REAL_LOCAL_ONLINE_VERTICAL_PROVEN"] is False
     assert result["summary"]["product_entry"] == "nexus run"
     assert result["summary"]["runtime_seam"] == "cli->command_service->engine"
     assert result["summary"]["task_id"] == task
-    assert result["summary"]["REAL_LOCAL_ONLINE_VERTICAL_PROVEN"] is True
     assert result["closeout"]["five_live_pairs"] == 5
     assert result["closeout"]["pair_row_count"] == 5
-    assert result["claim_boundary"]["NEXUS_LIVE_ONLINE_AND_PAIRED_PILOT_COMPLETE"] is True
+    assert result["claim_boundary"]["public_claim_allowed"] is False
+    assert result["claim_boundary"]["production_ready"] is False
     assert (scratch / "vertical_proof_summary.json").is_file()
     assert (camp / "campaign_closeout.json").is_file()
     closeout = json.loads((camp / "campaign_closeout.json").read_text(encoding="utf-8"))

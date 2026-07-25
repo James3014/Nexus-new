@@ -145,7 +145,7 @@ def build_vertical_proof_summary(
     preflight = receipt.get("online_preflight") if isinstance(receipt.get("online_preflight"), Mapping) else {}
     proven = str(validation.get("status") or "") == "LIVE_PROOF_PASS" and bool(
         receipt.get("receipt_complete")
-    )
+    ) and evidence_mode == "live_runtime"
     return {
         "product_entry": PRODUCT_ENTRY,
         "runtime_seam": RUNTIME_SEAM,
@@ -212,6 +212,7 @@ def run_vertical_proof(
     skip_subprocess: bool = False,
     selected_provider: str = "grok",
     campaign_dir: Path | None = None,
+    evidence_mode: str = "live_runtime",
 ) -> dict[str, Any]:
     """Execute (or mock) product vertical and seal summary/claim artifacts."""
     root = Path(repo_root or default_repo_root())
@@ -312,6 +313,7 @@ def run_vertical_proof(
         pipeline_report_path=report_file if report_file.is_file() else None,
         unified_runtime_receipt_path=receipt_path if receipt_path.is_file() else None,
         external_authorized=True,
+        evidence_mode=evidence_mode,
     )
     validation_payload = validation.to_dict()
     if log_failures:
