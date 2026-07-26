@@ -38,3 +38,35 @@ def test_provider_error_enum():
     """驗證 Provider 錯誤類型的 Enum 值。"""
     assert ProviderErrorType.QUOTA_LIMIT.value == "QUOTA_LIMIT"
     assert ProviderErrorType.SCHEMA_VIOLATION.value == "SCHEMA_VIOLATION"
+
+
+def test_executor_input_accepts_optional_self_hosted_contract():
+    ctx = ContextPackSchema(files={"app.py": "content"})
+    contract = {
+        "schema": "nexus.self_hosted_task_contract.v1",
+        "task_id": "sh2-contract",
+        "human_approval_required": True,
+    }
+
+    inp = ExecutorInput(
+        task_id="T-SH2",
+        phase="repair",
+        workspace_root="/tmp/ws",
+        context_pack=ctx,
+        self_hosted_contract=contract,
+    )
+
+    assert inp.self_hosted_contract == contract
+
+
+def test_legacy_executor_input_remains_compatible():
+    ctx = ContextPackSchema(files={})
+
+    inp = ExecutorInput(
+        task_id="T-LEGACY",
+        phase="repair",
+        workspace_root="/tmp/ws",
+        context_pack=ctx,
+    )
+
+    assert inp.self_hosted_contract is None

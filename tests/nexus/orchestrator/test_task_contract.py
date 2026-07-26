@@ -1,13 +1,46 @@
+import json
+
 import pytest
 from nexus.orchestrator.task_contract import (
+    ApprovalStatus,
     Evidence,
     EvidenceKind,
     EvidenceRequirement,
     DeliveryProfile,
+    MutationMode,
+    SelfHostedTaskContract,
     Task,
     TaskStatus,
     TaskStateTransition,
 )
+
+
+EXACT_CONTROLLER_SHA = "a" * 40
+EXACT_TARGET_SHA = "b" * 40
+
+
+def _self_hosted_contract(tmp_path, **overrides):
+    values = {
+        "task_id": "sh2-contract",
+        "objective": "Capture a bounded candidate diff",
+        "controller_revision": EXACT_CONTROLLER_SHA,
+        "target_base_revision": EXACT_TARGET_SHA,
+        "controller_repo_root": str(tmp_path / "controller"),
+        "target_repo_root": str(tmp_path / "targets" / "sh2-contract"),
+        "target_worktree_root": str(tmp_path / "targets"),
+        "allowed_files": ["nexus/orchestrator/task_contract.py"],
+        "forbidden_files": ["secrets/"],
+        "verifier_commands": ["python3 -m pytest -q"],
+        "protected_contracts": ["receipt-v1"],
+        "preferred_provider": "codex",
+        "fallback_provider": None,
+        "maximum_provider_calls": 0,
+        "maximum_replans": 0,
+        "mutation_mode": MutationMode.WORKING_TREE_ONLY,
+        "human_approval_required": True,
+    }
+    values.update(overrides)
+    return SelfHostedTaskContract(**values)
 
 def test_task_schema_validation():
     task = Task(
@@ -165,4 +198,40 @@ def test_live_delivery_profile_requires_human_approval_evidence():
 
     task.add_evidence(Evidence(command="human-approval approved-by:james", exit_code=0, output_summary="approved"))
     assert task.missing_evidence_requirements() == []
+
+
+def test_self_hosted_contract_requires_exact_controller_sha(tmp_path):
+    with pytest.raises(ValueError, match="controller_revision"):
+        _self_hosted_contract(tmp_path, controller_revision="abc123")
+
+
+def test_self_hosted_contract_requires_exact_target_sha(tmp_path):
+    with pytest.raises(ValueError, match="target_base_revision"):
+        _self_hosted_contract(tmp_path, target_base_revision="B" * 40)
+
+
+def test_self_hosted_contract_rejects_absolute_allowed_path(tmp_path):
+    with pytest.raises(ValueError, match="repository-relative"):
+        _self_hosted_contract(tmp_path, allowed_files=["/etc/passwd"])
+
+
+def test_self_hosted_contract_rejects_path_traversal(tmp_path):
+    with pytest.raises(ValueError, match="traversal"):
+        _self_hosted_contract(tmp_path, allowed_files=["nexus/../secrets.txt"])
+
+
+def test_self_hosted_contract_requires_human_approval(tmp_path):
+    with pytest.raises(ValueError, match="human approval"):
+        _self_hosted_contract(tmp_path, human_approval_required=False)
+
+
+def test_self_hosted_contract_hash_is_deterministic(tmp_path):
+    first = _self_hosted_contract(tmp_path)
+    second = _self_hosted_contract(tmp_path)
+
+    assert first.schema == "nexus.self_hosted_task_contract.v1"
+    assert first.contract_hash == second.contract_hash
+    assert len(first.contract_hash) == 64
+    assert json.loads(first.model_dump_json())["schema"] == first.schema
+    assert ApprovalStatus.PENDING.value == "PENDING"
 # integrity-seal: 1776512137

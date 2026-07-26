@@ -71,6 +71,7 @@ class ExecutorInput:
     context_pack: ContextPackSchema
     rules: List[str] = field(default_factory=list)
     instruction: Optional[TaskInstruction] = None # 選填細節
+    self_hosted_contract: Optional[Dict[str, Any]] = None
 
 @dataclass
 class ExecutorOutput:

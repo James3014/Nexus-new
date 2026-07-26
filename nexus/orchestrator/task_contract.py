@@ -1,7 +1,145 @@
 from enum import Enum
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
+from hashlib import sha256
+import json
+from pathlib import Path, PurePosixPath
+import re
+from typing import List, Optional, Dict, Any, Literal
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 import os
+
+
+_EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SAFE_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+class ApprovalStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class MutationMode(str, Enum):
+    WORKING_TREE_ONLY = "WORKING_TREE_ONLY"
+
+
+def _normalize_repository_path(value: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("path must be a non-empty repository-relative POSIX path")
+    if "\\" in value:
+        raise ValueError("path must be a repository-relative POSIX path")
+    if value.startswith("/") or PurePosixPath(value).is_absolute():
+        raise ValueError("path must be a repository-relative POSIX path")
+    parts = value.split("/")
+    if ".." in parts:
+        raise ValueError("path traversal is not allowed")
+    directory_prefix = value.endswith("/")
+    raw_path = value[:-1] if directory_prefix else value
+    if not raw_path or "." in raw_path.split("/") or "//" in value:
+        raise ValueError("path must be normalized")
+    normalized = PurePosixPath(raw_path).as_posix()
+    if normalized != raw_path:
+        raise ValueError("path must be normalized")
+    return f"{normalized}/" if directory_prefix else normalized
+
+
+class SelfHostedTaskContract(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    schema_: Literal["nexus.self_hosted_task_contract.v1"] = Field(
+        default="nexus.self_hosted_task_contract.v1",
+        alias="schema",
+        serialization_alias="schema",
+    )
+
+    @property
+    def schema(self) -> str:
+        return self.schema_
+
+    def model_dump(self, *args, **kwargs):
+        kwargs.setdefault("by_alias", True)
+        return super().model_dump(*args, **kwargs)
+
+    def model_dump_json(self, *args, **kwargs):
+        kwargs.setdefault("by_alias", True)
+        return super().model_dump_json(*args, **kwargs)
+
+    task_id: str
+    objective: str
+    controller_revision: str
+    target_base_revision: str
+    controller_repo_root: str
+    target_repo_root: str
+    target_worktree_root: str
+    allowed_files: List[str]
+    forbidden_files: List[str] = Field(default_factory=list)
+    verifier_commands: List[str] = Field(default_factory=list)
+    protected_contracts: List[str] = Field(default_factory=list)
+    preferred_provider: Optional[str] = None
+    fallback_provider: Optional[str] = None
+    maximum_provider_calls: int = Field(default=0, ge=0)
+    maximum_replans: int = Field(default=0, ge=0)
+    mutation_mode: MutationMode = MutationMode.WORKING_TREE_ONLY
+    human_approval_required: bool = True
+
+    @field_validator("task_id")
+    @classmethod
+    def _validate_task_id(cls, value: str) -> str:
+        if not _SAFE_TASK_ID_RE.fullmatch(value):
+            raise ValueError("task_id must be a safe slug")
+        return value
+
+    @field_validator("objective")
+    @classmethod
+    def _validate_objective(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("objective must be non-empty")
+        return value
+
+    @field_validator("controller_revision", "target_base_revision")
+    @classmethod
+    def _validate_exact_revision(cls, value: str, info) -> str:
+        if not _EXACT_GIT_SHA_RE.fullmatch(value):
+            raise ValueError(f"{info.field_name} must be an exact 40-char lowercase Git SHA")
+        return value
+
+    @field_validator("allowed_files", "forbidden_files")
+    @classmethod
+    def _validate_repository_paths(cls, values: List[str]) -> List[str]:
+        return [_normalize_repository_path(value) for value in values]
+
+    @model_validator(mode="after")
+    def _validate_self_hosted_boundaries(self):
+        if not self.allowed_files:
+            raise ValueError("allowed_files must be non-empty")
+        if self.mutation_mode != MutationMode.WORKING_TREE_ONLY:
+            raise ValueError("mutation_mode must be WORKING_TREE_ONLY")
+        if not self.human_approval_required:
+            raise ValueError("human approval is required")
+        controller_root = Path(self.controller_repo_root).expanduser().resolve(strict=False)
+        target_root = Path(self.target_repo_root).expanduser().resolve(strict=False)
+        if controller_root == target_root:
+            raise ValueError("controller and target roots must be physically separate")
+        return self
+
+    @computed_field(return_type=str)
+    @property
+    def contract_hash(self) -> str:
+        payload = self.model_dump(mode="json", exclude={"contract_hash"})
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return sha256(canonical).hexdigest()
 
 class TaskStatus(str, Enum):
     CREATED = "CREATED"
