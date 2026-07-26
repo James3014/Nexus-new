@@ -1,14 +1,17 @@
 """P4 mainchain entry + three-arm structural (ROUTING FREEZE)."""
 
-from __future__ import annotations
-
+import json
 from typing import Any
+
+import pytest
 
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.services.mainchain_entry import (
     run_mainchain,
+    run_mainchain_replan,
     run_three_arm_structural,
     stamp_mainchain_route,
+    summarize_arm_receipt,
     with_nexus_armor_enabled,
 )
 from nexus.services.online_nexus_context import NEXUS_CODEINTEL_MARKER, NEXUS_ROUTE_MARKER
@@ -159,3 +162,504 @@ def test_three_arm_structural_distinguishable() -> None:
     assert result["compare"]["nexus_local_has_vap"] is True
     assert result["arms"]["nexus_local"]["local_physical_callable"] == "LocalModelExecutor.run"
     assert result["arms"]["nexus_local"]["assist_credited"] is True
+
+
+# Milestone B Tests — Mainchain Controlled Replan Seam & Route Identity
+
+def test_mainchain_replan_delegates_to_unified_runtime_once():
+    seen = {}
+    def online(ctx):
+        seen["invoked"] = True
+        return normalize_online_invoker_payload(
+            provider="fixture",
+            task_id=ctx["task_id"],
+            invoked=True,
+            output_delivered=True,
+            gate_passed=True,
+            provider_call_count=1,
+            response="attempt1",
+            raw_response="attempt1",
+            evidence_refs=["o:1"],
+        )
+
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-replan-1"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+
+    req = UnifiedRuntimeRequest(
+        task_id="mc-replan-1",
+        workspace_revision="rev-mc-1",
+        task_statement="inspect codeintel",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=online,
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail1", "evidence_refs": ["v:1"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:1"]},
+    )
+    assert r1["terminal_status"] == "INCOMPLETE"
+    assert r1["execution_replan_request"]["replan_required"] is True
+
+    r2 = run_mainchain_replan(
+        r1,
+        req,
+        online_invoker=online,
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass2", "evidence_refs": ["v:2"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:2"]},
+    )
+    assert r2["terminal_status"] == "SUCCEEDED"
+    assert r2["execution_depth"] == "STANDARD"
+    assert r2["execution_attempt"]["attempt_number"] == 2
+
+
+def test_mainchain_replan_preserves_planner_authority():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-replan-authority"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-replan-authority",
+        workspace_revision="rev-mc-2",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    r2 = run_mainchain_replan(
+        r1,
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r2", raw_response="r2", evidence_refs=["o:2"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    assert r2["context_trace"]["selection_authority"] == "CapabilityPlanner"
+    assert r2["planner_decision_id"] != r1["planner_decision_id"]
+
+
+def test_mainchain_replan_stamps_attempt_two_route():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-replan-stamps"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-replan-stamps",
+        workspace_revision="rev-mc-3",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    r2 = run_mainchain_replan(
+        r1,
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r2", raw_response="r2", evidence_refs=["o:2"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    route = r2["context_trace"]["route"]
+    assert route["mainchain_entry"] is True
+    assert route["with_nexus_armor"] is True
+
+
+def test_mainchain_replan_rejects_non_mainchain_prior_receipt():
+    fake_r1 = {
+        "schema": "nexus.unified_receipt.v1",
+        "task_id": "mc-non-mainchain",
+        "workspace_revision": "rev-mc-4",
+        "planner_decision_id": "p1",
+        "execution_depth": "LIGHT",
+        "terminal_status": "INCOMPLETE",
+        "receipt_complete": False,
+        "public_claim_allowed": False,
+        "receipt_base": {
+            "schema": "nexus.receipt_base.v3",
+            "task_id": "mc-non-mainchain",
+            "workspace_revision": "rev-mc-4",
+            "planner_decision_id": "p1",
+            "receipt_hash": "sha256:1111",
+            "run_anchor_hash": "sha256:2222",
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "source_world": "A",
+            "source_component": "unified_runtime",
+        },
+        "execution_replan_request": {
+            "schema": "nexus.execution_replan_request.v1",
+            "task_id": "mc-non-mainchain",
+            "source_planner_decision_id": "p1",
+            "current_execution_depth": "LIGHT",
+            "requested_execution_depth": "STANDARD",
+            "replan_required": True,
+            "verifier_outcome_trusted": True,
+            "manual_review_required": False,
+            "public_claim_allowed": False,
+            "replan_request_id": "sha256:req1",
+        },
+        "context_trace": {
+            "route": {"recommended_flow": "direct"},  # Missing mainchain_entry
+        },
+        "verifier": {"task_id": "mc-non-mainchain", "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-non-mainchain",
+        workspace_revision="rev-mc-4",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={"recommended_flow": "direct"},
+        online_enabled=True,
+        local_enabled=False,
+    )
+    with pytest.raises(ValueError, match="previous_receipt_not_mainchain"):
+        run_mainchain_replan(
+            fake_r1,
+            req,
+            online_invoker=lambda c: {},
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+
+
+def test_mainchain_replan_rejects_tampered_prior_receipt():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-tampered"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-tampered",
+        workspace_revision="rev-mc-5",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    tampered = dict(r1)
+    tampered["execution_depth"] = "FULL"  # Tamper depth
+    with pytest.raises(ValueError):
+        run_mainchain_replan(
+            tampered,
+            req,
+            online_invoker=lambda c: {},
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+
+
+def test_mainchain_replan_rejects_caller_route_spoof():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-spoof"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req1 = UnifiedRuntimeRequest(
+        task_id="mc-spoof",
+        workspace_revision="rev-mc-6",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req1,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    req_spoof = UnifiedRuntimeRequest(
+        task_id="mc-spoof",
+        workspace_revision="rev-mc-6",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+            "with_nexus_armor": False,
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r2 = run_mainchain_replan(
+        r1,
+        req_spoof,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r2", raw_response="r2", evidence_refs=["o:2"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+        with_nexus_armor=True,
+    )
+    assert r2["context_trace"]["route"]["with_nexus_armor"] is True
+
+
+def test_mainchain_replan_uses_new_planner_decision():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-new-planner"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-new-planner",
+        workspace_revision="rev-mc-7",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    r2 = run_mainchain_replan(
+        r1,
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r2", raw_response="r2", evidence_refs=["o:2"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    assert r2["planner_decision_id"] != r1["planner_decision_id"]
+
+
+def test_mainchain_replan_preserves_parent_receipt_identity():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-parent-id"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-parent-id",
+        workspace_revision="rev-mc-8",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    r2 = run_mainchain_replan(
+        r1,
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r2", raw_response="r2", evidence_refs=["o:2"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    assert r2["execution_attempt"]["parent_receipt_hash"] == r1["receipt_base"]["receipt_hash"]
+
+
+def test_mainchain_replan_stops_after_attempt_two():
+    all_caps = ["baseline", "harness_preflight_sensor", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"]
+    cap_invokers = {
+        name: lambda ctx, n=name: {
+            "task_id": ctx.get("task_id", "mc-max-two"),
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": "ok",
+            "evidence_refs": [f"c:{n}:ok"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in all_caps
+    }
+    req = UnifiedRuntimeRequest(
+        task_id="mc-max-two",
+        workspace_revision="rev-mc-9",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r1", raw_response="r1", evidence_refs=["o:1"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail1", "evidence_refs": ["v:fail1"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    r2 = run_mainchain_replan(
+        r1,
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="r2", raw_response="r2", evidence_refs=["o:2"]),
+        capability_invokers=cap_invokers,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail2", "evidence_refs": ["v:fail2"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    assert r2["terminal_status"] == "INCOMPLETE"
+    assert r2["execution_attempt"]["attempt_number"] == 2
+    with pytest.raises(ValueError, match="replan_attempt_budget_exhausted"):
+        run_mainchain_replan(
+            r2,
+            req,
+            online_invoker=lambda c: {},
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+
+
+def test_mainchain_summary_exposes_only_safe_process_identity():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-summary-safe",
+        workspace_revision="rev-mc-10",
+        task_statement="my secret prompt 123",
+        task_type="public_bugfix",
+        route={"recommended_flow": "direct"},
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
+    )
+    summary = summarize_arm_receipt(r1, prompt=req.task_statement)
+    summary_str = json.dumps(summary)
+    assert "my secret prompt 123" not in summary_str
+    assert "attempt_number" in summary
+    assert "is_replan" in summary

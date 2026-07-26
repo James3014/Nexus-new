@@ -173,6 +173,97 @@ def run_mainchain(
     )
 
 
+def run_mainchain_replan(
+    previous_receipt: Mapping[str, Any],
+    request: UnifiedRuntimeRequest,
+    *,
+    online_invoker: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+    local_service: Any = None,
+    planner: Any = None,
+    capability_invokers: Mapping[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] | None = None,
+    verifier: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+    learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+    receipt_path: Any = None,
+    with_nexus_armor: bool = True,
+) -> dict[str, Any]:
+    """Run UnifiedRuntime.run_replan with mainchain route stamps + with_nexus Online armor."""
+    if not isinstance(previous_receipt, Mapping):
+        raise ValueError("previous_receipt_invalid")
+
+    context_trace = previous_receipt.get("context_trace")
+    if not isinstance(context_trace, Mapping):
+        raise ValueError("previous_receipt_not_mainchain")
+
+    prior_route = context_trace.get("route")
+    if not isinstance(prior_route, Mapping) or not bool(prior_route.get(ROUTE_FLAG_MAINCHAIN)):
+        raise ValueError("previous_receipt_not_mainchain")
+
+    if not bool(prior_route.get("route_freeze", True)):
+        raise ValueError("previous_receipt_route_freeze_missing")
+
+    route = stamp_mainchain_route(
+        request.route if isinstance(request.route, Mapping) else {},
+        with_nexus_armor=with_nexus_armor,
+        product_entry=str(
+            (request.route or {}).get("product_entry")
+            if isinstance(request.route, Mapping)
+            else "mainchain"
+        )
+        or "mainchain",
+    )
+    if "mainchain_route_version" in prior_route:
+        route["mainchain_route_version"] = prior_route["mainchain_route_version"]
+
+    fields = {
+        "task_id": request.task_id,
+        "workspace_revision": request.workspace_revision,
+        "task_statement": request.task_statement,
+        "task_type": request.task_type,
+        "route": route,
+        "online_enabled": request.online_enabled,
+        "local_enabled": request.local_enabled,
+        "online_prompt": request.online_prompt,
+        "online_payload": request.online_payload,
+        "online_phase": request.online_phase,
+        "online_model_name": request.online_model_name,
+        "online_output_schema": request.online_output_schema,
+        "pillars": request.pillars,
+        "codeintel": request.codeintel,
+        "phase_trace": request.phase_trace,
+        "budget": request.budget,
+        "skills": request.skills,
+        "local_request": request.local_request,
+        "evidence_refs": request.evidence_refs,
+        "schema": request.schema,
+    }
+    stamped = UnifiedRuntimeRequest(**fields)
+
+    invoker = online_invoker
+    if online_invoker is not None:
+        invoker = wrap_mainchain_online_invoker(
+            online_invoker,
+            route=route,
+            force=with_nexus_armor,
+            provider="mainchain",
+        )
+
+    caps = merge_mainchain_capability_invokers(
+        capability_invokers,
+        codeintel=dict(stamped.codeintel) if isinstance(stamped.codeintel, Mapping) else {},
+        enable=with_nexus_armor,
+    )
+
+    return UnifiedRuntime(planner=planner, local_service=local_service).run_replan(
+        previous_receipt,
+        stamped,
+        online_invoker=invoker,
+        capability_invokers=caps,
+        verifier=verifier,
+        learning=learning,
+        receipt_path=receipt_path,
+    )
+
+
 def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> dict[str, Any]:
     """Machine-checkable Bare vs Nexus vs Nexus+L summary."""
     oc = {}
@@ -185,6 +276,12 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
     local = receipt.get("local") if isinstance(receipt.get("local"), Mapping) else {}
     local_resp = local.get("response") if isinstance(local.get("response"), Mapping) else {}
     caps = receipt.get("capability_results") if isinstance(receipt.get("capability_results"), Mapping) else {}
+    attempt = receipt.get("execution_attempt") if isinstance(receipt.get("execution_attempt"), Mapping) else {}
+    replan_req = receipt.get("execution_replan_request") if isinstance(receipt.get("execution_replan_request"), Mapping) else {}
+    online_stg = receipt.get("online") if isinstance(receipt.get("online"), Mapping) else {}
+    online_resp = online_stg.get("response") if isinstance(online_stg.get("response"), Mapping) else {}
+    proc_ev = online_resp.get("process_evidence") if isinstance(online_resp.get("process_evidence"), Mapping) else {}
+
     return {
         "task_id": str(receipt.get("task_id") or ""),
         "with_nexus_armor": bool(oc.get("with_nexus_armor") or sections.get("route")),
@@ -210,6 +307,15 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
         )
         if isinstance(receipt.get("treatment_core_equal"), Mapping)
         else False,
+        "attempt_number": int(attempt.get("attempt_number", 1)),
+        "is_replan": bool(attempt.get("is_replan", False)),
+        "execution_depth": str(receipt.get("execution_depth") or ""),
+        "replan_required": bool(replan_req.get("replan_required", False)),
+        "requested_execution_depth": str(replan_req.get("requested_execution_depth") or ""),
+        "process_invocation_id": str(proc_ev.get("process_invocation_id") or ""),
+        "provider": str(proc_ev.get("provider") or ""),
+        "transport": str(proc_ev.get("transport") or ""),
+        "terminal_status": str(receipt.get("terminal_status") or ""),
     }
 
 
