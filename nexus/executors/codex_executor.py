@@ -29,9 +29,15 @@ class CodexExecutionReceipt:
 
 
 class CodexCliExecutor:
-    def __init__(self, executable: str = "codex", timeout_seconds: float = 900.0):
+    def __init__(
+        self,
+        executable: str = "codex",
+        timeout_seconds: float = 900.0,
+        model: str = "gpt-5.5",
+    ):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
+        self.model = model
 
     def _request(
         self,
@@ -49,6 +55,8 @@ class CodexCliExecutor:
         argv = (
             "exec",
             "--ephemeral",
+            "-m",
+            self.model,
             "--json",
             "--sandbox",
             "workspace-write",

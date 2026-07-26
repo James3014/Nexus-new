@@ -92,6 +92,7 @@ def test_codex_executor_builds_fresh_target_bound_command(tmp_path, monkeypatch)
     request = captured["request"]
     assert receipt.provider == "codex"
     assert request.argv[:2] == ("exec", "--ephemeral")
+    assert request.argv[request.argv.index("-m") + 1] == "gpt-5.5"
     assert "resume" not in request.argv
     assert "--json" in request.argv
     assert "--sandbox" in request.argv
