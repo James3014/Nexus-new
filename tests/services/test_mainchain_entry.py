@@ -961,3 +961,103 @@ def test_mainchain_summary_marks_incomplete_identity_false():
     }
     summary = summarize_arm_receipt(incomplete_receipt)
     assert summary["mainchain_identity_complete"] is False
+
+
+# Milestone A — Summary Truth Separation Tests
+
+def test_mainchain_summary_rejects_prompt_armor_substitution():
+    receipt = {
+        "task_id": "mc-sum-sub-1",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "product_entry": "mainchain",
+                "with_nexus_armor": False,
+            }
+        },
+    }
+    prompt = "Some prompt\n[WITH_NEXUS_ROUTE]\narmor"
+    summary = summarize_arm_receipt(receipt, prompt=prompt)
+    assert summary["with_nexus_armor"] is False
+    assert summary["route_with_nexus_armor"] is False
+    assert summary["prompt_armor_present"] is True
+    assert summary["mainchain_identity_complete"] is False
+
+
+def test_mainchain_summary_rejects_online_context_armor_substitution():
+    receipt = {
+        "task_id": "mc-sum-sub-2",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "product_entry": "mainchain",
+                "with_nexus_armor": False,
+            },
+            "online_received_context": {"with_nexus_armor": True},
+        },
+    }
+    summary = summarize_arm_receipt(receipt)
+    assert summary["with_nexus_armor"] is False
+    assert summary["route_with_nexus_armor"] is False
+    assert summary["online_context_with_nexus_armor"] is True
+    assert summary["mainchain_identity_complete"] is False
+
+
+def test_mainchain_summary_route_armor_is_authoritative():
+    receipt = {
+        "task_id": "mc-sum-sub-3",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "product_entry": "mainchain",
+                "with_nexus_armor": True,
+            },
+            "online_received_context": {"with_nexus_armor": False},
+        },
+    }
+    summary = summarize_arm_receipt(receipt)
+    assert summary["with_nexus_armor"] is True
+    assert summary["route_with_nexus_armor"] is True
+    assert summary["mainchain_identity_complete"] is True
+
+
+def test_mainchain_summary_reports_prompt_armor_separately():
+    receipt = {
+        "task_id": "mc-sum-sub-4",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "product_entry": "mainchain",
+                "with_nexus_armor": True,
+            }
+        },
+    }
+    summary = summarize_arm_receipt(receipt, prompt="hello world\n[WITH_NEXUS_ROUTE]\n...")
+    assert summary["prompt_armor_present"] is True
+    assert summary["route_with_nexus_armor"] is True
+
+
+def test_mainchain_summary_reports_online_context_armor_separately():
+    receipt = {
+        "task_id": "mc-sum-sub-5",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "product_entry": "mainchain",
+                "with_nexus_armor": True,
+            },
+            "online_received_context": {"with_nexus_armor": True},
+        },
+    }
+    summary = summarize_arm_receipt(receipt)
+    assert summary["online_context_with_nexus_armor"] is True

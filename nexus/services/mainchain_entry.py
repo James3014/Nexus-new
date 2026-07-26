@@ -356,13 +356,16 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
     freeze = route.get("route_freeze") is True
     ver = str(route.get("mainchain_route_version") or "")
     prod = str(route.get("product_entry") or "").strip()
-    armor = route.get("with_nexus_armor") is True or bool(oc.get("with_nexus_armor") or sections.get("route"))
+    route_armor = route.get("with_nexus_armor") is True
+    online_context_armor = bool(oc.get("with_nexus_armor"))
+    prompt_str = str(prompt or "")
+    prompt_armor = bool(sections.get("route")) or "[WITH_NEXUS_ROUTE]" in prompt_str
 
     identity_complete = (
         mc_entry
         and freeze
         and ver == MAINCHAIN_ROUTE_VERSION
-        and armor
+        and route_armor
         and bool(prod)
         and prod not in ("None", "null")
     )
@@ -373,9 +376,12 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
         "route_freeze": freeze,
         "mainchain_route_version": ver,
         "product_entry": prod,
-        "with_nexus_armor": armor,
+        "with_nexus_armor": route_armor,
+        "route_with_nexus_armor": route_armor,
+        "online_context_with_nexus_armor": online_context_armor,
+        "prompt_armor_present": prompt_armor,
         "mainchain_identity_complete": identity_complete,
-        "prompt_has_route": bool(sections.get("route")),
+        "prompt_has_route": prompt_armor,
         "prompt_has_codeintel": bool(sections.get("codeintel")),
         "vap_attached": bool(oc.get("vap_attached")),
         "vap_packet_hash": str(oc.get("vap_packet_hash") or ""),
