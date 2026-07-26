@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import shlex
+from pathlib import Path
+import sys
 import time
 from typing import Dict, Any, Optional, Tuple
 
@@ -38,6 +40,10 @@ class MCPDelegator:
         default_server = os.getenv("MCP_DEFAULT_SERVER")
         if default_server:
             return shlex.split(default_server)
+
+        if tool.startswith("nexus_self_hosted_"):
+            repo_root = Path(__file__).resolve().parents[2]
+            return [sys.executable, str(repo_root / "scripts/ops/nexus_self_hosted_mcp.py")]
         
         # Safe default for internal mempalace tools
         if tool.startswith("mempalace_"):

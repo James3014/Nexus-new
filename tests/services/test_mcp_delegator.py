@@ -87,6 +87,22 @@ async def test_serena_no_server_degrades_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_self_hosted_tools_use_bundled_nexus_server_by_default(monkeypatch):
+    monkeypatch.delenv("MCP_DEFAULT_SERVER", raising=False)
+    delegator = MCPDelegator()
+
+    result = await delegator.delegate_mcp(
+        tool="nexus_self_hosted_get_task",
+        tenant_id="tenant_123",
+        args={"task_id": "missing-task"},
+    )
+
+    assert result["status"] == "SUCCESS"
+    assert result["tool"] == "nexus_self_hosted_get_task"
+    assert result["data"] is None
+
+
+@pytest.mark.asyncio
 async def test_serena_healthcheck_failed_degrades_success(mock_server_env, monkeypatch):
     monkeypatch.setenv("NEXUS_SERENA_FAIL_OPEN", "1")
     delegator = MCPDelegator()
