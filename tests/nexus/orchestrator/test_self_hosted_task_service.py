@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import time
 
 import pytest
 
@@ -54,15 +55,73 @@ def test_submit_persists_idempotent_task_state(tmp_path):
     request = _request(tmp_path)
 
     first = service.submit_task(request)
+    assert first["status"] in {"SUBMITTED", "CANDIDATE_COMMITTED"}
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        current = service.get_task(request["task_id"])
+        if current and current["status"] == "CANDIDATE_COMMITTED":
+            break
+        time.sleep(0.01)
     second = service.submit_task(request)
 
     assert first["task_id"] == "mcp-task-001"
-    assert first["status"] == "CANDIDATE_COMMITTED"
-    assert first["candidate_commit_sha"] == "c" * 40
-    assert second == first
+    assert first["status"] == "SUBMITTED"
+    assert second["candidate_commit_sha"] == "c" * 40
     assert calls == ["mcp-task-001"]
     persisted = json.loads((tmp_path / "state" / "mcp-task-001.json").read_text())
-    assert persisted == first
+    assert persisted == second
+
+
+def test_submit_returns_before_background_runner_finishes(tmp_path):
+    started = __import__("threading").Event()
+    release = __import__("threading").Event()
+
+    def fake_runner(contract, request, update):
+        started.set()
+        release.wait(2)
+        update("WORKER_COMPLETED", {"execution": {"provider": "codex"}})
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    request = _request(tmp_path, task_id="async-task-001")
+    submitted = service.submit_task(request)
+
+    assert submitted["status"] == "SUBMITTED"
+    assert started.wait(1)
+    running = service.get_task(request["task_id"])
+    assert running["status"] in {"SUBMITTED", "WORKER_COMPLETED", "CANDIDATE_COMMITTED"}
+    assert running["attempt_id"]
+    assert running["worker_pid"]
+    assert running["heartbeat_at"]
+    release.set()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and service.get_task(request["task_id"])["status"] != "CANDIDATE_COMMITTED":
+        time.sleep(0.01)
+    assert service.get_task(request["task_id"])["status"] == "CANDIDATE_COMMITTED"
+
+
+def test_reconcile_fails_closed_when_worker_lost_before_receipt(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _request(tmp_path, task_id="lost-task-001")
+    service._write_state(
+        request["task_id"],
+        {
+            "task_id": request["task_id"],
+            "status": "WORKER_RUNNING",
+            "attempt_id": "a" * 32,
+            "worker_pid": 999999,
+            "worker_pgid": 999999,
+            "worker_child_pgid": None,
+            "heartbeat_at": "2026-01-01T00:00:00+00:00",
+            "request": request,
+            "promotion_status": "NOT_CREATED",
+        },
+    )
+
+    reconciled = service.reconcile_task(request["task_id"])
+
+    assert reconciled["status"] == "FINAL_BLOCK"
+    assert "lost before recoverable execution evidence" in reconciled["error"]
 
 
 def test_submit_rejects_raw_prompt_and_non_codex_worker(tmp_path):

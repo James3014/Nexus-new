@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Optional
 
 from nexus.executors.cli_worker import CliWorkerResult, CliWorkerRequest, run_cli_worker
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
@@ -34,10 +35,12 @@ class CodexCliExecutor:
         executable: str = "codex",
         timeout_seconds: float = 900.0,
         model: str = "gpt-5.5",
+        on_process_group: Optional[Callable[[Optional[int]], None]] = None,
     ):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
         self.model = model
+        self.on_process_group = on_process_group
 
     def _request(
         self,
@@ -103,5 +106,8 @@ class CodexCliExecutor:
         prompt: str,
     ) -> CodexExecutionReceipt:
         request = self._request(contract, lease, prompt)
-        result = run_cli_worker(request)
+        if self.on_process_group is None:
+            result = run_cli_worker(request)
+        else:
+            result = run_cli_worker(request, on_process_group=self.on_process_group)
         return self._receipt(contract, lease, result)

@@ -33,6 +33,8 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_get_task",
         "nexus_self_hosted_get_receipt",
         "nexus_self_hosted_get_promotion_packet",
+        "nexus_self_hosted_reconcile_tasks",
+        "nexus_self_hosted_resume_task",
         "nexus_self_hosted_approve_promotion",
     } <= names
 

@@ -11,7 +11,7 @@ import signal
 import shutil
 import subprocess
 import time
-from typing import Mapping, Optional, Tuple
+from typing import Callable, Mapping, Optional, Tuple
 
 
 class CliWorkerStatus(str, Enum):
@@ -108,7 +108,11 @@ def _kill_process_group(process: subprocess.Popen[bytes]) -> bool:
         return False
 
 
-def run_cli_worker(request: CliWorkerRequest) -> CliWorkerResult:
+def run_cli_worker(
+    request: CliWorkerRequest,
+    *,
+    on_process_group: Optional[Callable[[Optional[int]], None]] = None,
+) -> CliWorkerResult:
     """Run one isolated CLI invocation and return execution evidence."""
 
     started = time.monotonic()
@@ -128,6 +132,8 @@ def run_cli_worker(request: CliWorkerRequest) -> CliWorkerResult:
             shell=False,
             start_new_session=True,
         )
+        if on_process_group is not None:
+            on_process_group(process.pid)
         try:
             stdout, stderr = process.communicate(timeout=request.timeout_seconds)
             timed_out = False
@@ -152,6 +158,9 @@ def run_cli_worker(request: CliWorkerRequest) -> CliWorkerResult:
         timed_out = False
         group_killed = False
         status = CliWorkerStatus.START_FAILED
+    finally:
+        if on_process_group is not None:
+            on_process_group(None)
     wall_time_ms = max(0, int((time.monotonic() - started) * 1000))
     return CliWorkerResult(
         status=status,

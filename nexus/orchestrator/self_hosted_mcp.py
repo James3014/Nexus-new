@@ -68,6 +68,16 @@ class NexusSelfHostedMCPServer:
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
             },
             {
+                "name": "nexus_self_hosted_reconcile_tasks",
+                "description": "Reconcile non-terminal task owners after an MCP restart.",
+                "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_self_hosted_resume_task",
+                "description": "Resume a task only from durable, non-provider execution evidence.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
                 "name": "nexus_self_hosted_approve_promotion",
                 "description": "Approve an exact candidate binding without merging or pushing.",
                 "inputSchema": {
@@ -126,6 +136,12 @@ class NexusSelfHostedMCPServer:
             return self.service.get_receipt(task_id)
         if name == "nexus_self_hosted_get_promotion_packet":
             return self.service.get_promotion_packet(task_id)
+        if name == "nexus_self_hosted_reconcile_tasks":
+            if task_id:
+                return self.service.reconcile_task(task_id)
+            return {"tasks": self.service.reconcile_tasks()}
+        if name == "nexus_self_hosted_resume_task":
+            return self.service.resume_task(task_id)
         if name == "nexus_self_hosted_approve_promotion":
             return self.service.approve_promotion(
                 task_id,
