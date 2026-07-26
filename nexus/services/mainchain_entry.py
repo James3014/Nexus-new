@@ -24,6 +24,26 @@ from nexus.services.unified_runtime import (
 
 ROUTE_FLAG_WITH_NEXUS = "with_nexus_armor"
 ROUTE_FLAG_MAINCHAIN = "mainchain_entry"
+MAINCHAIN_ROUTE_VERSION = "mainchain.v1"
+MAINCHAIN_DEFAULT_PRODUCT_ENTRY = "mainchain"
+
+
+def mainchain_route_identity_projection(
+    route: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project pure canonical Mainchain route identity (no permissive defaults)."""
+    r = dict(route) if isinstance(route, Mapping) else {}
+    raw_prod = r.get("product_entry")
+    prod = str(raw_prod or "mainchain").strip()
+    if prod in ("None", "null", ""):
+        prod = "mainchain"
+    return {
+        "mainchain_entry": bool(r.get("mainchain_entry", False)),
+        "route_freeze": bool(r.get("route_freeze", False)),
+        "mainchain_route_version": str(r.get("mainchain_route_version") or ""),
+        "product_entry": prod,
+        "with_nexus_armor": bool(r.get("with_nexus_armor", False)),
+    }
 
 
 def with_nexus_armor_enabled(route: Mapping[str, Any] | None) -> bool:
@@ -47,8 +67,16 @@ def stamp_mainchain_route(
     """Return a route dict with FREEZE-safe mainchain flags (no new topology)."""
     out = dict(route or {})
     out[ROUTE_FLAG_MAINCHAIN] = True
+    out["route_freeze"] = True
+    out["mainchain_route_version"] = MAINCHAIN_ROUTE_VERSION
     out[ROUTE_FLAG_WITH_NEXUS] = bool(with_nexus_armor)
-    out.setdefault("product_entry", product_entry)
+
+    raw_prod = out.get("product_entry") or product_entry
+    prod = str(raw_prod or "mainchain").strip()
+    if prod in ("None", "null", ""):
+        prod = "mainchain"
+    out["product_entry"] = prod
+
     # Strip non-product reconnection labels if a caller stuffed them into topology.
     if str(out.get("execution_topology") or "") in {
         "nexus_full_stack",
@@ -187,32 +215,73 @@ def run_mainchain_replan(
     with_nexus_armor: bool = True,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime.run_replan with mainchain route stamps + with_nexus Online armor."""
+    if not with_nexus_armor:
+        raise ValueError("mainchain_replan_requires_nexus_armor")
+
     if not isinstance(previous_receipt, Mapping):
         raise ValueError("previous_receipt_invalid")
+
+    from nexus.evidence.receipt_base import validate_receipt_base
+
+    res = validate_receipt_base(previous_receipt, mode="strict")
+    if not res.get("ok"):
+        blockers = res.get("blockers") or ["validation_failed"]
+        raise ValueError(f"previous_receipt_integrity_invalid:{','.join(blockers)}")
 
     context_trace = previous_receipt.get("context_trace")
     if not isinstance(context_trace, Mapping):
         raise ValueError("previous_receipt_not_mainchain")
 
     prior_route = context_trace.get("route")
-    if not isinstance(prior_route, Mapping) or not bool(prior_route.get(ROUTE_FLAG_MAINCHAIN)):
+    if not isinstance(prior_route, Mapping):
         raise ValueError("previous_receipt_not_mainchain")
 
-    if not bool(prior_route.get("route_freeze", True)):
+    selection_authority = context_trace.get("selection_authority") or previous_receipt.get("selection_authority")
+    if selection_authority != "CapabilityPlanner":
+        raise ValueError("previous_receipt_planner_authority_invalid")
+
+    if not bool(prior_route.get("mainchain_entry")):
+        raise ValueError("previous_receipt_not_mainchain")
+
+    if prior_route.get("route_freeze") is not True:
         raise ValueError("previous_receipt_route_freeze_missing")
+
+    prior_ver = prior_route.get("mainchain_route_version")
+    if not prior_ver:
+        raise ValueError("previous_receipt_mainchain_version_missing")
+    if prior_ver != MAINCHAIN_ROUTE_VERSION:
+        raise ValueError(f"previous_receipt_mainchain_version_unsupported:{prior_ver}")
+
+    if prior_route.get("with_nexus_armor") is not True:
+        raise ValueError("previous_receipt_nexus_armor_missing")
+
+    prior_prod = str(prior_route.get("product_entry") or "").strip()
+    if not prior_prod or prior_prod in ("None", "null"):
+        raise ValueError("previous_receipt_product_entry_invalid")
+
+    rb = previous_receipt.get("receipt_base") if isinstance(previous_receipt.get("receipt_base"), Mapping) else {}
+    if not bool(rb.get("mainchain_entry")):
+        raise ValueError("previous_receipt_not_mainchain")
+    if rb.get("route_freeze") is not True:
+        raise ValueError("previous_receipt_route_freeze_missing")
+    if rb.get("mainchain_route_version") != MAINCHAIN_ROUTE_VERSION:
+        raise ValueError(f"previous_receipt_mainchain_version_unsupported:{rb.get('mainchain_route_version')}")
+    if rb.get("with_nexus_armor") is not True:
+        raise ValueError("previous_receipt_nexus_armor_missing")
+
+    if (
+        prior_route.get("mainchain_entry") != rb.get("mainchain_entry")
+        or prior_route.get("route_freeze") != rb.get("route_freeze")
+        or prior_route.get("mainchain_route_version") != rb.get("mainchain_route_version")
+        or prior_route.get("with_nexus_armor") != rb.get("with_nexus_armor")
+    ):
+        raise ValueError("previous_receipt_mainchain_identity_mismatch")
 
     route = stamp_mainchain_route(
         request.route if isinstance(request.route, Mapping) else {},
-        with_nexus_armor=with_nexus_armor,
-        product_entry=str(
-            (request.route or {}).get("product_entry")
-            if isinstance(request.route, Mapping)
-            else "mainchain"
-        )
-        or "mainchain",
+        with_nexus_armor=True,
+        product_entry=prior_prod,
     )
-    if "mainchain_route_version" in prior_route:
-        route["mainchain_route_version"] = prior_route["mainchain_route_version"]
 
     fields = {
         "task_id": request.task_id,
@@ -243,14 +312,14 @@ def run_mainchain_replan(
         invoker = wrap_mainchain_online_invoker(
             online_invoker,
             route=route,
-            force=with_nexus_armor,
+            force=True,
             provider="mainchain",
         )
 
     caps = merge_mainchain_capability_invokers(
         capability_invokers,
         codeintel=dict(stamped.codeintel) if isinstance(stamped.codeintel, Mapping) else {},
-        enable=with_nexus_armor,
+        enable=True,
     )
 
     return UnifiedRuntime(planner=planner, local_service=local_service).run_replan(
@@ -268,6 +337,7 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
     """Machine-checkable Bare vs Nexus vs Nexus+L summary."""
     oc = {}
     ctx = receipt.get("context_trace") if isinstance(receipt.get("context_trace"), Mapping) else {}
+    route = ctx.get("route") if isinstance(ctx.get("route"), Mapping) else {}
     if isinstance(ctx.get("online_received_context"), Mapping):
         oc = dict(ctx["online_received_context"])
     sections = prompt_has_with_nexus_sections(prompt)
@@ -282,9 +352,29 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
     online_resp = online_stg.get("response") if isinstance(online_stg.get("response"), Mapping) else {}
     proc_ev = online_resp.get("process_evidence") if isinstance(online_resp.get("process_evidence"), Mapping) else {}
 
+    mc_entry = route.get("mainchain_entry") is True
+    freeze = route.get("route_freeze") is True
+    ver = str(route.get("mainchain_route_version") or "")
+    prod = str(route.get("product_entry") or "").strip()
+    armor = route.get("with_nexus_armor") is True or bool(oc.get("with_nexus_armor") or sections.get("route"))
+
+    identity_complete = (
+        mc_entry
+        and freeze
+        and ver == MAINCHAIN_ROUTE_VERSION
+        and armor
+        and bool(prod)
+        and prod not in ("None", "null")
+    )
+
     return {
         "task_id": str(receipt.get("task_id") or ""),
-        "with_nexus_armor": bool(oc.get("with_nexus_armor") or sections.get("route")),
+        "mainchain_entry": mc_entry,
+        "route_freeze": freeze,
+        "mainchain_route_version": ver,
+        "product_entry": prod,
+        "with_nexus_armor": armor,
+        "mainchain_identity_complete": identity_complete,
         "prompt_has_route": bool(sections.get("route")),
         "prompt_has_codeintel": bool(sections.get("codeintel")),
         "vap_attached": bool(oc.get("vap_attached")),
@@ -317,6 +407,7 @@ def summarize_arm_receipt(receipt: Mapping[str, Any], *, prompt: str = "") -> di
         "transport": str(proc_ev.get("transport") or ""),
         "terminal_status": str(receipt.get("terminal_status") or ""),
     }
+
 
 
 def run_three_arm_structural(

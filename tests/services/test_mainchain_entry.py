@@ -14,8 +14,9 @@ from nexus.services.mainchain_entry import (
     summarize_arm_receipt,
     with_nexus_armor_enabled,
 )
+from nexus.evidence.receipt_base import validate_receipt_base
 from nexus.services.online_nexus_context import NEXUS_CODEINTEL_MARKER, NEXUS_ROUTE_MARKER
-from nexus.services.unified_runtime import UnifiedRuntimeRequest, normalize_online_invoker_payload
+from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest, normalize_online_invoker_payload
 
 
 class _PlannerLocal:
@@ -376,7 +377,7 @@ def test_mainchain_replan_rejects_non_mainchain_prior_receipt():
         online_enabled=True,
         local_enabled=False,
     )
-    with pytest.raises(ValueError, match="previous_receipt_not_mainchain"):
+    with pytest.raises(ValueError, match="previous_receipt_not_mainchain|previous_receipt_integrity_invalid"):
         run_mainchain_replan(
             fake_r1,
             req,
@@ -663,3 +664,300 @@ def test_mainchain_summary_exposes_only_safe_process_identity():
     assert "my secret prompt 123" not in summary_str
     assert "attempt_number" in summary
     assert "is_replan" in summary
+
+
+# Milestone A Identity Seal & Prior Receipt Contract Tests
+
+def test_stamp_mainchain_route_sets_canonical_frozen_identity():
+    route = stamp_mainchain_route({})
+    assert route["mainchain_entry"] is True
+    assert route["route_freeze"] is True
+    assert route["mainchain_route_version"] == "mainchain.v1"
+    assert route["product_entry"] == "mainchain"
+    assert route["with_nexus_armor"] is True
+
+
+def test_stamp_mainchain_route_overwrites_false_spoof():
+    spoof = {
+        "mainchain_entry": False,
+        "route_freeze": False,
+        "mainchain_route_version": "evil.v9",
+    }
+    route = stamp_mainchain_route(spoof)
+    assert route["mainchain_entry"] is True
+    assert route["route_freeze"] is True
+    assert route["mainchain_route_version"] == "mainchain.v1"
+
+
+def test_stamp_mainchain_route_normalizes_none_product_entry():
+    for invalid_val in ["None", "null", "", None]:
+        route = stamp_mainchain_route({"product_entry": invalid_val})
+        assert route["product_entry"] == "mainchain"
+
+
+def test_run_mainchain_receipt_contains_route_freeze():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-freeze-1",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    receipt = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:pass"]},
+    )
+    assert receipt["context_trace"]["route"]["route_freeze"] is True
+    assert receipt["context_trace"]["route"]["mainchain_route_version"] == "mainchain.v1"
+    assert receipt["receipt_base"]["route_freeze"] is True
+    assert receipt["receipt_base"]["mainchain_route_version"] == "mainchain.v1"
+
+
+def test_run_mainchain_receipt_base_matches_route_identity():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-base-match-1",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    receipt = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:pass"]},
+    )
+    rb = receipt["receipt_base"]
+    route = receipt["context_trace"]["route"]
+    assert rb["mainchain_entry"] == route["mainchain_entry"]
+    assert rb["route_freeze"] == route["route_freeze"]
+    assert rb["mainchain_route_version"] == route["mainchain_route_version"]
+    assert rb["with_nexus_armor"] == route["with_nexus_armor"]
+
+
+def test_mainchain_replan_rejects_pseudo_mainchain_runtime_receipt():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-pseudo-1",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+            "mainchain_entry": True,
+            "with_nexus_armor": True,
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    invocations = {"count": 0}
+    def online_invoker(c):
+        invocations["count"] += 1
+        return normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="attempt1", raw_response="attempt1", evidence_refs=["o:1"])
+
+    r1 = UnifiedRuntime().run(
+        req,
+        online_invoker=online_invoker,
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:1"]},
+    )
+    assert r1["terminal_status"] == "INCOMPLETE"
+    assert validate_receipt_base(r1, mode="strict")["ok"] is True
+
+    invocations_before = invocations["count"]
+    with pytest.raises(ValueError, match="previous_receipt_route_freeze_missing"):
+        run_mainchain_replan(
+            r1,
+            req,
+            online_invoker=online_invoker,
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+    assert invocations["count"] == invocations_before
+
+
+def test_mainchain_replan_rejects_missing_route_freeze():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-no-freeze",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:1"]},
+    )
+    r1["context_trace"]["route"].pop("route_freeze", None)
+    r1["receipt_base"].pop("route_freeze", None)
+    with pytest.raises(ValueError, match="previous_receipt_route_freeze_missing|previous_receipt_integrity_invalid"):
+        run_mainchain_replan(
+            r1,
+            req,
+            online_invoker=lambda c: {},
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+
+
+def test_mainchain_replan_rejects_missing_mainchain_version():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-no-ver",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:1"]},
+    )
+    r1["context_trace"]["route"].pop("mainchain_route_version", None)
+    r1["receipt_base"].pop("mainchain_route_version", None)
+    with pytest.raises(ValueError, match="previous_receipt_mainchain_version_missing|previous_receipt_integrity_invalid"):
+        run_mainchain_replan(
+            r1,
+            req,
+            online_invoker=lambda c: {},
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+
+
+def test_mainchain_replan_rejects_wrong_mainchain_version():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-bad-ver",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:1"]},
+    )
+    r1["context_trace"]["route"]["mainchain_route_version"] = "mainchain.v99"
+    r1["receipt_base"]["mainchain_route_version"] = "mainchain.v99"
+    with pytest.raises(ValueError, match="previous_receipt_mainchain_version_unsupported|prior_receipt_base_invalid|previous_receipt_integrity_invalid"):
+        run_mainchain_replan(
+            r1,
+            req,
+            online_invoker=lambda c: {},
+            verifier=lambda c: {},
+            learning=lambda c: {},
+        )
+
+
+def test_mainchain_replan_rejects_false_nexus_armor_argument():
+    req = UnifiedRuntimeRequest(
+        task_id="mc-armor-false",
+        workspace_revision="rev-1",
+        task_statement="inspect module",
+        task_type="public_bugfix",
+        route={
+            "execution_depth": "LIGHT",
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        online_enabled=True,
+        local_enabled=False,
+    )
+    r1 = run_mainchain(
+        req,
+        online_invoker=lambda c: normalize_online_invoker_payload(provider="fixture", task_id=c["task_id"], invoked=True, output_delivered=True, gate_passed=True, provider_call_count=1, response="ok", raw_response="ok", evidence_refs=["o:ok"]),
+        verifier=lambda c: {"task_id": c["task_id"], "invoked": True, "gate_passed": False, "status": "FAILED", "evidence": "fail", "evidence_refs": ["v:fail"]},
+        learning=lambda c: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True, "evidence_refs": ["l:1"]},
+    )
+    invocations = {"count": 0}
+    def online_invoker(c):
+        invocations["count"] += 1
+        return {}
+
+    with pytest.raises(ValueError, match="mainchain_replan_requires_nexus_armor"):
+        run_mainchain_replan(
+            r1,
+            req,
+            online_invoker=online_invoker,
+            verifier=lambda c: {},
+            learning=lambda c: {},
+            with_nexus_armor=False,
+        )
+    assert invocations["count"] == 0
+
+
+def test_mainchain_summary_does_not_default_missing_freeze_to_true():
+    receipt = {
+        "task_id": "mc-sum-1",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "with_nexus_armor": True,
+            }
+        },
+    }
+    summary = summarize_arm_receipt(receipt)
+    assert summary["route_freeze"] is False
+    assert summary["mainchain_identity_complete"] is False
+
+
+def test_mainchain_summary_marks_incomplete_identity_false():
+    incomplete_receipt = {
+        "task_id": "mc-sum-2",
+        "context_trace": {
+            "route": {
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "product_entry": "None",
+                "with_nexus_armor": True,
+            }
+        },
+    }
+    summary = summarize_arm_receipt(incomplete_receipt)
+    assert summary["mainchain_identity_complete"] is False
