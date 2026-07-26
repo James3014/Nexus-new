@@ -3,10 +3,15 @@ import json
 import pytest
 from nexus.orchestrator.task_contract import (
     ApprovalStatus,
+    AcceptanceProfile,
+    ArchitectureDecision,
+    ArchitectTaskContract,
+    DevelopmentGoal,
     Evidence,
     EvidenceKind,
     EvidenceRequirement,
     DeliveryProfile,
+    HumanApprovalPolicy,
     MutationMode,
     SelfHostedTaskContract,
     Task,
@@ -234,4 +239,112 @@ def test_self_hosted_contract_hash_is_deterministic(tmp_path):
     assert len(first.contract_hash) == 64
     assert json.loads(first.model_dump_json())["schema"] == first.schema
     assert ApprovalStatus.PENDING.value == "PENDING"
+
+
+def _architect_contract(tmp_path, **overrides):
+    values = {
+        "task_id": "architect-contract",
+        "objective": "Build the governed worker vertical",
+        "goal": DevelopmentGoal(
+            what="Build the governed worker vertical",
+            why="Remove unsafe manual agent handoff",
+        ),
+        "architecture_decisions": [
+            ArchitectureDecision(
+                decision_id="worker-boundary",
+                selected_option="Target-only mutation",
+                rationale="Keep the Controller immutable",
+                rejected_alternatives=["Controller working-tree mutation"],
+            )
+        ],
+        "acceptance_profile": AcceptanceProfile(
+            verifier_commands=["python3 -m pytest -q"],
+            protected_contracts=["candidate-receipt-v1"],
+            required_evidence=["candidate_state_hash", "controller_unchanged"],
+        ),
+        "human_approval_policy": HumanApprovalPolicy(
+            decision_approval_required=True,
+            promotion_approval_required=True,
+            approver_roles=["James"],
+        ),
+        "controller_revision": EXACT_CONTROLLER_SHA,
+        "target_base_revision": EXACT_TARGET_SHA,
+        "controller_repo_root": str(tmp_path / "controller"),
+        "target_repo_root": str(tmp_path / "targets" / "architect-contract"),
+        "target_worktree_root": str(tmp_path / "targets"),
+        "allowed_files": ["nexus/"],
+        "forbidden_files": ["secrets/"],
+        "verifier_commands": ["python3 -m pytest -q"],
+        "protected_contracts": ["candidate-receipt-v1"],
+        "preferred_provider": "codex",
+        "fallback_provider": None,
+        "maximum_provider_calls": 1,
+        "maximum_replans": 0,
+        "mutation_mode": MutationMode.WORKING_TREE_ONLY,
+        "human_approval_required": True,
+    }
+    values.update(overrides)
+    return ArchitectTaskContract(**values)
+
+
+def test_architect_goal_requires_non_empty_why(tmp_path):
+    with pytest.raises(ValueError, match="why"):
+        _architect_contract(
+            tmp_path,
+            goal=DevelopmentGoal(
+                what="Build the governed worker vertical",
+                why=" ",
+            ),
+        )
+
+
+def test_architecture_decision_requires_rationale(tmp_path):
+    with pytest.raises(ValueError, match="rationale"):
+        _architect_contract(
+            tmp_path,
+            architecture_decisions=[
+                ArchitectureDecision(
+                    decision_id="worker-boundary",
+                    selected_option="Target-only mutation",
+                    rationale=" ",
+                    rejected_alternatives=["Controller mutation"],
+                )
+            ],
+        )
+
+
+def test_architect_contract_requires_acceptance_profile(tmp_path):
+    with pytest.raises(ValueError, match="acceptance_profile"):
+        _architect_contract(tmp_path, acceptance_profile=None)
+
+
+def test_architect_contract_requires_human_approval_policy(tmp_path):
+    with pytest.raises(ValueError, match="human_approval_policy"):
+        _architect_contract(tmp_path, human_approval_policy=None)
+
+
+def test_architect_contract_binds_objective_to_goal(tmp_path):
+    with pytest.raises(ValueError, match="objective.*goal"):
+        _architect_contract(
+            tmp_path,
+            objective="Different objective",
+        )
+
+
+def test_architect_contract_hash_is_deterministic_and_serializable(tmp_path):
+    first = _architect_contract(tmp_path)
+    second = _architect_contract(tmp_path)
+
+    assert first.schema == "nexus.self_hosted_task_contract.v2"
+    assert first.contract_hash == second.contract_hash
+    payload = json.loads(first.model_dump_json())
+    assert payload["goal"]["why"] == "Remove unsafe manual agent handoff"
+    assert payload["human_approval_policy"]["promotion_approval_required"] is True
+
+
+def test_v1_contract_remains_available_for_sh2_replay(tmp_path):
+    contract = _self_hosted_contract(tmp_path)
+
+    assert contract.schema == "nexus.self_hosted_task_contract.v1"
+    assert json.loads(contract.model_dump_json())["schema"] == contract.schema
 # integrity-seal: 1776512137

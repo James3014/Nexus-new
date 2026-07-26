@@ -141,6 +141,117 @@ class SelfHostedTaskContract(BaseModel):
         ).encode("utf-8")
         return sha256(canonical).hexdigest()
 
+
+def _non_empty_text(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
+    return value.strip()
+
+
+class DevelopmentGoal(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    what: str
+    why: str
+
+    @field_validator("what", "why")
+    @classmethod
+    def _validate_text(cls, value: str, info) -> str:
+        return _non_empty_text(value, info.field_name)
+
+
+class ArchitectureDecision(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision_id: str
+    selected_option: str
+    rationale: str
+    rejected_alternatives: List[str] = Field(default_factory=list)
+
+    @field_validator("decision_id")
+    @classmethod
+    def _validate_decision_id(cls, value: str) -> str:
+        if not _SAFE_TASK_ID_RE.fullmatch(value):
+            raise ValueError("decision_id must be a safe slug")
+        return value
+
+    @field_validator("selected_option", "rationale")
+    @classmethod
+    def _validate_text(cls, value: str, info) -> str:
+        return _non_empty_text(value, info.field_name)
+
+    @field_validator("rejected_alternatives")
+    @classmethod
+    def _validate_alternatives(cls, values: List[str]) -> List[str]:
+        return [_non_empty_text(value, "rejected_alternatives") for value in values]
+
+
+class AcceptanceProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verifier_commands: List[str] = Field(default_factory=list)
+    protected_contracts: List[str] = Field(default_factory=list)
+    required_evidence: List[str] = Field(default_factory=list)
+
+    @field_validator("verifier_commands", "protected_contracts", "required_evidence")
+    @classmethod
+    def _validate_entries(cls, values: List[str], info) -> List[str]:
+        return [_non_empty_text(value, info.field_name) for value in values]
+
+
+class HumanApprovalPolicy(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision_approval_required: bool = True
+    promotion_approval_required: bool = True
+    approver_roles: List[str] = Field(default_factory=list)
+
+    @field_validator("approver_roles")
+    @classmethod
+    def _validate_roles(cls, values: List[str]) -> List[str]:
+        return [_non_empty_text(value, "approver_roles") for value in values]
+
+    @model_validator(mode="after")
+    def _require_approvals(self):
+        if not self.decision_approval_required:
+            raise ValueError("decision approval is required")
+        if not self.promotion_approval_required:
+            raise ValueError("promotion approval is required")
+        if not self.approver_roles:
+            raise ValueError("approver_roles must be non-empty")
+        return self
+
+
+class ArchitectTaskContract(SelfHostedTaskContract):
+    """Versioned WHAT/WHY contract used to govern the self-hosted worker."""
+
+    schema_: Literal["nexus.self_hosted_task_contract.v2"] = Field(
+        default="nexus.self_hosted_task_contract.v2",
+        alias="schema",
+        serialization_alias="schema",
+    )
+    goal: DevelopmentGoal
+    architecture_decisions: List[ArchitectureDecision]
+    acceptance_profile: AcceptanceProfile
+    human_approval_policy: HumanApprovalPolicy
+
+    @model_validator(mode="after")
+    def _validate_architect_boundaries(self):
+        if not self.architecture_decisions:
+            raise ValueError("architecture_decisions must be non-empty")
+        if self.objective != self.goal.what:
+            raise ValueError("objective must match goal.what")
+        if self.acceptance_profile.verifier_commands != self.verifier_commands:
+            raise ValueError("acceptance_profile.verifier_commands must match verifier_commands")
+        if self.acceptance_profile.protected_contracts != self.protected_contracts:
+            raise ValueError("acceptance_profile.protected_contracts must match protected_contracts")
+        if not self.human_approval_required:
+            raise ValueError("human approval is required")
+        return self
+
+
+SelfHostedTaskContractV2 = ArchitectTaskContract
+
 class TaskStatus(str, Enum):
     CREATED = "CREATED"
     ASSIGNED = "ASSIGNED"
