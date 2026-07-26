@@ -13,6 +13,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -545,6 +546,7 @@ class OnlineCliSpec:
     provider: str
     command: tuple[str, ...]
     timeout_sec: float = 120.0
+    working_directory: str = ""
 
     def validate(self) -> None:
         if not str(self.provider or "").strip():
@@ -553,6 +555,12 @@ class OnlineCliSpec:
             raise ValueError("command_required")
         if self.timeout_sec <= 0:
             raise ValueError("timeout_must_be_positive")
+        if self.working_directory:
+            wd = str(self.working_directory)
+            if not os.path.exists(wd):
+                raise ValueError(f"working_directory_not_found:{wd}")
+            if not os.path.isdir(wd):
+                raise ValueError(f"working_directory_not_directory:{wd}")
 
 
 @dataclass(frozen=True)
@@ -846,6 +854,7 @@ def resolve_registered_online_cli_spec(
     command: tuple[str, ...] | list[str] | str | None = None,
     timeout_sec: float = 120.0,
     environ: Mapping[str, str] | None = None,
+    working_directory: str = "",
 ) -> OnlineCliSpec:
     """Resolve a registered provider command without invoking it.
 
@@ -876,7 +885,12 @@ def resolve_registered_online_cli_spec(
             if not binary:
                 raise ValueError("provider_binary_not_found")
             resolved_command = (binary,)
-    spec = OnlineCliSpec(provider=key, command=resolved_command, timeout_sec=timeout_sec)
+    spec = OnlineCliSpec(
+        provider=key,
+        command=resolved_command,
+        timeout_sec=timeout_sec,
+        working_directory=working_directory,
+    )
     spec.validate()
     return spec
 
@@ -893,6 +907,13 @@ def build_subprocess_online_invoker(
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(context.get("task_id", ""))
+        attempt_info = context.get("execution_attempt") if isinstance(context.get("execution_attempt"), Mapping) else {}
+        attempt_id = str(
+            context.get("attempt_id")
+            or attempt_info.get("attempt_id")
+            or context.get("planner_decision_id")
+            or ""
+        )
         prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
         payload = str(context.get("online_payload") or "")
         local_context_forwarded = False
@@ -939,37 +960,83 @@ def build_subprocess_online_invoker(
                 )
                 capability_context_forwarded = True
         stdin = f"{prompt}\n\n[PAYLOAD]\n{payload}" if payload else prompt
-        # Print-mode CLIs (grok/agy/gemini/codex) take prompt as argv when the
-        # resolved command is bare binary only. Explicit multi-arg commands
-        # (tests, NEXUS_*_COMMAND) keep stdin prompt delivery.
+
         meta = ONLINE_CLI_SPEC_REGISTRY.get(spec.provider, {})
         print_flag = str(meta.get("print_flag") or "").strip()
         argv = list(spec.command)
+        stdin_input: str | None = None
+        prompt_transport = "stdin"
+
         if print_flag and len(argv) == 1:
-            # e.g. grok -p "<prompt>", agy --dangerously-skip-permissions -p "<prompt>", codex exec "<prompt>"
             if spec.provider == "agy":
                 argv = [argv[0], "--dangerously-skip-permissions", print_flag, stdin]
             else:
                 argv = [argv[0], print_flag, stdin]
+            stdin_input = None
+            prompt_transport = "argv"
         elif spec.provider == "opencode" and len(argv) == 1:
             model = str(meta.get("default_model", "") or "").strip()
             argv = [argv[0], "run", "--model", model, stdin]
             stdin_input = None
-            stdin_input = None
+            prompt_transport = "argv"
         else:
             if spec.provider == "agy" and "--dangerously-skip-permissions" not in argv:
                 argv.insert(1, "--dangerously-skip-permissions")
             stdin_input = stdin
+            prompt_transport = "stdin"
+
+        cmd_fp = hashlib.sha256(json.dumps(argv, ensure_ascii=False).encode("utf-8")).hexdigest()
+        exec_path = str(shutil.which(argv[0]) or argv[0])
+        exec_hash = hashlib.sha256(exec_path.encode("utf-8")).hexdigest()
+        cwd_str = str(spec.working_directory or os.getcwd())
+        cwd_hash = hashlib.sha256(cwd_str.encode("utf-8")).hexdigest()
+        input_sha256 = hashlib.sha256(stdin.encode("utf-8")).hexdigest()
+
+        proc_inv_id = hashlib.sha256(
+            json.dumps([task_id, attempt_id, spec.provider, cmd_fp, input_sha256, cwd_hash]).encode("utf-8")
+        ).hexdigest()
+
+        start_time = time.monotonic()
+
+        def _build_process_evidence(
+            started: bool,
+            stdout_str: str,
+            stderr_str: str,
+            retcode: int | None,
+            elapsed_ms: int,
+        ) -> dict[str, Any]:
+            return {
+                "schema": "nexus.provider_process_evidence.v1",
+                "provider": spec.provider,
+                "transport": TRANSPORT_REGISTERED_CLI,
+                "process_started": started,
+                "prompt_transport": prompt_transport,
+                "command_fingerprint": cmd_fp,
+                "executable_path_hash": exec_hash,
+                "working_directory_hash": cwd_hash,
+                "sandboxed_working_directory": bool(spec.working_directory),
+                "provider_input_sha256": input_sha256,
+                "stdout_sha256": hashlib.sha256(stdout_str.encode("utf-8")).hexdigest() if started else "",
+                "stderr_sha256": hashlib.sha256(stderr_str.encode("utf-8")).hexdigest() if started else "",
+                "returncode": retcode,
+                "wall_time_ms": elapsed_ms,
+                "attempt_id": attempt_id,
+                "process_invocation_id": proc_inv_id,
+            }
+
         try:
             result = runner(
                 argv,
                 input=stdin_input,
+                cwd=spec.working_directory or None,
                 capture_output=True,
                 text=True,
                 timeout=spec.timeout_sec,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
+            elapsed = int((time.monotonic() - start_time) * 1000)
+            pe = _build_process_evidence(True, "", str(exc), None, max(0, elapsed))
             return normalize_online_invoker_payload(
                 provider=spec.provider,
                 task_id=task_id,
@@ -984,9 +1051,11 @@ def build_subprocess_online_invoker(
                 evidence_refs=[f"online:{spec.provider}:{task_id}:timeout"],
                 transport=TRANSPORT_REGISTERED_CLI,
                 selection_source=SELECTION_EXPLICIT_REQUEST,
-                extra={"returncode": None, "stderr": str(exc)},
+                extra={"returncode": None, "stderr": str(exc), "process_evidence": pe},
             )
         except OSError as exc:
+            elapsed = int((time.monotonic() - start_time) * 1000)
+            pe = _build_process_evidence(False, "", str(exc), None, max(0, elapsed))
             return normalize_online_invoker_payload(
                 provider=spec.provider,
                 task_id=task_id,
@@ -1001,12 +1070,14 @@ def build_subprocess_online_invoker(
                 evidence_refs=[f"online:{spec.provider}:{task_id}:not_invoked"],
                 transport=TRANSPORT_REGISTERED_CLI,
                 selection_source=SELECTION_EXPLICIT_REQUEST,
-                extra={"returncode": None, "stderr": str(exc)},
+                extra={"returncode": None, "stderr": str(exc), "process_evidence": pe},
             )
+        elapsed = int((time.monotonic() - start_time) * 1000)
         stdout = str(getattr(result, "stdout", "") or "")
         stderr = str(getattr(result, "stderr", "") or "")
         returncode = int(getattr(result, "returncode", 1))
         delivered = bool(stdout.strip())
+        pe = _build_process_evidence(True, stdout, stderr, returncode, max(0, elapsed))
         return normalize_online_invoker_payload(
             provider=spec.provider,
             task_id=task_id,
@@ -1026,7 +1097,7 @@ def build_subprocess_online_invoker(
             ),
             transport=TRANSPORT_REGISTERED_CLI,
             selection_source=SELECTION_EXPLICIT_REQUEST,
-            extra={"returncode": returncode, "stderr": stderr},
+            extra={"returncode": returncode, "stderr": stderr, "process_evidence": pe},
         )
 
     return invoke
@@ -1040,6 +1111,7 @@ def build_registered_online_invoker(
     environ: Mapping[str, str] | None = None,
     runner: Callable[..., Any] = subprocess.run,
     include_local_context: bool = True,
+    working_directory: str = "",
 ) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
     """Build the single provider-neutral Online edge adapter.
 

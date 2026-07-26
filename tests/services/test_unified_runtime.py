@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -3969,3 +3971,274 @@ def test_run_replan_rejects_forged_verifier_with_rebuilt_replan_request():
             verifier=lambda ctx: {"task_id": ctx["task_id"], "invoked": True, "gate_passed": True, "status": "SUCCEEDED", "evidence": "pass", "evidence_refs": ["v:pass"]},
             learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence_present": True, "gate_passed": True},
         )
+
+
+# Milestone A Tests — Hardened Subprocess Invoker & Sealed Process Evidence
+
+def test_bare_gemini_print_flag_uses_argv_and_none_stdin(tmp_path):
+    recorded = {}
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+        recorded["input"] = input
+        recorded["cwd"] = cwd
+        class Res:
+            stdout = "gemini ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t1", "task_statement": "reply gemini"})
+    assert recorded["argv"] == ["gemini", "-p", "reply gemini"]
+    assert recorded["input"] is None
+    assert res["gate_passed"] is True
+
+
+def test_bare_codex_exec_uses_argv_and_none_stdin(tmp_path):
+    recorded = {}
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+        recorded["input"] = input
+        class Res:
+            stdout = "codex ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="codex", command=("codex",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t2", "task_statement": "reply codex"})
+    assert recorded["argv"] == ["codex", "exec", "reply codex"]
+    assert recorded["input"] is None
+    assert res["gate_passed"] is True
+
+
+def test_bare_opencode_uses_registered_free_model(tmp_path):
+    recorded = {}
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+        recorded["input"] = input
+        class Res:
+            stdout = "opencode ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="opencode", command=("opencode",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t3", "task_statement": "reply opencode"})
+    assert recorded["argv"] == ["opencode", "run", "--model", "opencode/deepseek-v4-flash-free", "reply opencode"]
+    assert recorded["input"] is None
+    assert res["gate_passed"] is True
+
+
+def test_explicit_multi_argument_command_uses_stdin(tmp_path):
+    recorded = {}
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+        recorded["input"] = input
+        class Res:
+            stdout = "custom ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("python3", "-c", "import sys; print('ok')"))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t4", "task_statement": "custom prompt"})
+    assert recorded["argv"] == ["python3", "-c", "import sys; print('ok')"]
+    assert recorded["input"] == "custom prompt"
+    assert res["gate_passed"] is True
+
+
+def test_registered_cli_print_flag_has_no_unbound_local(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t5", "task_statement": "test unbound local"})
+    assert res["invoked"] is True
+
+
+def test_subprocess_invoker_passes_explicit_working_directory(tmp_path):
+    recorded = {}
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["cwd"] = cwd
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",), working_directory=str(tmp_path))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    invoker({"task_id": "t6", "task_statement": "cwd test"})
+    assert recorded["cwd"] == str(tmp_path)
+
+
+def test_subprocess_invoker_default_cwd_is_none(tmp_path):
+    recorded = {}
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["cwd"] = cwd
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    invoker({"task_id": "t7", "task_statement": "default cwd test"})
+    assert recorded["cwd"] is None
+
+
+def test_online_cli_spec_rejects_missing_working_directory():
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",), working_directory="/nonexistent/path/xyz_123")
+    with pytest.raises(ValueError, match="working_directory_not_found"):
+        spec.validate()
+
+
+def test_online_cli_spec_rejects_file_as_working_directory(tmp_path):
+    file_path = tmp_path / "some_file.txt"
+    file_path.write_text("hello", encoding="utf-8")
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",), working_directory=str(file_path))
+    with pytest.raises(ValueError, match="working_directory_not_directory"):
+        spec.validate()
+
+
+def test_parent_process_cwd_does_not_change(tmp_path):
+    old_cwd = os.getcwd()
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",), working_directory=str(tmp_path))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    invoker({"task_id": "t8", "task_statement": "no chdir"})
+    assert os.getcwd() == old_cwd
+
+
+def test_process_evidence_contains_only_hashed_command_identity(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = "secret_output"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="opencode", command=("opencode",), working_directory=str(tmp_path))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t9", "task_statement": "my_secret_prompt"})
+    evidence = res["process_evidence"]
+    assert evidence["schema"] == "nexus.provider_process_evidence.v1"
+    assert evidence["provider"] == "opencode"
+    assert "command_fingerprint" in evidence
+    assert "executable_path_hash" in evidence
+    assert "working_directory_hash" in evidence
+    assert "provider_input_sha256" in evidence
+    assert "stdout_sha256" in evidence
+    assert "stderr_sha256" in evidence
+
+
+def test_process_evidence_does_not_expose_prompt(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    secret_prompt = "TOP_SECRET_PROMPT_12345"
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t10", "task_statement": secret_prompt})
+    evidence_str = json.dumps(res["process_evidence"])
+    assert secret_prompt not in evidence_str
+
+
+def test_process_evidence_does_not_expose_working_directory(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",), working_directory=str(tmp_path))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t11", "task_statement": "prompt"})
+    evidence_str = json.dumps(res["process_evidence"])
+    assert str(tmp_path) not in evidence_str
+
+
+def test_process_evidence_attempt_ids_produce_unique_invocation_ids(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = "ok"
+            stderr = ""
+            returncode = 0
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    r1 = invoker({"task_id": "t12", "task_statement": "prompt", "attempt_id": "attempt_1_hash"})
+    r2 = invoker({"task_id": "t12", "task_statement": "prompt", "attempt_id": "attempt_2_hash"})
+    inv1 = r1["process_evidence"]["process_invocation_id"]
+    inv2 = r2["process_evidence"]["process_invocation_id"]
+    assert inv1 != inv2
+
+
+def test_process_evidence_timeout_is_fail_closed(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout)
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t13", "task_statement": "prompt"})
+    assert res["gate_passed"] is False
+    evidence = res["process_evidence"]
+    assert evidence["process_started"] is True
+    assert evidence["returncode"] is None
+    assert res["error"] == "provider_timeout"
+
+
+def test_process_evidence_nonzero_exit_is_fail_closed(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        class Res:
+            stdout = ""
+            stderr = "error occurred"
+            returncode = 1
+        return Res()
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t14", "task_statement": "prompt"})
+    assert res["gate_passed"] is False
+    evidence = res["process_evidence"]
+    assert evidence["process_started"] is True
+    assert evidence["returncode"] == 1
+    assert res["error"] == "provider_subprocess_failed"
+
+
+def test_process_evidence_oserror_records_not_invoked(tmp_path):
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        raise OSError("Binary not found")
+
+    spec = OnlineCliSpec(provider="gemini", command=("gemini",))
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t15", "task_statement": "prompt"})
+    assert res["invoked"] is False
+    assert res["gate_passed"] is False
+    evidence = res["process_evidence"]
+    assert evidence["process_started"] is False
+    assert evidence["returncode"] is None
+    assert res["error"] == "provider_not_invoked"
