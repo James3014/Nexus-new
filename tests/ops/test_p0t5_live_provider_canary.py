@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -9,7 +10,8 @@ import pytest
 
 # Ensure scripts/ops can be imported if needed, or import function directly
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "ops"))
-from p0t5_live_provider_canary import run_canary_campaign
+from p0t5_live_provider_canary import get_provider_executable_identity, run_canary_campaign
+from nexus.services.unified_runtime import resolve_registered_online_cli_spec
 
 
 def _make_fixture_runner(nonce_store: list[str]):
@@ -223,3 +225,67 @@ def test_canary_supports_mainchain_entrypoint(tmp_path: Path, monkeypatch):
     assert summary["attempt_2_mainchain_entry"] is True
     assert summary["attempt_1_route_freeze"] is True
     assert summary["attempt_2_route_freeze"] is True
+
+
+# Milestone B Tests — Exact Executable Binding & Route Identity Truth
+
+def test_provider_identity_uses_exact_resolved_executable(tmp_path: Path):
+    ident = get_provider_executable_identity("opencode", shutil.which("opencode") or "opencode")
+    assert ident["version_source"] == "exact_invoked_executable"
+    assert ident["version_command_exit_code"] in (0, -1)
+    assert "executable_path_hash" in ident
+
+
+def test_provider_version_uses_same_executable_as_inference(tmp_path: Path):
+    spec = resolve_registered_online_cli_spec("opencode", working_directory=str(tmp_path))
+    ident = get_provider_executable_identity("opencode", spec.command[0])
+    assert ident["version_normalized"] != ""
+    assert "executable_path_hash" in ident
+
+
+def test_provider_identity_hash_matches_process_evidence(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    ident_hash = summary["provider_executable_identity"]["executable_path_hash"]
+    assert ident_hash.startswith("sha256:")
+
+
+def test_provider_version_summary_matches_identity(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert summary["provider_version"] == summary["provider_executable_identity"]["version_normalized"]
+
+
+def test_provider_identity_error_does_not_expose_exception(tmp_path: Path):
+    ident = get_provider_executable_identity("invalid_binary_foo_bar_xyz", "/nonexistent/path/binary")
+    assert ident["version_normalized"] == "unknown"
+    assert ident["version_error_code"] == "provider_version_query_failed"
+    assert "/nonexistent/path" not in str(ident)
+
+
+def test_mainchain_canary_summary_requires_complete_route_identity(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert summary["attempt_1_mainchain_identity_complete"] is True
+    assert summary["attempt_2_mainchain_identity_complete"] is True

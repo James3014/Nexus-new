@@ -29,11 +29,13 @@ from nexus.evidence.receipt_base import validate_receipt_base
 from nexus.services.mainchain_entry import (
     run_mainchain,
     run_mainchain_replan,
+    summarize_arm_receipt,
 )
 from nexus.services.unified_runtime import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_registered_online_invoker,
+    resolve_registered_online_cli_spec,
 )
 
 ALLOWED_PROVIDERS = {"opencode", "gemini"}
@@ -50,15 +52,18 @@ def get_git_status(project_root: str) -> str:
     return str(res.stdout or "")
 
 
-def get_provider_executable_identity(provider: str) -> dict[str, Any]:
-    binary = shutil.which(provider)
-    if not binary:
+def get_provider_executable_identity(
+    provider: str, executable: str | None = None
+) -> dict[str, Any]:
+    binary = str(executable or "").strip() or shutil.which(provider)
+    if not binary or not Path(binary).exists():
         return {
             "provider": provider,
             "version_command_exit_code": -1,
             "version_raw_sha256": "",
-            "version_normalized": "not_found",
-            "version_source": "exact_canary_executable",
+            "version_normalized": "unknown",
+            "version_error_code": "provider_version_query_failed",
+            "version_source": "exact_invoked_executable",
             "executable_path_hash": "",
         }
     try:
@@ -78,22 +83,23 @@ def get_provider_executable_identity(provider: str) -> dict[str, Any]:
             "version_command_exit_code": res.returncode,
             "version_raw_sha256": raw_sha256,
             "version_normalized": normalized,
-            "version_source": "exact_canary_executable",
+            "version_source": "exact_invoked_executable",
             "executable_path_hash": path_hash,
         }
-    except Exception as exc:
+    except Exception:
         return {
             "provider": provider,
             "version_command_exit_code": -1,
             "version_raw_sha256": "",
-            "version_normalized": f"error:{exc}",
-            "version_source": "exact_canary_executable",
+            "version_normalized": "unknown",
+            "version_error_code": "provider_version_query_failed",
+            "version_source": "exact_invoked_executable",
             "executable_path_hash": "",
         }
 
 
-def get_provider_version(provider: str) -> str:
-    ident = get_provider_executable_identity(provider)
+def get_provider_version(provider: str, executable: str | None = None) -> str:
+    ident = get_provider_executable_identity(provider, executable)
     return str(ident.get("version_normalized") or "unknown")
 
 
@@ -128,6 +134,11 @@ def run_canary_campaign(
 
     temp_cwd = tempfile.mkdtemp(prefix="nexus-p0t5b-cwd-")
     try:
+        # Resolve exact executable ONCE before Attempt 1
+        spec = resolve_registered_online_cli_spec(prov_clean, working_directory=temp_cwd)
+        invoked_executable = spec.command[0] if spec and spec.command else prov_clean
+        prov_identity = get_provider_executable_identity(prov_clean, invoked_executable)
+
         nonce = uuid.uuid4().hex
         canary_prompt = (
             "This is a read-only Nexus transport canary.\n\n"
@@ -307,20 +318,40 @@ def run_canary_campaign(
         pe1 = r1["online"]["response"]["process_evidence"]
         pe2 = r2["online"]["response"]["process_evidence"]
 
-        r1_route = (r1.get("context_trace") or {}).get("route") or {}
-        r2_route = (r2.get("context_trace") or {}).get("route") or {}
+        # Milestone B Section 15.3: Process evidence executable identity equality check
+        def _norm_hash(h: str) -> str:
+            s = str(h or "").strip()
+            if not s:
+                return ""
+            return s if s.startswith("sha256:") else f"sha256:{s}"
+
+        ident_hash = _norm_hash(prov_identity.get("executable_path_hash"))
+        pe1_hash = _norm_hash(pe1.get("executable_path_hash"))
+        pe2_hash = _norm_hash(pe2.get("executable_path_hash"))
+
+        if ident_hash and (pe1_hash != ident_hash or pe2_hash != ident_hash):
+            raise RuntimeError("TASK_BLOCK: PROVIDER_EXECUTABLE_IDENTITY_MISMATCH")
+
+        s1 = summarize_arm_receipt(r1, prompt=canary_prompt)
+        s2 = summarize_arm_receipt(r2, prompt=canary_prompt)
 
         summary = {
             "campaign_id": f"campaign-{task_id}",
             "entrypoint": entry_clean,
             "provider": prov_clean,
-            "provider_version": get_provider_version(prov_clean),
-            "provider_executable_identity": get_provider_executable_identity(prov_clean),
+            "provider_version": prov_identity["version_normalized"],
+            "provider_executable_identity": prov_identity,
             "real_provider_call_count": 2,
-            "attempt_1_mainchain_entry": bool(r1_route.get("mainchain_entry")),
-            "attempt_2_mainchain_entry": bool(r2_route.get("mainchain_entry")),
-            "attempt_1_route_freeze": bool(r1_route.get("route_freeze", True)),
-            "attempt_2_route_freeze": bool(r2_route.get("route_freeze", True)),
+            "attempt_1_mainchain_entry": s1["mainchain_entry"],
+            "attempt_2_mainchain_entry": s2["mainchain_entry"],
+            "attempt_1_route_freeze": s1["route_freeze"],
+            "attempt_2_route_freeze": s2["route_freeze"],
+            "attempt_1_mainchain_route_version": s1["mainchain_route_version"],
+            "attempt_2_mainchain_route_version": s2["mainchain_route_version"],
+            "attempt_1_with_nexus_armor": s1["with_nexus_armor"],
+            "attempt_2_with_nexus_armor": s2["with_nexus_armor"],
+            "attempt_1_mainchain_identity_complete": s1["mainchain_identity_complete"],
+            "attempt_2_mainchain_identity_complete": s2["mainchain_identity_complete"],
             "attempt_1_process_invocation_id": pe1["process_invocation_id"],
             "attempt_2_process_invocation_id": pe2["process_invocation_id"],
             "attempt_1_stdout_sha256": pe1["stdout_sha256"],
@@ -333,6 +364,7 @@ def run_canary_campaign(
             "attempt_2_planner_decision_id": r2["planner_decision_id"],
             "attempt_1_execution_depth": r1["execution_depth"],
             "attempt_2_execution_depth": r2["execution_depth"],
+            "attempt_2_terminal_status": r2.get("terminal_status"),
             "source_replan_request_id": r1["execution_replan_request"]["replan_request_id"],
             "parent_receipt_hash": r2["execution_attempt"]["parent_receipt_hash"],
             "worktree_status_before_hash": hash_before,
