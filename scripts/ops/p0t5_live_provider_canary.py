@@ -35,6 +35,7 @@ from nexus.services.unified_runtime import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_registered_online_invoker,
+    build_subprocess_online_invoker,
     resolve_registered_online_cli_spec,
 )
 
@@ -149,13 +150,6 @@ def run_canary_campaign(
             f"Return exactly one line:\n\nNEXUS_CANARY:{nonce}"
         )
 
-        online_invoker = build_registered_online_invoker(
-            provider=prov_clean,
-            timeout_sec=timeout_sec,
-            runner=runner,
-            working_directory=temp_cwd,
-        )
-
         task_id = f"canary-{prov_clean}-{nonce[:8]}"
         req = UnifiedRuntimeRequest(
             task_id=task_id,
@@ -227,10 +221,14 @@ def run_canary_campaign(
             }
 
         # Attempt 1 execution
+        online_invoker1 = build_subprocess_online_invoker(
+            spec,
+            runner=runner,
+        )
         if entry_clean == "mainchain":
             r1 = run_mainchain(
                 req,
-                online_invoker=online_invoker,
+                online_invoker=online_invoker1,
                 capability_invokers=cap_invokers,
                 verifier=verifier_attempt1,
                 learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
@@ -239,7 +237,7 @@ def run_canary_campaign(
         else:
             r1 = runtime.run(
                 req,
-                online_invoker=online_invoker,
+                online_invoker=online_invoker1,
                 capability_invokers=cap_invokers,
                 verifier=verifier_attempt1,
                 learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
@@ -280,11 +278,15 @@ def run_canary_campaign(
             }
 
         # Attempt 2 execution
+        online_invoker2 = build_subprocess_online_invoker(
+            spec,
+            runner=runner,
+        )
         if entry_clean == "mainchain":
             r2 = run_mainchain_replan(
                 previous_receipt,
                 req,
-                online_invoker=online_invoker,
+                online_invoker=online_invoker2,
                 capability_invokers=cap_invokers,
                 verifier=verifier_attempt2,
                 learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
@@ -294,7 +296,7 @@ def run_canary_campaign(
             r2 = runtime.run_replan(
                 previous_receipt,
                 req,
-                online_invoker=online_invoker,
+                online_invoker=online_invoker2,
                 capability_invokers=cap_invokers,
                 verifier=verifier_attempt2,
                 learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},

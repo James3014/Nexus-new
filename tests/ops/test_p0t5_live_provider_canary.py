@@ -10,6 +10,7 @@ import pytest
 
 # Ensure scripts/ops can be imported if needed, or import function directly
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "ops"))
+import p0t5_live_provider_canary
 from p0t5_live_provider_canary import get_provider_executable_identity, run_canary_campaign
 from nexus.services.unified_runtime import resolve_registered_online_cli_spec
 
@@ -289,3 +290,165 @@ def test_mainchain_canary_summary_requires_complete_route_identity(tmp_path: Pat
     )
     assert summary["attempt_1_mainchain_identity_complete"] is True
     assert summary["attempt_2_mainchain_identity_complete"] is True
+
+
+# Milestone B — Executable Pinning & Resolution Closure Tests
+
+def test_canary_resolves_provider_exactly_once(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    resolve_count = {"count": 0}
+    orig_resolver = p0t5_live_provider_canary.resolve_registered_online_cli_spec
+
+    def counting_resolver(provider, working_directory=""):
+        resolve_count["count"] += 1
+        return orig_resolver(provider, working_directory=working_directory)
+
+    monkeypatch.setattr(
+        p0t5_live_provider_canary,
+        "resolve_registered_online_cli_spec",
+        counting_resolver,
+    )
+
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert resolve_count["count"] == 1
+    assert summary["real_provider_call_count"] == 2
+
+
+def test_canary_reuses_resolved_spec_for_both_attempts(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    resolved_specs = []
+    orig_invoker_builder = p0t5_live_provider_canary.build_subprocess_online_invoker
+
+    def tracking_builder(spec, runner=None):
+        resolved_specs.append(spec)
+        return orig_invoker_builder(spec, runner=runner)
+
+    monkeypatch.setattr(
+        p0t5_live_provider_canary,
+        "build_subprocess_online_invoker",
+        tracking_builder,
+    )
+
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert len(resolved_specs) == 2
+    assert resolved_specs[0] is resolved_specs[1]
+
+
+def test_canary_does_not_reresolve_after_path_change(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    dir_a = tmp_path / "bin_a"
+    dir_a.mkdir()
+    bin_a = dir_a / "opencode"
+    bin_a.write_text("#!/bin/sh\necho '1.17.20-A'", encoding="utf-8")
+    bin_a.chmod(0o755)
+
+    dir_b = tmp_path / "bin_b"
+    dir_b.mkdir()
+    bin_b = dir_b / "opencode"
+    bin_b.write_text("#!/bin/sh\necho '9.9.9-B'", encoding="utf-8")
+    bin_b.chmod(0o755)
+
+    monkeypatch.setenv("PATH", f"{dir_a}:{os.environ.get('PATH', '')}")
+
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert summary["provider_executable_identity"]["version_normalized"].startswith("1.17.20")
+
+
+def test_canary_version_uses_resolved_spec_executable(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    ident = summary["provider_executable_identity"]
+    assert ident["version_source"] == "exact_invoked_executable"
+    assert ident["executable_path_hash"].startswith("sha256:")
+
+
+def test_canary_process_hash_matches_resolved_executable(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert summary["provider_executable_identity"]["executable_path_hash"] != ""
+
+
+def test_canary_fails_when_process_identity_differs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    orig_ident = p0t5_live_provider_canary.get_provider_executable_identity
+
+    def bad_ident(provider, executable=None):
+        res = orig_ident(provider, executable)
+        res["executable_path_hash"] = "sha256:mismatch_fake_hash_123"
+        return res
+
+    monkeypatch.setattr(
+        p0t5_live_provider_canary,
+        "get_provider_executable_identity",
+        bad_ident,
+    )
+    nonces = []
+    with pytest.raises(RuntimeError, match="PROVIDER_EXECUTABLE_IDENTITY_MISMATCH"):
+        run_canary_campaign(
+            provider="opencode",
+            entrypoint="mainchain",
+            project_root=str(tmp_path),
+            receipt_dir=str(tmp_path / "receipts"),
+            runner=_make_fixture_runner(nonces),
+        )
+
+
+def test_canary_does_not_call_registered_lazy_resolver(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    lazy_calls = {"count": 0}
+
+    def lazy_invoker(*args, **kwargs):
+        lazy_calls["count"] += 1
+        raise RuntimeError("build_registered_online_invoker_should_not_be_called")
+
+    monkeypatch.setattr(
+        p0t5_live_provider_canary,
+        "build_registered_online_invoker",
+        lazy_invoker,
+    )
+
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert lazy_calls["count"] == 0
+    assert summary["real_provider_call_count"] == 2
