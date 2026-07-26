@@ -176,6 +176,8 @@ class SelfHostedTaskService:
             "promotion_packet": packet,
             "promotion_status": packet.promotion_status,
             "candidate_commit_created": packet.candidate_commit_created,
+            "public_claim_allowed": packet.public_claim_allowed,
+            "production_ready": packet.production_ready,
             "merge_performed": packet.merge_performed,
             "push_performed": packet.push_performed,
         }
@@ -238,6 +240,8 @@ class SelfHostedTaskService:
             "promotion_status": state.get("promotion_status"),
             "promotion_packet": state.get("promotion_packet"),
             "candidate_commit_created": state.get("candidate_commit_created", False),
+            "public_claim_allowed": state.get("public_claim_allowed", False),
+            "production_ready": state.get("production_ready", False),
             "merge_performed": state.get("merge_performed", False),
             "push_performed": state.get("push_performed", False),
         }

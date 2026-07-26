@@ -35,7 +35,9 @@ class VerifiedCandidateReceipt:
     protected_contract_gate_passed: bool
     verifier_gate_passed: bool
     verified: bool
+    candidate_commit_allowed: bool
     public_claim_allowed: bool
+    production_ready: bool
     failure_reasons: list[str]
     verifier_evidence: tuple[VerifierEvidence, ...]
     candidate_commit_created: bool
@@ -134,7 +136,9 @@ class CandidateVerifier:
             protected_contract_gate_passed=protected_passed,
             verifier_gate_passed=verifier_passed,
             verified=verified,
-            public_claim_allowed=verified,
+            candidate_commit_allowed=verified,
+            public_claim_allowed=False,
+            production_ready=False,
             failure_reasons=failures,
             verifier_evidence=verifier_evidence,
             candidate_commit_created=False,

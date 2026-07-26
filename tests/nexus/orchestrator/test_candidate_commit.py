@@ -63,6 +63,8 @@ def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
 
     assert packet.candidate_commit_created is True
     assert packet.promotion_status == "PENDING_HUMAN_APPROVAL"
+    assert packet.public_claim_allowed is False
+    assert packet.production_ready is False
     assert packet.merge_performed is False
     assert packet.push_performed is False
     assert len(packet.candidate_commit_sha) == 40
@@ -77,6 +79,15 @@ def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
 def test_candidate_commit_rejects_unverified_receipt(tmp_path):
     contract, lease, verified, manager = _scenario(tmp_path)
     object.__setattr__(verified, "verified", False)
+
+    with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+
+def test_candidate_commit_requires_independent_commit_authority(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    object.__setattr__(verified, "candidate_commit_allowed", False)
+    object.__setattr__(verified, "public_claim_allowed", True)
 
     with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)

@@ -25,6 +25,8 @@ class PromotionApprovalPacket:
     verified_receipt_hash: str
     candidate_commit_created: bool
     promotion_status: str
+    public_claim_allowed: bool
+    production_ready: bool
     merge_performed: bool
     push_performed: bool
 
@@ -52,7 +54,7 @@ class CandidateCommitter:
         lease: TargetWorktreeLease,
         receipt: VerifiedCandidateReceipt,
     ) -> PromotionApprovalPacket:
-        if not receipt.verified or not receipt.public_claim_allowed:
+        if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
         if receipt.candidate_commit_created or receipt.merge_performed:
             raise RuntimeError("receipt already contains a promotion mutation")
@@ -115,6 +117,8 @@ class CandidateCommitter:
             verified_receipt_hash=self._receipt_hash(receipt),
             candidate_commit_created=True,
             promotion_status="PENDING_HUMAN_APPROVAL",
+            public_claim_allowed=False,
+            production_ready=False,
             merge_performed=False,
             push_performed=False,
         )

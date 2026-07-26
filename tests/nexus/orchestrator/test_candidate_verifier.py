@@ -66,6 +66,9 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert receipt.verifier_gate_passed is True
     assert receipt.candidate_state_hash == candidate.candidate_state_hash
     assert receipt.candidate_commit_created is False
+    assert receipt.candidate_commit_allowed is True
+    assert receipt.public_claim_allowed is False
+    assert receipt.production_ready is False
 
 
 def test_candidate_verifier_fails_closed_for_deleted_file(scenario):
