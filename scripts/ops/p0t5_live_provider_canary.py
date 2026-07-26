@@ -26,6 +26,10 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
 from nexus.evidence.receipt_base import validate_receipt_base
+from nexus.services.mainchain_entry import (
+    run_mainchain,
+    run_mainchain_replan,
+)
 from nexus.services.unified_runtime import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
@@ -46,10 +50,17 @@ def get_git_status(project_root: str) -> str:
     return str(res.stdout or "")
 
 
-def get_provider_version(provider: str) -> str:
+def get_provider_executable_identity(provider: str) -> dict[str, Any]:
     binary = shutil.which(provider)
     if not binary:
-        return "not_found"
+        return {
+            "provider": provider,
+            "version_command_exit_code": -1,
+            "version_raw_sha256": "",
+            "version_normalized": "not_found",
+            "version_source": "exact_canary_executable",
+            "executable_path_hash": "",
+        }
     try:
         res = subprocess.run(
             [binary, "--version"],
@@ -58,9 +69,32 @@ def get_provider_version(provider: str) -> str:
             timeout=10,
             check=False,
         )
-        return str(res.stdout or res.stderr or "unknown").strip()
-    except Exception:
-        return "unknown"
+        raw_ver = str(res.stdout or res.stderr or "").strip()
+        raw_sha256 = f"sha256:{hashlib.sha256(raw_ver.encode('utf-8')).hexdigest()}"
+        path_hash = f"sha256:{hashlib.sha256(binary.encode('utf-8')).hexdigest()}"
+        normalized = raw_ver.splitlines()[0].strip() if raw_ver else "unknown"
+        return {
+            "provider": provider,
+            "version_command_exit_code": res.returncode,
+            "version_raw_sha256": raw_sha256,
+            "version_normalized": normalized,
+            "version_source": "exact_canary_executable",
+            "executable_path_hash": path_hash,
+        }
+    except Exception as exc:
+        return {
+            "provider": provider,
+            "version_command_exit_code": -1,
+            "version_raw_sha256": "",
+            "version_normalized": f"error:{exc}",
+            "version_source": "exact_canary_executable",
+            "executable_path_hash": "",
+        }
+
+
+def get_provider_version(provider: str) -> str:
+    ident = get_provider_executable_identity(provider)
+    return str(ident.get("version_normalized") or "unknown")
 
 
 def run_canary_campaign(
@@ -69,6 +103,7 @@ def run_canary_campaign(
     receipt_dir: str,
     timeout_sec: float = 120.0,
     runner: Any = subprocess.run,
+    entrypoint: str = "runtime",
 ) -> dict[str, Any]:
     if os.environ.get("NEXUS_P0T5_ALLOW_REAL_PROVIDER") != "1":
         sys.stderr.write("real_provider_canary_not_authorized\n")
@@ -78,6 +113,10 @@ def run_canary_campaign(
     if prov_clean not in ALLOWED_PROVIDERS:
         sys.stderr.write(f"provider_not_allowed:{prov_clean}\n")
         raise ValueError(f"provider_not_allowed:{prov_clean}")
+
+    entry_clean = str(entrypoint or "runtime").strip().lower()
+    if entry_clean not in {"runtime", "mainchain"}:
+        raise ValueError(f"entrypoint_not_allowed:{entry_clean}")
 
     project_root_path = Path(project_root).resolve()
     receipt_dir_path = Path(receipt_dir).resolve()
@@ -126,6 +165,7 @@ def run_canary_campaign(
 
         def _make_cap_invoker(name: str):
             return lambda ctx: {
+                "task_id": ctx.get("task_id", task_id),
                 "status": "SUCCEEDED",
                 "invoked": True,
                 "evidence": "canary cap ok",
@@ -176,14 +216,24 @@ def run_canary_campaign(
             }
 
         # Attempt 1 execution
-        r1 = runtime.run(
-            req,
-            online_invoker=online_invoker,
-            capability_invokers=cap_invokers,
-            verifier=verifier_attempt1,
-            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
-            receipt_path=receipt1_path,
-        )
+        if entry_clean == "mainchain":
+            r1 = run_mainchain(
+                req,
+                online_invoker=online_invoker,
+                capability_invokers=cap_invokers,
+                verifier=verifier_attempt1,
+                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
+                receipt_path=receipt1_path,
+            )
+        else:
+            r1 = runtime.run(
+                req,
+                online_invoker=online_invoker,
+                capability_invokers=cap_invokers,
+                verifier=verifier_attempt1,
+                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
+                receipt_path=receipt1_path,
+            )
 
         v1_check = validate_receipt_base(r1, mode="strict")
         if not v1_check.get("ok"):
@@ -219,15 +269,26 @@ def run_canary_campaign(
             }
 
         # Attempt 2 execution
-        r2 = runtime.run_replan(
-            previous_receipt,
-            req,
-            online_invoker=online_invoker,
-            capability_invokers=cap_invokers,
-            verifier=verifier_attempt2,
-            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
-            receipt_path=receipt2_path,
-        )
+        if entry_clean == "mainchain":
+            r2 = run_mainchain_replan(
+                previous_receipt,
+                req,
+                online_invoker=online_invoker,
+                capability_invokers=cap_invokers,
+                verifier=verifier_attempt2,
+                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
+                receipt_path=receipt2_path,
+            )
+        else:
+            r2 = runtime.run_replan(
+                previous_receipt,
+                req,
+                online_invoker=online_invoker,
+                capability_invokers=cap_invokers,
+                verifier=verifier_attempt2,
+                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
+                receipt_path=receipt2_path,
+            )
 
         v2_check = validate_receipt_base(r2, mode="strict")
         if not v2_check.get("ok"):
@@ -246,11 +307,20 @@ def run_canary_campaign(
         pe1 = r1["online"]["response"]["process_evidence"]
         pe2 = r2["online"]["response"]["process_evidence"]
 
+        r1_route = (r1.get("context_trace") or {}).get("route") or {}
+        r2_route = (r2.get("context_trace") or {}).get("route") or {}
+
         summary = {
             "campaign_id": f"campaign-{task_id}",
+            "entrypoint": entry_clean,
             "provider": prov_clean,
             "provider_version": get_provider_version(prov_clean),
+            "provider_executable_identity": get_provider_executable_identity(prov_clean),
             "real_provider_call_count": 2,
+            "attempt_1_mainchain_entry": bool(r1_route.get("mainchain_entry")),
+            "attempt_2_mainchain_entry": bool(r2_route.get("mainchain_entry")),
+            "attempt_1_route_freeze": bool(r1_route.get("route_freeze", True)),
+            "attempt_2_route_freeze": bool(r2_route.get("route_freeze", True)),
             "attempt_1_process_invocation_id": pe1["process_invocation_id"],
             "attempt_2_process_invocation_id": pe2["process_invocation_id"],
             "attempt_1_stdout_sha256": pe1["stdout_sha256"],
@@ -269,6 +339,8 @@ def run_canary_campaign(
             "worktree_status_after_hash": hash_after,
             "worktree_unchanged": hash_before == hash_after,
             "both_strict_validations": bool(v1_check.get("ok") and v2_check.get("ok")),
+            "attempt_1_strict_validation": bool(v1_check.get("ok")),
+            "attempt_2_strict_validation": bool(v2_check.get("ok")),
         }
         return summary
     finally:
@@ -278,6 +350,7 @@ def run_canary_campaign(
 def main():
     parser = argparse.ArgumentParser(description="P0-T5B Real Provider Canary Operator")
     parser.add_argument("--provider", default="opencode", choices=["opencode", "gemini"])
+    parser.add_argument("--entrypoint", default="runtime", choices=["runtime", "mainchain"])
     parser.add_argument("--project-root", default=os.getcwd())
     parser.add_argument("--receipt-dir", required=True)
     parser.add_argument("--timeout-sec", type=float, default=120.0)
@@ -289,6 +362,7 @@ def main():
             project_root=args.project_root,
             receipt_dir=args.receipt_dir,
             timeout_sec=args.timeout_sec,
+            entrypoint=args.entrypoint,
         )
         print(json.dumps(summary, indent=2))
         sys.exit(0)

@@ -206,3 +206,20 @@ def test_canary_does_not_automatically_use_codex(tmp_path: Path, monkeypatch):
             project_root=str(tmp_path),
             receipt_dir=str(tmp_path / "receipts"),
         )
+
+
+def test_canary_supports_mainchain_entrypoint(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
+    nonces = []
+    summary = run_canary_campaign(
+        provider="opencode",
+        entrypoint="mainchain",
+        project_root=str(tmp_path),
+        receipt_dir=str(tmp_path / "receipts"),
+        runner=_make_fixture_runner(nonces),
+    )
+    assert summary["entrypoint"] == "mainchain"
+    assert summary["attempt_1_mainchain_entry"] is True
+    assert summary["attempt_2_mainchain_entry"] is True
+    assert summary["attempt_1_route_freeze"] is True
+    assert summary["attempt_2_route_freeze"] is True
