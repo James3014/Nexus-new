@@ -124,6 +124,12 @@ def test_reconcile_fails_closed_when_worker_lost_before_receipt(tmp_path):
     assert "lost before recoverable execution evidence" in reconciled["error"]
 
 
+def test_pid_permission_error_is_treated_as_alive(monkeypatch):
+    monkeypatch.setattr("os.kill", lambda pid, signal: (_ for _ in ()).throw(PermissionError()))
+
+    assert SelfHostedTaskService._pid_alive(12345) is True
+
+
 def test_submit_rejects_raw_prompt_and_non_codex_worker(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state")
 

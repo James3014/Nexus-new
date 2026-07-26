@@ -478,6 +478,8 @@ class SelfHostedTaskService:
     def _pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
+        except PermissionError:
+            return True
         except (OSError, ProcessLookupError):
             return False
         return True
@@ -495,7 +497,7 @@ class SelfHostedTaskService:
                 os.killpg(pgid, signal.SIGTERM)
                 time.sleep(0.05)
                 os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
+            except (PermissionError, ProcessLookupError):
                 continue
 
     def reconcile_task(self, task_id: str) -> Optional[dict[str, Any]]:
