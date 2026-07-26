@@ -1,5 +1,6 @@
 from typing import Optional
 
+from nexus.executors.codex_executor import CodexCliExecutor
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import (
     CandidateDiffReceipt,
@@ -37,3 +38,25 @@ class SelfHostedDevelopmentController:
             expected_status_sha256=lease.controller_status_sha256,
         )
         return self.worktree_manager.capture_candidate(contract, lease)
+
+    def execute_codex_candidate(
+        self,
+        contract: SelfHostedTaskContract,
+        *,
+        prompt: str,
+        executor: Optional[CodexCliExecutor] = None,
+    ) -> tuple[TargetWorktreeLease, object, CandidateDiffReceipt]:
+        """Prepare Target, invoke one fresh Codex worker, then recover Git truth."""
+
+        lease = self.prepare_task(contract)
+        execution = (executor or CodexCliExecutor()).invoke(
+            contract,
+            lease,
+            prompt=prompt,
+        )
+        if execution.provider != "codex":
+            raise RuntimeError("self-hosted worker provider must be codex")
+        if execution.commit_created or execution.merge_performed:
+            raise RuntimeError("worker must not commit or merge")
+        receipt = self.collect_candidate(contract, lease)
+        return lease, execution, receipt

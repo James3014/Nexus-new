@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -115,3 +116,26 @@ def test_self_hosted_controller_rejects_controller_revision_drift(controller_sce
 
     with pytest.raises(RuntimeError, match="Controller revision drift"):
         controller.collect_candidate(contract, lease)
+
+
+def test_self_hosted_controller_runs_codex_then_recovers_actual_diff(controller_scenario):
+    contract = _contract(controller_scenario)
+    controller = _controller(controller_scenario)
+
+    class FakeCodex:
+        def invoke(self, contract, lease, *, prompt):
+            assert prompt == "change bounded file"
+            Path(lease.target_worktree, "bounded.txt").write_text("codex candidate\n", encoding="utf-8")
+            return SimpleNamespace(provider="codex", commit_created=False, merge_performed=False)
+
+    lease, execution, receipt = controller.execute_codex_candidate(
+        contract,
+        prompt="change bounded file",
+        executor=FakeCodex(),
+    )
+
+    assert lease.task_id == contract.task_id
+    assert execution.provider == "codex"
+    assert execution.commit_created is False
+    assert receipt.changed_files == ["bounded.txt"]
+    assert receipt.allowed_scope_passed is True
