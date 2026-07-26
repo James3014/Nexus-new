@@ -3991,7 +3991,7 @@ def test_bare_gemini_print_flag_uses_argv_and_none_stdin(tmp_path):
     invoker = build_subprocess_online_invoker(spec, runner=runner)
     res = invoker({"task_id": "t1", "task_statement": "reply gemini"})
     assert recorded["argv"] == ["gemini", "-p", "reply gemini"]
-    assert recorded["input"] is None
+    assert recorded["input"] in (None, "")
     assert res["gate_passed"] is True
 
 
@@ -4010,7 +4010,7 @@ def test_bare_codex_exec_uses_argv_and_none_stdin(tmp_path):
     invoker = build_subprocess_online_invoker(spec, runner=runner)
     res = invoker({"task_id": "t2", "task_statement": "reply codex"})
     assert recorded["argv"] == ["codex", "exec", "reply codex"]
-    assert recorded["input"] is None
+    assert recorded["input"] in (None, "")
     assert res["gate_passed"] is True
 
 
@@ -4029,7 +4029,7 @@ def test_bare_opencode_uses_registered_free_model(tmp_path):
     invoker = build_subprocess_online_invoker(spec, runner=runner)
     res = invoker({"task_id": "t3", "task_statement": "reply opencode"})
     assert recorded["argv"] == ["opencode", "run", "--model", "opencode/deepseek-v4-flash-free", "reply opencode"]
-    assert recorded["input"] is None
+    assert recorded["input"] in (None, "")
     assert res["gate_passed"] is True
 
 

@@ -972,12 +972,12 @@ def build_subprocess_online_invoker(
                 argv = [argv[0], "--dangerously-skip-permissions", print_flag, stdin]
             else:
                 argv = [argv[0], print_flag, stdin]
-            stdin_input = None
+            stdin_input = ""
             prompt_transport = "argv"
         elif spec.provider == "opencode" and len(argv) == 1:
             model = str(meta.get("default_model", "") or "").strip()
             argv = [argv[0], "run", "--model", model, stdin]
-            stdin_input = None
+            stdin_input = ""
             prompt_transport = "argv"
         else:
             if spec.provider == "agy" and "--dangerously-skip-permissions" not in argv:
