@@ -750,7 +750,12 @@ class SelfHostedTaskService:
             "contract": contract.model_dump(mode="json"),
             "contract_hash": contract.contract_hash,
             "worker_provider": contract.preferred_provider,
-            "worker_selection_mode": str(request.get("worker_selection_mode", "explicit")),
+            "worker_selection_mode": str(
+                request.get(
+                    "worker_selection_mode",
+                    "auto" if str(request.get("worker", "codex")).strip().lower() == "auto" else "explicit",
+                )
+            ),
             "attempt_id": attempt_id,
             "worker_pid": None,
             "worker_pgid": None,
