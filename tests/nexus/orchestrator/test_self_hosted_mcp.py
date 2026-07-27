@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
 
@@ -36,6 +34,9 @@ class FakeService:
     def dispose_candidate(self, task_id, **kwargs):
         return {"task_id": task_id, "status": kwargs["disposition"]}
 
+    def cancel_task(self, task_id):
+        return {"task_id": task_id, "status": "CANCELLED"}
+
 
 def test_tools_list_exposes_governed_self_hosted_surface():
     server = NexusSelfHostedMCPServer(service=FakeService())
@@ -64,6 +65,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_archive_state",
         "nexus_self_hosted_integrate_approved",
         "nexus_self_hosted_dispose_candidate",
+        "nexus_self_hosted_cancel_task",
     } <= names
     specs = {item["name"]: item for item in response["result"]["tools"]}
     submit_properties = specs["nexus_self_hosted_submit_task"]["inputSchema"]["properties"]

@@ -1,9 +1,9 @@
-from dataclasses import dataclass
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import subprocess
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
 from typing import Callable, Dict, Optional
 
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
@@ -64,6 +64,7 @@ class TargetCleanupReceipt:
     decision: str
     blocker: Optional[str]
     performed: bool
+    eligible: bool
 
 
 class WorktreeManager:
@@ -191,17 +192,27 @@ class WorktreeManager:
             if self._worktree_entry(controller_root, target_path) is not None:
                 raise RuntimeError("registered worktree metadata has a different identity")
             target_root.mkdir(parents=True, exist_ok=True)
-            self._run_git(
-                [
-                    "worktree",
-                    "add",
-                    "-b",
-                    target_branch,
-                    str(target_path),
-                    contract.target_base_revision,
-                ],
-                cwd=controller_root,
-            )
+            branch_ref = f"refs/heads/{target_branch}"
+            try:
+                branch_head = self._run_git(["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller_root)
+            except RuntimeError:
+                branch_head = None
+            if branch_head is None:
+                add_args = ["worktree", "add", "-b", target_branch, str(target_path), contract.target_base_revision]
+            else:
+                if branch_head != contract.target_base_revision:
+                    protected = self._run_git(
+                        ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
+                        cwd=controller_root,
+                    ).splitlines()
+                    if branch_head not in protected:
+                        raise RuntimeError("existing task branch candidate lacks durable protection")
+                    self._run_git(
+                        ["update-ref", branch_ref, contract.target_base_revision, branch_head],
+                        cwd=controller_root,
+                    )
+                add_args = ["worktree", "add", str(target_path), target_branch]
+            self._run_git(add_args, cwd=controller_root)
 
         initial_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
         actual_branch = self._run_git(["branch", "--show-current"], cwd=target_path)
@@ -240,7 +251,7 @@ class WorktreeManager:
         actual = self._run_git(["rev-parse", "HEAD"], cwd=target)
         if actual != candidate_commit:
             raise RuntimeError("candidate commit does not match Target HEAD")
-        candidate_ref = f"refs/nexus-candidates/{contract.task_id}"
+        candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate_commit}"
         self._run_git(["update-ref", candidate_ref, candidate_commit], cwd=contract.controller_repo_root)
         if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
             raise RuntimeError("candidate durable ref verification failed")
@@ -253,40 +264,42 @@ class WorktreeManager:
         *,
         candidate_commit: Optional[str] = None,
         candidate_ref: Optional[str] = None,
+        dry_run: bool = False,
     ) -> TargetCleanupReceipt:
         self.validate_lease_identity(contract, lease)
         target = Path(lease.target_worktree).resolve()
         controller = Path(contract.controller_repo_root).resolve()
         if target == controller:
-            return self._cleanup_receipt(contract, lease, "BLOCKED_MAIN_OR_CONTROLLER", "Target is controller", False)
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is controller", False, False)
         entry = self._worktree_entry(controller, target)
         if not target.exists() and entry is None:
-            return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False)
+            return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False, True)
         if entry is None:
-            return self._cleanup_receipt(contract, lease, "BLOCKED_NOT_REGISTERED", "Target is not a registered worktree", False)
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is not a registered worktree", False, False)
         if self.process_checker(target):
-            return self._cleanup_receipt(contract, lease, "BLOCKED_ACTIVE_PROCESS", "active process uses Target", False)
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
         status = self._status_bytes(target)
         if status:
-            return self._cleanup_receipt(contract, lease, "RETAINED_FOR_REVIEW", "dirty target has no durable snapshot", False)
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "dirty target has no durable snapshot", False, False)
         head = self._run_git(["rev-parse", "HEAD"], cwd=target)
         if candidate_commit:
             if head != candidate_commit or not candidate_ref:
-                return self._cleanup_receipt(contract, lease, "BLOCKED_MISSING_DURABLE_REF", "candidate ref is missing or mismatched", False)
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", "candidate ref is missing or mismatched", False, False)
             try:
                 protected = self._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller)
             except RuntimeError:
                 protected = ""
             if protected != candidate_commit:
-                return self._cleanup_receipt(contract, lease, "BLOCKED_MISSING_DURABLE_REF", "candidate ref is missing or mismatched", False)
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", "candidate ref is missing or mismatched", False, False)
         elif head != lease.initial_head:
-            return self._cleanup_receipt(contract, lease, "RETAINED_FOR_REVIEW", "Target HEAD changed without durable snapshot", False)
-        self._run_git(["worktree", "remove", "--", str(target)], cwd=controller)
-        self._run_git(["worktree", "prune"], cwd=controller)
-        return self._cleanup_receipt(contract, lease, "TARGET_CLEANED", None, True)
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target HEAD changed without durable snapshot", False, False)
+        if not dry_run:
+            self._run_git(["worktree", "remove", "--", str(target)], cwd=controller)
+            self._run_git(["worktree", "prune"], cwd=controller)
+        return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
 
     @staticmethod
-    def _cleanup_receipt(contract, lease, decision, blocker, performed):
+    def _cleanup_receipt(contract, lease, decision, blocker, performed, eligible):
         return TargetCleanupReceipt(
             schema="nexus.target_cleanup_receipt.v1",
             task_id=contract.task_id,
@@ -294,6 +307,7 @@ class WorktreeManager:
             decision=decision,
             blocker=blocker,
             performed=performed,
+            eligible=eligible,
         )
 
     @staticmethod

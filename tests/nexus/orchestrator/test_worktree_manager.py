@@ -1,15 +1,17 @@
-import pytest
-import subprocess
-import shutil
-import os
 import hashlib
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
+
 from nexus.orchestrator.task_contract import (
     ApprovalStatus,
     MutationMode,
     SelfHostedTaskContract,
 )
 from nexus.orchestrator.worktree_manager import WorktreeManager
+
 
 @pytest.fixture
 def temp_git_repo(tmp_path):
@@ -353,7 +355,7 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     candidate = _git(target, "rev-parse", "HEAD")
 
     blocked = manager.cleanup_terminal_target(contract, lease, candidate_commit=candidate)
-    assert blocked.decision == "BLOCKED_MISSING_DURABLE_REF"
+    assert blocked.decision == "BLOCKED_BY_MISSING_REF"
     assert target.exists()
 
     candidate_ref = f"refs/nexus-candidates/{contract.task_id}"
@@ -361,7 +363,7 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     removed = manager.cleanup_terminal_target(
         contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
     )
-    assert removed.decision == "TARGET_CLEANED"
+    assert removed.decision == "REMOVED"
     assert not target.exists()
     assert manager.cleanup_terminal_target(
         contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
@@ -374,7 +376,64 @@ def test_dirty_unique_target_is_retained_for_review(sh2_repo):
 
     receipt = manager.cleanup_terminal_target(contract, lease)
 
-    assert receipt.decision == "RETAINED_FOR_REVIEW"
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
     assert receipt.blocker == "dirty target has no durable snapshot"
     assert target.exists()
+
+
+def test_active_process_blocks_terminal_cleanup(sh2_repo):
+    contract = _contract(sh2_repo)
+    manager = WorktreeManager(
+        root_dir=str(sh2_repo["target_root"]),
+        process_checker=lambda path: True,
+    )
+    lease = manager.create_lease(contract)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+
+    assert receipt.decision == "BLOCKED_BY_PROCESS"
+    assert Path(lease.target_worktree).exists()
+
+
+def test_clean_terminal_target_is_removed_and_branch_can_be_reused(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+
+    preview = manager.cleanup_terminal_target(contract, lease, dry_run=True)
+    assert preview.decision == "REMOVED"
+    assert preview.performed is False
+    assert target.exists()
+
+    applied = manager.cleanup_terminal_target(contract, lease)
+    assert applied.decision == "REMOVED"
+    assert applied.performed is True
+    assert not target.exists()
+
+    retried = manager.create_lease(contract)
+    assert Path(retried.target_worktree).exists()
+    assert retried.initial_head == contract.target_base_revision
+
+
+def test_candidate_ref_is_immutable_per_candidate_commit(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+
+    candidate_ref = manager.protect_candidate(contract, lease, candidate)
+
+    assert candidate_ref.endswith(candidate)
+    assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
+
+
+def test_five_clean_attempts_do_not_grow_worktrees(sh2_repo):
+    contract = _contract(sh2_repo, task_id="stable-five")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    baseline = len(manager._registered_worktrees(sh2_repo["controller"]))
+
+    for _ in range(5):
+        lease = manager.create_lease(contract)
+        assert manager.cleanup_terminal_target(contract, lease).decision == "REMOVED"
+
+    assert len(manager._registered_worktrees(sh2_repo["controller"])) == baseline
 # integrity-seal: 1776512137
