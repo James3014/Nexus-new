@@ -203,6 +203,15 @@ class SelfHostedTaskService:
             raise ValueError(
                 "worker must be one of: " + ", ".join(SUPPORTED_WORKER_PROVIDERS)
             )
+        fallback_worker = request.get("fallback_worker", request.get("fallback_provider"))
+        if fallback_worker is not None:
+            fallback_worker = str(fallback_worker).strip().lower()
+            if fallback_worker not in SUPPORTED_WORKER_PROVIDERS:
+                raise ValueError(
+                    "fallback_worker must be one of: " + ", ".join(SUPPORTED_WORKER_PROVIDERS)
+                )
+            if fallback_worker == worker:
+                raise ValueError("fallback_worker must differ from worker")
         what = str(request.get("what", "")).strip()
         why = str(request.get("why", "")).strip()
         if not what or not why:
@@ -245,8 +254,8 @@ class SelfHostedTaskService:
             verifier_commands=verifier_commands,
             protected_contracts=protected_contracts,
             preferred_provider=worker,
-            fallback_provider=None,
-            maximum_provider_calls=1,
+            fallback_provider=fallback_worker,
+            maximum_provider_calls=2 if fallback_worker else 1,
             maximum_replans=0,
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,

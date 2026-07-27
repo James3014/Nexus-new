@@ -137,6 +137,9 @@ def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
         service.build_contract(_request(tmp_path, prompt="run arbitrary shell"))
     contract = service.build_contract(_request(tmp_path, worker="gemini"))
     assert contract.preferred_provider == "gemini"
+    escalated = service.build_contract(_request(tmp_path, worker="codex", fallback_worker="opencode"))
+    assert escalated.fallback_provider == "opencode"
+    assert escalated.maximum_provider_calls == 2
     with pytest.raises(ValueError, match="one of"):
         service.build_contract(_request(tmp_path, worker="unknown"))
 
