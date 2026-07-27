@@ -33,8 +33,6 @@ class WorkerEscalationPolicy:
             )
         if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
             return EscalationDecision("VERIFY", None, "worker execution completed; verification required")
-        if latest.outcome == WorkerOutcome.PROVEN.value and latest.evidence_complete:
-            return EscalationDecision("VERIFY", None, "worker produced complete proof")
         attempted = {attempt.provider for attempt in attempts}
         next_provider = next(
             (provider for provider in (self.provider_order or (self.strong_provider,)) if provider not in attempted),

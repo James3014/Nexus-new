@@ -413,3 +413,123 @@ def test_deterministic_resolver_timeout_is_incomplete():
 
     res = resolve_attempt(exec_receipt, candidate, verified)
     assert res.verdict == AttemptResolutionVerdict.INCOMPLETE.value
+    assert res.escalation_allowed is True
+
+
+def test_deterministic_resolver_carries_identity_and_candidate_hash():
+    from types import SimpleNamespace
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    exec_receipt = WorkerExecutionReceipt(
+        provider="gemini",
+        task_id="task-xyz-789",
+        target_worktree="/tmp",
+        worker_status="COMPLETED",
+        outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+        exit_code=0,
+        executable_identity="/bin/gemini",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=10,
+        process_group_id=None,
+        process_group_killed=False,
+        timed_out=False,
+        provider_calls=1,
+        evidence_complete=True,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    candidate = SimpleNamespace(
+        changed_files=["nexus.py"],
+        untracked_files=[],
+        deleted_files=[],
+        candidate_state_hash="cand-hash-1234567890abcdef",
+    )
+    verified = SimpleNamespace(
+        verified=True,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        failure_reasons=[],
+    )
+
+    res = resolve_attempt(exec_receipt, candidate, verified)
+    assert res.task_id == "task-xyz-789"
+    assert res.provider == "gemini"
+    assert res.execution_outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert res.candidate_state_hash == "cand-hash-1234567890abcdef"
+    assert res.verdict == AttemptResolutionVerdict.PROVEN.value
+    assert res.escalation_allowed is False
+
+
+def test_escalation_allowed_is_true_only_for_incomplete():
+    from types import SimpleNamespace
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    exec_incomplete = WorkerExecutionReceipt(
+        provider="codex",
+        task_id="t-inc",
+        target_worktree="/tmp",
+        worker_status="TIMED_OUT",
+        outcome=WorkerOutcome.INCOMPLETE.value,
+        exit_code=None,
+        executable_identity="/bin/codex",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=1,
+        process_group_id=None,
+        process_group_killed=False,
+        timed_out=True,
+        provider_calls=1,
+        evidence_complete=False,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    exec_failed = WorkerExecutionReceipt(
+        provider="codex",
+        task_id="t-fail",
+        target_worktree="/tmp",
+        worker_status="FAILED",
+        outcome=WorkerOutcome.FAILED.value,
+        exit_code=1,
+        executable_identity="/bin/codex",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=1,
+        process_group_id=None,
+        process_group_killed=False,
+        timed_out=False,
+        provider_calls=1,
+        evidence_complete=True,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    candidate = SimpleNamespace(changed_files=["file.py"], untracked_files=[], deleted_files=[], candidate_state_hash="hash")
+    verified_fail = SimpleNamespace(
+        verified=False,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=False,
+        failure_reasons=["failed"],
+    )
+
+    res_inc = resolve_attempt(exec_incomplete, candidate, verified_fail)
+    assert res_inc.verdict == AttemptResolutionVerdict.INCOMPLETE.value
+    assert res_inc.escalation_allowed is True
+
+    res_fail = resolve_attempt(exec_failed, candidate, verified_fail)
+    assert res_fail.verdict == AttemptResolutionVerdict.FAILED.value
+    assert res_fail.escalation_allowed is False

@@ -25,6 +25,10 @@ class AttemptResolutionVerdict(str, Enum):
 
 @dataclass(frozen=True)
 class AttemptResolutionReceipt:
+    task_id: str
+    provider: str
+    execution_outcome: str
+    candidate_state_hash: str
     verdict: str
     candidate_non_empty: bool
     execution_completed: bool
@@ -35,6 +39,7 @@ class AttemptResolutionReceipt:
     controller_gate_passed: bool
     protected_contract_gate_passed: bool
     verifier_gate_passed: bool
+    escalation_allowed: bool
     failure_reasons: tuple[str, ...] = ()
 
 
@@ -132,7 +137,13 @@ def resolve_attempt(
     else:
         verdict = AttemptResolutionVerdict.FAILED.value
 
+    escalation_allowed = (verdict == AttemptResolutionVerdict.INCOMPLETE.value)
+
     return AttemptResolutionReceipt(
+        task_id=str(getattr(execution, "task_id", "")),
+        provider=str(getattr(execution, "provider", "")),
+        execution_outcome=str(getattr(execution, "outcome", "")),
+        candidate_state_hash=str(getattr(candidate, "candidate_state_hash", "")),
         verdict=verdict,
         candidate_non_empty=candidate_non_empty,
         execution_completed=execution_completed,
@@ -143,6 +154,7 @@ def resolve_attempt(
         controller_gate_passed=controller_gate_passed,
         protected_contract_gate_passed=protected_contract_gate_passed,
         verifier_gate_passed=verifier_gate_passed,
+        escalation_allowed=escalation_allowed,
         failure_reasons=tuple(reasons),
     )
 

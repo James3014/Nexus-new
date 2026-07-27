@@ -41,7 +41,7 @@ def test_strong_worker_must_prove_complete_evidence():
     decision = policy.decide(
         [
             _receipt("cheap", WorkerOutcome.INCOMPLETE.value),
-            _receipt("strong", WorkerOutcome.PROVEN.value, evidence_complete=False),
+            _receipt("strong", WorkerOutcome.EXECUTION_COMPLETED.value, evidence_complete=False),
         ]
     )
 
@@ -70,3 +70,16 @@ def test_execution_completed_returns_action_verify():
     assert decision.action == "VERIFY"
     assert decision.next_provider is None
 
+
+def test_legacy_proven_outcome_fails_closed_in_policy():
+    policy = WorkerEscalationPolicy("cheap", "strong")
+
+    decision = policy.decide(
+        [
+            _receipt("cheap", WorkerOutcome.INCOMPLETE.value),
+            _receipt("strong", WorkerOutcome.PROVEN.value, evidence_complete=True),
+        ]
+    )
+
+    assert decision.action == "BLOCK"
+    assert decision.next_provider is None

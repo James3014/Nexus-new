@@ -460,3 +460,95 @@ def test_empty_candidate_fails_closed_and_blocks_candidate_commit(tmp_path, monk
     assert len(verified_checkpoints) == 1
     assert verified_checkpoints[0].verdict == "FAILED"
     assert verified_checkpoints[0].candidate_non_empty is False
+
+
+def test_legacy_proven_outcome_fails_closed_in_service(tmp_path, monkeypatch):
+    class FakeAdapter:
+        provider = "codex"
+
+        def preflight(self):
+            return WorkerPreflight(
+                provider="codex",
+                executable="/bin/codex",
+                executable_available=True,
+                authorized=True,
+                implementation_status="IMPLEMENTED",
+                ready=True,
+                reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, **options):
+            return WorkerExecutionReceipt(
+                provider="codex",
+                task_id=contract.task_id,
+                target_worktree=lease.target_worktree,
+                worker_status="COMPLETED",
+                outcome=WorkerOutcome.PROVEN.value,
+                exit_code=0,
+                executable_identity="/bin/codex",
+                argv=("codex",),
+                stdout_sha256="a" * 64,
+                stderr_sha256="b" * 64,
+                wall_time_ms=1,
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=1,
+                evidence_complete=True,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+            )
+
+    registry = WorkerRegistry({provider: FakeAdapter() for provider in ("codex", "gemini", "opencode", "mimo", "ollama")})
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False)
+    request = _request(tmp_path, worker="codex", task_id="legacy-proven-task")
+    contract = service.build_contract(request)
+    checkpoint_history = []
+    state = {"status": "SUBMITTED", "attempt_id": "a" * 32}
+    monkeypatch.setattr(service, "_read_state", lambda task_id: state)
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            pass
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            pass
+
+        def prepare_task(self, contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1",
+                lease_id="lease-1",
+                task_id=contract.task_id,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"),
+                target_branch="branch",
+                initial_head="b" * 40,
+                initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64,
+                created_from_exact_revision=True,
+                commit_created=False,
+                merge_performed=False,
+            )
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", FakeController)
+
+    def update(status, values):
+        state["status"] = status
+        state.update(values)
+        checkpoint_history.append((status, values.get("attempt_resolution")))
+
+    with pytest.raises(RuntimeError):
+        service._run_default_resumable(
+            contract,
+            request,
+            update,
+            task_id=contract.task_id,
+            attempt_id=state["attempt_id"],
+        )
+
+    verified_checkpoints = [v for s, v in checkpoint_history if s == "VERIFIED"]
+    assert len(verified_checkpoints) == 0

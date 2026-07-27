@@ -492,7 +492,7 @@ class SelfHostedTaskService:
             latest = attempts[-1] if attempts else self._receipt_from_state(execution)
             if latest is None:
                 raise RuntimeError("worker execution receipt is missing common outcome evidence")
-            if latest.outcome in (WorkerOutcome.EXECUTION_COMPLETED.value, WorkerOutcome.PROVEN.value) and latest.evidence_complete:
+            if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
                 break
             decision = policy.decide(attempts) if policy else None
             if decision is not None and decision.action in ("VERIFY", "ACCEPT"):
