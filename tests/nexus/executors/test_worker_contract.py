@@ -86,6 +86,18 @@ def test_agy_adapter_requires_executable(monkeypatch):
     assert preflight.reason.endswith("executable not found: " + str(Path.home() / ".local/bin/agy"))
 
 
+@pytest.mark.parametrize(
+    ("timeout_seconds", "expected"),
+    (
+        (42.0, "42s"),
+        (42.5, "42.5s"),
+        (1200.0, "1200s"),
+    ),
+)
+def test_agy_timeout_arg_serializes_go_duration_seconds(timeout_seconds, expected):
+    assert AgyWorkerAdapter._timeout_arg(timeout_seconds) == expected
+
+
 def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(monkeypatch, tmp_path):
     target = tmp_path / "target"
     target.mkdir()
@@ -141,7 +153,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
         "--model",
         "gemini-3.6-flash-medium",
         "--print-timeout",
-        "42",
+        "42s",
         "--print",
         prompt,
     )

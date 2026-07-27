@@ -219,7 +219,9 @@ class AgyWorkerAdapter:
 
     @staticmethod
     def _timeout_arg(timeout_seconds: float) -> str:
-        return str(int(timeout_seconds)) if float(timeout_seconds).is_integer() else str(timeout_seconds)
+        seconds = float(timeout_seconds)
+        value = str(int(seconds)) if seconds.is_integer() else str(seconds)
+        return f"{value}s"
 
     def preflight(self) -> WorkerPreflight:
         executable = self._configured_executable()
