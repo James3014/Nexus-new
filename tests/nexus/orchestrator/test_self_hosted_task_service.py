@@ -281,7 +281,7 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
             )
 
         def collect_candidate(self, contract, lease):
-            return SimpleNamespace(candidate_state_hash="c" * 64)
+            return SimpleNamespace(candidate_state_hash="c" * 64, changed_files=["nexus_canary.txt"])
 
     class FakeVerifier:
         def __init__(self, manager):

@@ -533,3 +533,46 @@ def test_escalation_allowed_is_true_only_for_incomplete():
     res_fail = resolve_attempt(exec_failed, candidate, verified_fail)
     assert res_fail.verdict == AttemptResolutionVerdict.FAILED.value
     assert res_fail.escalation_allowed is False
+
+
+def test_deterministic_resolver_unknown_candidate_shape_fails_closed():
+    from types import SimpleNamespace
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    exec_receipt = WorkerExecutionReceipt(
+        provider="codex",
+        task_id="t-unknown",
+        target_worktree="/tmp",
+        worker_status="COMPLETED",
+        outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+        exit_code=0,
+        executable_identity="/bin/codex",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=1,
+        process_group_id=None,
+        process_group_killed=False,
+        timed_out=False,
+        provider_calls=1,
+        evidence_complete=True,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    candidate = SimpleNamespace(candidate_state_hash="unknown-shape-hash")
+    verified = SimpleNamespace(
+        verified=True,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        failure_reasons=[],
+    )
+
+    res = resolve_attempt(exec_receipt, candidate, verified)
+    assert res.verdict == AttemptResolutionVerdict.FAILED.value
+    assert res.candidate_non_empty is False
+    assert "candidate diff is empty" in res.failure_reasons

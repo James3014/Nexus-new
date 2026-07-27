@@ -57,7 +57,8 @@ def _is_candidate_non_empty(candidate: Any) -> bool:
             or (untracked and len(untracked) > 0)
             or (deleted and len(deleted) > 0)
         )
-    return True
+    return False
+
 
 
 def resolve_attempt(
