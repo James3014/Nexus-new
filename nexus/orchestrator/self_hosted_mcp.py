@@ -124,6 +124,11 @@ class NexusSelfHostedMCPServer:
                 "inputSchema": {"type": "object", "required": ["campaign_id"], "properties": {"campaign_id": {"type": "string"}}},
             },
             {
+                "name": "nexus_self_hosted_get_refactor_campaign",
+                "description": "Read durable campaign wave, checkpoint, and rollback state.",
+                "inputSchema": {"type": "object", "required": ["campaign_id"], "properties": {"campaign_id": {"type": "string"}}},
+            },
+            {
                 "name": "nexus_self_hosted_rollback_refactor_campaign",
                 "description": "Rollback an integration branch to a durable wave checkpoint.",
                 "inputSchema": {"type": "object", "required": ["campaign_id", "wave_id"], "properties": {"campaign_id": {"type": "string"}, "wave_id": {"type": "string"}}},
@@ -244,6 +249,8 @@ class NexusSelfHostedMCPServer:
             )
         if name == "nexus_self_hosted_advance_refactor_campaign":
             return self.campaigns.advance(str(arguments["campaign_id"]))
+        if name == "nexus_self_hosted_get_refactor_campaign":
+            return self.campaigns.get(str(arguments["campaign_id"]))
         if name == "nexus_self_hosted_rollback_refactor_campaign":
             return self.campaigns.rollback(
                 str(arguments["campaign_id"]),

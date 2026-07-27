@@ -35,6 +35,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_integrate_competition",
         "nexus_self_hosted_create_refactor_campaign",
         "nexus_self_hosted_advance_refactor_campaign",
+        "nexus_self_hosted_get_refactor_campaign",
         "nexus_self_hosted_rollback_refactor_campaign",
         "nexus_self_hosted_push_competition",
         "nexus_self_hosted_get_task",
