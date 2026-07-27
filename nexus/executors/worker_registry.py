@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 import os
+import subprocess
 from typing import Any, Optional
 
 from nexus.executors.codex_executor import CodexCliExecutor
-from nexus.executors.cli_worker import CliWorkerStatus
+from nexus.executors.cli_worker import CliWorkerStatus, CliWorkerRequest, run_cli_worker
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerAdapter,
@@ -187,6 +188,113 @@ class DirectCliWorkerAdapter:
         )
 
 
+class OllamaPatchWorkerAdapter:
+    """Local Ollama worker using a governed unified-diff output contract."""
+
+    provider = "ollama"
+
+    def __init__(self, executable: str = "ollama", model_env: str = "NEXUS_OLLAMA_WORKER_MODEL"):
+        self.executable = executable
+        self.model_env = model_env
+
+    def preflight(self) -> WorkerPreflight:
+        resolved = shutil.which(self.executable)
+        authorized = os.getenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "0") == "1"
+        if not authorized:
+            reason = "NEXUS_LOCAL_MODEL_CALL_ALLOWED=1 is required"
+        elif resolved is None:
+            reason = f"executable not found: {self.executable}"
+        else:
+            reason = "ready"
+        return WorkerPreflight(
+            provider=self.provider,
+            executable=str(Path(resolved).resolve()) if resolved else None,
+            executable_available=resolved is not None,
+            authorized=authorized,
+            implementation_status="IMPLEMENTED",
+            ready=resolved is not None and authorized,
+            reason=reason,
+        )
+
+    @staticmethod
+    def _extract_patch(stdout: bytes) -> Optional[bytes]:
+        marker = b"diff --git "
+        index = stdout.find(marker)
+        if index < 0:
+            return None
+        patch = stdout[index:]
+        return patch if b"\n" in patch else None
+
+    def invoke(
+        self,
+        contract: Any,
+        lease: Any,
+        *,
+        prompt: str,
+        timeout_seconds: Optional[float] = None,
+        on_process_group: Any = None,
+    ) -> WorkerExecutionReceipt:
+        preflight = self.preflight()
+        if not preflight.ready:
+            raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
+        model = os.getenv(self.model_env, "qwen2.5-coder:7b")
+        request = CliWorkerRequest(
+            executable=self.executable,
+            argv=("run", model, prompt + "\nReturn only a unified git diff beginning with diff --git."),
+            cwd=str(Path(lease.target_worktree).resolve()),
+            timeout_seconds=timeout_seconds or 900.0,
+        )
+        result = run_cli_worker(request, on_process_group=on_process_group)
+        patch = self._extract_patch(result.stdout)
+        applied = False
+        failure_reason = None
+        if result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0 and patch:
+            target = str(Path(lease.target_worktree).resolve())
+            check = subprocess.run(
+                ["git", "apply", "--check", "--binary", "--whitespace=nowarn", "-"],
+                cwd=target,
+                input=patch,
+                capture_output=True,
+            )
+            if check.returncode == 0:
+                applied_result = subprocess.run(
+                    ["git", "apply", "--binary", "--whitespace=nowarn", "-"],
+                    cwd=target,
+                    input=patch,
+                    capture_output=True,
+                )
+                applied = applied_result.returncode == 0
+                if not applied:
+                    failure_reason = applied_result.stderr.decode("utf-8", errors="replace")
+            else:
+                failure_reason = check.stderr.decode("utf-8", errors="replace")
+        else:
+            failure_reason = "Ollama did not return a usable unified diff"
+        outcome = WorkerOutcome.PROVEN if applied else WorkerOutcome.FAILED
+        return WorkerExecutionReceipt(
+            provider=self.provider,
+            task_id=contract.task_id,
+            target_worktree=str(Path(lease.target_worktree).resolve()),
+            worker_status=result.status.value,
+            outcome=outcome.value,
+            exit_code=result.exit_code,
+            executable_identity=result.executable_identity,
+            argv=result.argv,
+            stdout_sha256=result.stdout_sha256,
+            stderr_sha256=result.stderr_sha256,
+            wall_time_ms=result.wall_time_ms,
+            process_group_id=result.process_group_id,
+            process_group_killed=result.process_group_killed,
+            timed_out=result.timed_out,
+            provider_calls=1,
+            evidence_complete=applied,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+            failure_reason=None if applied else failure_reason,
+        )
+
+
 def _gemini_args(prompt: str, model: str) -> tuple[str, ...]:
     return ("--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json")
 
@@ -217,7 +325,7 @@ class WorkerRegistry:
                 "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
                 "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
                 "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "mimo", _mimo_args),
-                "ollama": UnimplementedWorkerAdapter("ollama", "ollama"),
+                "ollama": OllamaPatchWorkerAdapter(),
             }
         )
 

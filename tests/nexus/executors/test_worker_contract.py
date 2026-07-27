@@ -9,7 +9,8 @@ from nexus.executors.worker_contract import (
     WorkerOutcome,
     WorkerProviderUnavailable,
 )
-from nexus.executors.worker_registry import CodexWorkerAdapter, WorkerRegistry
+from nexus.executors.cli_worker import CliWorkerResult, CliWorkerStatus
+from nexus.executors.worker_registry import CodexWorkerAdapter, OllamaPatchWorkerAdapter, WorkerRegistry
 
 
 def test_registry_recognizes_all_governed_provider_names():
@@ -70,3 +71,39 @@ def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path):
     assert receipt.commit_created is False
     assert receipt.merge_performed is False
     assert receipt.push_performed is False
+
+
+def test_ollama_adapter_applies_only_a_validated_unified_diff(tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    target.mkdir()
+    subprocess = __import__("subprocess")
+    subprocess.run(["git", "init", "-q"], cwd=target, check=True)
+    (target / "file.txt").write_text("before\n")
+    patch = b"diff --git a/file.txt b/file.txt\nindex 8f3f5f0..9b5f0b1 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-before\n+after\n"
+
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/ollama")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=patch,
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        ),
+    )
+
+    receipt = OllamaPatchWorkerAdapter(executable="ollama").invoke(
+        type("Contract", (), {"task_id": "ollama-task"})(),
+        type("Lease", (), {"target_worktree": str(target)})(),
+        prompt="change file",
+    )
+
+    assert receipt.outcome == "PROVEN"
+    assert receipt.evidence_complete is True
+    assert (target / "file.txt").read_text() == "after\n"
