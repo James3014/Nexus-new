@@ -188,6 +188,127 @@ class DirectCliWorkerAdapter:
         )
 
 
+class AgyWorkerAdapter:
+    """Governed Antigravity CLI adapter with explicit external-runtime gates."""
+
+    provider = "agy"
+
+    def __init__(
+        self,
+        executable_env: str = "NEXUS_AGY_EXECUTABLE",
+        project_id_env: str = "NEXUS_AGY_PROJECT_ID",
+        model_env: str = "NEXUS_AGY_WORKER_MODEL",
+        default_model: str = "gemini-3.6-flash-medium",
+    ):
+        self.executable_env = executable_env
+        self.project_id_env = project_id_env
+        self.model_env = model_env
+        self.default_model = default_model
+
+    def _configured_executable(self) -> str:
+        configured = os.getenv(self.executable_env, "").strip()
+        if configured:
+            return str(Path(configured).expanduser())
+        return str(Path.home() / ".local/bin/agy")
+
+    def _project_id(self) -> str:
+        return os.getenv(self.project_id_env, "").strip()
+
+    def _model(self) -> str:
+        return os.getenv(self.model_env, self.default_model).strip() or self.default_model
+
+    @staticmethod
+    def _timeout_arg(timeout_seconds: float) -> str:
+        return str(int(timeout_seconds)) if float(timeout_seconds).is_integer() else str(timeout_seconds)
+
+    def preflight(self) -> WorkerPreflight:
+        executable = self._configured_executable()
+        resolved = shutil.which(executable)
+        authorized = os.getenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "0") == "1"
+        project_id = self._project_id()
+        if not authorized:
+            reason = "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1 is required"
+        elif not project_id:
+            reason = f"{self.project_id_env} is required"
+        elif resolved is None:
+            reason = f"executable not found: {executable}"
+        else:
+            reason = "ready"
+        return WorkerPreflight(
+            provider=self.provider,
+            executable=str(Path(resolved).resolve()) if resolved else None,
+            executable_available=resolved is not None,
+            authorized=authorized,
+            implementation_status="IMPLEMENTED",
+            ready=resolved is not None and authorized and bool(project_id),
+            reason=reason,
+        )
+
+    def invoke(
+        self,
+        contract: Any,
+        lease: Any,
+        *,
+        prompt: str,
+        timeout_seconds: Optional[float] = None,
+        on_process_group: Any = None,
+    ) -> WorkerExecutionReceipt:
+        preflight = self.preflight()
+        if not preflight.ready:
+            raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
+        target = str(Path(lease.target_worktree).resolve())
+        timeout = timeout_seconds or 900.0
+        request = CliWorkerRequest(
+            executable=preflight.executable or self._configured_executable(),
+            argv=(
+                "--project",
+                self._project_id(),
+                "--add-dir",
+                target,
+                "--dangerously-skip-permissions",
+                "--print",
+                "--mode",
+                "accept-edits",
+                "--model",
+                self._model(),
+                "--print-timeout",
+                self._timeout_arg(timeout),
+                prompt,
+            ),
+            cwd=target,
+            timeout_seconds=timeout,
+        )
+        result = run_cli_worker(request, on_process_group=on_process_group)
+        if result.status is CliWorkerStatus.TIMED_OUT:
+            outcome = WorkerOutcome.INCOMPLETE
+        elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
+            outcome = WorkerOutcome.FAILED
+        else:
+            outcome = WorkerOutcome.PROVEN
+        return WorkerExecutionReceipt(
+            provider=self.provider,
+            task_id=contract.task_id,
+            target_worktree=target,
+            worker_status=result.status.value,
+            outcome=outcome.value,
+            exit_code=result.exit_code,
+            executable_identity=result.executable_identity,
+            argv=result.argv,
+            stdout_sha256=result.stdout_sha256,
+            stderr_sha256=result.stderr_sha256,
+            wall_time_ms=result.wall_time_ms,
+            process_group_id=result.process_group_id,
+            process_group_killed=result.process_group_killed,
+            timed_out=result.timed_out,
+            provider_calls=1,
+            evidence_complete=outcome == WorkerOutcome.PROVEN,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+            failure_reason=None if outcome == WorkerOutcome.PROVEN else f"{self.provider} execution did not prove success",
+        )
+
+
 class OllamaPatchWorkerAdapter:
     """Local Ollama worker using a governed unified-diff output contract."""
 
@@ -309,10 +430,14 @@ def _mimo_args(prompt: str, model: str) -> tuple[str, ...]:
 
 class WorkerRegistry:
     def __init__(self, adapters: dict[str, WorkerAdapter]):
+        adapters = dict(adapters)
+        missing = set(SUPPORTED_WORKER_PROVIDERS) - set(adapters)
+        if missing == {"agy"}:
+            adapters["agy"] = AgyWorkerAdapter()
+            missing = set()
         unknown = set(adapters) - set(SUPPORTED_WORKER_PROVIDERS)
         if unknown:
             raise ValueError(f"unknown worker providers: {sorted(unknown)}")
-        missing = set(SUPPORTED_WORKER_PROVIDERS) - set(adapters)
         if missing:
             raise ValueError(f"missing worker providers: {sorted(missing)}")
         self._adapters = dict(adapters)
@@ -323,6 +448,7 @@ class WorkerRegistry:
             {
                 "codex": CodexWorkerAdapter(),
                 "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
+                "agy": AgyWorkerAdapter(),
                 "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
                 "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "mimo", _mimo_args),
                 "ollama": OllamaPatchWorkerAdapter(),

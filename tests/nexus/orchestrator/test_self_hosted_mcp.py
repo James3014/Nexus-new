@@ -45,6 +45,15 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_resume_task",
         "nexus_self_hosted_approve_promotion",
     } <= names
+    specs = {item["name"]: item for item in response["result"]["tools"]}
+    submit_properties = specs["nexus_self_hosted_submit_task"]["inputSchema"]["properties"]
+    compete_properties = specs["nexus_self_hosted_compete_task"]["inputSchema"]["properties"]
+    campaign_properties = specs["nexus_self_hosted_create_refactor_campaign"]["inputSchema"]["properties"]
+    assert "agy" in submit_properties["worker"]["enum"]
+    assert "agy" in submit_properties["worker_order"]["items"]["enum"]
+    assert "agy" in submit_properties["fallback_worker"]["enum"]
+    assert "agy" in compete_properties["workers"]["items"]["enum"]
+    assert "agy" in campaign_properties["workers"]["items"]["enum"]
 
 
 def test_tools_call_returns_structured_json_result():

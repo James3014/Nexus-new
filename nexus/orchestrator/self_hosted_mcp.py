@@ -7,9 +7,13 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
 from nexus.orchestrator.refactor_campaign import RefactorCampaignCoordinator, RefactorWave
+
+
+WORKER_ENUM = list(SUPPORTED_WORKER_PROVIDERS)
 
 
 class NexusSelfHostedMCPServer:
@@ -34,9 +38,9 @@ class NexusSelfHostedMCPServer:
             "forbidden_files": {"type": "array", "items": {"type": "string"}},
             "verifier_commands": {"type": "array", "items": {"type": "string"}},
             "protected_contracts": {"type": "array", "items": {"type": "string"}},
-            "worker": {"type": "string", "enum": ["auto", "codex", "gemini", "opencode", "mimo", "ollama"]},
-            "worker_order": {"type": "array", "items": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]}, "uniqueItems": True},
-            "fallback_worker": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
+            "worker": {"type": "string", "enum": ["auto", *WORKER_ENUM]},
+            "worker_order": {"type": "array", "items": {"type": "string", "enum": WORKER_ENUM}, "uniqueItems": True},
+            "fallback_worker": {"type": "string", "enum": WORKER_ENUM},
         }
         return [
             {
@@ -73,7 +77,7 @@ class NexusSelfHostedMCPServer:
                         "competition_id": {"type": "string"},
                         "workers": {
                             "type": "array",
-                            "items": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
+                            "items": {"type": "string", "enum": WORKER_ENUM},
                             "minItems": 2,
                             "uniqueItems": True,
                         },
@@ -112,7 +116,7 @@ class NexusSelfHostedMCPServer:
                     "properties": {
                         "campaign_id": {"type": "string"},
                         "base_request": {"type": "object"},
-                        "workers": {"type": "array", "items": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]}, "minItems": 2, "uniqueItems": True},
+                        "workers": {"type": "array", "items": {"type": "string", "enum": WORKER_ENUM}, "minItems": 2, "uniqueItems": True},
                         "waves": {"type": "array", "items": {"type": "object"}, "minItems": 1},
                         "max_scope_entries": {"type": "integer", "minimum": 1, "default": 100},
                     },
