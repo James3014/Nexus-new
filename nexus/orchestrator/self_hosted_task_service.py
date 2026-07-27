@@ -21,8 +21,11 @@ from uuid import uuid4
 
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
+    AttemptResolutionReceipt,
+    AttemptResolutionVerdict,
     WorkerExecutionReceipt,
     WorkerOutcome,
+    resolve_attempt,
 )
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.candidate_commit import CandidateCommitter
@@ -489,12 +492,14 @@ class SelfHostedTaskService:
             latest = attempts[-1] if attempts else self._receipt_from_state(execution)
             if latest is None:
                 raise RuntimeError("worker execution receipt is missing common outcome evidence")
-            if latest.outcome == WorkerOutcome.PROVEN.value and latest.evidence_complete:
+            if latest.outcome in (WorkerOutcome.EXECUTION_COMPLETED.value, WorkerOutcome.PROVEN.value) and latest.evidence_complete:
                 break
             decision = policy.decide(attempts) if policy else None
+            if decision is not None and decision.action in ("VERIFY", "ACCEPT"):
+                break
             if decision is None or decision.action != "ESCALATE" or not decision.next_provider:
                 raise RuntimeError(
-                    latest.failure_reason or "worker execution did not prove success"
+                    latest.failure_reason or f"worker execution did not complete: {latest.outcome}"
                 )
             next_provider = self._next_ready_provider(policy, attempts)
             if not next_provider:
@@ -538,14 +543,26 @@ class SelfHostedTaskService:
             candidate,
             protected_paths=request.get("protected_paths") or {},
         )
-        if not verified.verified:
-            raise RuntimeError("candidate verification failed: " + ",".join(verified.failure_reasons))
-        update("VERIFIED", {"verified_receipt": verified})
+        latest_execution = attempts[-1] if attempts else self._receipt_from_state(execution)
+        if latest_execution is None:
+            raise RuntimeError("worker execution receipt is missing for attempt resolution")
+        resolution = resolve_attempt(latest_execution, candidate, verified)
+
+        update("VERIFIED", {
+            "verified_receipt": verified,
+            "attempt_resolution": resolution,
+        })
+
+        if resolution.verdict != AttemptResolutionVerdict.PROVEN.value:
+            reasons = ", ".join(resolution.failure_reasons) or f"verdict is {resolution.verdict}"
+            raise RuntimeError(f"candidate verification failed: {reasons}")
+
         packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
         result = {
             "execution": execution,
             "candidate": candidate,
             "verified_receipt": verified,
+            "attempt_resolution": resolution,
             "promotion_packet": packet,
             "promotion_status": packet.promotion_status,
             "candidate_commit_created": packet.candidate_commit_created,

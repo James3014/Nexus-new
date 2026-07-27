@@ -164,7 +164,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
     assert receipt.executable_identity == str(executable.resolve())
     assert receipt.argv == captured["request"].argv
     assert receipt.target_worktree == str(target.resolve())
-    assert receipt.outcome == WorkerOutcome.PROVEN.value
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert receipt.stdout_sha256 == CliWorkerResult.hash_bytes(b"agy stdout")
     assert receipt.stderr_sha256 == CliWorkerResult.hash_bytes(b"agy stderr")
     assert receipt.wall_time_ms == 25
@@ -204,7 +204,7 @@ def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path):
     )
 
     assert receipt.provider == "codex"
-    assert receipt.outcome == WorkerOutcome.PROVEN.value
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert receipt.evidence_complete is True
     assert receipt.commit_created is False
     assert receipt.merge_performed is False
@@ -242,6 +242,174 @@ def test_ollama_adapter_applies_only_a_validated_unified_diff(tmp_path, monkeypa
         prompt="change file",
     )
 
-    assert receipt.outcome == "PROVEN"
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert receipt.evidence_complete is True
     assert (target / "file.txt").read_text() == "after\n"
+
+
+def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from nexus.executors.worker_registry import DirectCliWorkerAdapter, _gemini_args, _opencode_args, _mimo_args
+
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setenv("NEXUS_AGY_PROJECT_ID", "project-123")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"{}",
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=None,
+        ),
+    )
+
+    contract = SimpleNamespace(task_id="test-task")
+    lease = SimpleNamespace(target_worktree=str(tmp_path))
+
+    for provider, model_env, default_m, args_fn in [
+        ("gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
+        ("opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
+        ("mimo", "NEXUS_MIMO_WORKER_MODEL", "mimo", _mimo_args),
+    ]:
+        adapter = DirectCliWorkerAdapter(provider, provider, model_env, default_m, args_fn)
+        receipt = adapter.invoke(contract, lease, prompt="test")
+        assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+        assert receipt.evidence_complete is True
+
+    agy_adapter = AgyWorkerAdapter()
+    agy_receipt = agy_adapter.invoke(contract, lease, prompt="test")
+    assert agy_receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert agy_receipt.evidence_complete is True
+
+
+def test_deterministic_resolver_all_gates_and_non_empty_diff():
+    from types import SimpleNamespace
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    exec_receipt = WorkerExecutionReceipt(
+        provider="codex",
+        task_id="t1",
+        target_worktree="/tmp",
+        worker_status="COMPLETED",
+        outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+        exit_code=0,
+        executable_identity="/bin/codex",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=1,
+        process_group_id=None,
+        process_group_killed=False,
+        timed_out=False,
+        provider_calls=1,
+        evidence_complete=True,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    candidate = SimpleNamespace(changed_files=["a.py"], untracked_files=[], deleted_files=[])
+    verified = SimpleNamespace(
+        verified=True,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        failure_reasons=[],
+    )
+
+    res = resolve_attempt(exec_receipt, candidate, verified)
+    assert res.verdict == AttemptResolutionVerdict.PROVEN.value
+    assert res.candidate_non_empty is True
+    assert res.verified is True
+
+
+def test_deterministic_resolver_empty_candidate_fails():
+    from types import SimpleNamespace
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    exec_receipt = WorkerExecutionReceipt(
+        provider="codex",
+        task_id="t1",
+        target_worktree="/tmp",
+        worker_status="COMPLETED",
+        outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+        exit_code=0,
+        executable_identity="/bin/codex",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=1,
+        process_group_id=None,
+        process_group_killed=False,
+        timed_out=False,
+        provider_calls=1,
+        evidence_complete=True,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    candidate = SimpleNamespace(changed_files=[], untracked_files=[], deleted_files=[])
+    verified = SimpleNamespace(
+        verified=True,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        failure_reasons=[],
+    )
+
+    res = resolve_attempt(exec_receipt, candidate, verified)
+    assert res.verdict == AttemptResolutionVerdict.FAILED.value
+    assert res.candidate_non_empty is False
+    assert "candidate diff is empty" in res.failure_reasons
+
+
+def test_deterministic_resolver_timeout_is_incomplete():
+    from types import SimpleNamespace
+    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    exec_receipt = WorkerExecutionReceipt(
+        provider="codex",
+        task_id="t1",
+        target_worktree="/tmp",
+        worker_status="TIMED_OUT",
+        outcome=WorkerOutcome.INCOMPLETE.value,
+        exit_code=None,
+        executable_identity="/bin/codex",
+        argv=(),
+        stdout_sha256="",
+        stderr_sha256="",
+        wall_time_ms=1000,
+        process_group_id=None,
+        process_group_killed=True,
+        timed_out=True,
+        provider_calls=1,
+        evidence_complete=False,
+        commit_created=False,
+        merge_performed=False,
+        push_performed=False,
+    )
+
+    candidate = SimpleNamespace(changed_files=["a.py"], untracked_files=[], deleted_files=[])
+    verified = SimpleNamespace(
+        verified=False,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=False,
+        failure_reasons=["timeout"],
+    )
+
+    res = resolve_attempt(exec_receipt, candidate, verified)
+    assert res.verdict == AttemptResolutionVerdict.INCOMPLETE.value

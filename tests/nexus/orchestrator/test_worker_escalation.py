@@ -58,3 +58,15 @@ def test_forbidden_mutation_blocks_instead_of_escalating():
 
     assert decision.action == "BLOCK"
     assert "forbidden" in decision.reason
+
+
+def test_execution_completed_returns_action_verify():
+    policy = WorkerEscalationPolicy("cheap", "strong")
+
+    decision = policy.decide(
+        [_receipt("cheap", WorkerOutcome.EXECUTION_COMPLETED.value, evidence_complete=True)]
+    )
+
+    assert decision.action == "VERIFY"
+    assert decision.next_provider is None
+

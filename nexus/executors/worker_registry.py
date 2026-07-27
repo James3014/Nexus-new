@@ -62,7 +62,7 @@ class CodexWorkerAdapter:
         elif receipt.worker_status != CliWorkerStatus.COMPLETED.value or receipt.exit_code != 0:
             outcome = WorkerOutcome.FAILED
         else:
-            outcome = WorkerOutcome.PROVEN
+            outcome = WorkerOutcome.EXECUTION_COMPLETED
         return WorkerExecutionReceipt(
             provider=receipt.provider,
             task_id=receipt.task_id,
@@ -79,11 +79,11 @@ class CodexWorkerAdapter:
             process_group_killed=False,
             timed_out=receipt.worker_status == CliWorkerStatus.TIMED_OUT.value,
             provider_calls=receipt.provider_calls,
-            evidence_complete=outcome == WorkerOutcome.PROVEN,
+            evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED,
             commit_created=receipt.commit_created,
             merge_performed=receipt.merge_performed,
             push_performed=False,
-            failure_reason=None if outcome == WorkerOutcome.PROVEN else "Codex execution did not prove a successful run",
+            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else "Codex execution did not complete successfully",
         )
 
 
@@ -163,7 +163,7 @@ class DirectCliWorkerAdapter:
         elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
             outcome = WorkerOutcome.FAILED
         else:
-            outcome = WorkerOutcome.PROVEN
+            outcome = WorkerOutcome.EXECUTION_COMPLETED
         return WorkerExecutionReceipt(
             provider=self.provider,
             task_id=contract.task_id,
@@ -180,11 +180,11 @@ class DirectCliWorkerAdapter:
             process_group_killed=result.process_group_killed,
             timed_out=result.timed_out,
             provider_calls=1,
-            evidence_complete=outcome == WorkerOutcome.PROVEN,
+            evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED,
             commit_created=False,
             merge_performed=False,
             push_performed=False,
-            failure_reason=None if outcome == WorkerOutcome.PROVEN else f"{self.provider} execution did not prove success",
+            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
         )
 
 
@@ -286,7 +286,7 @@ class AgyWorkerAdapter:
         elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
             outcome = WorkerOutcome.FAILED
         else:
-            outcome = WorkerOutcome.PROVEN
+            outcome = WorkerOutcome.EXECUTION_COMPLETED
         return WorkerExecutionReceipt(
             provider=self.provider,
             task_id=contract.task_id,
@@ -303,11 +303,11 @@ class AgyWorkerAdapter:
             process_group_killed=result.process_group_killed,
             timed_out=result.timed_out,
             provider_calls=1,
-            evidence_complete=outcome == WorkerOutcome.PROVEN,
+            evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED,
             commit_created=False,
             merge_performed=False,
             push_performed=False,
-            failure_reason=None if outcome == WorkerOutcome.PROVEN else f"{self.provider} execution did not prove success",
+            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
         )
 
 
@@ -393,7 +393,7 @@ class OllamaPatchWorkerAdapter:
                 failure_reason = check.stderr.decode("utf-8", errors="replace")
         else:
             failure_reason = "Ollama did not return a usable unified diff"
-        outcome = WorkerOutcome.PROVEN if applied else WorkerOutcome.FAILED
+        outcome = WorkerOutcome.EXECUTION_COMPLETED if applied else WorkerOutcome.FAILED
         return WorkerExecutionReceipt(
             provider=self.provider,
             task_id=contract.task_id,
@@ -410,11 +410,11 @@ class OllamaPatchWorkerAdapter:
             process_group_killed=result.process_group_killed,
             timed_out=result.timed_out,
             provider_calls=1,
-            evidence_complete=applied,
+            evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED,
             commit_created=False,
             merge_performed=False,
             push_performed=False,
-            failure_reason=None if applied else failure_reason,
+            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else failure_reason,
         )
 
 

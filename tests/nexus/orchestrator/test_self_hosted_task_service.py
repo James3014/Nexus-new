@@ -209,7 +209,7 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
 
         def invoke(self, contract, lease, *, prompt, **options):
             calls.append(self.provider)
-            outcome = WorkerOutcome.FAILED.value if self.provider == "codex" else WorkerOutcome.PROVEN.value
+            outcome = WorkerOutcome.FAILED.value if self.provider == "codex" else WorkerOutcome.EXECUTION_COMPLETED.value
             return WorkerExecutionReceipt(
                 provider=self.provider,
                 task_id=contract.task_id,
@@ -226,11 +226,11 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
                 process_group_killed=False,
                 timed_out=False,
                 provider_calls=1,
-                evidence_complete=outcome == WorkerOutcome.PROVEN.value,
+                evidence_complete=outcome == WorkerOutcome.EXECUTION_COMPLETED.value,
                 commit_created=False,
                 merge_performed=False,
                 push_performed=False,
-                failure_reason=None if outcome == WorkerOutcome.PROVEN.value else "codex failed",
+                failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED.value else "codex failed",
             )
 
     registry = WorkerRegistry({provider: FakeAdapter(provider) for provider in ("codex", "gemini", "opencode", "mimo", "ollama")})
@@ -288,7 +288,15 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
             pass
 
         def verify(self, contract, lease, candidate, protected_paths=None):
-            return SimpleNamespace(verified=True)
+            return SimpleNamespace(
+                verified=True,
+                scope_gate_passed=True,
+                deletion_gate_passed=True,
+                controller_gate_passed=True,
+                protected_contract_gate_passed=True,
+                verifier_gate_passed=True,
+                failure_reasons=[],
+            )
 
     class FakeCommitter:
         def __init__(self, manager):
@@ -325,3 +333,130 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
     assert FakeManager.cleanup_calls == 1
     assert lease_count == 2
     assert result["execution"].provider == "opencode"
+    assert result["attempt_resolution"].verdict == "PROVEN"
+
+
+def test_empty_candidate_fails_closed_and_blocks_candidate_commit(tmp_path, monkeypatch):
+    class FakeAdapter:
+        provider = "codex"
+
+        def preflight(self):
+            return WorkerPreflight(
+                provider="codex",
+                executable="/bin/codex",
+                executable_available=True,
+                authorized=True,
+                implementation_status="IMPLEMENTED",
+                ready=True,
+                reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, **options):
+            return WorkerExecutionReceipt(
+                provider="codex",
+                task_id=contract.task_id,
+                target_worktree=lease.target_worktree,
+                worker_status="COMPLETED",
+                outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+                exit_code=0,
+                executable_identity="/bin/codex",
+                argv=("codex",),
+                stdout_sha256="a" * 64,
+                stderr_sha256="b" * 64,
+                wall_time_ms=1,
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=1,
+                evidence_complete=True,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+            )
+
+    registry = WorkerRegistry({"codex": FakeAdapter(), "gemini": FakeAdapter(), "opencode": FakeAdapter(), "mimo": FakeAdapter(), "ollama": FakeAdapter()})
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False)
+    request = _request(tmp_path, worker="codex", task_id="empty-cand-task")
+    contract = service.build_contract(request)
+    checkpoint_history = []
+    state = {"status": "SUBMITTED", "attempt_id": "a" * 32}
+    monkeypatch.setattr(service, "_read_state", lambda task_id: state)
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            pass
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            pass
+
+        def prepare_task(self, contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1",
+                lease_id="lease-1",
+                task_id=contract.task_id,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"),
+                target_branch="branch",
+                initial_head="b" * 40,
+                initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64,
+                created_from_exact_revision=True,
+                commit_created=False,
+                merge_performed=False,
+            )
+
+        def collect_candidate(self, contract, lease):
+            # empty diff
+            return SimpleNamespace(candidate_state_hash="c" * 64, changed_files=[], untracked_files=[], deleted_files=[])
+
+    class FakeVerifier:
+        def __init__(self, manager):
+            pass
+
+        def verify(self, contract, lease, candidate, protected_paths=None):
+            return SimpleNamespace(
+                verified=True,
+                scope_gate_passed=True,
+                deletion_gate_passed=True,
+                controller_gate_passed=True,
+                protected_contract_gate_passed=True,
+                verifier_gate_passed=True,
+                failure_reasons=[],
+            )
+
+    committer_called = False
+
+    class FakeCommitter:
+        def __init__(self, manager):
+            pass
+
+        def create_candidate_commit(self, contract, lease, verified):
+            nonlocal committer_called
+            committer_called = True
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", FakeController)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier", FakeVerifier)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateCommitter", FakeCommitter)
+
+    def update(status, values):
+        state["status"] = status
+        state.update(values)
+        checkpoint_history.append((status, values.get("attempt_resolution")))
+
+    with pytest.raises(RuntimeError, match="candidate verification failed: candidate diff is empty"):
+        service._run_default_resumable(
+            contract,
+            request,
+            update,
+            task_id=contract.task_id,
+            attempt_id=state["attempt_id"],
+        )
+
+    assert committer_called is False
+    verified_checkpoints = [v for s, v in checkpoint_history if s == "VERIFIED"]
+    assert len(verified_checkpoints) == 1
+    assert verified_checkpoints[0].verdict == "FAILED"
+    assert verified_checkpoints[0].candidate_non_empty is False
