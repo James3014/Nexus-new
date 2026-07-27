@@ -92,10 +92,17 @@ class ControlledIntegrationManager:
         target_base_revision = str(contract.get("target_base_revision", ""))
         candidate_sha = str(packet.get("candidate_commit_sha", ""))
         source_branch = str(lease.get("target_branch", ""))
-        if state.get("status") != "CANDIDATE_COMMITTED":
+        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED"}:
             raise RuntimeError("only a terminal candidate task can be integrated")
-        if packet.get("promotion_status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
-            raise RuntimeError("candidate promotion packet is missing")
+        approved = state.get("approved_binding") or {}
+        binding_fields = (
+            "candidate_commit_sha", "candidate_tree_sha",
+            "candidate_state_hash", "verified_receipt_hash",
+        )
+        if not approved or not packet or state.get("promotion_status") != "APPROVED" or any(
+            approved.get(field) != packet.get(field) for field in binding_fields
+        ):
+            raise RuntimeError("exact approved binding is required")
         if not _SHA.fullmatch(candidate_sha) or not _SHA.fullmatch(target_base_revision):
             raise RuntimeError("candidate and target base revisions must be exact Git SHAs")
         if not source_branch:
@@ -136,12 +143,12 @@ class ControlledIntegrationManager:
                 list(contract.get("verifier_commands") or []), integration_path
             )
             if not passed:
-                self._git(["reset", "--hard", integration_base_sha], integration_path)
+                self._git(["reset", "--merge", integration_base_sha], integration_path)
                 raise RuntimeError(reason or "integration verifier failed")
             integration_sha = self._git(["rev-parse", "HEAD"], integration_path)
         except Exception:
             subprocess.run(["git", "merge", "--abort"], cwd=integration_path, capture_output=True, text=True)
-            subprocess.run(["git", "reset", "--hard", integration_base_sha], cwd=integration_path, capture_output=True, text=True)
+            subprocess.run(["git", "reset", "--merge", integration_base_sha], cwd=integration_path, capture_output=True, text=True)
             self._git(["worktree", "remove", "--force", str(integration_path)], controller_root)
             raise
         self._git(["worktree", "remove", str(integration_path)], controller_root)

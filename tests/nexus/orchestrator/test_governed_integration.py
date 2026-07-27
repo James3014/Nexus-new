@@ -26,6 +26,15 @@ def _candidate_state(repo: Path, base: str, candidate: str, tree: str):
             "promotion_status": "PENDING_HUMAN_APPROVAL",
             "candidate_commit_sha": candidate,
             "candidate_tree_sha": tree,
+            "candidate_state_hash": "a" * 64,
+            "verified_receipt_hash": "b" * 64,
+        },
+        "promotion_status": "APPROVED",
+        "approved_binding": {
+            "candidate_commit_sha": candidate,
+            "candidate_tree_sha": tree,
+            "candidate_state_hash": "a" * 64,
+            "verified_receipt_hash": "b" * 64,
         },
     }
 
@@ -65,3 +74,11 @@ def test_controlled_integration_rejects_protected_branch(tmp_path):
 
     with pytest.raises(ValueError, match="protected"):
         manager._validate_branch("main")
+
+
+def test_controlled_integration_requires_exact_approved_binding(tmp_path):
+    manager = ControlledIntegrationManager(integration_root=tmp_path / "integrations")
+    state = {"status": "CANDIDATE_COMMITTED", "promotion_status": "APPROVED"}
+
+    with pytest.raises(RuntimeError, match="approved binding"):
+        manager.integrate_task_state(state)

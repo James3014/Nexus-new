@@ -189,6 +189,51 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["push_performed"] is False
 
 
+def test_terminal_retry_keeps_task_identity_and_increments_attempt(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "TARGET_CLEANED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _request(tmp_path, task_id="stable-task")
+    first = service.submit_task(request)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and service._read_state("stable-task")["status"] != "FINAL_BLOCK":
+        time.sleep(0.01)
+    first_attempt = service._read_state("stable-task")["attempt_id"]
+    service.submit_task(request)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and len(calls) < 2:
+        time.sleep(0.01)
+    state = service._read_state("stable-task")
+
+    assert first["task_id"] == state["task_id"] == "stable-task"
+    assert state["attempt_id"] != first_attempt
+    assert len(state["attempts"]) == 2
+    assert calls == ["stable-task", "stable-task"]
+
+
+def test_noncanonical_state_root_requires_ephemeral_mode(tmp_path):
+    with pytest.raises(ValueError, match="canonical state root"):
+        SelfHostedTaskService(state_dir="/Users/jameschen/Workspace/nexus-sibling-state", auto_reconcile=False)
+
+
+def test_archive_manifest_hash_is_reproducible(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("done", {"task_id": "done", "status": "FINAL_BLOCK"})
+
+    first = service.archive_states(dry_run=True)
+    second = service.archive_states(dry_run=True)
+
+    assert first["manifest_hash"] == second["manifest_hash"]
+    assert first["entries"][0]["receipt_hash"]
+
+
 def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatch):
     calls = []
 
@@ -255,6 +300,12 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
         def cleanup(self, task_id, force=False):
             FakeManager.cleanup_calls += 1
 
+        def protect_candidate(self, contract, lease, candidate_commit):
+            return f"refs/nexus-candidates/{contract.task_id}"
+
+        def cleanup_terminal_target(self, contract, lease, **kwargs):
+            return SimpleNamespace(decision="TARGET_CLEANED", blocker=None, performed=True)
+
     lease_count = 0
 
     class FakeController:
@@ -304,6 +355,7 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
 
         def create_candidate_commit(self, contract, lease, verified):
             return SimpleNamespace(
+                candidate_commit_sha="d" * 40,
                 promotion_status="PENDING_HUMAN_APPROVAL",
                 candidate_commit_created=True,
                 public_claim_allowed=False,

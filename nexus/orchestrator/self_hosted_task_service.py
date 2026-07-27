@@ -30,6 +30,7 @@ from nexus.executors.worker_contract import (
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier
+from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,
@@ -44,7 +45,10 @@ from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
-TERMINAL_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
+TERMINAL_STATUSES = frozenset({
+    "CANDIDATE_COMMITTED", "FINAL_BLOCK", "RETAINED_FOR_REVIEW",
+    "REJECTED", "SUPERSEDED", "INTEGRATED", "INTEGRATION_FAILED",
+})
 RESUMABLE_STATUSES = frozenset({
     "WORKER_COMPLETED",
     "WORKER_ESCALATING",
@@ -89,8 +93,15 @@ class SelfHostedTaskService:
         stale_after_seconds: float = 30.0,
         auto_reconcile: bool = True,
         worker_registry: Optional[WorkerRegistry] = None,
+        ephemeral: bool = False,
     ):
         self.state_dir = Path(state_dir).expanduser().resolve()
+        canonical = (Path.cwd() / ".nexus/self_hosted_tasks").resolve()
+        temporary_roots = (Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders"))
+        is_temporary = any(root == self.state_dir or root in self.state_dir.parents for root in temporary_roots)
+        if self.state_dir != canonical and not ephemeral and not is_temporary:
+            raise ValueError(f"production tasks must use canonical state root: {canonical}")
+        self.ephemeral = ephemeral or is_temporary
         self._custom_runner = runner
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
@@ -558,12 +569,28 @@ class SelfHostedTaskService:
             raise RuntimeError(f"candidate verification failed: {reasons}")
 
         packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+        candidate_ref = manager.protect_candidate(contract, lease, packet.candidate_commit_sha)
+        cleanup = manager.cleanup_terminal_target(
+            contract,
+            lease,
+            candidate_commit=packet.candidate_commit_sha,
+            candidate_ref=candidate_ref,
+        )
+        if cleanup.decision != "TARGET_CLEANED":
+            raise RuntimeError(f"candidate Target cleanup failed: {cleanup.decision}")
         result = {
             "execution": execution,
             "candidate": candidate,
             "verified_receipt": verified,
             "attempt_resolution": resolution,
             "promotion_packet": packet,
+            "candidate_ref": candidate_ref,
+            "cleanup_decision": cleanup.decision,
+            "cleanup_blocker": cleanup.blocker,
+            "cleanup_performed": cleanup.performed,
+            "cleanup_performed_at": _utc_now(),
+            "terminal_status": "PENDING_HUMAN_APPROVAL",
+            "state_retention_status": "TERMINAL",
             "promotion_status": packet.promotion_status,
             "candidate_commit_created": packet.candidate_commit_created,
             "public_claim_allowed": packet.public_claim_allowed,
@@ -608,13 +635,41 @@ class SelfHostedTaskService:
                 )
             else:
                 result = self.runner(contract, state["request"], update)
-            self._checkpoint(task_id, "CANDIDATE_COMMITTED", result, attempt_id=attempt_id)
+            current = self._read_state(task_id) or {}
+            if current.get("status") not in TERMINAL_STATUSES:
+                self._checkpoint(task_id, "CANDIDATE_COMMITTED", result, attempt_id=attempt_id)
         except Exception as exc:
             self._terminate_owned_processes(task_id, exclude_pid=owner_pid)
+            current = self._read_state(task_id) or {}
+            cleanup_values: dict[str, Any] = {
+                "cleanup_decision": "ALREADY_REMOVED",
+                "cleanup_blocker": None,
+                "cleanup_performed": False,
+                "terminal_status": "FINAL_BLOCK",
+                "state_retention_status": "TERMINAL",
+            }
+            if current.get("lease"):
+                try:
+                    contract = self.build_contract(current["request"])
+                    lease = self._lease_from_state(current)
+                    cleanup = WorktreeManager(root_dir=contract.target_worktree_root).cleanup_terminal_target(contract, lease)
+                    cleanup_values.update({
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_blocker": cleanup.blocker,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                    })
+                    if cleanup.decision == "RETAINED_FOR_REVIEW":
+                        cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
+                except Exception as cleanup_exc:
+                    cleanup_values.update({
+                        "cleanup_decision": "CLEANUP_BLOCKED",
+                        "cleanup_blocker": str(cleanup_exc),
+                    })
             self._checkpoint(
                 task_id,
-                "FINAL_BLOCK",
-                {"error": str(exc), "promotion_status": "NOT_CREATED"},
+                str(cleanup_values["terminal_status"]),
+                {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
                 attempt_id=attempt_id,
             )
         finally:
@@ -731,6 +786,42 @@ class SelfHostedTaskService:
                 {"error": "stale task heartbeat; owned process group terminated", "promotion_status": "NOT_CREATED"},
                 attempt_id=state.get("attempt_id"),
             )
+        if state.get("status") == "TARGET_LEASED":
+            contract = state.get("contract") or {}
+            target = Path(str(contract.get("target_repo_root", ""))).expanduser().resolve()
+            controller = Path(str(contract.get("controller_repo_root", ""))).expanduser().resolve()
+            target_exists = target.is_dir()
+            manager = WorktreeManager(root_dir=str(contract.get("target_worktree_root") or target.parent))
+            entry = manager._worktree_entry(controller, target) if target_exists and controller.is_dir() else None
+            head = manager._run_git(["rev-parse", "HEAD"], cwd=target) if entry else None
+            dirty = bool(manager._status_bytes(target)) if entry else None
+            evidence = {
+                "worker_alive": False,
+                "heartbeat_fresh": False,
+                "target_exists": target_exists,
+                "target_registered": entry is not None,
+                "target_clean": not dirty if dirty is not None else None,
+                "target_head": head,
+                "candidate_exists": bool(head and head != contract.get("target_base_revision")),
+            }
+            if entry and dirty:
+                return self._checkpoint(task_id, "RETAINED_FOR_REVIEW", {
+                    **evidence,
+                    "reconcile_decision": "RETAINED_FOR_REVIEW",
+                    "cleanup_decision": "RETAINED_FOR_REVIEW",
+                    "cleanup_blocker": "dirty target has no durable snapshot",
+                    "cleanup_performed": False,
+                    "terminal_status": "RETAINED_FOR_REVIEW",
+                    "state_retention_status": "TERMINAL",
+                }, attempt_id=state.get("attempt_id"))
+            return self._checkpoint(task_id, "FINAL_BLOCK", {
+                **evidence,
+                "reconcile_decision": "CLEANUP_REQUIRED" if entry else "ALREADY_REMOVED",
+                "cleanup_decision": "CLEANUP_REQUIRED" if entry else "ALREADY_REMOVED",
+                "cleanup_performed": entry is None,
+                "terminal_status": "FINAL_BLOCK",
+                "state_retention_status": "TERMINAL",
+            }, attempt_id=state.get("attempt_id"))
         if state.get("status") == "SUBMITTED" or state.get("status") in RESUMABLE_STATUSES:
             return self._launch_worker(task_id, str(state.get("attempt_id")))
         self._terminate_owned_processes(task_id)
@@ -774,6 +865,7 @@ class SelfHostedTaskService:
                 )
             ),
             "attempt_id": attempt_id,
+            "attempts": [{"attempt_id": attempt_id, "started_at": now}],
             "worker_pid": None,
             "worker_pgid": None,
             "worker_child_pgid": None,
@@ -789,8 +881,105 @@ class SelfHostedTaskService:
         if not created:
             if existing.get("contract_hash") != contract.contract_hash:
                 raise ValueError("task_id already exists with a different contract")
+            if existing.get("status") in {"FINAL_BLOCK", "REJECTED", "SUPERSEDED"}:
+                if existing.get("cleanup_decision") not in {"TARGET_CLEANED", "ALREADY_REMOVED"}:
+                    raise RuntimeError("terminal retry blocked until previous Target disposition")
+                attempt_id = uuid4().hex
+                def retry(current: dict[str, Any]) -> None:
+                    current["attempt_id"] = attempt_id
+                    current.setdefault("attempts", []).append({"attempt_id": attempt_id, "started_at": now})
+                    current["status"] = "SUBMITTED"
+                    current.setdefault("status_history", []).append({"status": "ATTEMPT_INCREMENTED", "at": now})
+                    current["worker_pid"] = None
+                    current["worker_pgid"] = None
+                    current["worker_child_pgid"] = None
+                    current["heartbeat_at"] = now
+                    current["error"] = None
+                self._mutate_state(contract.task_id, retry)
+                return self._launch_worker(contract.task_id, attempt_id) or existing
             return self.reconcile_task(contract.task_id) or existing
         return self._launch_worker(contract.task_id, attempt_id) or state
+
+    def dispose_candidate(
+        self,
+        task_id: str,
+        *,
+        disposition: str,
+        superseded_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        disposition = disposition.upper()
+        if disposition not in {"REJECTED", "SUPERSEDED"}:
+            raise ValueError("candidate disposition must be REJECTED or SUPERSEDED")
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("promotion_status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
+            raise RuntimeError("candidate is not pending disposition")
+        return self._checkpoint(task_id, disposition, {
+            "promotion_status": disposition,
+            "candidate_status": disposition,
+            "final_disposition": disposition,
+            "superseded_by": superseded_by if disposition == "SUPERSEDED" else None,
+            "terminal_status": disposition,
+            "cleanup_decision": state.get("cleanup_decision", "TARGET_CLEANED"),
+            "cleanup_performed": state.get("cleanup_performed", True),
+        }, attempt_id=state.get("attempt_id")) or state
+
+    def lifecycle_status(self) -> dict[str, Any]:
+        states = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(self.state_dir.glob("*.json"))] if self.state_dir.exists() else []
+        return {
+            "canonical_state_root": str(self.state_dir),
+            "tasks": len(states),
+            "active_tasks": sum(state.get("status") not in TERMINAL_STATUSES for state in states),
+            "active_targets": sum(bool((state.get("lease") or {}).get("target_worktree")) and state.get("status") not in TERMINAL_STATUSES for state in states),
+        }
+
+    def cleanup_tasks(self, *, task_id: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
+        ids = [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
+        decisions = []
+        for item in ids:
+            state = self._read_state(item) or {}
+            decisions.append({"task_id": item, "status": state.get("status"), "cleanup_decision": state.get("cleanup_decision"), "would_apply": not dry_run})
+        return {"dry_run": dry_run, "decisions": decisions}
+
+    def archive_states(self, *, dry_run: bool = True) -> dict[str, Any]:
+        import hashlib
+        archive_root = self.state_dir.parent / "self_hosted_tasks_archive"
+        entries = []
+        for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
+            payload = path.read_bytes()
+            state = json.loads(payload)
+            if state.get("status") not in {"FINAL_BLOCK", "INTEGRATED", "REJECTED", "SUPERSEDED", "CANCELLED"}:
+                continue
+            digest = hashlib.sha256(payload).hexdigest()
+            destination = archive_root / path.name
+            entries.append({"task_id": path.stem, "source": str(path), "archive_location": str(destination), "receipt_hash": digest})
+            if not dry_run:
+                archive_root.mkdir(parents=True, exist_ok=True)
+                if not destination.exists():
+                    path.replace(destination)
+        manifest_bytes = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+        return {"dry_run": dry_run, "entries": entries, "manifest_hash": __import__("hashlib").sha256(manifest_bytes).hexdigest()}
+
+    def integrate_approved(self, task_id: str, *, integration_branch: str = "nexus/integration") -> dict[str, Any]:
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("promotion_status") == "INTEGRATED":
+            return state
+        if state.get("promotion_status") != "APPROVED":
+            raise RuntimeError("exact approved binding is required before integration")
+        root = Path((state.get("contract") or {})["target_worktree_root"]).resolve() / "integrations"
+        receipt = ControlledIntegrationManager(integration_root=root).integrate_task_state(state, integration_branch=integration_branch)
+        return self._checkpoint(task_id, "INTEGRATED", {
+            "promotion_status": "INTEGRATED",
+            "integration_branch": receipt.integration_branch,
+            "integration_result_sha": receipt.integration_commit_sha,
+            "integration_receipt": receipt,
+            "terminal_status": "INTEGRATED",
+            "merge_performed": True,
+            "push_performed": False,
+        }, attempt_id=state.get("attempt_id")) or state
 
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.reconcile_task(task_id)

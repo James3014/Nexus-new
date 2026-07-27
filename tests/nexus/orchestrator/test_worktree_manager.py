@@ -334,4 +334,47 @@ def test_candidate_receipt_does_not_create_commit(sh2_repo):
     assert _git(target, "rev-parse", "HEAD") == initial_head
     assert receipt.commit_created is False
     assert receipt.merge_performed is False
+
+
+def test_serial_target_budget_rejects_second_active_target(sh2_repo):
+    first = _contract(sh2_repo, task_id="first")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    manager.create_lease(first)
+
+    with pytest.raises(RuntimeError, match="serial Target budget"):
+        manager.create_lease(_contract(sh2_repo, task_id="second"))
+
+
+def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+
+    blocked = manager.cleanup_terminal_target(contract, lease, candidate_commit=candidate)
+    assert blocked.decision == "BLOCKED_MISSING_DURABLE_REF"
+    assert target.exists()
+
+    candidate_ref = f"refs/nexus-candidates/{contract.task_id}"
+    _git(sh2_repo["controller"], "update-ref", candidate_ref, candidate)
+    removed = manager.cleanup_terminal_target(
+        contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
+    )
+    assert removed.decision == "TARGET_CLEANED"
+    assert not target.exists()
+    assert manager.cleanup_terminal_target(
+        contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
+    ).decision == "ALREADY_REMOVED"
+
+
+def test_dirty_unique_target_is_retained_for_review(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("unique\n", encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+
+    assert receipt.decision == "RETAINED_FOR_REVIEW"
+    assert receipt.blocker == "dirty target has no durable snapshot"
+    assert target.exists()
 # integrity-seal: 1776512137

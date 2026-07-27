@@ -191,6 +191,31 @@ class NexusSelfHostedMCPServer:
                     },
                 },
             },
+            {
+                "name": "nexus_self_hosted_status",
+                "description": "Report canonical lifecycle state and active Target budget.",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "nexus_self_hosted_cleanup",
+                "description": "Dry-run or apply governed terminal Target cleanup decisions.",
+                "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "apply": {"type": "boolean", "default": False}}},
+            },
+            {
+                "name": "nexus_self_hosted_archive_state",
+                "description": "Dry-run or apply terminal state archive with a reproducible manifest hash.",
+                "inputSchema": {"type": "object", "properties": {"apply": {"type": "boolean", "default": False}}},
+            },
+            {
+                "name": "nexus_self_hosted_integrate_approved",
+                "description": "Integrate an exact approved candidate to nexus/integration without push.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string", "default": "nexus/integration"}}},
+            },
+            {
+                "name": "nexus_self_hosted_dispose_candidate",
+                "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt.",
+                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+            },
         ]
 
     @staticmethod
@@ -286,6 +311,26 @@ class NexusSelfHostedMCPServer:
                 candidate_tree_sha=str(arguments["candidate_tree_sha"]),
                 candidate_state_hash=str(arguments["candidate_state_hash"]),
                 verified_receipt_hash=str(arguments["verified_receipt_hash"]),
+            )
+        if name == "nexus_self_hosted_status":
+            return self.service.lifecycle_status()
+        if name == "nexus_self_hosted_cleanup":
+            return self.service.cleanup_tasks(
+                task_id=task_id or None,
+                dry_run=not bool(arguments.get("apply", False)),
+            )
+        if name == "nexus_self_hosted_archive_state":
+            return self.service.archive_states(dry_run=not bool(arguments.get("apply", False)))
+        if name == "nexus_self_hosted_integrate_approved":
+            return self.service.integrate_approved(
+                task_id,
+                integration_branch=str(arguments.get("integration_branch", "nexus/integration")),
+            )
+        if name == "nexus_self_hosted_dispose_candidate":
+            return self.service.dispose_candidate(
+                task_id,
+                disposition=str(arguments["disposition"]),
+                superseded_by=arguments.get("superseded_by"),
             )
         raise ValueError(f"unknown tool: {name}")
 

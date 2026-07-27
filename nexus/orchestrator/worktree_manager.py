@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
@@ -56,10 +56,26 @@ class CandidateDiffReceipt:
     production_ready: bool
 
 
+@dataclass(frozen=True)
+class TargetCleanupReceipt:
+    schema: str
+    task_id: str
+    target_worktree: str
+    decision: str
+    blocker: Optional[str]
+    performed: bool
+
+
 class WorktreeManager:
-    def __init__(self, root_dir: str = ".nexus/worktrees"):
+    def __init__(
+        self,
+        root_dir: str = ".nexus/worktrees",
+        *,
+        process_checker: Optional[Callable[[Path], bool]] = None,
+    ):
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.process_checker = process_checker or self._path_has_process
 
     def _run_git(self, args: list[str], cwd: Optional[str | Path] = None) -> str:
         result = subprocess.run(
@@ -150,6 +166,15 @@ class WorktreeManager:
             raise RuntimeError("Target base revision did not resolve to the exact contract SHA")
 
         target_branch = f"nexus/task/{contract.task_id}"
+        active_targets = [
+            entry for entry in self._registered_worktrees(controller_root)
+            if "worktree" in entry
+            and Path(entry["worktree"]).resolve() != controller_root
+            and self.root_dir.resolve() in Path(entry["worktree"]).resolve().parents
+            and Path(entry["worktree"]).resolve() != target_path
+        ]
+        if active_targets:
+            raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
@@ -203,6 +228,80 @@ class WorktreeManager:
             commit_created=False,
             merge_performed=False,
         )
+
+    def protect_candidate(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        candidate_commit: str,
+    ) -> str:
+        self.validate_lease_identity(contract, lease)
+        target = Path(lease.target_worktree).resolve()
+        actual = self._run_git(["rev-parse", "HEAD"], cwd=target)
+        if actual != candidate_commit:
+            raise RuntimeError("candidate commit does not match Target HEAD")
+        candidate_ref = f"refs/nexus-candidates/{contract.task_id}"
+        self._run_git(["update-ref", candidate_ref, candidate_commit], cwd=contract.controller_repo_root)
+        if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
+            raise RuntimeError("candidate durable ref verification failed")
+        return candidate_ref
+
+    def cleanup_terminal_target(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        *,
+        candidate_commit: Optional[str] = None,
+        candidate_ref: Optional[str] = None,
+    ) -> TargetCleanupReceipt:
+        self.validate_lease_identity(contract, lease)
+        target = Path(lease.target_worktree).resolve()
+        controller = Path(contract.controller_repo_root).resolve()
+        if target == controller:
+            return self._cleanup_receipt(contract, lease, "BLOCKED_MAIN_OR_CONTROLLER", "Target is controller", False)
+        entry = self._worktree_entry(controller, target)
+        if not target.exists() and entry is None:
+            return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False)
+        if entry is None:
+            return self._cleanup_receipt(contract, lease, "BLOCKED_NOT_REGISTERED", "Target is not a registered worktree", False)
+        if self.process_checker(target):
+            return self._cleanup_receipt(contract, lease, "BLOCKED_ACTIVE_PROCESS", "active process uses Target", False)
+        status = self._status_bytes(target)
+        if status:
+            return self._cleanup_receipt(contract, lease, "RETAINED_FOR_REVIEW", "dirty target has no durable snapshot", False)
+        head = self._run_git(["rev-parse", "HEAD"], cwd=target)
+        if candidate_commit:
+            if head != candidate_commit or not candidate_ref:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_MISSING_DURABLE_REF", "candidate ref is missing or mismatched", False)
+            try:
+                protected = self._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller)
+            except RuntimeError:
+                protected = ""
+            if protected != candidate_commit:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_MISSING_DURABLE_REF", "candidate ref is missing or mismatched", False)
+        elif head != lease.initial_head:
+            return self._cleanup_receipt(contract, lease, "RETAINED_FOR_REVIEW", "Target HEAD changed without durable snapshot", False)
+        self._run_git(["worktree", "remove", "--", str(target)], cwd=controller)
+        self._run_git(["worktree", "prune"], cwd=controller)
+        return self._cleanup_receipt(contract, lease, "TARGET_CLEANED", None, True)
+
+    @staticmethod
+    def _cleanup_receipt(contract, lease, decision, blocker, performed):
+        return TargetCleanupReceipt(
+            schema="nexus.target_cleanup_receipt.v1",
+            task_id=contract.task_id,
+            target_worktree=lease.target_worktree,
+            decision=decision,
+            blocker=blocker,
+            performed=performed,
+        )
+
+    @staticmethod
+    def _path_has_process(path: Path) -> bool:
+        result = subprocess.run(
+            ["lsof", "+D", str(path)], capture_output=True, text=True
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
 
     def capture_candidate(
         self,
