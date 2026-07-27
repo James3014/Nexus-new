@@ -19,7 +19,8 @@ import time
 from typing import Any, Callable, Iterator, Mapping, Optional
 from uuid import uuid4
 
-from nexus.executors.codex_executor import CodexCliExecutor
+from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS, WorkerOutcome
+from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
@@ -74,11 +75,13 @@ class SelfHostedTaskService:
         *,
         stale_after_seconds: float = 30.0,
         auto_reconcile: bool = True,
+        worker_registry: Optional[WorkerRegistry] = None,
     ):
         self.state_dir = Path(state_dir).expanduser().resolve()
         self._custom_runner = runner
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
+        self.worker_registry = worker_registry or WorkerRegistry.default()
         self._threads: dict[str, threading.Thread] = {}
         if auto_reconcile:
             self.reconcile_tasks()
@@ -196,8 +199,10 @@ class SelfHostedTaskService:
         if "prompt" in request:
             raise ValueError("prompt is not accepted; submit WHAT and WHY")
         worker = str(request.get("worker", "codex")).strip().lower()
-        if worker != "codex":
-            raise ValueError("MCP v1 only supports the codex worker")
+        if worker not in SUPPORTED_WORKER_PROVIDERS:
+            raise ValueError(
+                "worker must be one of: " + ", ".join(SUPPORTED_WORKER_PROVIDERS)
+            )
         what = str(request.get("what", "")).strip()
         why = str(request.get("why", "")).strip()
         if not what or not why:
@@ -239,7 +244,7 @@ class SelfHostedTaskService:
             forbidden_files=list(request.get("forbidden_files", [])),
             verifier_commands=verifier_commands,
             protected_contracts=protected_contracts,
-            preferred_provider="codex",
+            preferred_provider=worker,
             fallback_provider=None,
             maximum_provider_calls=1,
             maximum_replans=0,
@@ -299,8 +304,11 @@ class SelfHostedTaskService:
         state = self._read_state(task_id) or {}
         status = str(state.get("status"))
         if status == "SUBMITTED":
+            preflight = self.worker_registry.preflight(str(contract.preferred_provider or "codex"))
+            if not preflight.ready:
+                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
             lease = controller.prepare_task(contract)
-            update("TARGET_LEASED", {"lease": lease})
+            update("TARGET_LEASED", {"lease": lease, "worker_preflight": preflight})
             update("WORKER_RUNNING", {})
             state = self._read_state(task_id) or {}
             status = "WORKER_RUNNING"
@@ -314,14 +322,19 @@ class SelfHostedTaskService:
             def on_process_group(pgid: Optional[int]) -> None:
                 self._set_child_pgid(task_id, attempt_id, pgid)
 
-            execution_receipt = CodexCliExecutor(
-                timeout_seconds=float(request.get("timeout_seconds", 900.0)),
-                on_process_group=on_process_group,
-            ).invoke(
+            provider = str(contract.preferred_provider or "codex")
+            execution_receipt = self.worker_registry.invoke(
+                provider,
                 contract,
                 lease,
                 prompt=self._prompt(contract),
+                timeout_seconds=float(request.get("timeout_seconds", 900.0)),
+                on_process_group=on_process_group,
             )
+            if execution_receipt.outcome != WorkerOutcome.PROVEN.value:
+                raise RuntimeError(
+                    execution_receipt.failure_reason or "worker execution did not prove success"
+                )
             execution = execution_receipt
             update("WORKER_COMPLETED", {"execution": execution_receipt})
             state = self._read_state(task_id) or {}
@@ -552,6 +565,8 @@ class SelfHostedTaskService:
             "request": _jsonable(dict(request)),
             "contract": contract.model_dump(mode="json"),
             "contract_hash": contract.contract_hash,
+            "worker_provider": contract.preferred_provider,
+            "worker_selection_mode": str(request.get("worker_selection_mode", "explicit")),
             "attempt_id": attempt_id,
             "worker_pid": None,
             "worker_pgid": None,

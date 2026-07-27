@@ -130,13 +130,15 @@ def test_pid_permission_error_is_treated_as_alive(monkeypatch):
     assert SelfHostedTaskService._pid_alive(12345) is True
 
 
-def test_submit_rejects_raw_prompt_and_non_codex_worker(tmp_path):
+def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state")
 
     with pytest.raises(ValueError, match="prompt"):
         service.build_contract(_request(tmp_path, prompt="run arbitrary shell"))
-    with pytest.raises(ValueError, match="codex"):
-        service.build_contract(_request(tmp_path, worker="gemini"))
+    contract = service.build_contract(_request(tmp_path, worker="gemini"))
+    assert contract.preferred_provider == "gemini"
+    with pytest.raises(ValueError, match="one of"):
+        service.build_contract(_request(tmp_path, worker="unknown"))
 
 
 def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
