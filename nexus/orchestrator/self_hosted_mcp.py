@@ -89,6 +89,18 @@ class NexusSelfHostedMCPServer:
                 },
             },
             {
+                "name": "nexus_self_hosted_integrate_competition",
+                "description": "Merge the deterministic verified winner into nexus/integration only; never push or merge protected main.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["competition_id"],
+                    "properties": {
+                        "competition_id": {"type": "string"},
+                        "integration_branch": {"type": "string", "default": "nexus/integration"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_self_hosted_get_receipt",
                 "description": "Read execution evidence and Verified Candidate Receipt.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
@@ -167,6 +179,11 @@ class NexusSelfHostedMCPServer:
             return self.competition.submit(request, workers)
         if name == "nexus_self_hosted_get_competition":
             return self.competition.get(str(arguments.get("competition_id", "")))
+        if name == "nexus_self_hosted_integrate_competition":
+            return self.competition.integrate_winner(
+                str(arguments.get("competition_id", "")),
+                integration_branch=str(arguments.get("integration_branch", "nexus/integration")),
+            )
         task_id = str(arguments.get("task_id", ""))
         if name == "nexus_self_hosted_get_task":
             return self.service.get_task(task_id)

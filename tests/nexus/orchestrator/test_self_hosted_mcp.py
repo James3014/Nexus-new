@@ -32,6 +32,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_submit_task",
         "nexus_self_hosted_compete_task",
         "nexus_self_hosted_get_competition",
+        "nexus_self_hosted_integrate_competition",
         "nexus_self_hosted_get_task",
         "nexus_self_hosted_get_receipt",
         "nexus_self_hosted_get_promotion_packet",

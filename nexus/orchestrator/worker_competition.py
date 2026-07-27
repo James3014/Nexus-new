@@ -12,6 +12,7 @@ from typing import Any, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
+from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
@@ -207,4 +208,41 @@ class WorkerCompetitionCoordinator:
             state["winner"] = decision
         else:
             state["status"] = "RUNNING"
+        return self._write(state)
+
+    def integrate_winner(
+        self,
+        competition_id: str,
+        *,
+        integration_branch: str = "nexus/integration",
+    ) -> dict[str, Any]:
+        state = self.get(competition_id)
+        if state is None:
+            raise KeyError(f"unknown competition_id: {competition_id}")
+        if state.get("status") != "WINNER_SELECTED":
+            raise RuntimeError("competition has no deterministic verified winner")
+        winner_task_id = str((state.get("winner") or {}).get("winner_task_id") or "")
+        winner_state = self.service.get_task(winner_task_id)
+        if winner_state is None:
+            raise RuntimeError("winner task state is missing")
+        contract = winner_state.get("contract") or {}
+        integration_root = Path(str(contract.get("target_worktree_root", self.state_dir))) / "integrations"
+        receipt = ControlledIntegrationManager(integration_root=integration_root).integrate_task_state(
+            winner_state,
+            integration_branch=integration_branch,
+        )
+        state["status"] = "INTEGRATED"
+        state["integration"] = {
+            "schema": receipt.schema,
+            "task_id": receipt.task_id,
+            "integration_branch": receipt.integration_branch,
+            "source_branch": receipt.source_branch,
+            "candidate_commit_sha": receipt.candidate_commit_sha,
+            "integration_commit_sha": receipt.integration_commit_sha,
+            "verifier_passed": receipt.verifier_passed,
+            "merge_performed": receipt.merge_performed,
+            "push_performed": receipt.push_performed,
+            "worktree_removed": receipt.worktree_removed,
+            "failure_reason": receipt.failure_reason,
+        }
         return self._write(state)
