@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
 
 
 class NexusSelfHostedMCPServer:
     def __init__(self, service: Optional[SelfHostedTaskService] = None):
         state_dir = os.getenv("NEXUS_SELF_HOSTED_STATE_DIR", str(Path.cwd() / ".nexus/self_hosted_tasks"))
         self.service = service or SelfHostedTaskService(state_dir=state_dir)
+        self.competition = WorkerCompetitionCoordinator(self.service)
 
     @staticmethod
     def _tool_specs() -> list[dict[str, Any]]:
@@ -30,7 +32,8 @@ class NexusSelfHostedMCPServer:
             "forbidden_files": {"type": "array", "items": {"type": "string"}},
             "verifier_commands": {"type": "array", "items": {"type": "string"}},
             "protected_contracts": {"type": "array", "items": {"type": "string"}},
-            "worker": {"type": "string", "enum": ["codex"]},
+            "worker": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
+            "fallback_worker": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
         }
         return [
             {
@@ -56,6 +59,34 @@ class NexusSelfHostedMCPServer:
                 "name": "nexus_self_hosted_get_task",
                 "description": "Read durable task lifecycle state.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_self_hosted_compete_task",
+                "description": "Submit isolated worker candidates in parallel and apply the common verifier.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        **task_properties,
+                        "competition_id": {"type": "string"},
+                        "workers": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
+                            "minItems": 2,
+                            "uniqueItems": True,
+                        },
+                    },
+                    "required": ["what", "why", "workers", "controller_revision", "target_base_revision", "controller_repo_root", "target_repo_root", "target_worktree_root", "allowed_files"],
+                    "additionalProperties": True,
+                },
+            },
+            {
+                "name": "nexus_self_hosted_get_competition",
+                "description": "Read parallel candidate states and deterministic winner decision.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["competition_id"],
+                    "properties": {"competition_id": {"type": "string"}},
+                },
             },
             {
                 "name": "nexus_self_hosted_get_receipt",
@@ -129,6 +160,13 @@ class NexusSelfHostedMCPServer:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> Any:
         if name == "nexus_self_hosted_submit_task":
             return self.service.submit_task(arguments)
+        if name == "nexus_self_hosted_compete_task":
+            workers = arguments.get("workers") or []
+            request = dict(arguments)
+            request.pop("workers", None)
+            return self.competition.submit(request, workers)
+        if name == "nexus_self_hosted_get_competition":
+            return self.competition.get(str(arguments.get("competition_id", "")))
         task_id = str(arguments.get("task_id", ""))
         if name == "nexus_self_hosted_get_task":
             return self.service.get_task(task_id)
