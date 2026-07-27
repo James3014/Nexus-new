@@ -91,7 +91,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
     target.mkdir()
     executable = tmp_path / "bin" / "agy"
     resolved_executable = str(executable)
-    prompt = "Nexus generated prompt"
+    prompt = "WHAT: keep the full Nexus contract\nWHY: --mode must not become the prompt"
     callback_events = []
     process_group_callback = callback_events.append
     captured = {}
@@ -136,15 +136,16 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
         "--add-dir",
         str(target.resolve()),
         "--dangerously-skip-permissions",
-        "--print",
         "--mode",
         "accept-edits",
         "--model",
         "gemini-3.6-flash-medium",
         "--print-timeout",
         "42",
+        "--print",
         prompt,
     )
+    assert captured["request"].argv[-2:] == ("--print", prompt)
     assert captured["on_process_group"] is process_group_callback
     assert callback_events == [777]
     assert receipt.provider == "agy"
