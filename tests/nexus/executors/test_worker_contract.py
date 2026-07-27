@@ -1,16 +1,20 @@
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from nexus.executors.cli_worker import CliWorkerResult, CliWorkerStatus
 from nexus.executors.codex_executor import CodexExecutionReceipt
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerOutcome,
     WorkerProviderUnavailable,
 )
-from nexus.executors.cli_worker import CliWorkerResult, CliWorkerStatus
-from nexus.executors.worker_registry import AgyWorkerAdapter, CodexWorkerAdapter, OllamaPatchWorkerAdapter, WorkerRegistry
+from nexus.executors.worker_registry import (
+    AgyWorkerAdapter,
+    CodexWorkerAdapter,
+    OllamaPatchWorkerAdapter,
+    WorkerRegistry,
+)
 
 
 def test_registry_recognizes_all_governed_provider_names():
@@ -60,7 +64,7 @@ def test_agy_adapter_requires_external_runtime_authorization(monkeypatch, tmp_pa
         )
 
 
-def test_agy_adapter_requires_project_id(monkeypatch):
+def test_agy_adapter_uses_isolated_project_without_project_id(monkeypatch):
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.delenv("NEXUS_AGY_PROJECT_ID", raising=False)
     monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
@@ -68,9 +72,9 @@ def test_agy_adapter_requires_project_id(monkeypatch):
 
     preflight = adapter.preflight()
 
-    assert preflight.ready is False
+    assert preflight.ready is True
     assert preflight.executable_available is True
-    assert preflight.reason == "NEXUS_AGY_PROJECT_ID is required"
+    assert preflight.reason == "ready"
 
 
 def test_agy_adapter_requires_executable(monkeypatch):
@@ -143,8 +147,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
 
     assert captured["request"].cwd == str(target.resolve())
     assert captured["request"].argv == (
-        "--project",
-        "project-123",
+        "--new-project",
         "--add-dir",
         str(target.resolve()),
         "--dangerously-skip-permissions",
@@ -249,7 +252,13 @@ def test_ollama_adapter_applies_only_a_validated_unified_diff(tmp_path, monkeypa
 
 def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from nexus.executors.worker_registry import DirectCliWorkerAdapter, _gemini_args, _opencode_args, _mimo_args
+
+    from nexus.executors.worker_registry import (
+        DirectCliWorkerAdapter,
+        _gemini_args,
+        _mimo_args,
+        _opencode_args,
+    )
 
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.setenv("NEXUS_AGY_PROJECT_ID", "project-123")
@@ -290,7 +299,12 @@ def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatc
 
 def test_deterministic_resolver_all_gates_and_non_empty_diff():
     from types import SimpleNamespace
-    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    from nexus.executors.worker_contract import (
+        AttemptResolutionVerdict,
+        WorkerExecutionReceipt,
+        resolve_attempt,
+    )
 
     exec_receipt = WorkerExecutionReceipt(
         provider="codex",
@@ -333,7 +347,12 @@ def test_deterministic_resolver_all_gates_and_non_empty_diff():
 
 def test_deterministic_resolver_empty_candidate_fails():
     from types import SimpleNamespace
-    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    from nexus.executors.worker_contract import (
+        AttemptResolutionVerdict,
+        WorkerExecutionReceipt,
+        resolve_attempt,
+    )
 
     exec_receipt = WorkerExecutionReceipt(
         provider="codex",
@@ -376,7 +395,12 @@ def test_deterministic_resolver_empty_candidate_fails():
 
 def test_deterministic_resolver_timeout_is_incomplete():
     from types import SimpleNamespace
-    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    from nexus.executors.worker_contract import (
+        AttemptResolutionVerdict,
+        WorkerExecutionReceipt,
+        resolve_attempt,
+    )
 
     exec_receipt = WorkerExecutionReceipt(
         provider="codex",
@@ -418,7 +442,12 @@ def test_deterministic_resolver_timeout_is_incomplete():
 
 def test_deterministic_resolver_carries_identity_and_candidate_hash():
     from types import SimpleNamespace
-    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    from nexus.executors.worker_contract import (
+        AttemptResolutionVerdict,
+        WorkerExecutionReceipt,
+        resolve_attempt,
+    )
 
     exec_receipt = WorkerExecutionReceipt(
         provider="gemini",
@@ -469,7 +498,12 @@ def test_deterministic_resolver_carries_identity_and_candidate_hash():
 
 def test_escalation_allowed_is_true_only_for_incomplete():
     from types import SimpleNamespace
-    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    from nexus.executors.worker_contract import (
+        AttemptResolutionVerdict,
+        WorkerExecutionReceipt,
+        resolve_attempt,
+    )
 
     exec_incomplete = WorkerExecutionReceipt(
         provider="codex",
@@ -537,7 +571,12 @@ def test_escalation_allowed_is_true_only_for_incomplete():
 
 def test_deterministic_resolver_unknown_candidate_shape_fails_closed():
     from types import SimpleNamespace
-    from nexus.executors.worker_contract import WorkerExecutionReceipt, resolve_attempt, AttemptResolutionVerdict
+
+    from nexus.executors.worker_contract import (
+        AttemptResolutionVerdict,
+        WorkerExecutionReceipt,
+        resolve_attempt,
+    )
 
     exec_receipt = WorkerExecutionReceipt(
         provider="codex",
