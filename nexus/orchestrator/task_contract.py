@@ -83,6 +83,7 @@ class SelfHostedTaskContract(BaseModel):
     protected_contracts: List[str] = Field(default_factory=list)
     preferred_provider: Optional[str] = None
     fallback_provider: Optional[str] = None
+    provider_order: List[str] = Field(default_factory=list)
     maximum_provider_calls: int = Field(default=0, ge=0)
     maximum_replans: int = Field(default=0, ge=0)
     mutation_mode: MutationMode = MutationMode.WORKING_TREE_ONLY
@@ -127,6 +128,11 @@ class SelfHostedTaskContract(BaseModel):
         target_root = Path(self.target_repo_root).expanduser().resolve(strict=False)
         if controller_root == target_root:
             raise ValueError("controller and target roots must be physically separate")
+        if len(set(self.provider_order)) != len(self.provider_order):
+            raise ValueError("provider_order must not contain duplicates")
+        configured = {provider for provider in (self.preferred_provider, self.fallback_provider) if provider}
+        if configured and not configured.issubset(set(self.provider_order or configured)):
+            raise ValueError("provider_order must include preferred and fallback providers")
         return self
 
     @computed_field(return_type=str)

@@ -25,15 +25,16 @@ def test_registry_recognizes_all_governed_provider_names():
     assert registry.providers == SUPPORTED_WORKER_PROVIDERS
 
 
-def test_unimplemented_provider_fails_closed_even_when_binary_is_installed():
+def test_unauthorized_provider_fails_closed_even_when_binary_is_installed(monkeypatch):
     registry = WorkerRegistry.default()
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
 
     preflight = registry.preflight("gemini")
 
     assert preflight.provider == "gemini"
     assert preflight.ready is False
-    assert preflight.implementation_status == "UNIMPLEMENTED"
-    with pytest.raises(WorkerProviderUnavailable, match="provider adapter is not implemented"):
+    assert preflight.implementation_status == "IMPLEMENTED"
+    with pytest.raises(WorkerProviderUnavailable, match="NEXUS_EXTERNAL_RUNTIME_AUTHORIZED"):
         registry.invoke("gemini", None, None, prompt="bounded")
 
 

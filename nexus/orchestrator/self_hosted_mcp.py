@@ -34,7 +34,8 @@ class NexusSelfHostedMCPServer:
             "forbidden_files": {"type": "array", "items": {"type": "string"}},
             "verifier_commands": {"type": "array", "items": {"type": "string"}},
             "protected_contracts": {"type": "array", "items": {"type": "string"}},
-            "worker": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
+            "worker": {"type": "string", "enum": ["auto", "codex", "gemini", "opencode", "mimo", "ollama"]},
+            "worker_order": {"type": "array", "items": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]}, "uniqueItems": True},
             "fallback_worker": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]},
         }
         return [

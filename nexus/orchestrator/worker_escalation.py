@@ -19,6 +19,7 @@ class EscalationDecision:
 class WorkerEscalationPolicy:
     cheap_provider: str
     strong_provider: str
+    provider_order: tuple[str, ...] = ()
 
     def decide(self, attempts: Sequence[WorkerExecutionReceipt]) -> EscalationDecision:
         if not attempts:
@@ -32,10 +33,15 @@ class WorkerEscalationPolicy:
             )
         if latest.outcome == WorkerOutcome.PROVEN.value and latest.evidence_complete:
             return EscalationDecision("ACCEPT", None, "worker produced complete proof")
-        if len(attempts) == 1 and latest.provider == self.cheap_provider:
+        attempted = {attempt.provider for attempt in attempts}
+        next_provider = next(
+            (provider for provider in (self.provider_order or (self.strong_provider,)) if provider not in attempted),
+            None,
+        )
+        if next_provider is not None and latest.provider in attempted:
             return EscalationDecision(
                 "ESCALATE",
-                self.strong_provider,
+                next_provider,
                 f"cheap worker did not prove success: {latest.outcome}",
             )
         return EscalationDecision(

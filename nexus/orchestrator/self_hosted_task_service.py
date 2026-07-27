@@ -16,7 +16,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any, Callable, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from nexus.executors.worker_contract import (
@@ -209,10 +209,26 @@ class SelfHostedTaskService:
         if "prompt" in request:
             raise ValueError("prompt is not accepted; submit WHAT and WHY")
         worker = str(request.get("worker", "codex")).strip().lower()
+        requested_worker = worker
         if worker not in SUPPORTED_WORKER_PROVIDERS:
-            raise ValueError(
-                "worker must be one of: " + ", ".join(SUPPORTED_WORKER_PROVIDERS)
+            if worker != "auto":
+                raise ValueError(
+                    "worker must be one of: auto, " + ", ".join(SUPPORTED_WORKER_PROVIDERS)
+                )
+        provider_order = request.get("worker_order")
+        if provider_order is None:
+            provider_order = (
+                list(SUPPORTED_WORKER_PROVIDERS)
+                if requested_worker == "auto"
+                else [worker]
             )
+        provider_order = [str(provider).strip().lower() for provider in provider_order]
+        if worker == "auto" and not provider_order:
+            raise ValueError("worker_order must be non-empty for auto selection")
+        if worker == "auto" and (set(provider_order) - set(SUPPORTED_WORKER_PROVIDERS) or len(set(provider_order)) != len(provider_order)):
+            raise ValueError("worker_order contains an unknown or duplicate provider")
+        if worker == "auto":
+            worker = provider_order[0]
         fallback_worker = request.get("fallback_worker", request.get("fallback_provider"))
         if fallback_worker is not None:
             fallback_worker = str(fallback_worker).strip().lower()
@@ -222,6 +238,8 @@ class SelfHostedTaskService:
                 )
             if fallback_worker == worker:
                 raise ValueError("fallback_worker must differ from worker")
+            if fallback_worker not in provider_order:
+                provider_order.append(fallback_worker)
         what = str(request.get("what", "")).strip()
         why = str(request.get("why", "")).strip()
         if not what or not why:
@@ -264,8 +282,9 @@ class SelfHostedTaskService:
             verifier_commands=verifier_commands,
             protected_contracts=protected_contracts,
             preferred_provider=worker,
-            fallback_provider=fallback_worker,
-            maximum_provider_calls=2 if fallback_worker else 1,
+            fallback_provider=fallback_worker or (provider_order[1] if len(provider_order) > 1 else None),
+            provider_order=provider_order,
+            maximum_provider_calls=len(provider_order) if requested_worker == "auto" else (2 if fallback_worker else 1),
             maximum_replans=0,
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,
@@ -329,15 +348,14 @@ class SelfHostedTaskService:
         return WorkerEscalationPolicy(
             cheap_provider=contract.preferred_provider,
             strong_provider=contract.fallback_provider,
+            provider_order=tuple(contract.provider_order or (contract.preferred_provider, contract.fallback_provider)),
         )
 
     def _select_initial_provider(
         self,
         contract: ArchitectTaskContract,
     ) -> tuple[str, Any]:
-        providers = [str(contract.preferred_provider or "codex")]
-        if contract.fallback_provider:
-            providers.append(str(contract.fallback_provider))
+        providers = list(contract.provider_order or [str(contract.preferred_provider or "codex")])
         failures: list[str] = []
         for provider in providers:
             preflight = self.worker_registry.preflight(provider)
@@ -345,6 +363,19 @@ class SelfHostedTaskService:
                 return provider, preflight
             failures.append(f"{provider}: {preflight.reason}")
         raise RuntimeError("worker preflight failed: " + "; ".join(failures))
+
+    def _next_ready_provider(
+        self,
+        policy: WorkerEscalationPolicy,
+        attempts: Sequence[WorkerExecutionReceipt],
+    ) -> Optional[str]:
+        attempted = {attempt.provider for attempt in attempts}
+        for provider in policy.provider_order or (policy.strong_provider,):
+            if provider in attempted:
+                continue
+            if self.worker_registry.preflight(provider).ready:
+                return provider
+        return None
 
     @staticmethod
     def _replace_failed_target(
@@ -465,16 +496,19 @@ class SelfHostedTaskService:
                 raise RuntimeError(
                     latest.failure_reason or "worker execution did not prove success"
                 )
+            next_provider = self._next_ready_provider(policy, attempts)
+            if not next_provider:
+                raise RuntimeError("no unattempted ready provider remains for escalation")
             update(
                 "WORKER_ESCALATING",
                 {
                     "executions": attempts,
-                    "next_provider": decision.next_provider,
+                    "next_provider": next_provider,
                     "escalation_reason": decision.reason,
                 },
             )
             lease = self._replace_failed_target(manager, controller, contract, lease)
-            preflight = self.worker_registry.preflight(decision.next_provider)
+            preflight = self.worker_registry.preflight(next_provider)
             if not preflight.ready:
                 raise RuntimeError(f"worker preflight failed: {preflight.reason}")
             update(
@@ -482,11 +516,11 @@ class SelfHostedTaskService:
                 {
                     "lease": lease,
                     "worker_preflight": preflight,
-                    "active_provider": decision.next_provider,
+                    "active_provider": next_provider,
                     "next_provider": None,
                 },
             )
-            update("WORKER_RUNNING", {"active_provider": decision.next_provider})
+            update("WORKER_RUNNING", {"active_provider": next_provider})
             state = self._read_state(task_id) or {}
             status = "WORKER_RUNNING"
 

@@ -144,6 +144,13 @@ def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
     escalated = service.build_contract(_request(tmp_path, worker="codex", fallback_worker="opencode"))
     assert escalated.fallback_provider == "opencode"
     assert escalated.maximum_provider_calls == 2
+    auto = service.build_contract(
+        _request(tmp_path, worker="auto", worker_order=["gemini", "codex", "ollama"])
+    )
+    assert auto.preferred_provider == "gemini"
+    assert auto.fallback_provider == "codex"
+    assert auto.provider_order == ["gemini", "codex", "ollama"]
+    assert auto.maximum_provider_calls == 3
     with pytest.raises(ValueError, match="one of"):
         service.build_contract(_request(tmp_path, worker="unknown"))
 

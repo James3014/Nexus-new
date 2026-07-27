@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import os
 from typing import Any, Optional
 
 from nexus.executors.codex_executor import CodexCliExecutor
@@ -108,6 +109,96 @@ class UnimplementedWorkerAdapter:
         )
 
 
+class DirectCliWorkerAdapter:
+    """Direct CLI adapter enabled only with explicit external-runtime authorization."""
+
+    def __init__(self, provider: str, executable: str, model_env: str, default_model: str, argv_builder):
+        self.provider = provider
+        self.executable = executable
+        self.model_env = model_env
+        self.default_model = default_model
+        self.argv_builder = argv_builder
+
+    def preflight(self) -> WorkerPreflight:
+        resolved = shutil.which(self.executable)
+        authorized = os.getenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "0") == "1"
+        if not authorized:
+            reason = "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1 is required"
+        elif resolved is None:
+            reason = f"executable not found: {self.executable}"
+        else:
+            reason = "ready"
+        return WorkerPreflight(
+            provider=self.provider,
+            executable=str(Path(resolved).resolve()) if resolved else None,
+            executable_available=resolved is not None,
+            authorized=authorized,
+            implementation_status="IMPLEMENTED",
+            ready=resolved is not None and authorized,
+            reason=reason,
+        )
+
+    def invoke(
+        self,
+        contract: Any,
+        lease: Any,
+        *,
+        prompt: str,
+        timeout_seconds: Optional[float] = None,
+        on_process_group: Any = None,
+    ) -> WorkerExecutionReceipt:
+        preflight = self.preflight()
+        if not preflight.ready:
+            raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
+        request = CliWorkerRequest(
+            executable=self.executable,
+            argv=self.argv_builder(prompt, os.getenv(self.model_env, self.default_model)),
+            cwd=str(Path(lease.target_worktree).resolve()),
+            timeout_seconds=timeout_seconds or 900.0,
+        )
+        result = run_cli_worker(request, on_process_group=on_process_group)
+        if result.status is CliWorkerStatus.TIMED_OUT:
+            outcome = WorkerOutcome.INCOMPLETE
+        elif result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
+            outcome = WorkerOutcome.FAILED
+        else:
+            outcome = WorkerOutcome.PROVEN
+        return WorkerExecutionReceipt(
+            provider=self.provider,
+            task_id=contract.task_id,
+            target_worktree=str(Path(lease.target_worktree).resolve()),
+            worker_status=result.status.value,
+            outcome=outcome.value,
+            exit_code=result.exit_code,
+            executable_identity=result.executable_identity,
+            argv=result.argv,
+            stdout_sha256=result.stdout_sha256,
+            stderr_sha256=result.stderr_sha256,
+            wall_time_ms=result.wall_time_ms,
+            process_group_id=result.process_group_id,
+            process_group_killed=result.process_group_killed,
+            timed_out=result.timed_out,
+            provider_calls=1,
+            evidence_complete=outcome == WorkerOutcome.PROVEN,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+            failure_reason=None if outcome == WorkerOutcome.PROVEN else f"{self.provider} execution did not prove success",
+        )
+
+
+def _gemini_args(prompt: str, model: str) -> tuple[str, ...]:
+    return ("--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json")
+
+
+def _opencode_args(prompt: str, model: str) -> tuple[str, ...]:
+    return ("run", "--auto", "--model", model, prompt)
+
+
+def _mimo_args(prompt: str, model: str) -> tuple[str, ...]:
+    return ("run", "--never-ask-questions", "--model", model, prompt)
+
+
 class WorkerRegistry:
     def __init__(self, adapters: dict[str, WorkerAdapter]):
         unknown = set(adapters) - set(SUPPORTED_WORKER_PROVIDERS)
@@ -123,9 +214,9 @@ class WorkerRegistry:
         return cls(
             {
                 "codex": CodexWorkerAdapter(),
-                "gemini": UnimplementedWorkerAdapter("gemini", "gemini"),
-                "opencode": UnimplementedWorkerAdapter("opencode", "opencode"),
-                "mimo": UnimplementedWorkerAdapter("mimo", "mimo"),
+                "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
+                "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
+                "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "mimo", _mimo_args),
                 "ollama": UnimplementedWorkerAdapter("ollama", "ollama"),
             }
         )
