@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
@@ -13,6 +14,7 @@ from uuid import uuid4
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
+from nexus.orchestrator.governed_push import GovernedPushManager
 
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
@@ -177,6 +179,52 @@ class WorkerCompetitionCoordinator:
                 }
                 for candidate, submission in zip(candidates, submissions)
             ],
+        }
+        return self._write(state)
+
+    def push_winner(
+        self,
+        competition_id: str,
+        *,
+        remote: str,
+        authorized: bool,
+    ) -> dict[str, Any]:
+        state = self.get(competition_id)
+        if state is None:
+            raise KeyError(f"unknown competition_id: {competition_id}")
+        if state.get("status") != "INTEGRATED":
+            raise RuntimeError("only an integrated winner can be pushed")
+        integration = state.get("integration") or {}
+        winner_task_id = str((state.get("winner") or {}).get("winner_task_id") or "")
+        winner_state = self.service.get_task(winner_task_id)
+        if winner_state is None:
+            raise RuntimeError("winner task state is missing")
+        contract = winner_state.get("contract") or {}
+        configured_remotes = frozenset(
+            item.strip()
+            for item in os.getenv("NEXUS_GOVERNED_PUSH_REMOTES", "").split(",")
+            if item.strip()
+        )
+        receipt = GovernedPushManager(
+            repo_root=str(contract.get("controller_repo_root", "")),
+            allowed_remotes=configured_remotes,
+        ).push(
+            remote=remote,
+            branch=str(integration.get("integration_branch", "")),
+            expected_sha=str(integration.get("integration_commit_sha", "")),
+            authorized=authorized,
+            integration_receipt=integration,
+        )
+        state["status"] = "PUSHED"
+        state["push"] = {
+            "schema": receipt.schema,
+            "remote": receipt.remote,
+            "branch": receipt.branch,
+            "pushed_commit_sha": receipt.pushed_commit_sha,
+            "remote_commit_sha": receipt.remote_commit_sha,
+            "push_performed": receipt.push_performed,
+            "force_push": receipt.force_push,
+            "authorized": receipt.authorized,
         }
         return self._write(state)
 

@@ -9,6 +9,7 @@ from typing import Any, Mapping, Optional
 
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
+from nexus.orchestrator.refactor_campaign import RefactorCampaignCoordinator, RefactorWave
 
 
 class NexusSelfHostedMCPServer:
@@ -16,6 +17,7 @@ class NexusSelfHostedMCPServer:
         state_dir = os.getenv("NEXUS_SELF_HOSTED_STATE_DIR", str(Path.cwd() / ".nexus/self_hosted_tasks"))
         self.service = service or SelfHostedTaskService(state_dir=state_dir)
         self.competition = WorkerCompetitionCoordinator(self.service)
+        self.campaigns = RefactorCampaignCoordinator(self.competition)
 
     @staticmethod
     def _tool_specs() -> list[dict[str, Any]]:
@@ -97,6 +99,44 @@ class NexusSelfHostedMCPServer:
                     "properties": {
                         "competition_id": {"type": "string"},
                         "integration_branch": {"type": "string", "default": "nexus/integration"},
+                    },
+                },
+            },
+            {
+                "name": "nexus_self_hosted_create_refactor_campaign",
+                "description": "Create a bounded multi-wave refactor campaign with checkpoints and rollback.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["campaign_id", "base_request", "waves", "workers"],
+                    "properties": {
+                        "campaign_id": {"type": "string"},
+                        "base_request": {"type": "object"},
+                        "workers": {"type": "array", "items": {"type": "string", "enum": ["codex", "gemini", "opencode", "mimo", "ollama"]}, "minItems": 2, "uniqueItems": True},
+                        "waves": {"type": "array", "items": {"type": "object"}, "minItems": 1},
+                        "max_scope_entries": {"type": "integer", "minimum": 1, "default": 100},
+                    },
+                },
+            },
+            {
+                "name": "nexus_self_hosted_advance_refactor_campaign",
+                "description": "Advance one campaign wave; each wave requires competition, common verification, and integration evidence.",
+                "inputSchema": {"type": "object", "required": ["campaign_id"], "properties": {"campaign_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_self_hosted_rollback_refactor_campaign",
+                "description": "Rollback an integration branch to a durable wave checkpoint.",
+                "inputSchema": {"type": "object", "required": ["campaign_id", "wave_id"], "properties": {"campaign_id": {"type": "string"}, "wave_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_self_hosted_push_competition",
+                "description": "Explicitly push an integrated winner only to an allowlisted remote and nexus/integration branch.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["competition_id", "remote", "authorized"],
+                    "properties": {
+                        "competition_id": {"type": "string"},
+                        "remote": {"type": "string"},
+                        "authorized": {"type": "boolean"},
                     },
                 },
             },
@@ -183,6 +223,36 @@ class NexusSelfHostedMCPServer:
             return self.competition.integrate_winner(
                 str(arguments.get("competition_id", "")),
                 integration_branch=str(arguments.get("integration_branch", "nexus/integration")),
+            )
+        if name == "nexus_self_hosted_create_refactor_campaign":
+            waves = [
+                RefactorWave(
+                    wave_id=str(item["wave_id"]),
+                    objective=str(item["objective"]),
+                    allowed_files=tuple(str(path) for path in item.get("allowed_files", [])),
+                    verifier_commands=tuple(str(command) for command in item.get("verifier_commands", [])),
+                )
+                for item in arguments.get("waves", [])
+            ]
+            return self.campaigns.create(
+                str(arguments["campaign_id"]),
+                dict(arguments["base_request"]),
+                waves,
+                [str(provider) for provider in arguments.get("workers", [])],
+                max_scope_entries=int(arguments.get("max_scope_entries", 100)),
+            )
+        if name == "nexus_self_hosted_advance_refactor_campaign":
+            return self.campaigns.advance(str(arguments["campaign_id"]))
+        if name == "nexus_self_hosted_rollback_refactor_campaign":
+            return self.campaigns.rollback(
+                str(arguments["campaign_id"]),
+                wave_id=str(arguments["wave_id"]),
+            )
+        if name == "nexus_self_hosted_push_competition":
+            return self.competition.push_winner(
+                str(arguments["competition_id"]),
+                remote=str(arguments["remote"]),
+                authorized=bool(arguments["authorized"]),
             )
         task_id = str(arguments.get("task_id", ""))
         if name == "nexus_self_hosted_get_task":
