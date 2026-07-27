@@ -19,7 +19,11 @@ import time
 from typing import Any, Callable, Iterator, Mapping, Optional
 from uuid import uuid4
 
-from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS, WorkerOutcome
+from nexus.executors.worker_contract import (
+    SUPPORTED_WORKER_PROVIDERS,
+    WorkerExecutionReceipt,
+    WorkerOutcome,
+)
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier
@@ -33,11 +37,17 @@ from nexus.orchestrator.task_contract import (
     MutationMode,
 )
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
-RESUMABLE_STATUSES = frozenset({"WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED"})
+RESUMABLE_STATUSES = frozenset({
+    "WORKER_COMPLETED",
+    "WORKER_ESCALATING",
+    "CANDIDATE_CAPTURED",
+    "VERIFIED",
+})
 
 
 def _jsonable(value: Any) -> Any:
@@ -299,6 +309,60 @@ class SelfHostedTaskService:
             raise RuntimeError("candidate state changed during recovery")
         return candidate
 
+    @staticmethod
+    def _receipt_from_state(value: Any) -> Optional[WorkerExecutionReceipt]:
+        if isinstance(value, WorkerExecutionReceipt):
+            return value
+        if not isinstance(value, Mapping) or "outcome" not in value:
+            return None
+        try:
+            payload = dict(value)
+            payload["argv"] = tuple(payload.get("argv", ()))
+            return WorkerExecutionReceipt(**payload)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _escalation_policy(contract: ArchitectTaskContract) -> Optional[WorkerEscalationPolicy]:
+        if not contract.preferred_provider or not contract.fallback_provider:
+            return None
+        return WorkerEscalationPolicy(
+            cheap_provider=contract.preferred_provider,
+            strong_provider=contract.fallback_provider,
+        )
+
+    def _select_initial_provider(
+        self,
+        contract: ArchitectTaskContract,
+    ) -> tuple[str, Any]:
+        providers = [str(contract.preferred_provider or "codex")]
+        if contract.fallback_provider:
+            providers.append(str(contract.fallback_provider))
+        failures: list[str] = []
+        for provider in providers:
+            preflight = self.worker_registry.preflight(provider)
+            if preflight.ready:
+                return provider, preflight
+            failures.append(f"{provider}: {preflight.reason}")
+        raise RuntimeError("worker preflight failed: " + "; ".join(failures))
+
+    @staticmethod
+    def _replace_failed_target(
+        manager: WorktreeManager,
+        controller: SelfHostedDevelopmentController,
+        contract: ArchitectTaskContract,
+        lease: TargetWorktreeLease,
+    ) -> TargetWorktreeLease:
+        manager.verify_controller_unchanged(
+            contract,
+            expected_status_sha256=lease.controller_status_sha256,
+        )
+        target_head = manager._run_git(["rev-parse", "HEAD"], cwd=lease.target_worktree)
+        if target_head != lease.initial_head:
+            raise RuntimeError("failed worker changed Target HEAD; escalation is blocked")
+        manager.cleanup(contract.task_id, force=True)
+        return controller.prepare_task(contract)
+
     def _run_default_resumable(
         self,
         contract: ArchitectTaskContract,
@@ -312,42 +376,119 @@ class SelfHostedTaskService:
         controller = SelfHostedDevelopmentController(worktree_manager=manager)
         state = self._read_state(task_id) or {}
         status = str(state.get("status"))
+        policy = self._escalation_policy(contract)
+        attempts = [
+            receipt
+            for raw in state.get("executions", [])
+            if (receipt := self._receipt_from_state(raw)) is not None
+        ]
         if status == "SUBMITTED":
-            preflight = self.worker_registry.preflight(str(contract.preferred_provider or "codex"))
-            if not preflight.ready:
-                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
+            provider, preflight = self._select_initial_provider(contract)
             lease = controller.prepare_task(contract)
-            update("TARGET_LEASED", {"lease": lease, "worker_preflight": preflight})
-            update("WORKER_RUNNING", {})
+            update(
+                "TARGET_LEASED",
+                {
+                    "lease": lease,
+                    "worker_preflight": preflight,
+                    "active_provider": provider,
+                },
+            )
+            update("WORKER_RUNNING", {"active_provider": provider})
             state = self._read_state(task_id) or {}
             status = "WORKER_RUNNING"
-        elif status in {"TARGET_LEASED", "WORKER_RUNNING"}:
+        elif status == "WORKER_ESCALATING":
+            lease = self._lease_from_state(state)
+            provider = str(state.get("next_provider") or "")
+            if not provider:
+                raise RuntimeError("escalation state is missing next_provider")
+            lease = self._replace_failed_target(manager, controller, contract, lease)
+            preflight = self.worker_registry.preflight(provider)
+            if not preflight.ready:
+                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
+            update(
+                "TARGET_LEASED",
+                {
+                    "lease": lease,
+                    "worker_preflight": preflight,
+                    "active_provider": provider,
+                    "next_provider": None,
+                },
+            )
+            update("WORKER_RUNNING", {"active_provider": provider})
+            state = self._read_state(task_id) or {}
+            status = "WORKER_RUNNING"
+        elif status == "TARGET_LEASED":
             raise RuntimeError("worker lost before execution receipt; recovery is fail-closed")
         else:
             lease = self._lease_from_state(state)
 
         execution = state.get("execution")
-        if status == "WORKER_RUNNING":
-            def on_process_group(pgid: Optional[int]) -> None:
-                self._set_child_pgid(task_id, attempt_id, pgid)
+        while status in {"WORKER_RUNNING", "WORKER_COMPLETED"}:
+            if status == "WORKER_RUNNING":
+                def on_process_group(pgid: Optional[int]) -> None:
+                    self._set_child_pgid(task_id, attempt_id, pgid)
 
-            provider = str(contract.preferred_provider or "codex")
-            execution_receipt = self.worker_registry.invoke(
-                provider,
-                contract,
-                lease,
-                prompt=self._prompt(contract),
-                timeout_seconds=float(request.get("timeout_seconds", 900.0)),
-                on_process_group=on_process_group,
-            )
-            if execution_receipt.outcome != WorkerOutcome.PROVEN.value:
-                raise RuntimeError(
-                    execution_receipt.failure_reason or "worker execution did not prove success"
+                provider = str(
+                    state.get("active_provider")
+                    or contract.preferred_provider
+                    or "codex"
                 )
-            execution = execution_receipt
-            update("WORKER_COMPLETED", {"execution": execution_receipt})
+                execution_receipt = self.worker_registry.invoke(
+                    provider,
+                    contract,
+                    lease,
+                    prompt=self._prompt(contract),
+                    timeout_seconds=float(request.get("timeout_seconds", 900.0)),
+                    on_process_group=on_process_group,
+                )
+                attempts.append(execution_receipt)
+                execution = execution_receipt
+                update(
+                    "WORKER_COMPLETED",
+                    {
+                        "execution": execution_receipt,
+                        "executions": attempts,
+                        "active_provider": provider,
+                    },
+                )
+                state = self._read_state(task_id) or {}
+                status = "WORKER_COMPLETED"
+                continue
+
+            latest = attempts[-1] if attempts else self._receipt_from_state(execution)
+            if latest is None:
+                raise RuntimeError("worker execution receipt is missing common outcome evidence")
+            if latest.outcome == WorkerOutcome.PROVEN.value and latest.evidence_complete:
+                break
+            decision = policy.decide(attempts) if policy else None
+            if decision is None or decision.action != "ESCALATE" or not decision.next_provider:
+                raise RuntimeError(
+                    latest.failure_reason or "worker execution did not prove success"
+                )
+            update(
+                "WORKER_ESCALATING",
+                {
+                    "executions": attempts,
+                    "next_provider": decision.next_provider,
+                    "escalation_reason": decision.reason,
+                },
+            )
+            lease = self._replace_failed_target(manager, controller, contract, lease)
+            preflight = self.worker_registry.preflight(decision.next_provider)
+            if not preflight.ready:
+                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
+            update(
+                "TARGET_LEASED",
+                {
+                    "lease": lease,
+                    "worker_preflight": preflight,
+                    "active_provider": decision.next_provider,
+                    "next_provider": None,
+                },
+            )
+            update("WORKER_RUNNING", {"active_provider": decision.next_provider})
             state = self._read_state(task_id) or {}
-            status = "WORKER_COMPLETED"
+            status = "WORKER_RUNNING"
 
         if status == "WORKER_COMPLETED":
             candidate = self._capture_resumed_candidate(contract, controller, lease, state)

@@ -1,10 +1,14 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import time
 
 import pytest
 
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease
+from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerPreflight, WorkerOutcome
+from nexus.executors.worker_registry import WorkerRegistry
 
 
 def _request(tmp_path: Path, **overrides):
@@ -176,3 +180,141 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["promotion_status"] == "APPROVED"
     assert approved["merge_performed"] is False
     assert approved["push_performed"] is False
+
+
+def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeAdapter:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def preflight(self):
+            return WorkerPreflight(
+                provider=self.provider,
+                executable=f"/bin/{self.provider}",
+                executable_available=True,
+                authorized=True,
+                implementation_status="IMPLEMENTED",
+                ready=True,
+                reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, **options):
+            calls.append(self.provider)
+            outcome = WorkerOutcome.FAILED.value if self.provider == "codex" else WorkerOutcome.PROVEN.value
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=lease.target_worktree,
+                worker_status="COMPLETED",
+                outcome=outcome,
+                exit_code=1 if outcome == WorkerOutcome.FAILED.value else 0,
+                executable_identity=f"/bin/{self.provider}",
+                argv=(self.provider,),
+                stdout_sha256="a" * 64,
+                stderr_sha256="b" * 64,
+                wall_time_ms=1,
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=1,
+                evidence_complete=outcome == WorkerOutcome.PROVEN.value,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason=None if outcome == WorkerOutcome.PROVEN.value else "codex failed",
+            )
+
+    registry = WorkerRegistry({provider: FakeAdapter(provider) for provider in ("codex", "gemini", "opencode", "mimo", "ollama")})
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False)
+    request = _request(tmp_path, worker="codex", fallback_worker="opencode", task_id="escalate-task")
+    contract = service.build_contract(request)
+    state = {"status": "SUBMITTED", "attempt_id": "a" * 32}
+    monkeypatch.setattr(service, "_read_state", lambda task_id: state)
+
+    class FakeManager:
+        cleanup_calls = 0
+
+        def __init__(self, root_dir):
+            self.root_dir = root_dir
+
+        def verify_controller_unchanged(self, contract, expected_status_sha256=None):
+            return expected_status_sha256 or "0" * 64
+
+        def _run_git(self, args, cwd=None):
+            return "b" * 40
+
+        def cleanup(self, task_id, force=False):
+            FakeManager.cleanup_calls += 1
+
+    lease_count = 0
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            self.worktree_manager = worktree_manager
+
+        def prepare_task(self, contract):
+            nonlocal lease_count
+            lease_count += 1
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1",
+                lease_id=f"lease-{lease_count}",
+                task_id=contract.task_id,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"),
+                target_branch=f"nexus/task/{contract.task_id}",
+                initial_head="b" * 40,
+                initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64,
+                created_from_exact_revision=True,
+                commit_created=False,
+                merge_performed=False,
+            )
+
+        def collect_candidate(self, contract, lease):
+            return SimpleNamespace(candidate_state_hash="c" * 64)
+
+    class FakeVerifier:
+        def __init__(self, manager):
+            pass
+
+        def verify(self, contract, lease, candidate, protected_paths=None):
+            return SimpleNamespace(verified=True)
+
+    class FakeCommitter:
+        def __init__(self, manager):
+            pass
+
+        def create_candidate_commit(self, contract, lease, verified):
+            return SimpleNamespace(
+                promotion_status="PENDING_HUMAN_APPROVAL",
+                candidate_commit_created=True,
+                public_claim_allowed=False,
+                production_ready=False,
+                merge_performed=False,
+                push_performed=False,
+            )
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", FakeController)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier", FakeVerifier)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateCommitter", FakeCommitter)
+
+    def update(status, values):
+        state["status"] = status
+        state.update(values)
+
+    result = service._run_default_resumable(
+        contract,
+        request,
+        update,
+        task_id=contract.task_id,
+        attempt_id=state["attempt_id"],
+    )
+
+    assert calls == ["codex", "opencode"]
+    assert FakeManager.cleanup_calls == 1
+    assert lease_count == 2
+    assert result["execution"].provider == "opencode"
