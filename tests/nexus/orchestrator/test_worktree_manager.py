@@ -375,6 +375,48 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == candidate
 
 
+def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_repo):
+    original = _contract(sh2_repo)
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("salvaged\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "salvage snapshot")
+    salvage = _git(target, "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", f"refs/nexus-salvage/worktree/{original.task_id}-attempt-1", salvage)
+    assert manager.cleanup_terminal_target(
+        original,
+        lease,
+        candidate_commit=salvage,
+        candidate_ref=f"refs/nexus-salvage/worktree/{original.task_id}-attempt-1",
+    ).decision == "REMOVED"
+    _git(
+        sh2_repo["controller"],
+        "update-ref",
+        f"refs/heads/nexus/task/{original.task_id}",
+        original.target_base_revision,
+    )
+
+    (sh2_repo["controller"] / "controller.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "controller.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = _contract(sh2_repo)
+    refreshed = refreshed.model_copy(
+        update={
+            "controller_revision": refreshed_sha,
+            "target_base_revision": refreshed_sha,
+        }
+    )
+
+    retried = manager.create_lease(refreshed)
+
+    assert retried.target_detached is True
+    assert retried.initial_head == refreshed_sha
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
 def test_dirty_unique_target_is_retained_for_review(sh2_repo):
     contract, manager, lease, target = _prepare_candidate(sh2_repo)
     (target / "src" / "allowed.txt").write_text("unique\n", encoding="utf-8")

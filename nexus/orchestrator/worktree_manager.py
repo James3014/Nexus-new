@@ -222,6 +222,24 @@ class WorktreeManager:
                         legacy_candidate = None
                     if legacy_candidate:
                         protected.append(legacy_candidate)
+                    salvage_refs = self._run_git(
+                        [
+                            "for-each-ref",
+                            "--format=%(refname)",
+                            f"refs/nexus-salvage/worktree/{contract.task_id}-*",
+                        ],
+                        cwd=controller_root,
+                    ).splitlines()
+                    for salvage_ref in salvage_refs:
+                        try:
+                            salvage_parents = self._run_git(
+                                ["rev-list", "--parents", "-n", "1", salvage_ref],
+                                cwd=controller_root,
+                            ).split()
+                        except RuntimeError:
+                            continue
+                        if len(salvage_parents) == 2:
+                            protected.append(salvage_parents[1])
                     if branch_head not in protected:
                         raise RuntimeError("existing task branch candidate lacks durable protection")
                     target_detached = True
