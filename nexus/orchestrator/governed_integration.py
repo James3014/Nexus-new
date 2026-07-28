@@ -96,14 +96,14 @@ class ControlledIntegrationManager:
             if lease.get("target_detached")
             else lease.get("target_branch", "")
         )
-        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED", "INTEGRATING"}:
+        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED", "INTEGRATING", "INTEGRATION_FAILED"}:
             raise RuntimeError("only a terminal candidate task can be integrated")
         approved = state.get("approved_binding") or {}
         binding_fields = (
             "candidate_commit_sha", "candidate_tree_sha",
             "candidate_state_hash", "verified_receipt_hash",
         )
-        if not approved or not packet or state.get("promotion_status") != "APPROVED" or any(
+        if not approved or not packet or state.get("promotion_status") not in {"APPROVED", "INTEGRATION_FAILED"} or any(
             approved.get(field) != packet.get(field) for field in binding_fields
         ):
             raise RuntimeError("exact approved binding is required")
