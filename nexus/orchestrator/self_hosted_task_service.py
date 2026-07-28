@@ -519,12 +519,16 @@ class SelfHostedTaskService:
     @staticmethod
     def _prompt(contract: ArchitectTaskContract) -> str:
         allowed = ", ".join(contract.allowed_files)
+        verifiers = "\n".join(f"- {command}" for command in contract.verifier_commands)
         return (
             f"WHAT: {contract.goal.what}\n"
             f"WHY: {contract.goal.why}\n"
             f"Allowed files: {allowed}\n"
             "Work only in the isolated Target. Do not edit, delete, stage, commit, merge, push, or reset "
-            "outside the allowed scope. Return a concise summary after making the change."
+            "outside the allowed scope. Run every verifier command below after making the change; if any "
+            "verifier fails, diagnose and repair within the allowed files before returning.\n"
+            f"Required verifier commands:\n{verifiers}\n"
+            "Return a concise summary only after all required verifiers pass."
         )
 
     def _set_child_pgid(self, task_id: str, attempt_id: str, pgid: Optional[int]) -> None:
