@@ -1105,3 +1105,153 @@ def test_legacy_proven_outcome_fails_closed_in_service(tmp_path, monkeypatch):
 
     verified_checkpoints = [v for s, v in checkpoint_history if s == "VERIFIED"]
     assert len(verified_checkpoints) == 0
+
+
+def test_close_retained_without_candidate_success_with_missing_target(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-001"
+    target_path = tmp_path / "targets" / task_id
+    assert not target_path.exists()
+
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "submitted_at": "2026-07-28T10:00:00+00:00",
+        "status_history": [{"status": "RETAINED_FOR_REVIEW", "at": "2026-07-28T10:00:00+00:00"}],
+        "request": _request(tmp_path, task_id=task_id),
+        "contract": service.build_contract(_request(tmp_path, task_id=task_id)).model_dump(mode="json"),
+        "target_worktree": str(target_path),
+        "controller_worktree": str(tmp_path / "controller"),
+        "attempt_id": "att-001",
+        "promotion_status": "NOT_CREATED",
+        "worker_pid": None,
+        "execution": {"provider": "codex", "outcome": "EXECUTION_FAILED"},
+        "error": "worker crashed before candidate",
+        "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+        "state_retention_status": "TERMINAL",
+        "archive_eligible": False,
+    }
+    service._write_state(task_id, state)
+
+    result = service.close_retained_without_candidate(task_id, superseded_by="ref-evidence-456")
+
+    assert result["status"] == "SUPERSEDED"
+    assert result["final_disposition"] == "SUPERSEDED"
+    assert result["terminal_status"] == "SUPERSEDED"
+    assert result["state_retention_status"] == "TERMINAL"
+    assert result["archive_eligible"] is True
+    assert result["merge_performed"] is False
+    assert result["push_performed"] is False
+    assert result["superseded_by"] == "ref-evidence-456"
+    assert result["promotion_status"] == "NOT_CREATED"
+    assert result["execution"] == {"provider": "codex", "outcome": "EXECUTION_FAILED"}
+    assert result["error"] == "worker crashed before candidate"
+
+    archive_result = service.archive_states(dry_run=False)
+    assert any(entry["task_id"] == task_id for entry in archive_result["entries"])
+
+
+def test_close_retained_without_candidate_fails_closed_missing_superseded_by(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-002"
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(tmp_path / "nonexistent"),
+    }
+    service._write_state(task_id, state)
+
+    with pytest.raises(ValueError, match="superseded_by"):
+        service.close_retained_without_candidate(task_id, superseded_by="")
+
+    with pytest.raises(ValueError, match="superseded_by"):
+        service.close_retained_without_candidate(task_id, superseded_by="   ")
+
+
+def test_close_retained_without_candidate_fails_closed_wrong_status(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-003"
+    state = {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(tmp_path / "nonexistent"),
+    }
+    service._write_state(task_id, state)
+
+    with pytest.raises(RuntimeError, match="RETAINED_FOR_REVIEW"):
+        service.close_retained_without_candidate(task_id, superseded_by="ref-123")
+
+
+def test_close_retained_without_candidate_fails_closed_candidate_present(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-004"
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "candidate_commit_sha": "a" * 40,
+        "target_worktree": str(tmp_path / "nonexistent"),
+    }
+    service._write_state(task_id, state)
+
+    with pytest.raises(RuntimeError):
+        service.close_retained_without_candidate(task_id, superseded_by="ref-123")
+
+
+def test_close_retained_without_candidate_fails_closed_active_process(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-005"
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "worker_pid": 12345,
+        "target_worktree": str(tmp_path / "nonexistent"),
+    }
+    service._write_state(task_id, state)
+
+    monkeypatch.setattr(service, "_pid_alive", staticmethod(lambda pid: True))
+
+    with pytest.raises(RuntimeError, match="active worker process"):
+        service.close_retained_without_candidate(task_id, superseded_by="ref-123")
+
+
+def test_close_retained_without_candidate_fails_closed_active_child_pgid(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-005b"
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "worker_pid": None,
+        "worker_child_pgid": 54321,
+        "target_worktree": str(tmp_path / "nonexistent"),
+    }
+    service._write_state(task_id, state)
+
+    monkeypatch.setattr(service, "_pid_alive", staticmethod(lambda pid: True))
+
+    with pytest.raises(RuntimeError, match="active worker child process"):
+        service.close_retained_without_candidate(task_id, superseded_by="ref-123")
+
+
+def test_close_retained_without_candidate_fails_closed_existing_dirty_target(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-006"
+    target_dir = tmp_path / "targets" / task_id
+    target_dir.mkdir(parents=True)
+    (target_dir / "dirty.txt").write_text("unsaved work")
+
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(target_dir),
+    }
+    service._write_state(task_id, state)
+
+    with pytest.raises(RuntimeError, match="Target path exists"):
+        service.close_retained_without_candidate(task_id, superseded_by="ref-123")

@@ -1293,6 +1293,90 @@ class SelfHostedTaskService:
             "archive_eligible": True,
         }, attempt_id=state.get("attempt_id")) or state
 
+    def close_retained_without_candidate(
+        self,
+        task_id: str,
+        *,
+        superseded_by: str,
+    ) -> dict[str, Any]:
+        if not superseded_by or not str(superseded_by).strip():
+            raise ValueError("superseded_by evidence identifier is required and non-empty")
+        superseded_by = str(superseded_by).strip()
+
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+
+        if state.get("status") != "RETAINED_FOR_REVIEW":
+            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW status")
+
+        if state.get("promotion_status") != "NOT_CREATED":
+            raise RuntimeError("promotion_status must be NOT_CREATED")
+
+        packet = state.get("promotion_packet") or {}
+        candidate_commit = packet.get("candidate_commit_sha") or state.get("candidate_commit_sha")
+        candidate_ref = state.get("candidate_ref")
+        verified_receipt = state.get("verified_receipt") or {}
+        candidate_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
+        verified_receipt_hash = state.get("verified_receipt_hash")
+        candidate_dict = state.get("candidate") or {}
+        candidate_created = (
+            state.get("candidate_commit_created")
+            or packet.get("candidate_commit_created")
+            or candidate_dict.get("commit_created")
+        )
+        if (
+            packet
+            or candidate_commit
+            or candidate_ref
+            or candidate_state_hash
+            or verified_receipt_hash
+            or candidate_created
+        ):
+            raise RuntimeError("task has candidate evidence present")
+
+        worker_pid = state.get("worker_pid")
+        if worker_pid and self._pid_alive(int(worker_pid)):
+            raise RuntimeError("active worker process is running for task")
+
+        child_pgid = state.get("worker_child_pgid")
+        if child_pgid and self._pid_alive(int(child_pgid)):
+            raise RuntimeError("active worker child process is running for task")
+
+        contract = state.get("contract") or {}
+        lease = state.get("lease") or {}
+        target_raw = state.get("target_worktree") or lease.get("target_worktree") or contract.get("target_repo_root")
+        if target_raw:
+            target_path = Path(str(target_raw)).expanduser().resolve()
+            if target_path.exists():
+                raise RuntimeError(f"recorded Target path exists: {target_path}")
+            controller_raw = state.get("controller_worktree") or contract.get("controller_repo_root")
+            if controller_raw:
+                controller_path = Path(str(controller_raw)).expanduser().resolve()
+                if controller_path.is_dir():
+                    target_worktree_root = contract.get("target_worktree_root") or str(target_path.parent)
+                    manager = WorktreeManager(root_dir=str(target_worktree_root))
+                    if manager._worktree_entry(controller_path, target_path) is not None:
+                        raise RuntimeError(f"recorded Target path is a registered worktree: {target_path}")
+
+        return self._checkpoint(
+            task_id,
+            "SUPERSEDED",
+            {
+                "promotion_status": "NOT_CREATED",
+                "final_disposition": "SUPERSEDED",
+                "superseded_by": superseded_by,
+                "terminal_status": "SUPERSEDED",
+                "state_retention_status": "TERMINAL",
+                "archive_eligible": True,
+                "merge_performed": False,
+                "push_performed": False,
+                "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
+                "cleanup_performed": False,
+            },
+            attempt_id=state.get("attempt_id"),
+        ) or state
+
     def cancel_task(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
         if state is None:
