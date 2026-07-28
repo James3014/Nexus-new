@@ -177,3 +177,17 @@ def test_verify_expected_checkout_requires_launch_from_repo_root(tmp_path):
 
     with pytest.raises(MCPHTTPConfigError):
         verify_expected_checkout(repo_root, cwd=tmp_path)
+
+
+def test_ops_entrypoint_handles_keyboard_interrupt_without_traceback(monkeypatch, capsys):
+    from scripts.ops import nexus_self_hosted_mcp_http as entrypoint
+
+    def interrupt(*, expected_repo_root):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(entrypoint, "serve_from_env", interrupt)
+
+    assert entrypoint.main() == 130
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
