@@ -282,6 +282,54 @@ def test_archive_apply_persists_manifest_and_remains_readable(tmp_path):
     assert repeated["entries"] == []
 
 
+def test_archived_integrated_task_retries_with_same_identity_and_versions_receipt(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _request(tmp_path, task_id="archived-integrated")
+    contract = service.build_contract(request)
+    first_attempt = "a" * 32
+    service._write_state("archived-integrated", {
+        "task_id": "archived-integrated", "status": "INTEGRATED",
+        "attempt_id": first_attempt, "attempts": [{"attempt_id": first_attempt}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "promotion_status": "INTEGRATED",
+        "candidate_ref": "refs/nexus-candidates/archived-integrated/old",
+        "promotion_packet": {"candidate_commit_sha": "c" * 40},
+        "final_disposition": "INTEGRATED", "cleanup_decision": "REMOVED",
+        "cleanup_performed": True, "updated_at": "2026-01-01T00:00:00+00:00",
+    })
+    first_archive = service.archive_states(dry_run=False)
+
+    submitted = service.submit_task(request)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        current = service._read_state("archived-integrated")
+        if current and current["status"] == "FINAL_BLOCK":
+            break
+        time.sleep(0.01)
+    current = service._read_state("archived-integrated")
+    second_archive = service.archive_states(dry_run=False)
+
+    assert submitted["task_id"] == "archived-integrated"
+    assert current["attempt_id"] != first_attempt
+    assert len(current["attempts"]) == 2
+    assert current["candidate_ref"] is None
+    assert current["candidate_history"][0]["final_disposition"] == "INTEGRATED"
+    assert calls == ["archived-integrated"]
+    assert Path(first_archive["entries"][0]["archive_location"]).is_file()
+    assert Path(second_archive["entries"][0]["archive_location"]).is_file()
+    assert first_archive["entries"][0]["archive_location"] != second_archive["entries"][0]["archive_location"]
+    assert service.get_task("archived-integrated")["attempt_id"] == current["attempt_id"]
+
+
 def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
     calls = []
 

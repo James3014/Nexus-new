@@ -138,6 +138,23 @@ class SelfHostedTaskService:
     def _archive_state_path(self, task_id: str) -> Path:
         return self._archive_root() / f"{task_id}.json"
 
+    def _archive_state_candidates(self, task_id: str) -> list[Path]:
+        root = self._archive_root()
+        candidates = [self._archive_state_path(task_id)]
+        candidates.extend(sorted(root.glob(f"{task_id}--attempt-*.json")) if root.exists() else [])
+        return [path for path in candidates if path.exists()]
+
+    def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
+        latest_path: Optional[Path] = None
+        latest_state: Optional[dict[str, Any]] = None
+        latest_key: tuple[str, int] = ("", -1)
+        for path in self._archive_state_candidates(task_id):
+            state = json.loads(path.read_text(encoding="utf-8"))
+            key = (str(state.get("updated_at") or ""), path.stat().st_mtime_ns)
+            if latest_state is None or key > latest_key:
+                latest_path, latest_state, latest_key = path, state, key
+        return latest_path, latest_state
+
     def _lock_path(self) -> Path:
         return self.state_dir / ".state.lock"
 
@@ -175,23 +192,31 @@ class SelfHostedTaskService:
     def _create_state(self, task_id: str, state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         with self._state_lock():
             destination = self._state_path(task_id)
-            archived = self._archive_state_path(task_id)
-            if destination.exists() or archived.exists():
-                source = destination if destination.exists() else archived
-                return json.loads(source.read_text(encoding="utf-8")), False
+            if destination.exists():
+                return json.loads(destination.read_text(encoding="utf-8")), False
+            _, archived = self._latest_archived_state(task_id)
+            if archived is not None:
+                return archived, False
             return self._write_state_locked(task_id, state), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
         path = self._state_path(task_id)
         if not path.exists():
-            archived = self._archive_state_path(task_id)
-            if not archived.exists():
-                return None
-            return json.loads(archived.read_text(encoding="utf-8"))
+            _, archived = self._latest_archived_state(task_id)
+            return archived
         with self._state_lock():
             if not path.exists():
                 return None
             return json.loads(path.read_text(encoding="utf-8"))
+
+    def _reactivate_archived_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        with self._state_lock():
+            path = self._state_path(task_id)
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+            if not self._archive_state_candidates(task_id):
+                raise RuntimeError("archived task receipt disappeared before retry")
+            return self._write_state_locked(task_id, state)
 
     def _mutate_state(self, task_id: str, mutator: Callable[[dict[str, Any]], None]) -> Optional[dict[str, Any]]:
         with self._state_lock():
@@ -1128,11 +1153,24 @@ class SelfHostedTaskService:
                 raise ValueError("task_id already exists with a different contract")
             if existing.get("status") in PENDING_CANDIDATE_STATUSES or existing.get("promotion_status") in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
                 return existing
-            if existing.get("status") in {"FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED", "INTEGRATION_FAILED"}:
-                if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED"}:
+            if existing.get("status") in {"FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED", "INTEGRATION_FAILED", "INTEGRATED"}:
+                if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
                     raise RuntimeError("terminal retry blocked until previous Target disposition")
+                existing = self._reactivate_archived_state(contract.task_id, existing)
                 attempt_id = uuid4().hex
                 def retry(current: dict[str, Any]) -> None:
+                    packet = current.get("promotion_packet") or {}
+                    if packet.get("candidate_commit_sha") or current.get("candidate_ref"):
+                        current.setdefault("candidate_history", []).append({
+                            "candidate_commit": packet.get("candidate_commit_sha"),
+                            "candidate_ref": current.get("candidate_ref"),
+                            "candidate_state_hash": packet.get("candidate_state_hash"),
+                            "verified_receipt_hash": packet.get("verified_receipt_hash"),
+                            "approval_binding": current.get("approved_binding"),
+                            "integration_branch": current.get("integration_branch"),
+                            "integration_commit": current.get("integration_result_sha"),
+                            "final_disposition": current.get("final_disposition") or current.get("status"),
+                        })
                     current["attempt_id"] = attempt_id
                     current.setdefault("attempts", []).append({"attempt_id": attempt_id, "started_at": now})
                     current["status"] = "SUBMITTED"
@@ -1143,9 +1181,30 @@ class SelfHostedTaskService:
                     current["heartbeat_at"] = now
                     current["error"] = None
                     current["promotion_status"] = "NOT_CREATED"
+                    current["candidate_status"] = None
+                    current["candidate_commit_sha"] = None
+                    current["candidate_tree_sha"] = None
+                    current["candidate_ref"] = None
+                    current["candidate_state_hash"] = None
+                    current["verified_receipt_hash"] = None
+                    current["promotion_packet"] = None
+                    current["approved_binding"] = None
+                    current["integration_branch"] = None
+                    current["integration_base_sha"] = None
+                    current["integration_result_sha"] = None
+                    current["integration_receipt"] = None
+                    current["final_disposition"] = None
                     current["terminal_status"] = None
+                    current["cleanup_eligible"] = False
+                    current["cleanup_decision"] = None
+                    current["cleanup_blocker"] = None
+                    current["cleanup_performed"] = False
+                    current["cleanup_performed_at"] = None
                     current["state_retention_status"] = "ACTIVE"
                     current["archive_eligible"] = False
+                    current["archive_location"] = None
+                    current["merge_performed"] = False
+                    current["push_performed"] = False
                 self._mutate_state(contract.task_id, retry)
                 return self._launch_worker(contract.task_id, attempt_id) or existing
             return self.reconcile_task(contract.task_id) or existing
@@ -1296,6 +1355,9 @@ class SelfHostedTaskService:
                 continue
             digest = hashlib.sha256(payload).hexdigest()
             destination = archive_root / path.name
+            if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+                attempt_id = str(state.get("attempt_id") or "unknown")
+                destination = archive_root / f"{path.stem}--attempt-{attempt_id}.json"
             entries.append({
                 "task_id": path.stem,
                 "terminal_status": state.get("terminal_status") or state.get("status"),
@@ -1390,7 +1452,7 @@ class SelfHostedTaskService:
         contract = state.get("contract") or {}
         lease = state.get("lease") or {}
         packet = state.get("promotion_packet") or {}
-        archived_path = self._archive_state_path(task_id)
+        archived_path, _ = self._latest_archived_state(task_id)
         return {
             "task_id": task_id,
             "attempt_id": state.get("attempt_id"),
@@ -1424,9 +1486,9 @@ class SelfHostedTaskService:
             "cleanup_blocker": state.get("cleanup_blocker"),
             "cleanup_performed": state.get("cleanup_performed"),
             "cleanup_performed_at": state.get("cleanup_performed_at"),
-            "state_retention_status": "ARCHIVED" if archived_path.exists() else state.get("state_retention_status"),
+            "state_retention_status": "ARCHIVED" if archived_path is not None else state.get("state_retention_status"),
             "archive_eligible": state.get("archive_eligible"),
-            "archive_location": str(archived_path) if archived_path.exists() else state.get("archive_location"),
+            "archive_location": str(archived_path) if archived_path is not None else state.get("archive_location"),
             "execution": state.get("execution"),
             "candidate": state.get("candidate"),
             "verified_receipt": state.get("verified_receipt"),
