@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, CliWorkerStatus, run_cli_worker
+from nexus.orchestrator.repository_contract_gate import (
+    RepositoryContractFinding,
+    RepositoryContractGate,
+)
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import CandidateDiffReceipt, TargetWorktreeLease, WorktreeManager
 
@@ -50,6 +54,10 @@ class VerifiedCandidateReceipt:
     verifier_evidence: tuple[VerifierEvidence, ...]
     candidate_commit_created: bool
     merge_performed: bool
+    repository_contract_gate_passed: bool = True
+    repository_contract_mode: str = "shadow"
+    repository_contract_policy_revision_hash: str = ""
+    repository_contract_findings: tuple[RepositoryContractFinding, ...] = ()
 
 
 class CandidateVerifier:
@@ -173,6 +181,12 @@ class CandidateVerifier:
             contract,
             lease.target_worktree,
         )
+        repository_contract = RepositoryContractGate(self.worktree_manager).evaluate(
+            contract=contract,
+            lease=lease,
+            candidate=candidate,
+            current=current,
+        )
         failures: list[str] = []
         if not scope_passed:
             failures.append("scope_gate_failed")
@@ -182,6 +196,7 @@ class CandidateVerifier:
             failures.append("controller_gate_failed")
         failures.extend(protected_failures)
         failures.extend(verifier_failures)
+        failures.extend(repository_contract.blocking_reasons)
         verified = not failures
         return VerifiedCandidateReceipt(
             schema="nexus.verified_candidate_receipt.v1",
@@ -202,4 +217,8 @@ class CandidateVerifier:
             verifier_evidence=verifier_evidence,
             candidate_commit_created=False,
             merge_performed=False,
+            repository_contract_gate_passed=repository_contract.passed,
+            repository_contract_mode=repository_contract.mode,
+            repository_contract_policy_revision_hash=repository_contract.policy_revision_hash,
+            repository_contract_findings=repository_contract.findings,
         )
