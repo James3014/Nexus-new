@@ -203,6 +203,10 @@ from scripts.engine.commands.multi_agent_actions import (
     submit_multi_agent_task,
     verify_multi_agent_task,
 )
+from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_status,
+    run_self_hosted_submit,
+)
 from scripts.engine.commands.registry_actions import (
     get_registry_status,
     get_skills_list,
@@ -3366,6 +3370,107 @@ def mission_resume():
     subprocess.run(cmd, check=False)
 
 
+@nexus_group.group(name="self-hosted")
+def self_hosted_group():
+    """🏠 Self-hosted task execution and status governance."""
+    pass
+
+
+nexus.add_command(self_hosted_group, name="self-hosted")
+
+
+@self_hosted_group.command(name="submit")
+@click.option("--request-file", "-f", type=click.Path(exists=True, dir_okay=False), help="Path to JSON file with task request.")
+@click.option("--task-id", help="Explicit task ID.")
+@click.option("--what", help="Task objective (WHAT).")
+@click.option("--why", help="Task justification (WHY).")
+@click.option("--controller-revision", help="Controller Git revision SHA.")
+@click.option("--target-base-revision", help="Target base Git revision SHA.")
+@click.option("--controller-repo-root", help="Controller repository root path.")
+@click.option("--target-repo-root", help="Target repository root path.")
+@click.option("--target-worktree-root", help="Target worktree root path.")
+@click.option("--allowed-files", help="Comma-separated list of allowed file patterns.")
+@click.option("--forbidden-files", help="Comma-separated list of forbidden file patterns.")
+@click.option("--verifier-commands", help="Comma-separated list of verifier commands.")
+@click.option("--protected-contracts", help="Comma-separated list of protected contracts.")
+@click.option("--worker", default=None, help="Worker provider (e.g. codex, auto).")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_submit(
+    request_file: str | None,
+    task_id: str | None,
+    what: str | None,
+    why: str | None,
+    controller_revision: str | None,
+    target_base_revision: str | None,
+    controller_repo_root: str | None,
+    target_repo_root: str | None,
+    target_worktree_root: str | None,
+    allowed_files: str | None,
+    forbidden_files: str | None,
+    verifier_commands: str | None,
+    protected_contracts: str | None,
+    worker: str | None,
+    state_dir: str | None,
+) -> None:
+    """Submit a governed self-hosted task."""
+    request_data: dict[str, Any] = {}
+    if request_file:
+        with open(request_file, "r", encoding="utf-8") as f:
+            request_data = json.load(f)
+
+    if task_id is not None:
+        request_data["task_id"] = task_id
+    if what is not None:
+        request_data["what"] = what
+    if why is not None:
+        request_data["why"] = why
+    if controller_revision is not None:
+        request_data["controller_revision"] = controller_revision
+    if target_base_revision is not None:
+        request_data["target_base_revision"] = target_base_revision
+    if controller_repo_root is not None:
+        request_data["controller_repo_root"] = controller_repo_root
+    if target_repo_root is not None:
+        request_data["target_repo_root"] = target_repo_root
+    if target_worktree_root is not None:
+        request_data["target_worktree_root"] = target_worktree_root
+    if worker is not None:
+        request_data["worker"] = worker
+
+    def _split_csv(val: str | None) -> list[str] | None:
+        if val is None:
+            return None
+        return [s.strip() for s in val.split(",") if s.strip()]
+
+    af = _split_csv(allowed_files)
+    if af is not None:
+        request_data["allowed_files"] = af
+    ff = _split_csv(forbidden_files)
+    if ff is not None:
+        request_data["forbidden_files"] = ff
+    vc = _split_csv(verifier_commands)
+    if vc is not None:
+        request_data["verifier_commands"] = vc
+    pc = _split_csv(protected_contracts)
+    if pc is not None:
+        request_data["protected_contracts"] = pc
+
+    res = run_self_hosted_submit(request_data, state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="status")
+@click.option("--task-id", required=True, help="Task ID to inspect.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_status(task_id: str, state_dir: str | None) -> None:
+    """Read durable status for a self-hosted task."""
+    res = run_self_hosted_status(task_id, state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
 if __name__ == "__main__":
 
     nexus()
+
