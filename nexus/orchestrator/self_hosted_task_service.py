@@ -243,7 +243,9 @@ class SelfHostedTaskService:
             previous = state.get("status")
             state["status"] = status
             if values:
-                state.update(_jsonable(dict(values)))
+                updates = _jsonable(dict(values))
+                updates.pop("submitted_at", None)
+                state.update(updates)
             state["updated_at"] = now
             state["heartbeat_at"] = now
             history = list(state.get("status_history", []))
@@ -1138,6 +1140,7 @@ class SelfHostedTaskService:
             "schema": "nexus.self_hosted_task_state.v1",
             "task_id": contract.task_id,
             "status": "SUBMITTED",
+            "submitted_at": now,
             "status_history": [{"status": "SUBMITTED", "at": now}],
             "request": _jsonable(dict(request)),
             "contract": contract.model_dump(mode="json"),
@@ -1499,6 +1502,7 @@ class SelfHostedTaskService:
             "task_id": task_id,
             "attempt_id": state.get("attempt_id"),
             "status": state.get("status"),
+            "submitted_at": state.get("submitted_at"),
             "contract_hash": state.get("contract_hash"),
             "controller_worktree": state.get("controller_worktree") or contract.get("controller_repo_root"),
             "controller_revision": state.get("controller_revision") or contract.get("controller_revision"),
