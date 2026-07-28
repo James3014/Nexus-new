@@ -34,6 +34,7 @@ def test_worker_runs_without_shell_and_records_hashes_and_telemetry(tmp_path):
     assert result.status is CliWorkerStatus.COMPLETED
     assert result.exit_code == 0
     assert result.executable_identity == str(Path(sys.executable).resolve())
+    assert result.executable_sha256 == result.hash_bytes(Path(result.executable_identity).read_bytes())
     assert result.argv == request.argv
     assert result.cwd == str(tmp_path.resolve())
     assert result.stdout_sha256 == result.hash_bytes(result.stdout)
@@ -41,6 +42,40 @@ def test_worker_runs_without_shell_and_records_hashes_and_telemetry(tmp_path):
     assert result.wall_time_ms >= 0
     assert result.telemetry["wall_time_ms"] == result.wall_time_ms
     assert result.telemetry["process_group_id"] == result.process_group_id
+
+
+def test_worker_records_nonzero_exit_with_executable_hash(tmp_path):
+    request = _python_request(
+        tmp_path,
+        "import sys; print('bad', file=sys.stderr); sys.exit(7)",
+    )
+
+    result = run_cli_worker(request)
+
+    assert result.status is CliWorkerStatus.COMPLETED
+    assert result.exit_code == 7
+    assert result.executable_sha256 == result.hash_bytes(Path(result.executable_identity).read_bytes())
+    assert result.timed_out is False
+    assert result.process_group_killed is False
+
+
+def test_worker_invokes_and_clears_process_group_callback(tmp_path):
+    calls = []
+
+    def on_pg(pg_id):
+        calls.append(pg_id)
+
+    request = _python_request(
+        tmp_path,
+        "print('ok')",
+    )
+
+    result = run_cli_worker(request, on_process_group=on_pg)
+
+    assert result.status is CliWorkerStatus.COMPLETED
+    assert len(calls) == 2
+    assert calls[0] == result.process_group_id
+    assert calls[1] is None
 
 
 def test_worker_rejects_commit_merge_and_push_commands(tmp_path):

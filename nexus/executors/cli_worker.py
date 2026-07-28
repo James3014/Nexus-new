@@ -48,6 +48,10 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
                 raise ValueError(f"worker command cannot invoke git {subcommand}")
 
 
+def _hash_file(path: str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 @dataclass(frozen=True)
 class CliWorkerRequest:
     executable: str
@@ -85,6 +89,7 @@ class CliWorkerResult:
     process_group_id: Optional[int]
     process_group_killed: bool = False
     timed_out: bool = False
+    executable_sha256: str = ""
     telemetry: dict[str, int] = field(default_factory=dict)
 
     @staticmethod
@@ -116,6 +121,7 @@ def run_cli_worker(
     """Run one isolated CLI invocation and return execution evidence."""
 
     started = time.monotonic()
+    executable_sha256 = _hash_file(request.executable)
     environment = None
     if request.env is not None:
         environment = os.environ.copy()
@@ -165,6 +171,7 @@ def run_cli_worker(
     return CliWorkerResult(
         status=status,
         executable_identity=request.executable,
+        executable_sha256=executable_sha256,
         argv=request.argv,
         cwd=request.cwd,
         exit_code=exit_code,

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.executors.cli_worker import CliWorkerResult, CliWorkerStatus
 from nexus.orchestrator.candidate_verifier import CandidateVerifier
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.task_contract import MutationMode, SelfHostedTaskContract
@@ -57,6 +58,7 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     contract, lease, candidate, controller = scenario
 
     receipt = CandidateVerifier(controller.worktree_manager).verify(contract, lease, candidate)
+    verifier_evidence = receipt.verifier_evidence[0]
 
     assert receipt.verified is True
     assert receipt.scope_gate_passed is True
@@ -69,6 +71,189 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert receipt.candidate_commit_allowed is True
     assert receipt.public_claim_allowed is False
     assert receipt.production_ready is False
+    assert verifier_evidence.argv == ("-c", 'print("verifier pass")')
+    assert verifier_evidence.cwd == str(Path(lease.target_worktree).resolve())
+    assert verifier_evidence.executable_identity
+    assert verifier_evidence.executable_sha256 == hashlib.sha256(
+        Path(verifier_evidence.executable_identity).read_bytes()
+    ).hexdigest()
+    assert verifier_evidence.process_group_id is not None
+    assert verifier_evidence.process_group_killed is False
+    assert verifier_evidence.timed_out is False
+
+
+def test_candidate_verifier_fails_closed_for_nonzero_verifier_exit(scenario):
+    contract, lease, candidate, controller = scenario
+    failing_contract = contract.model_copy(
+        update={"verifier_commands": ["python3 -c 'import sys; sys.exit(4)'"]}
+    )
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(failing_contract, lease, candidate)
+
+    assert receipt.verified is False
+    assert receipt.verifier_gate_passed is False
+    assert receipt.public_claim_allowed is False
+    assert receipt.candidate_commit_allowed is False
+    assert receipt.verifier_evidence[0].exit_code == 4
+    assert receipt.failure_reasons == ["verifier_failed:python3 -c 'import sys; sys.exit(4)'"]
+
+
+def test_candidate_verifier_records_timeout_cleanup(scenario, monkeypatch):
+    contract, lease, candidate, controller = scenario
+    timeout_contract = contract.model_copy(
+        update={"verifier_commands": ["python3 -c 'import time; time.sleep(30)'"]}
+    )
+    monkeypatch.setattr(CandidateVerifier, "VERIFIER_TIMEOUT_SECONDS", 0.05)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(timeout_contract, lease, candidate)
+    verifier_evidence = receipt.verifier_evidence[0]
+
+    assert receipt.verified is False
+    assert receipt.verifier_gate_passed is False
+    assert verifier_evidence.status == CliWorkerStatus.TIMED_OUT.value
+    assert verifier_evidence.timed_out is True
+    assert verifier_evidence.process_group_killed is True
+    assert verifier_evidence.process_group_id is not None
+    assert receipt.failure_reasons == ["verifier_failed:python3 -c 'import time; time.sleep(30)'"]
+
+
+@pytest.mark.parametrize(
+    ("tampered_field", "expected_reason"),
+    [
+        ("cwd", "cwd_mismatch"),
+        ("executable_identity", "executable_identity_mismatch"),
+        ("argv", "argv_mismatch"),
+        ("executable_sha256", "executable_sha256_mismatch"),
+    ],
+)
+def test_candidate_verifier_fails_closed_for_fake_evidence_mismatch(
+    scenario,
+    monkeypatch,
+    tampered_field,
+    expected_reason,
+):
+    contract, lease, candidate, controller = scenario
+
+    def fake_worker(request):
+        executable_identity = request.executable
+        cwd = request.cwd
+        argv = request.argv
+        executable_sha256 = hashlib.sha256(Path(request.executable).read_bytes()).hexdigest()
+        if tampered_field == "cwd":
+            cwd = str(Path(request.cwd).parent)
+        if tampered_field == "executable_identity":
+            executable_identity = str(Path(request.executable).with_name("fake-python"))
+        if tampered_field == "argv":
+            argv = (*request.argv, "--tampered")
+        if tampered_field == "executable_sha256":
+            executable_sha256 = "0" * 64
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=executable_identity,
+            executable_sha256=executable_sha256,
+            argv=argv,
+            cwd=cwd,
+            exit_code=0,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=123,
+        )
+
+    monkeypatch.setattr("nexus.orchestrator.candidate_verifier.run_cli_worker", fake_worker)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(contract, lease, candidate)
+
+    assert receipt.verified is False
+    assert receipt.verifier_gate_passed is False
+    assert receipt.public_claim_allowed is False
+    assert expected_reason in receipt.failure_reasons[0]
+
+
+def test_candidate_verifier_fails_closed_for_argv_mismatch(scenario, monkeypatch):
+    contract, lease, candidate, controller = scenario
+
+    def fake_worker(request):
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            executable_sha256=hashlib.sha256(Path(request.executable).read_bytes()).hexdigest(),
+            argv=(*request.argv, "--tampered-argv"),
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=123,
+        )
+
+    monkeypatch.setattr("nexus.orchestrator.candidate_verifier.run_cli_worker", fake_worker)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(contract, lease, candidate)
+
+    assert receipt.verified is False
+    assert receipt.verifier_gate_passed is False
+    assert receipt.public_claim_allowed is False
+    assert "argv_mismatch" in receipt.failure_reasons[0]
+
+
+def test_candidate_verifier_fails_closed_for_executable_sha256_mismatch(scenario, monkeypatch):
+    contract, lease, candidate, controller = scenario
+
+    def fake_worker(request):
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            executable_sha256="deadbeef" * 8,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=123,
+        )
+
+    monkeypatch.setattr("nexus.orchestrator.candidate_verifier.run_cli_worker", fake_worker)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(contract, lease, candidate)
+
+    assert receipt.verified is False
+    assert receipt.verifier_gate_passed is False
+    assert receipt.public_claim_allowed is False
+    assert "executable_sha256_mismatch" in receipt.failure_reasons[0]
+
+
+def test_candidate_verifier_fails_closed_when_timeout_does_not_kill_process_group(
+    scenario,
+    monkeypatch,
+):
+    contract, lease, candidate, controller = scenario
+
+    def fake_worker(request):
+        return CliWorkerResult(
+            status=CliWorkerStatus.TIMED_OUT,
+            executable_identity=request.executable,
+            executable_sha256=hashlib.sha256(Path(request.executable).read_bytes()).hexdigest(),
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=-9,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=1,
+            process_group_id=123,
+            process_group_killed=False,
+            timed_out=True,
+        )
+
+    monkeypatch.setattr("nexus.orchestrator.candidate_verifier.run_cli_worker", fake_worker)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(contract, lease, candidate)
+
+    assert receipt.verified is False
+    assert receipt.verifier_gate_passed is False
+    assert "timeout_without_process_group_kill" in receipt.failure_reasons[0]
+    assert receipt.failure_reasons[1] == "verifier_failed:python3 -c 'print(\"verifier pass\")'"
 
 
 def test_candidate_verifier_fails_closed_for_deleted_file(scenario):
