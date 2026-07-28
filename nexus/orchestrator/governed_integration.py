@@ -91,7 +91,11 @@ class ControlledIntegrationManager:
         controller_root = Path(str(contract.get("controller_repo_root", ""))).expanduser().resolve()
         target_base_revision = str(contract.get("target_base_revision", ""))
         candidate_sha = str(packet.get("candidate_commit_sha", ""))
-        source_branch = str(lease.get("target_branch", ""))
+        source_branch = str(
+            state.get("candidate_ref")
+            if lease.get("target_detached")
+            else lease.get("target_branch", "")
+        )
         if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED", "INTEGRATING"}:
             raise RuntimeError("only a terminal candidate task can be integrated")
         approved = state.get("approved_binding") or {}
