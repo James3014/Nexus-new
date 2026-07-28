@@ -2,6 +2,7 @@ import os
 import shutil
 import logging
 import time
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 
@@ -20,6 +21,57 @@ class SwarmBroker:
         if not self.swarm_dirs:
             logger.warning("⚠️ [SwarmBroker] No .nexus-swarm-* directories found. Parallel isolation may be degraded.")
 
+    def _git_output(self, args: List[str], cwd: Path) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        return result.stdout.strip()
+
+    def _git_top_level(self, path: Path) -> Optional[Path]:
+        output = self._git_output(["rev-parse", "--show-toplevel"], path)
+        if not output:
+            return None
+        return Path(output).resolve()
+
+    def _controller_git_top_level(self) -> Optional[Path]:
+        return self._git_top_level(self.workspace)
+
+    def _registered_worktree_paths(self) -> set[Path]:
+        output = self._git_output(["worktree", "list", "--porcelain"], self.workspace)
+        if output is None:
+            return set()
+
+        paths: set[Path] = set()
+        for line in output.splitlines():
+            key, _, value = line.partition(" ")
+            if key == "worktree" and value:
+                paths.add(Path(value).resolve())
+        return paths
+
+    def is_independently_registered_worktree(self, swarm_dir: Path) -> bool:
+        """
+        Validate that a swarm path is a separate Git worktree registered by the
+        controller, not a normal child directory that resolves back to it.
+        """
+        swarm_path = Path(swarm_dir).resolve()
+        if not swarm_path.is_dir():
+            return False
+        controller_top_level = self._controller_git_top_level()
+        if controller_top_level is None:
+            return True
+
+        top_level = self._git_top_level(swarm_path)
+        if top_level != swarm_path or top_level == controller_top_level:
+            return False
+        return swarm_path in self._registered_worktree_paths()
+
     def acquire(self, timeout_sec: float = 60.0) -> Optional[Path]:
         """
         租用一個閒置的 Swarm 目錄。支援跨進程的原子鎖定。
@@ -27,9 +79,17 @@ class SwarmBroker:
         if not self.swarm_dirs:
             return None
 
+        eligible_dirs = [
+            swarm_dir for swarm_dir in self.swarm_dirs
+            if self.is_independently_registered_worktree(swarm_dir)
+        ]
+        if not eligible_dirs:
+            logger.warning("⚠️ [SwarmBroker] No independently registered swarm worktrees available.")
+            return None
+
         start_time = time.time()
         while time.time() - start_time < timeout_sec:
-            for swarm_dir in self.swarm_dirs:
+            for swarm_dir in eligible_dirs:
                 lock_file = swarm_dir / ".swarm_lock"
                 try:
                     # Attempt to create the lock file exclusively for cross-process safety
@@ -103,6 +163,12 @@ class SwarmBroker:
             return
             
         lock_file = swarm_dir / ".swarm_lock"
+        if not self.is_independently_registered_worktree(swarm_dir):
+            if lock_file.exists():
+                lock_file.unlink()
+            logger.warning("⚠️ [SwarmBroker] Refused to clean unregistered swarm placeholder: %s", swarm_dir)
+            return
+
         try:
             for cache_dir in [".venv", "node_modules", ".ruff_cache"]:
                 mounted = swarm_dir / cache_dir
