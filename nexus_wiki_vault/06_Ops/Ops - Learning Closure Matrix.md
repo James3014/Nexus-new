@@ -4166,3 +4166,10 @@ version_scope:
 - **Root Cause**: The factory defined its nested invoker but omitted the final `return invoke`, so the Runtime received no callable capability edge.
 - **Lesson**: Every capability factory needs a direct callable-return test before wiring it into Planner execution; a valid function body alone does not prove the edge is constructed.
 - **Verification**: Added the missing return, then reran the focused planner/runtime tests.
+
+## 2026-07-28 - Self-hosted retries require lifecycle closure
+
+- **Phenomenon**: Repeated self-hosted attempts accumulated Controller, Target, and state directories while candidates could remain indefinitely at `APPROVED`.
+- **Root Cause**: Retry identity, durable candidate protection, Target cleanup, exact approval, integration, and terminal disposition were not enforced as one state machine.
+- **Lesson**: Retry a self-hosted task with a stable `task_id` plus a new `attempt_id`; after creating and verifying a durable candidate ref, immediately reclaim the terminal Target; every candidate must receive a final disposition, and `APPROVED` is not a terminal state.
+- **Verification**: Candidate `aa4c2505024480ee9645074b3400a6abc29bd4cc` completed exact-bound approval and governed integration on `nexus/integration/self-hosted-lifecycle-closure`; its Target was removed, protected main remained unchanged, and implementation candidate `5975d17f90deabf3a26af1e1e9add93793f42da8` is protected by a durable ref.
