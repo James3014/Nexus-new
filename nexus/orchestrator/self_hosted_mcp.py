@@ -215,6 +215,18 @@ class NexusSelfHostedMCPServer:
                 "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
             },
             {
+                "name": "nexus_self_hosted_close_retained_without_candidate",
+                "description": "Fail-closed operation to close a RETAINED_FOR_REVIEW task that never produced a candidate.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id", "superseded_by"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "superseded_by": {"type": "string"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_self_hosted_cancel_task",
                 "description": "Cancel a non-running task and apply its governed terminal Target cleanup.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
@@ -334,6 +346,11 @@ class NexusSelfHostedMCPServer:
                 task_id,
                 disposition=str(arguments["disposition"]),
                 superseded_by=arguments.get("superseded_by"),
+            )
+        if name == "nexus_self_hosted_close_retained_without_candidate":
+            return self.service.close_retained_without_candidate(
+                task_id,
+                superseded_by=str(arguments.get("superseded_by", "")),
             )
         if name == "nexus_self_hosted_cancel_task":
             return self.service.cancel_task(task_id)

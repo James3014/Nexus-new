@@ -34,6 +34,9 @@ class FakeService:
     def dispose_candidate(self, task_id, **kwargs):
         return {"task_id": task_id, "status": kwargs["disposition"]}
 
+    def close_retained_without_candidate(self, task_id, *, superseded_by):
+        return {"task_id": task_id, "status": "SUPERSEDED", "superseded_by": superseded_by}
+
     def cancel_task(self, task_id):
         return {"task_id": task_id, "status": "CANCELLED"}
 
@@ -99,13 +102,34 @@ def test_tools_call_returns_structured_json_result():
     assert response["result"]["structuredContent"] == payload
 
 
-def test_unknown_tool_is_jsonrpc_error():
+def test_close_retained_without_candidate_mcp_tool_call():
     server = NexusSelfHostedMCPServer(service=FakeService())
 
     response = server.handle(
         {
             "jsonrpc": "2.0",
             "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_close_retained_without_candidate",
+                "arguments": {"task_id": "retained-task-001", "superseded_by": "evidence-123"},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["status"] == "SUPERSEDED"
+    assert payload["superseded_by"] == "evidence-123"
+
+
+def test_unknown_tool_is_jsonrpc_error():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
             "method": "tools/call",
             "params": {"name": "nexus_self_hosted_unknown", "arguments": {}},
         }
