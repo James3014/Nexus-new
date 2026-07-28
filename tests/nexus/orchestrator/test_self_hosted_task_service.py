@@ -548,6 +548,42 @@ def test_orphan_candidate_checkpoint_resumes_ref_and_cleanup(tmp_path):
     assert _git(Path(contract.controller_repo_root), "rev-parse", reconciled["candidate_ref"]) == candidate
 
 
+def test_verified_retained_candidate_can_resume_ref_protection_and_cleanup(tmp_path):
+    request = _real_request(tmp_path, task_id="retained-candidate-recovery")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "nexus_canary.txt").write_text("candidate\n")
+    _git(target, "add", "nexus_canary.txt")
+    _git(target, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "RETAINED_FOR_REVIEW",
+        "attempt_id": "a" * 32, "attempts": [{"attempt_id": "a" * 32}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "lease": lease.__dict__,
+        "promotion_packet": {
+            "candidate_commit_sha": candidate, "candidate_tree_sha": tree,
+            "candidate_state_hash": "c" * 64, "verified_receipt_hash": "d" * 64,
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+        },
+        "verified_receipt": {"verified": True},
+        "promotion_status": "NOT_CREATED", "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+        "worker_pid": 999999, "heartbeat_at": "2026-01-01T00:00:00+00:00",
+    })
+
+    recovered = service.recover_retained_candidate(contract.task_id)
+
+    assert recovered["status"] == "PENDING_HUMAN_APPROVAL"
+    assert recovered["cleanup_decision"] == "REMOVED"
+    assert not target.exists()
+    assert _git(Path(contract.controller_repo_root), "rev-parse", recovered["candidate_ref"]) == candidate
+
+
 def test_live_target_lease_is_not_reconciled_away(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("live", {

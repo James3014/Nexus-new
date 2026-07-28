@@ -207,6 +207,12 @@ class WorktreeManager:
                         ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
                         cwd=controller_root,
                     ).splitlines()
+                    protected.extend(
+                        self._run_git(
+                            ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidate-commits/{contract.task_id}/"],
+                            cwd=controller_root,
+                        ).splitlines()
+                    )
                     try:
                         legacy_candidate = self._run_git(
                             ["rev-parse", f"refs/nexus-candidates/{contract.task_id}^{{commit}}"],
@@ -262,7 +268,12 @@ class WorktreeManager:
         actual = self._run_git(["rev-parse", "HEAD"], cwd=target)
         if actual != candidate_commit:
             raise RuntimeError("candidate commit does not match Target HEAD")
-        candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate_commit}"
+        legacy_ref = f"refs/nexus-candidates/{contract.task_id}"
+        try:
+            self._run_git(["rev-parse", f"{legacy_ref}^{{commit}}"], cwd=contract.controller_repo_root)
+            candidate_ref = f"refs/nexus-candidate-commits/{contract.task_id}/{candidate_commit}"
+        except RuntimeError:
+            candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate_commit}"
         self._run_git(["update-ref", candidate_ref, candidate_commit], cwd=contract.controller_repo_root)
         if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
             raise RuntimeError("candidate durable ref verification failed")

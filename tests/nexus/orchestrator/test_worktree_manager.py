@@ -431,6 +431,23 @@ def test_candidate_ref_is_immutable_per_candidate_commit(sh2_repo):
     assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
 
 
+def test_candidate_ref_uses_immutable_fallback_when_legacy_parent_exists(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    _git(
+        sh2_repo["controller"], "update-ref",
+        f"refs/nexus-candidates/{contract.task_id}", contract.target_base_revision,
+    )
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+
+    candidate_ref = manager.protect_candidate(contract, lease, candidate)
+
+    assert candidate_ref == f"refs/nexus-candidate-commits/{contract.task_id}/{candidate}"
+    assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
+
+
 def test_five_clean_attempts_do_not_grow_worktrees(sh2_repo):
     contract = _contract(sh2_repo, task_id="stable-five")
     manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))

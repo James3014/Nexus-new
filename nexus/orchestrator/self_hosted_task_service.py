@@ -1059,6 +1059,48 @@ class SelfHostedTaskService:
             attempt_id=state.get("attempt_id"),
         )
 
+    def recover_retained_candidate(self, task_id: str) -> dict[str, Any]:
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("status") != "RETAINED_FOR_REVIEW":
+            raise RuntimeError("only a retained candidate can enter recovery")
+        packet = state.get("promotion_packet") or {}
+        verified = state.get("verified_receipt") or {}
+        candidate_commit = str(packet.get("candidate_commit_sha") or "")
+        candidate_tree = str(packet.get("candidate_tree_sha") or "")
+        if not candidate_commit or not candidate_tree or not verified:
+            raise RuntimeError("retained candidate lacks verified durable recovery evidence")
+        contract = self._contract_from_state(state)
+        lease = self._lease_from_state(state)
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        target = Path(lease.target_worktree).resolve()
+        controller = Path(contract.controller_repo_root).resolve()
+        if manager._worktree_entry(controller, target) is None:
+            raise RuntimeError("retained candidate Target is not a registered worktree")
+        if manager.process_checker(target):
+            raise RuntimeError("active process uses retained candidate Target")
+        if manager._status_bytes(target):
+            raise RuntimeError("retained candidate Target has unsaved working-tree changes")
+        if manager._run_git(["rev-parse", "HEAD"], cwd=target) != candidate_commit:
+            raise RuntimeError("retained candidate HEAD does not match promotion packet")
+        if manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target) != candidate_tree:
+            raise RuntimeError("retained candidate tree does not match promotion packet")
+        self._checkpoint(task_id, "CANDIDATE_COMMITTED", {
+            "error": None,
+            "promotion_status": str(packet.get("promotion_status") or "PENDING_HUMAN_APPROVAL"),
+            "cleanup_decision": None,
+            "cleanup_blocker": None,
+            "cleanup_performed": False,
+            "terminal_status": None,
+            "state_retention_status": "ACTIVE",
+            "archive_eligible": False,
+        }, attempt_id=state.get("attempt_id"))
+        recovered = self.reconcile_task(task_id)
+        if recovered is None:
+            raise RuntimeError("retained candidate recovery lost task state")
+        return recovered
+
     def reconcile_tasks(self) -> list[dict[str, Any]]:
         if not self.state_dir.exists():
             return []
