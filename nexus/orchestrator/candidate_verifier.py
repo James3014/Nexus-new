@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import shlex
 from pathlib import Path
 from typing import Mapping, Optional
 
-from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
+from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, CliWorkerStatus, run_cli_worker
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import CandidateDiffReceipt, TargetWorktreeLease, WorktreeManager
 
@@ -20,6 +21,13 @@ class VerifierEvidence:
     stdout_sha256: str
     stderr_sha256: str
     wall_time_ms: int
+    executable_identity: str = ""
+    executable_sha256: str = ""
+    argv: tuple[str, ...] = ()
+    cwd: str = ""
+    process_group_id: Optional[int] = None
+    process_group_killed: bool = False
+    timed_out: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,8 @@ class VerifiedCandidateReceipt:
 
 
 class CandidateVerifier:
+    VERIFIER_TIMEOUT_SECONDS = 300.0
+
     def __init__(self, worktree_manager: WorktreeManager):
         self.worktree_manager = worktree_manager
 
@@ -62,23 +72,62 @@ class CandidateVerifier:
         return not failures, failures
 
     @staticmethod
+    def _build_verifier_request(command: str, target: str) -> CliWorkerRequest:
+        tokens = tuple(shlex.split(command))
+        if not tokens:
+            raise ValueError("verifier command must contain an executable")
+        return CliWorkerRequest(
+            executable=tokens[0],
+            argv=tokens[1:],
+            cwd=target,
+            timeout_seconds=CandidateVerifier.VERIFIER_TIMEOUT_SECONDS,
+            env={"PYTHONDONTWRITEBYTECODE": "1"},
+        )
+
+    @staticmethod
+    def _executable_sha256(executable_identity: str) -> str:
+        return hashlib.sha256(Path(executable_identity).read_bytes()).hexdigest()
+
+    @staticmethod
+    def _evidence_consistency_failures(
+        request: CliWorkerRequest,
+        result: CliWorkerResult,
+    ) -> list[str]:
+        failures: list[str] = []
+        if result.executable_identity != request.executable:
+            failures.append("executable_identity_mismatch")
+        if not result.executable_sha256:
+            failures.append("executable_sha256_missing")
+        else:
+            try:
+                expected_sha256 = CandidateVerifier._executable_sha256(request.executable)
+            except OSError:
+                failures.append("executable_sha256_unreadable")
+            else:
+                if result.executable_sha256 != expected_sha256:
+                    failures.append("executable_sha256_mismatch")
+        if result.argv != request.argv:
+            failures.append("argv_mismatch")
+        if result.cwd != request.cwd:
+            failures.append("cwd_mismatch")
+        if result.timed_out != (result.status is CliWorkerStatus.TIMED_OUT):
+            failures.append("timeout_status_mismatch")
+        if result.status is CliWorkerStatus.TIMED_OUT and not result.process_group_killed:
+            failures.append("timeout_without_process_group_kill")
+        if result.status is CliWorkerStatus.COMPLETED and result.process_group_killed:
+            failures.append("process_group_killed_without_timeout")
+        if result.status is not CliWorkerStatus.START_FAILED and result.process_group_id is None:
+            failures.append("process_group_id_missing")
+        return failures
+
+    @staticmethod
     def _run_verifiers(contract: SelfHostedTaskContract, target: str) -> tuple[bool, tuple[VerifierEvidence, ...], list[str]]:
         evidence: list[VerifierEvidence] = []
         failures: list[str] = []
         for command in contract.verifier_commands:
             try:
-                tokens = tuple(shlex.split(command))
-                if len(tokens) < 2:
-                    raise ValueError("verifier command must contain executable and argv")
-                result = run_cli_worker(
-                    CliWorkerRequest(
-                        executable=tokens[0],
-                        argv=tokens[1:],
-                        cwd=target,
-                        timeout_seconds=300.0,
-                        env={"PYTHONDONTWRITEBYTECODE": "1"},
-                    )
-                )
+                request = CandidateVerifier._build_verifier_request(command, target)
+                result = run_cli_worker(request)
                 evidence.append(
                     VerifierEvidence(
                         command=command,
@@ -87,8 +136,18 @@ class CandidateVerifier:
                         stdout_sha256=result.stdout_sha256,
                         stderr_sha256=result.stderr_sha256,
                         wall_time_ms=result.wall_time_ms,
+                        executable_identity=result.executable_identity,
+                        executable_sha256=result.executable_sha256,
+                        argv=result.argv,
+                        cwd=result.cwd,
+                        process_group_id=result.process_group_id,
+                        process_group_killed=result.process_group_killed,
+                        timed_out=result.timed_out,
                     )
                 )
+                consistency_failures = CandidateVerifier._evidence_consistency_failures(request, result)
+                if consistency_failures:
+                    failures.append(f"verifier_evidence_inconsistent:{command}:{','.join(consistency_failures)}")
                 if result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
                     failures.append(f"verifier_failed:{command}")
             except (OSError, ValueError) as exc:
