@@ -204,8 +204,10 @@ from scripts.engine.commands.multi_agent_actions import (
     verify_multi_agent_task,
 )
 from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_list_actionable,
     run_self_hosted_status,
     run_self_hosted_submit,
+    run_self_hosted_wait,
 )
 from scripts.engine.commands.registry_actions import (
     get_registry_status,
@@ -3470,7 +3472,39 @@ def self_hosted_status(task_id: str, state_dir: str | None) -> None:
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
+@self_hosted_group.command(name="wait")
+@click.option("--task-id", required=True, help="Task ID to wait for.")
+@click.option("--timeout", "timeout_seconds", type=float, default=10.0, help="Timeout in seconds.")
+@click.option("--poll-interval", "poll_interval_seconds", type=float, default=0.25, help="Poll interval in seconds.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_wait(
+    task_id: str,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    state_dir: str | None,
+) -> None:
+    """Wait for a self-hosted task until terminal/attention_required or timeout."""
+    res = run_self_hosted_wait(
+        task_id,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="list-actionable")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_list_actionable(state_dir: str | None) -> None:
+    """List self-hosted tasks requiring action."""
+    res = run_self_hosted_list_actionable(state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
 if __name__ == "__main__":
 
     nexus()
+
 

@@ -58,3 +58,42 @@ def run_self_hosted_status(
         if isinstance(exc, NexusCliActionError):
             raise
         raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
+def run_self_hosted_wait(
+    task_id: str,
+    timeout_seconds: float = 10.0,
+    poll_interval_seconds: float = 0.25,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    if not task_id or not str(task_id).strip():
+        raise NexusCliActionError("task_id is required", exit_code=1)
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        res = svc.wait_task(
+            task_id,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+        if res is None:
+            raise NexusCliActionError(f"task {task_id} not found", exit_code=1)
+        return res
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
+def run_self_hosted_list_actionable(
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.list_actionable_tasks()
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
