@@ -4173,3 +4173,23 @@ version_scope:
 - **Root Cause**: Retry identity, durable candidate protection, Target cleanup, exact approval, integration, and terminal disposition were not enforced as one state machine.
 - **Lesson**: Retry a self-hosted task with a stable `task_id` plus a new `attempt_id`; after creating and verifying a durable candidate ref, immediately reclaim the terminal Target; every candidate must receive a final disposition, and `APPROVED` is not a terminal state.
 - **Verification**: Candidate `aa4c2505024480ee9645074b3400a6abc29bd4cc` completed exact-bound approval and governed integration on `nexus/integration/self-hosted-lifecycle-closure`; its Target was removed, protected main remained unchanged, and implementation candidate `5975d17f90deabf3a26af1e1e9add93793f42da8` is protected by a durable ref.
+
+## 2026-07-28: Self-Hosted Lifecycle Adoption Operational Closure
+
+1. Tracked bytecode contamination from broad pytest
+- Observed failure: tracked bytecode contamination from broad pytest
+- Exact prevention: bounded verifiers plus PYTHONDONTWRITEBYTECODE=1 and tracked-artifact audit
+
+2. macOS say or notification subprocess pipe inheritance blocking worker closeout
+- Observed failure: macOS say or notification subprocess pipe inheritance blocking worker closeout
+- Exact prevention: prohibit notification subprocesses plus process-group residue checks
+
+3. git checkout <commit> -- <files> staging the index under WORKING_TREE_ONLY
+- Observed failure: git checkout <commit> -- <files> staging the index under WORKING_TREE_ONLY
+- Exact prevention: git restore --source=<sha> --worktree -- <files> plus git diff --cached --quiet
+
+4. ControlledIntegrationManager branch checkout collision when the Controller already holds the integration branch
+- Observed failure: ControlledIntegrationManager branch checkout collision when the Controller already holds the integration branch
+- Exact prevention: detach clean Controller at exact integration base, integrate, then switch back
+
+Evidence: candidate a6e962de4bbea25be9d141a698fbc6c37b842b67, integration a98dec77a97b26d387650688ad83a9397743793c, 102 passed, zero tracked deletions, active tasks=0, active targets=0.
