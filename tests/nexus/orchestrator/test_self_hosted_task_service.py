@@ -398,6 +398,79 @@ def test_archived_integrated_task_retries_with_same_identity_and_versions_receip
     assert service.get_task("archived-integrated")["attempt_id"] == current["attempt_id"]
 
 
+def test_terminal_retry_accepts_revision_fast_forward_and_preserves_contract_history(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append((contract.controller_revision, contract.target_base_revision))
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _real_request(tmp_path, task_id="activation-retry")
+    first_contract = service.build_contract(request)
+    first_attempt = "a" * 32
+    service._write_state("activation-retry", {
+        "task_id": "activation-retry", "status": "FINAL_BLOCK",
+        "attempt_id": first_attempt, "attempts": [{"attempt_id": first_attempt}],
+        "request": request, "contract": first_contract.model_dump(mode="json"),
+        "contract_hash": first_contract.contract_hash, "promotion_status": "NOT_CREATED",
+        "final_disposition": "FINAL_BLOCK", "cleanup_decision": "ALREADY_REMOVED",
+        "cleanup_performed": False,
+    })
+
+    controller = Path(request["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {
+        **request,
+        "controller_revision": activated_head,
+        "target_base_revision": activated_head,
+    }
+
+    submitted = service.submit_task(refreshed)
+    current = _wait_for_status(service, "activation-retry", "FINAL_BLOCK")
+
+    assert submitted["attempt_id"] != first_attempt
+    assert current["attempt_id"] == submitted["attempt_id"]
+    assert len(current["attempts"]) == 2
+    assert current["contract_hash"] == service.build_contract(refreshed).contract_hash
+    assert current["controller_revision"] == activated_head
+    assert current["target_initial_revision"] == activated_head
+    assert current["contract_history"] == [{
+        "attempt_id": first_attempt,
+        "contract_hash": first_contract.contract_hash,
+        "controller_revision": request["controller_revision"],
+        "target_base_revision": request["target_base_revision"],
+        "final_disposition": "FINAL_BLOCK",
+    }]
+    assert calls == [(activated_head, activated_head)]
+
+
+def test_terminal_retry_rejects_non_revision_contract_change(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=lambda *_: {}, auto_reconcile=False, ephemeral=True
+    )
+    request = _real_request(tmp_path, task_id="semantic-drift-retry")
+    contract = service.build_contract(request)
+    service._write_state("semantic-drift-retry", {
+        "task_id": "semantic-drift-retry", "status": "FINAL_BLOCK",
+        "attempt_id": "a" * 32, "attempts": [{"attempt_id": "a" * 32}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "ALREADY_REMOVED",
+    })
+
+    changed = {**request, "what": "Silently change the task objective"}
+
+    with pytest.raises(ValueError, match="different contract"):
+        service.submit_task(changed)
+
+
 def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
     calls = []
 

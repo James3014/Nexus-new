@@ -390,6 +390,43 @@ class SelfHostedTaskService:
             human_approval_required=True,
         )
 
+    @staticmethod
+    def _terminal_retry_revision_refresh_allowed(
+        existing: Mapping[str, Any],
+        request: Mapping[str, Any],
+        contract: ArchitectTaskContract,
+    ) -> bool:
+        previous_request = dict(existing.get("request") or {})
+        next_request = _jsonable(dict(request))
+        for field in ("controller_revision", "target_base_revision"):
+            previous_request.pop(field, None)
+            next_request.pop(field, None)
+        if previous_request != next_request:
+            return False
+
+        previous_contract = existing.get("contract") or {}
+        previous_controller = str(previous_contract.get("controller_revision") or "")
+        previous_target = str(previous_contract.get("target_base_revision") or "")
+        revisions = (
+            (previous_controller, contract.controller_revision),
+            (previous_target, contract.target_base_revision),
+        )
+        if not all(old and new for old, new in revisions):
+            return False
+        if all(old == new for old, new in revisions):
+            return False
+
+        controller_root = Path(contract.controller_repo_root).expanduser().resolve()
+        return all(
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", old, new],
+                cwd=controller_root,
+                capture_output=True,
+                text=True,
+            ).returncode == 0
+            for old, new in revisions
+        )
+
     def _contract_from_state(self, state: Mapping[str, Any]) -> ArchitectTaskContract:
         request = state.get("request")
         if isinstance(request, Mapping):
@@ -1194,11 +1231,20 @@ class SelfHostedTaskService:
         }
         existing, created = self._create_state(contract.task_id, state)
         if not created:
-            if existing.get("contract_hash") != contract.contract_hash:
+            terminal_retry = existing.get("status") in {
+                "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED",
+                "INTEGRATION_FAILED", "INTEGRATED",
+            }
+            contract_refreshed = existing.get("contract_hash") != contract.contract_hash
+            if contract_refreshed and not (
+                terminal_retry
+                and existing.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                and self._terminal_retry_revision_refresh_allowed(existing, request, contract)
+            ):
                 raise ValueError("task_id already exists with a different contract")
             if existing.get("status") in PENDING_CANDIDATE_STATUSES or existing.get("promotion_status") in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
                 return existing
-            if existing.get("status") in {"FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED", "INTEGRATION_FAILED", "INTEGRATED"}:
+            if terminal_retry:
                 if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
                     raise RuntimeError("terminal retry blocked until previous Target disposition")
                 existing = self._reactivate_archived_state(contract.task_id, existing)
@@ -1216,22 +1262,56 @@ class SelfHostedTaskService:
                             "integration_commit": current.get("integration_result_sha"),
                             "final_disposition": current.get("final_disposition") or current.get("status"),
                         })
+                    if contract_refreshed:
+                        previous_contract = current.get("contract") or {}
+                        current.setdefault("contract_history", []).append({
+                            "attempt_id": current.get("attempt_id"),
+                            "contract_hash": current.get("contract_hash"),
+                            "controller_revision": previous_contract.get("controller_revision"),
+                            "target_base_revision": previous_contract.get("target_base_revision"),
+                            "final_disposition": current.get("final_disposition") or current.get("status"),
+                        })
+                        current.update({
+                            "request": _jsonable(dict(request)),
+                            "contract": contract.model_dump(mode="json"),
+                            "contract_hash": contract.contract_hash,
+                            "controller_worktree": contract.controller_repo_root,
+                            "controller_revision": contract.controller_revision,
+                            "controller_status_sha256": None,
+                            "target_worktree": contract.target_repo_root,
+                            "target_initial_revision": contract.target_base_revision,
+                            "target_branch": f"nexus/task/{contract.task_id}",
+                            "target_created_at": None,
+                            "worker_provider": contract.preferred_provider,
+                        })
                     current["attempt_id"] = attempt_id
                     current.setdefault("attempts", []).append({"attempt_id": attempt_id, "started_at": now})
                     current["status"] = "SUBMITTED"
                     current.setdefault("status_history", []).append({"status": "ATTEMPT_INCREMENTED", "at": now})
+                    current["lease"] = None
                     current["worker_pid"] = None
                     current["worker_pgid"] = None
                     current["worker_child_pgid"] = None
+                    current["worker_started_at"] = None
+                    current["worker_finished_at"] = None
+                    current["worker_preflight"] = None
                     current["heartbeat_at"] = now
                     current["error"] = None
+                    current["active_provider"] = None
+                    current["execution"] = None
+                    current["executions"] = []
+                    current["execution_outcome"] = None
+                    current["attempt_resolution"] = None
+                    current["verification_verdict"] = None
                     current["promotion_status"] = "NOT_CREATED"
                     current["candidate_status"] = None
+                    current["candidate"] = None
                     current["candidate_commit_sha"] = None
                     current["candidate_tree_sha"] = None
                     current["candidate_ref"] = None
                     current["candidate_state_hash"] = None
                     current["verified_receipt_hash"] = None
+                    current["verified_receipt"] = None
                     current["promotion_packet"] = None
                     current["approved_binding"] = None
                     current["integration_branch"] = None
