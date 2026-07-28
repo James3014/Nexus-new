@@ -1152,6 +1152,40 @@ def test_close_retained_without_candidate_success_with_missing_target(tmp_path):
     assert any(entry["task_id"] == task_id for entry in archive_result["entries"])
 
 
+def test_close_retained_without_candidate_accepts_hash_only_diagnostics(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-no-candidate-hash-only"
+    target_path = tmp_path / "targets" / task_id
+    assert not target_path.exists()
+
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(target_path),
+        "candidate_state_hash": "c" * 64,
+        "verified_receipt_hash": "d" * 64,
+        "verified_receipt": {"candidate_state_hash": "c" * 64},
+        "candidate": {"candidate_state_hash": "c" * 64, "commit_created": False},
+        "promotion_packet": None,
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "candidate_commit_created": False,
+    }
+    service._write_state(task_id, state)
+
+    result = service.close_retained_without_candidate(
+        task_id,
+        superseded_by="integration:hash-only-diagnostics-covered",
+    )
+
+    assert result["status"] == "SUPERSEDED"
+    assert result["promotion_status"] == "NOT_CREATED"
+    assert result["superseded_by"] == "integration:hash-only-diagnostics-covered"
+    assert result["merge_performed"] is False
+    assert result["push_performed"] is False
+
+
 def test_close_retained_without_candidate_fails_closed_missing_superseded_by(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     task_id = "retained-no-candidate-002"
