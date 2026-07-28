@@ -325,3 +325,182 @@ def test_self_hosted_wait_and_list_actionable_subprocess(tmp_path: Path):
     assert list_data["actionable_count"] >= 1
 
 
+def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
+    runner = CliRunner()
+    state_dir = str(tmp_path / "state")
+    req = _valid_request(tmp_path, task_id="test-sh-approve-001")
+
+    submit_cmd = [
+        "nexus", "self-hosted", "submit",
+        "--task-id", req["task_id"],
+        "--what", req["what"],
+        "--why", req["why"],
+        "--controller-revision", req["controller_revision"],
+        "--target-base-revision", req["target_base_revision"],
+        "--controller-repo-root", req["controller_repo_root"],
+        "--target-repo-root", req["target_repo_root"],
+        "--target-worktree-root", req["target_worktree_root"],
+        "--allowed-files", req["allowed_files"],
+        "--worker", req["worker"],
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, submit_cmd)
+
+    state_file = Path(state_dir) / "test-sh-approve-001.json"
+    state_data = json.loads(state_file.read_text(encoding="utf-8"))
+    state_data["promotion_status"] = "PENDING_HUMAN_APPROVAL"
+    state_data["promotion_packet"] = {
+        "candidate_commit_sha": "a" * 40,
+        "candidate_tree_sha": "b" * 40,
+        "candidate_state_hash": "c" * 64,
+        "verified_receipt_hash": "d" * 64,
+    }
+    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+
+    approve_mismatch_cmd = [
+        "nexus", "self-hosted", "approve",
+        "--task-id", "test-sh-approve-001",
+        "--candidate-commit-sha", "x" * 40,
+        "--candidate-tree-sha", "b" * 40,
+        "--candidate-state-hash", "c" * 64,
+        "--verified-receipt-hash", "d" * 64,
+        "--state-dir", state_dir,
+    ]
+    res_mismatch = runner.invoke(nexus, approve_mismatch_cmd)
+    assert res_mismatch.exit_code == 0
+    mismatch_data = json.loads(res_mismatch.output)
+    assert mismatch_data["promotion_status"] == "APPROVAL_INVALIDATED"
+    assert mismatch_data["approved_binding"] is None
+
+    approve_cmd = [
+        "nexus", "self-hosted", "approve",
+        "--task-id", "test-sh-approve-001",
+        "--candidate-commit-sha", "a" * 40,
+        "--candidate-tree-sha", "b" * 40,
+        "--candidate-state-hash", "c" * 64,
+        "--verified-receipt-hash", "d" * 64,
+        "--state-dir", state_dir,
+    ]
+    res = runner.invoke(nexus, approve_cmd)
+    assert res.exit_code == 0
+    out_data = json.loads(res.output)
+    assert out_data["promotion_status"] == "APPROVED"
+    assert out_data["approved_binding"]["candidate_commit_sha"] == "a" * 40
+
+
+def test_self_hosted_integrate_requires_approved(tmp_path: Path):
+    runner = CliRunner()
+    state_dir = str(tmp_path / "state")
+    req = _valid_request(tmp_path, task_id="test-sh-integrate-001")
+
+    submit_cmd = [
+        "nexus", "self-hosted", "submit",
+        "--task-id", req["task_id"],
+        "--what", req["what"],
+        "--why", req["why"],
+        "--controller-revision", req["controller_revision"],
+        "--target-base-revision", req["target_base_revision"],
+        "--controller-repo-root", req["controller_repo_root"],
+        "--target-repo-root", req["target_repo_root"],
+        "--target-worktree-root", req["target_worktree_root"],
+        "--allowed-files", req["allowed_files"],
+        "--worker", req["worker"],
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, submit_cmd)
+
+    integrate_cmd = [
+        "nexus", "self-hosted", "integrate",
+        "--task-id", "test-sh-integrate-001",
+        "--state-dir", state_dir,
+    ]
+    res_before = runner.invoke(nexus, integrate_cmd)
+    assert res_before.exit_code != 0
+    assert "exact approved binding is required" in res_before.output
+
+
+def test_self_hosted_dispose_candidate(tmp_path: Path):
+    runner = CliRunner()
+    state_dir = str(tmp_path / "state")
+    req = _valid_request(tmp_path, task_id="test-sh-dispose-001")
+
+    submit_cmd = [
+        "nexus", "self-hosted", "submit",
+        "--task-id", req["task_id"],
+        "--what", req["what"],
+        "--why", req["why"],
+        "--controller-revision", req["controller_revision"],
+        "--target-base-revision", req["target_base_revision"],
+        "--controller-repo-root", req["controller_repo_root"],
+        "--target-repo-root", req["target_repo_root"],
+        "--target-worktree-root", req["target_worktree_root"],
+        "--allowed-files", req["allowed_files"],
+        "--worker", req["worker"],
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, submit_cmd)
+
+    state_file = Path(state_dir) / "test-sh-dispose-001.json"
+    state_data = json.loads(state_file.read_text(encoding="utf-8"))
+    state_data["promotion_status"] = "PENDING_HUMAN_APPROVAL"
+    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+
+    dispose_cmd = [
+        "nexus", "self-hosted", "dispose",
+        "--task-id", "test-sh-dispose-001",
+        "--disposition", "REJECTED",
+        "--state-dir", state_dir,
+    ]
+    res = runner.invoke(nexus, dispose_cmd)
+    assert res.exit_code == 0
+    out_data = json.loads(res.output)
+    assert out_data["promotion_status"] == "REJECTED"
+    assert out_data["status"] == "REJECTED"
+
+
+def test_self_hosted_cancel_task(tmp_path: Path):
+    runner = CliRunner()
+    state_dir = str(tmp_path / "state")
+    req = _valid_request(tmp_path, task_id="test-sh-cancel-001")
+
+    submit_cmd = [
+        "nexus", "self-hosted", "submit",
+        "--task-id", req["task_id"],
+        "--what", req["what"],
+        "--why", req["why"],
+        "--controller-revision", req["controller_revision"],
+        "--target-base-revision", req["target_base_revision"],
+        "--controller-repo-root", req["controller_repo_root"],
+        "--target-repo-root", req["target_repo_root"],
+        "--target-worktree-root", req["target_worktree_root"],
+        "--allowed-files", req["allowed_files"],
+        "--worker", req["worker"],
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, submit_cmd)
+
+    state_file = Path(state_dir) / "test-sh-cancel-001.json"
+    state_data = json.loads(state_file.read_text(encoding="utf-8"))
+    state_data["worker_pid"] = None
+    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+
+    cancel_cmd = [
+        "nexus", "self-hosted", "cancel",
+        "--task-id", "test-sh-cancel-001",
+        "--state-dir", state_dir,
+    ]
+    res = runner.invoke(nexus, cancel_cmd)
+    assert res.exit_code == 0
+    out_data = json.loads(res.output)
+    assert out_data["status"] == "CANCELLED"
+
+    cancel_bad = [
+        "nexus", "self-hosted", "cancel",
+        "--task-id", "nonexistent-cancel-999",
+        "--state-dir", state_dir,
+    ]
+    res_bad = runner.invoke(nexus, cancel_bad)
+    assert res_bad.exit_code != 0
+
+
+

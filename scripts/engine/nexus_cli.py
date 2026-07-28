@@ -204,6 +204,10 @@ from scripts.engine.commands.multi_agent_actions import (
     verify_multi_agent_task,
 )
 from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_approve,
+    run_self_hosted_cancel,
+    run_self_hosted_dispose,
+    run_self_hosted_integrate,
     run_self_hosted_list_actionable,
     run_self_hosted_status,
     run_self_hosted_submit,
@@ -3501,6 +3505,92 @@ def self_hosted_list_actionable(state_dir: str | None) -> None:
     """List self-hosted tasks requiring action."""
     res = run_self_hosted_list_actionable(state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="approve")
+@click.option("--task-id", required=True, help="Task ID to approve.")
+@click.option("--candidate-commit-sha", required=True, help="Candidate commit SHA.")
+@click.option("--candidate-tree-sha", required=True, help="Candidate tree SHA.")
+@click.option("--candidate-state-hash", required=True, help="Candidate state hash.")
+@click.option("--verified-receipt-hash", required=True, help="Verified receipt hash.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_approve(
+    task_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+    candidate_state_hash: str,
+    verified_receipt_hash: str,
+    state_dir: str | None,
+) -> None:
+    """Approve candidate promotion for a self-hosted task with exact binding."""
+    res = run_self_hosted_approve(
+        task_id=task_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        candidate_state_hash=candidate_state_hash,
+        verified_receipt_hash=verified_receipt_hash,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="integrate")
+@click.option("--task-id", required=True, help="Task ID to integrate.")
+@click.option("--integration-branch", default="nexus/integration", help="Target integration branch name.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_integrate(
+    task_id: str,
+    integration_branch: str,
+    state_dir: str | None,
+) -> None:
+    """Integrate an approved self-hosted candidate task into the integration branch."""
+    res = run_self_hosted_integrate(
+        task_id=task_id,
+        integration_branch=integration_branch,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="dispose")
+@click.option("--task-id", required=True, help="Task ID to dispose.")
+@click.option("--disposition", type=click.Choice(["REJECTED", "SUPERSEDED"], case_sensitive=False), required=True, help="Disposition type (REJECTED or SUPERSEDED).")
+@click.option("--superseded-by", default=None, help="Optional replacing task or evidence ID if SUPERSEDED.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_dispose(
+    task_id: str,
+    disposition: str,
+    superseded_by: str | None,
+    state_dir: str | None,
+) -> None:
+    """Dispose candidate promotion (REJECTED or SUPERSEDED)."""
+    res = run_self_hosted_dispose(
+        task_id=task_id,
+        disposition=disposition.upper(),
+        superseded_by=superseded_by,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="cancel")
+@click.option("--task-id", required=True, help="Task ID to cancel.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_cancel(
+    task_id: str,
+    state_dir: str | None,
+) -> None:
+    """Cancel a non-running self-hosted task and run terminal cleanup."""
+    res = run_self_hosted_cancel(
+        task_id=task_id,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
 
 
 if __name__ == "__main__":
