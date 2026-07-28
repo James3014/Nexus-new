@@ -1586,7 +1586,9 @@ class SelfHostedTaskService:
                 "merge_performed": False,
                 "push_performed": False,
                 "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
-                "cleanup_performed": False,
+                "cleanup_eligible": state.get("cleanup_eligible", True),
+                "cleanup_performed": state.get("cleanup_performed", False),
+                "cleanup_performed_at": state.get("cleanup_performed_at"),
             },
             attempt_id=state.get("attempt_id"),
         ) or state

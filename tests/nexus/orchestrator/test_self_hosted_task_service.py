@@ -1390,7 +1390,10 @@ def test_close_retained_without_candidate_success_with_missing_target(tmp_path):
         "worker_pid": None,
         "execution": {"provider": "codex", "outcome": "EXECUTION_FAILED"},
         "error": "worker crashed before candidate",
-        "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+        "cleanup_decision": "REMOVED",
+        "cleanup_eligible": True,
+        "cleanup_performed": True,
+        "cleanup_performed_at": "2026-07-28T10:05:00+00:00",
         "state_retention_status": "TERMINAL",
         "archive_eligible": False,
     }
@@ -1409,6 +1412,10 @@ def test_close_retained_without_candidate_success_with_missing_target(tmp_path):
     assert result["promotion_status"] == "NOT_CREATED"
     assert result["execution"] == {"provider": "codex", "outcome": "EXECUTION_FAILED"}
     assert result["error"] == "worker crashed before candidate"
+    assert result["cleanup_decision"] == "REMOVED"
+    assert result["cleanup_eligible"] is True
+    assert result["cleanup_performed"] is True
+    assert result["cleanup_performed_at"] == "2026-07-28T10:05:00+00:00"
 
     archive_result = service.archive_states(dry_run=False)
     assert any(entry["task_id"] == task_id for entry in archive_result["entries"])
