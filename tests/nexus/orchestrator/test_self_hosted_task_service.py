@@ -281,6 +281,73 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["push_performed"] is False
 
 
+def test_approved_task_action_envelope_requires_integration_not_terminal(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="approved-action")
+    service._write_state(
+        "approved-action",
+        {
+            "task_id": "approved-action",
+            "status": "APPROVED",
+            "request": request,
+            "promotion_status": "APPROVED",
+            "promotion_packet": {
+                "candidate_commit_sha": "c" * 40,
+                "candidate_tree_sha": "d" * 40,
+                "candidate_state_hash": "e" * 64,
+                "verified_receipt_hash": "f" * 64,
+            },
+            "cleanup_decision": "REMOVED",
+            "cleanup_performed": True,
+        },
+    )
+
+    state = service.get_task("approved-action")
+
+    assert state["task_action"]["action_state"] == "ACTION_REQUIRED"
+    assert state["task_action"]["attention_required"] is True
+    assert state["task_action"]["next_action"] == "integrate_approved_candidate"
+    assert state["task_action"]["recommended_tool"] == "nexus_self_hosted_integrate_approved"
+    assert state["task_action"]["candidate_commit_sha"] == "c" * 40
+    assert state["task_action"]["cleanup_status"]["cleanup_decision"] == "REMOVED"
+
+
+def test_approval_mismatch_returns_action_required_envelope(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="approval-mismatch")
+    service._write_state(
+        "approval-mismatch",
+        {
+            "task_id": "approval-mismatch",
+            "status": "PENDING_HUMAN_APPROVAL",
+            "request": request,
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": {
+                "candidate_commit_sha": "c" * 40,
+                "candidate_tree_sha": "d" * 40,
+                "candidate_state_hash": "e" * 64,
+                "verified_receipt_hash": "f" * 64,
+            },
+            "merge_performed": False,
+            "push_performed": False,
+        },
+    )
+
+    result = service.approve_promotion(
+        "approval-mismatch",
+        candidate_commit_sha="c" * 40,
+        candidate_tree_sha="0" * 40,
+        candidate_state_hash="e" * 64,
+        verified_receipt_hash="f" * 64,
+    )
+
+    assert result["status"] == "APPROVAL_INVALIDATED"
+    assert result["task_action"]["action_state"] == "ACTION_REQUIRED"
+    assert result["task_action"]["attention_required"] is True
+    assert result["task_action"]["next_action"] == "resubmit_exact_approval_binding"
+    assert result["task_action"]["recommended_tool"] == "nexus_self_hosted_approve_promotion"
+
+
 def test_terminal_retry_keeps_task_identity_and_increments_attempt(tmp_path):
     calls = []
 
@@ -788,6 +855,128 @@ def test_different_active_controller_is_rejected(tmp_path):
 
     with pytest.raises(RuntimeError, match="active Controller lease"):
         service.submit_task(second)
+
+
+def test_wait_task_polls_until_action_required(tmp_path):
+    release = __import__("threading").Event()
+
+    def runner(contract, request, update):
+        release.wait(2)
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(tmp_path, task_id="wait-poll")
+    service.submit_task(request)
+
+    release.set()
+    waited = service.wait_task("wait-poll", timeout_seconds=1.0, poll_interval_seconds=0.01)
+
+    assert waited["status"] == "PENDING_HUMAN_APPROVAL"
+    assert waited["wait"]["timed_out"] is False
+    assert waited["task_action"]["action_state"] == "ACTION_REQUIRED"
+    assert waited["task_action"]["recommended_tool"] == "nexus_self_hosted_approve_promotion"
+
+
+def test_wait_task_timeout_returns_in_progress_envelope(tmp_path):
+    release = __import__("threading").Event()
+
+    def runner(contract, request, update):
+        release.wait(2)
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(tmp_path, task_id="wait-timeout")
+    service.submit_task(request)
+
+    waited = service.wait_task("wait-timeout", timeout_seconds=0.01, poll_interval_seconds=0.001)
+
+    assert waited["wait"]["timed_out"] is True
+    assert waited["task_action"]["action_state"] == "IN_PROGRESS"
+    assert waited["task_action"]["next_action"] == "wait_for_task"
+    assert waited["task_action"]["recommended_tool"] == "nexus_self_hosted_wait_task"
+    release.set()
+
+
+def test_list_actionable_tasks_excludes_integrated_terminal_state(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    packet = {
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    service._write_state("needs-approval", {
+        "task_id": "needs-approval",
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "promotion_packet": packet,
+    })
+    service._write_state("needs-integration", {
+        "task_id": "needs-integration",
+        "status": "APPROVED",
+        "promotion_status": "APPROVED",
+        "promotion_packet": packet,
+    })
+    service._write_state("done", {
+        "task_id": "done",
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "promotion_packet": packet,
+        "terminal_status": "INTEGRATED",
+    })
+
+    result = service.list_actionable_tasks()
+
+    assert [item["task_id"] for item in result["tasks"]] == ["needs-approval", "needs-integration"]
+    assert result["actionable_count"] == 2
+    assert result["tasks"][0]["task_action"]["next_action"] == "approve_candidate"
+    assert result["tasks"][1]["task_action"]["next_action"] == "integrate_approved_candidate"
+
+
+def test_integrated_task_action_envelope_is_terminal(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("integrated", {
+        "task_id": "integrated",
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "terminal_status": "INTEGRATED",
+        "integration_result_sha": "c" * 40,
+        "cleanup_decision": "REMOVED",
+        "cleanup_performed": True,
+    })
+
+    state = service.get_task("integrated")
+
+    assert state["task_action"]["action_state"] == "TERMINAL"
+    assert state["task_action"]["attention_required"] is False
+    assert state["task_action"]["next_action"] == "none"
+    assert state["task_action"]["recommended_tool"] is None
+
+
+def test_integrating_task_action_envelope_remains_in_progress(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("integrating", {
+        "task_id": "integrating",
+        "status": "INTEGRATING",
+        "promotion_status": "APPROVED",
+        "integration_branch": "nexus/integration",
+    })
+
+    state = service.get_task("integrating")
+
+    assert state["task_action"]["action_state"] == "IN_PROGRESS"
+    assert state["task_action"]["attention_required"] is False
+    assert state["task_action"]["recommended_tool"] == "nexus_self_hosted_wait_task"
 
 
 def test_cancelled_task_records_terminal_cleanup_decision(tmp_path):

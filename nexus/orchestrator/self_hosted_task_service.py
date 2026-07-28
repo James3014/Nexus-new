@@ -144,6 +144,85 @@ class SelfHostedTaskService:
         candidates.extend(sorted(root.glob(f"{task_id}--attempt-*.json")) if root.exists() else [])
         return [path for path in candidates if path.exists()]
 
+    @staticmethod
+    def _candidate_commit(state: Mapping[str, Any]) -> Optional[str]:
+        packet = state.get("promotion_packet") or {}
+        return state.get("candidate_commit_sha") or packet.get("candidate_commit_sha")
+
+    @classmethod
+    def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        status = str(state.get("status") or "UNKNOWN")
+        promotion_status = str(state.get("promotion_status") or "")
+        candidate_commit = cls._candidate_commit(state)
+
+        if status == "INTEGRATING":
+            action_state = "IN_PROGRESS"
+            attention_required = False
+            next_action = "wait_for_task"
+            recommended_tool = "nexus_self_hosted_wait_task"
+        elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "inspect_blocker_and_retry_or_dispose"
+            recommended_tool = "nexus_self_hosted_get_receipt"
+        elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
+            action_state = "ACTION_REQUIRED"
+            attention_required = True
+            if promotion_status == "APPROVED" or status == "APPROVED":
+                next_action = "integrate_approved_candidate"
+                recommended_tool = "nexus_self_hosted_integrate_approved"
+            elif promotion_status == "APPROVAL_INVALIDATED" or status == "APPROVAL_INVALIDATED":
+                next_action = "resubmit_exact_approval_binding"
+                recommended_tool = "nexus_self_hosted_approve_promotion"
+            else:
+                next_action = "approve_candidate"
+                recommended_tool = "nexus_self_hosted_approve_promotion"
+        elif status in TERMINAL_STATUSES:
+            action_state = "TERMINAL"
+            attention_required = False
+            next_action = "none"
+            recommended_tool = None
+        else:
+            action_state = "IN_PROGRESS"
+            attention_required = False
+            next_action = "wait_for_task"
+            recommended_tool = "nexus_self_hosted_wait_task"
+
+        packet = state.get("promotion_packet") or {}
+        return {
+            "schema": "nexus.self_hosted_task_action.v1",
+            "task_id": state.get("task_id"),
+            "task_status": status,
+            "promotion_status": promotion_status or None,
+            "action_state": action_state,
+            "attention_required": attention_required,
+            "next_action": next_action,
+            "recommended_tool": recommended_tool,
+            "candidate_commit_sha": candidate_commit,
+            "candidate_ref": state.get("candidate_ref"),
+            "candidate": {
+                "candidate_commit_sha": candidate_commit,
+                "candidate_tree_sha": state.get("candidate_tree_sha") or packet.get("candidate_tree_sha"),
+                "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
+                "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+            },
+            "cleanup_status": {
+                "cleanup_eligible": state.get("cleanup_eligible", False),
+                "cleanup_decision": state.get("cleanup_decision"),
+                "cleanup_blocker": state.get("cleanup_blocker"),
+                "cleanup_performed": state.get("cleanup_performed", False),
+                "cleanup_performed_at": state.get("cleanup_performed_at"),
+                "state_retention_status": state.get("state_retention_status"),
+                "archive_eligible": state.get("archive_eligible", False),
+            },
+        }
+
+    @classmethod
+    def _with_task_action(cls, state: dict[str, Any]) -> dict[str, Any]:
+        state = dict(state)
+        state["task_action"] = cls._task_action_envelope(state)
+        return state
+
     def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
         latest_path: Optional[Path] = None
         latest_state: Optional[dict[str, Any]] = None
@@ -152,7 +231,7 @@ class SelfHostedTaskService:
             state = json.loads(path.read_text(encoding="utf-8"))
             key = (str(state.get("updated_at") or ""), path.stat().st_mtime_ns)
             if latest_state is None or key > latest_key:
-                latest_path, latest_state, latest_key = path, state, key
+                latest_path, latest_state, latest_key = path, self._with_task_action(state), key
         return latest_path, latest_state
 
     def _lock_path(self) -> Path:
@@ -170,6 +249,7 @@ class SelfHostedTaskService:
 
     def _write_state_locked(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
         normalized = _jsonable(state)
+        normalized["task_action"] = self._task_action_envelope(normalized)
         destination = self._state_path(task_id)
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -193,10 +273,10 @@ class SelfHostedTaskService:
         with self._state_lock():
             destination = self._state_path(task_id)
             if destination.exists():
-                return json.loads(destination.read_text(encoding="utf-8")), False
+                return self._with_task_action(json.loads(destination.read_text(encoding="utf-8"))), False
             _, archived = self._latest_archived_state(task_id)
             if archived is not None:
-                return archived, False
+                return self._with_task_action(archived), False
             return self._write_state_locked(task_id, state), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -207,13 +287,13 @@ class SelfHostedTaskService:
         with self._state_lock():
             if not path.exists():
                 return None
-            return json.loads(path.read_text(encoding="utf-8"))
+            return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
 
     def _reactivate_archived_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock():
             path = self._state_path(task_id)
             if path.exists():
-                return json.loads(path.read_text(encoding="utf-8"))
+                return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
             if not self._archive_state_candidates(task_id):
                 raise RuntimeError("archived task receipt disappeared before retry")
             return self._write_state_locked(task_id, state)
@@ -1153,6 +1233,65 @@ class SelfHostedTaskService:
     def resume_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.reconcile_task(task_id)
 
+    def wait_task(
+        self,
+        task_id: str,
+        *,
+        timeout_seconds: float = 10.0,
+        poll_interval_seconds: float = 0.25,
+    ) -> Optional[dict[str, Any]]:
+        timeout_seconds = float(timeout_seconds)
+        poll_interval_seconds = float(poll_interval_seconds)
+        if timeout_seconds < 0:
+            raise ValueError("timeout_seconds must be non-negative")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive")
+        if timeout_seconds > 60.0:
+            raise ValueError("timeout_seconds must be <= 60")
+
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            state = self.get_task(task_id)
+            if state is None:
+                return None
+            envelope = state.get("task_action") or self._task_action_envelope(state)
+            if envelope.get("action_state") != "IN_PROGRESS":
+                return {
+                    **state,
+                    "wait": {
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "poll_interval_seconds": poll_interval_seconds,
+                    },
+                }
+            if time.monotonic() >= deadline:
+                envelope = {**envelope, "wait_timed_out": True}
+                return {
+                    **state,
+                    "task_action": envelope,
+                    "wait": {
+                        "timed_out": True,
+                        "timeout_seconds": timeout_seconds,
+                        "poll_interval_seconds": poll_interval_seconds,
+                    },
+                }
+            time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+
+    def list_actionable_tasks(self) -> dict[str, Any]:
+        tasks = []
+        for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
+            state = self.get_task(path.stem)
+            if state is None:
+                continue
+            action = state.get("task_action") or self._task_action_envelope(state)
+            if action.get("attention_required") is True:
+                tasks.append(state)
+        return {
+            "schema": "nexus.self_hosted_actionable_tasks.v1",
+            "actionable_count": len(tasks),
+            "tasks": tasks,
+        }
+
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         contract = self.build_contract(request)
         existing_states = [
@@ -1331,9 +1470,9 @@ class SelfHostedTaskService:
                     current["merge_performed"] = False
                     current["push_performed"] = False
                 self._mutate_state(contract.task_id, retry)
-                return self._launch_worker(contract.task_id, attempt_id) or existing
+                return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(existing)
             return self.reconcile_task(contract.task_id) or existing
-        return self._launch_worker(contract.task_id, attempt_id) or state
+        return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(state)
 
     def dispose_candidate(
         self,
