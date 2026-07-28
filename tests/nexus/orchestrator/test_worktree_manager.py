@@ -369,6 +369,9 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
         contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
     ).decision == "ALREADY_REMOVED"
 
+    retried = manager.create_lease(contract)
+    assert retried.initial_head == contract.target_base_revision
+
 
 def test_dirty_unique_target_is_retained_for_review(sh2_repo):
     contract, manager, lease, target = _prepare_candidate(sh2_repo)

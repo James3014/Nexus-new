@@ -205,6 +205,15 @@ class WorktreeManager:
                         ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
                         cwd=controller_root,
                     ).splitlines()
+                    try:
+                        legacy_candidate = self._run_git(
+                            ["rev-parse", f"refs/nexus-candidates/{contract.task_id}^{{commit}}"],
+                            cwd=controller_root,
+                        )
+                    except RuntimeError:
+                        legacy_candidate = None
+                    if legacy_candidate:
+                        protected.append(legacy_candidate)
                     if branch_head not in protected:
                         raise RuntimeError("existing task branch candidate lacks durable protection")
                     self._run_git(
