@@ -1753,8 +1753,10 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         if state.get("promotion_status") == "INTEGRATED":
             return state
-        if state.get("promotion_status") != "APPROVED":
+        if state.get("promotion_status") not in {"APPROVED", "INTEGRATION_FAILED"}:
             raise RuntimeError("exact approved binding is required before integration")
+        if state.get("promotion_status") == "INTEGRATION_FAILED" and state.get("merge_performed"):
+            raise RuntimeError("cannot retry an integration that already performed a merge")
         root = Path((state.get("contract") or {})["target_worktree_root"]).resolve() / "integrations"
         self._checkpoint(task_id, "INTEGRATING", {
             "integration_branch": integration_branch,
