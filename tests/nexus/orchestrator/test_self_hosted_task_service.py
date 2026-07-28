@@ -55,6 +55,16 @@ def _real_request(tmp_path: Path, task_id: str = "real-reconcile"):
     )
 
 
+def _wait_for_status(service: SelfHostedTaskService, task_id: str, status: str):
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        current = service.get_task(task_id)
+        if current and current["status"] == status:
+            return current
+        time.sleep(0.01)
+    return service.get_task(task_id)
+
+
 def test_what_why_are_mapped_to_architect_contract(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state")
 
@@ -84,12 +94,7 @@ def test_submit_persists_idempotent_task_state(tmp_path):
 
     first = service.submit_task(request)
     assert first["status"] in {"SUBMITTED", "CANDIDATE_COMMITTED"}
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        current = service.get_task(request["task_id"])
-        if current and current["status"] == "CANDIDATE_COMMITTED":
-            break
-        time.sleep(0.01)
+    _wait_for_status(service, request["task_id"], "CANDIDATE_COMMITTED")
     second = service.submit_task(request)
 
     assert first["task_id"] == "mcp-task-001"
@@ -98,6 +103,69 @@ def test_submit_persists_idempotent_task_state(tmp_path):
     assert calls == ["mcp-task-001"]
     persisted = json.loads((tmp_path / "state" / "mcp-task-001.json").read_text())
     assert persisted == second
+
+
+def test_submitted_at_matches_initial_submitted_history_entry(tmp_path):
+    release = __import__("threading").Event()
+
+    def fake_runner(contract, request, update):
+        release.wait(2)
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    request = _request(tmp_path, task_id="submitted-at-initial")
+
+    submitted = service.submit_task(request)
+
+    assert submitted["status"] == "SUBMITTED"
+    assert submitted["submitted_at"] == submitted["status_history"][0]["at"]
+    assert submitted["status_history"][0]["status"] == "SUBMITTED"
+    release.set()
+    assert _wait_for_status(service, request["task_id"], "PENDING_HUMAN_APPROVAL")["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_submitted_at_is_immutable_after_background_completion_and_in_receipt(tmp_path):
+    release = __import__("threading").Event()
+
+    def fake_runner(contract, request, update):
+        release.wait(2)
+        update("WORKER_COMPLETED", {"execution": {"provider": "codex"}})
+        update("VERIFIED", {"submitted_at": "2099-01-01T00:00:00+00:00"})
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    request = _request(tmp_path, task_id="submitted-at-completion")
+    submitted = service.submit_task(request)
+    submitted_at = submitted["submitted_at"]
+
+    release.set()
+    completed = _wait_for_status(service, request["task_id"], "PENDING_HUMAN_APPROVAL")
+    receipt = service.get_receipt(request["task_id"])
+
+    assert completed["submitted_at"] == submitted_at
+    assert completed["status_history"][0]["at"] == submitted_at
+    assert receipt["submitted_at"] == submitted_at
+
+
+def test_submitted_at_is_stable_across_idempotent_resubmission(tmp_path):
+    calls = []
+
+    def fake_runner(contract, request, update):
+        calls.append(contract.task_id)
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    request = _request(tmp_path, task_id="submitted-at-idempotent")
+
+    first = service.submit_task(request)
+    completed = _wait_for_status(service, request["task_id"], "PENDING_HUMAN_APPROVAL")
+    second = service.submit_task(request)
+
+    assert first["submitted_at"] == first["status_history"][0]["at"]
+    assert completed["submitted_at"] == first["submitted_at"]
+    assert second["submitted_at"] == first["submitted_at"]
+    assert calls == ["submitted-at-idempotent"]
+
 
 
 def test_submit_returns_before_background_runner_finishes(tmp_path):
@@ -478,7 +546,7 @@ def test_lifecycle_receipt_exposes_required_fields(tmp_path):
     receipt = service.get_receipt("receipt")
 
     required = {
-        "task_id", "attempt_id", "controller_worktree", "controller_revision",
+        "task_id", "attempt_id", "status", "submitted_at", "controller_worktree", "controller_revision",
         "controller_status_sha256", "target_worktree", "target_initial_revision",
         "target_branch", "target_created_at", "worker_provider", "worker_pid",
         "heartbeat_at", "execution_outcome", "verification_verdict",
