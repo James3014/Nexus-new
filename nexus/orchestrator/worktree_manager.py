@@ -1,10 +1,10 @@
-from dataclasses import dataclass
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import subprocess
-from typing import Dict, Optional
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import Callable, Dict, Optional
 
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
@@ -24,6 +24,7 @@ class TargetWorktreeLease:
     created_from_exact_revision: bool
     commit_created: bool
     merge_performed: bool
+    target_detached: bool = False
 
 
 @dataclass(frozen=True)
@@ -56,10 +57,27 @@ class CandidateDiffReceipt:
     production_ready: bool
 
 
+@dataclass(frozen=True)
+class TargetCleanupReceipt:
+    schema: str
+    task_id: str
+    target_worktree: str
+    decision: str
+    blocker: Optional[str]
+    performed: bool
+    eligible: bool
+
+
 class WorktreeManager:
-    def __init__(self, root_dir: str = ".nexus/worktrees"):
+    def __init__(
+        self,
+        root_dir: str = ".nexus/worktrees",
+        *,
+        process_checker: Optional[Callable[[Path], bool]] = None,
+    ):
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.process_checker = process_checker or self._path_has_process
 
     def _run_git(self, args: list[str], cwd: Optional[str | Path] = None) -> str:
         result = subprocess.run(
@@ -150,6 +168,16 @@ class WorktreeManager:
             raise RuntimeError("Target base revision did not resolve to the exact contract SHA")
 
         target_branch = f"nexus/task/{contract.task_id}"
+        target_detached = False
+        active_targets = [
+            entry for entry in self._registered_worktrees(controller_root)
+            if "worktree" in entry
+            and Path(entry["worktree"]).resolve() != controller_root
+            and self.root_dir.resolve() in Path(entry["worktree"]).resolve().parents
+            and Path(entry["worktree"]).resolve() != target_path
+        ]
+        if active_targets:
+            raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
@@ -166,24 +194,48 @@ class WorktreeManager:
             if self._worktree_entry(controller_root, target_path) is not None:
                 raise RuntimeError("registered worktree metadata has a different identity")
             target_root.mkdir(parents=True, exist_ok=True)
-            self._run_git(
-                [
-                    "worktree",
-                    "add",
-                    "-b",
-                    target_branch,
-                    str(target_path),
-                    contract.target_base_revision,
-                ],
-                cwd=controller_root,
-            )
+            branch_ref = f"refs/heads/{target_branch}"
+            try:
+                branch_head = self._run_git(["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller_root)
+            except RuntimeError:
+                branch_head = None
+            if branch_head is None:
+                add_args = ["worktree", "add", "-b", target_branch, str(target_path), contract.target_base_revision]
+            else:
+                if branch_head != contract.target_base_revision:
+                    protected = self._run_git(
+                        ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
+                        cwd=controller_root,
+                    ).splitlines()
+                    protected.extend(
+                        self._run_git(
+                            ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidate-commits/{contract.task_id}/"],
+                            cwd=controller_root,
+                        ).splitlines()
+                    )
+                    try:
+                        legacy_candidate = self._run_git(
+                            ["rev-parse", f"refs/nexus-candidates/{contract.task_id}^{{commit}}"],
+                            cwd=controller_root,
+                        )
+                    except RuntimeError:
+                        legacy_candidate = None
+                    if legacy_candidate:
+                        protected.append(legacy_candidate)
+                    if branch_head not in protected:
+                        raise RuntimeError("existing task branch candidate lacks durable protection")
+                    target_detached = True
+                    add_args = ["worktree", "add", "--detach", str(target_path), contract.target_base_revision]
+                else:
+                    add_args = ["worktree", "add", str(target_path), target_branch]
+            self._run_git(add_args, cwd=controller_root)
 
         initial_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
         actual_branch = self._run_git(["branch", "--show-current"], cwd=target_path)
         initial_status = self._status_bytes(target_path)
         if initial_head != contract.target_base_revision:
             raise RuntimeError("Target worktree was not created from the exact revision")
-        if actual_branch != target_branch:
+        if actual_branch != target_branch and not (target_detached and not actual_branch):
             raise RuntimeError("Target worktree branch does not match the lease identity")
         if initial_status:
             raise RuntimeError("Target worktree must be clean")
@@ -202,7 +254,90 @@ class WorktreeManager:
             created_from_exact_revision=True,
             commit_created=False,
             merge_performed=False,
+            target_detached=target_detached,
         )
+
+    def protect_candidate(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        candidate_commit: str,
+    ) -> str:
+        self.validate_lease_identity(contract, lease)
+        target = Path(lease.target_worktree).resolve()
+        actual = self._run_git(["rev-parse", "HEAD"], cwd=target)
+        if actual != candidate_commit:
+            raise RuntimeError("candidate commit does not match Target HEAD")
+        legacy_ref = f"refs/nexus-candidates/{contract.task_id}"
+        try:
+            self._run_git(["rev-parse", f"{legacy_ref}^{{commit}}"], cwd=contract.controller_repo_root)
+            candidate_ref = f"refs/nexus-candidate-commits/{contract.task_id}/{candidate_commit}"
+        except RuntimeError:
+            candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate_commit}"
+        self._run_git(["update-ref", candidate_ref, candidate_commit], cwd=contract.controller_repo_root)
+        if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
+            raise RuntimeError("candidate durable ref verification failed")
+        return candidate_ref
+
+    def cleanup_terminal_target(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        *,
+        candidate_commit: Optional[str] = None,
+        candidate_ref: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> TargetCleanupReceipt:
+        self.validate_lease_identity(contract, lease)
+        target = Path(lease.target_worktree).resolve()
+        controller = Path(contract.controller_repo_root).resolve()
+        if target == controller:
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is controller", False, False)
+        entry = self._worktree_entry(controller, target)
+        if not target.exists() and entry is None:
+            return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False, True)
+        if entry is None:
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is not a registered worktree", False, False)
+        if self.process_checker(target):
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
+        status = self._status_bytes(target)
+        if status:
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "dirty target has no durable snapshot", False, False)
+        head = self._run_git(["rev-parse", "HEAD"], cwd=target)
+        if candidate_commit:
+            if head != candidate_commit or not candidate_ref:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", "candidate ref is missing or mismatched", False, False)
+            try:
+                protected = self._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller)
+            except RuntimeError:
+                protected = ""
+            if protected != candidate_commit:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", "candidate ref is missing or mismatched", False, False)
+        elif head != lease.initial_head:
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target HEAD changed without durable snapshot", False, False)
+        if not dry_run:
+            self._run_git(["worktree", "remove", "--", str(target)], cwd=controller)
+            self._run_git(["worktree", "prune"], cwd=controller)
+        return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
+
+    @staticmethod
+    def _cleanup_receipt(contract, lease, decision, blocker, performed, eligible):
+        return TargetCleanupReceipt(
+            schema="nexus.target_cleanup_receipt.v1",
+            task_id=contract.task_id,
+            target_worktree=lease.target_worktree,
+            decision=decision,
+            blocker=blocker,
+            performed=performed,
+            eligible=eligible,
+        )
+
+    @staticmethod
+    def _path_has_process(path: Path) -> bool:
+        result = subprocess.run(
+            ["lsof", "+D", str(path)], capture_output=True, text=True
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
 
     def capture_candidate(
         self,

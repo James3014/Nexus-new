@@ -4,22 +4,20 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
+from nexus.orchestrator.refactor_campaign import RefactorCampaignCoordinator, RefactorWave
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
-from nexus.orchestrator.refactor_campaign import RefactorCampaignCoordinator, RefactorWave
-
 
 WORKER_ENUM = list(SUPPORTED_WORKER_PROVIDERS)
 
 
 class NexusSelfHostedMCPServer:
     def __init__(self, service: Optional[SelfHostedTaskService] = None):
-        state_dir = os.getenv("NEXUS_SELF_HOSTED_STATE_DIR", str(Path.cwd() / ".nexus/self_hosted_tasks"))
-        self.service = service or SelfHostedTaskService(state_dir=state_dir)
+        state_dir = os.getenv("NEXUS_SELF_HOSTED_STATE_DIR")
+        self.service = service or SelfHostedTaskService(state_dir=state_dir or None)
         self.competition = WorkerCompetitionCoordinator(self.service)
         self.campaigns = RefactorCampaignCoordinator(self.competition)
 
@@ -191,6 +189,36 @@ class NexusSelfHostedMCPServer:
                     },
                 },
             },
+            {
+                "name": "nexus_self_hosted_status",
+                "description": "Report canonical lifecycle state and active Target budget.",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "nexus_self_hosted_cleanup",
+                "description": "Dry-run or apply governed terminal Target cleanup decisions.",
+                "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "apply": {"type": "boolean", "default": False}}},
+            },
+            {
+                "name": "nexus_self_hosted_archive_state",
+                "description": "Dry-run or apply terminal state archive with a reproducible manifest hash.",
+                "inputSchema": {"type": "object", "properties": {"apply": {"type": "boolean", "default": False}}},
+            },
+            {
+                "name": "nexus_self_hosted_integrate_approved",
+                "description": "Integrate an exact approved candidate to nexus/integration without push.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string", "default": "nexus/integration"}}},
+            },
+            {
+                "name": "nexus_self_hosted_dispose_candidate",
+                "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt.",
+                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_self_hosted_cancel_task",
+                "description": "Cancel a non-running task and apply its governed terminal Target cleanup.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
         ]
 
     @staticmethod
@@ -287,6 +315,28 @@ class NexusSelfHostedMCPServer:
                 candidate_state_hash=str(arguments["candidate_state_hash"]),
                 verified_receipt_hash=str(arguments["verified_receipt_hash"]),
             )
+        if name == "nexus_self_hosted_status":
+            return self.service.lifecycle_status()
+        if name == "nexus_self_hosted_cleanup":
+            return self.service.cleanup_tasks(
+                task_id=task_id or None,
+                dry_run=not bool(arguments.get("apply", False)),
+            )
+        if name == "nexus_self_hosted_archive_state":
+            return self.service.archive_states(dry_run=not bool(arguments.get("apply", False)))
+        if name == "nexus_self_hosted_integrate_approved":
+            return self.service.integrate_approved(
+                task_id,
+                integration_branch=str(arguments.get("integration_branch", "nexus/integration")),
+            )
+        if name == "nexus_self_hosted_dispose_candidate":
+            return self.service.dispose_candidate(
+                task_id,
+                disposition=str(arguments["disposition"]),
+                superseded_by=arguments.get("superseded_by"),
+            )
+        if name == "nexus_self_hosted_cancel_task":
+            return self.service.cancel_task(task_id)
         raise ValueError(f"unknown tool: {name}")
 
     def handle(self, request: Mapping[str, Any]) -> Optional[dict[str, Any]]:

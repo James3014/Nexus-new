@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
 
@@ -20,6 +18,24 @@ class FakeService:
 
     def approve_promotion(self, task_id, **kwargs):
         return {"task_id": task_id, "promotion_status": "APPROVED", "merge_performed": False}
+
+    def lifecycle_status(self):
+        return {"active_targets": 0}
+
+    def cleanup_tasks(self, **kwargs):
+        return {"dry_run": kwargs.get("dry_run", True)}
+
+    def archive_states(self, **kwargs):
+        return {"dry_run": kwargs.get("dry_run", True)}
+
+    def integrate_approved(self, task_id, **kwargs):
+        return {"task_id": task_id, "status": "INTEGRATED", "push_performed": False}
+
+    def dispose_candidate(self, task_id, **kwargs):
+        return {"task_id": task_id, "status": kwargs["disposition"]}
+
+    def cancel_task(self, task_id):
+        return {"task_id": task_id, "status": "CANCELLED"}
 
 
 def test_tools_list_exposes_governed_self_hosted_surface():
@@ -44,6 +60,12 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_reconcile_tasks",
         "nexus_self_hosted_resume_task",
         "nexus_self_hosted_approve_promotion",
+        "nexus_self_hosted_status",
+        "nexus_self_hosted_cleanup",
+        "nexus_self_hosted_archive_state",
+        "nexus_self_hosted_integrate_approved",
+        "nexus_self_hosted_dispose_candidate",
+        "nexus_self_hosted_cancel_task",
     } <= names
     specs = {item["name"]: item for item in response["result"]["tools"]}
     submit_properties = specs["nexus_self_hosted_submit_task"]["inputSchema"]["properties"]

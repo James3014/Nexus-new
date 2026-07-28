@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import shutil
 import os
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any, Optional
 
+from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
 from nexus.executors.codex_executor import CodexCliExecutor
-from nexus.executors.cli_worker import CliWorkerStatus, CliWorkerRequest, run_cli_worker
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerAdapter,
@@ -227,11 +227,8 @@ class AgyWorkerAdapter:
         executable = self._configured_executable()
         resolved = shutil.which(executable)
         authorized = os.getenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "0") == "1"
-        project_id = self._project_id()
         if not authorized:
             reason = "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1 is required"
-        elif not project_id:
-            reason = f"{self.project_id_env} is required"
         elif resolved is None:
             reason = f"executable not found: {executable}"
         else:
@@ -242,7 +239,7 @@ class AgyWorkerAdapter:
             executable_available=resolved is not None,
             authorized=authorized,
             implementation_status="IMPLEMENTED",
-            ready=resolved is not None and authorized and bool(project_id),
+            ready=resolved is not None and authorized,
             reason=reason,
         )
 
@@ -263,8 +260,7 @@ class AgyWorkerAdapter:
         request = CliWorkerRequest(
             executable=preflight.executable or self._configured_executable(),
             argv=(
-                "--project",
-                self._project_id(),
+                "--new-project",
                 "--add-dir",
                 target,
                 "--dangerously-skip-permissions",
