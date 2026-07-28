@@ -13,6 +13,8 @@ from nexus.orchestrator.self_hosted_mcp_http import MCPHTTPConfigError, serve_fr
 def main() -> int:
     try:
         serve_from_env(expected_repo_root=REPO_ROOT)
+    except KeyboardInterrupt:
+        return 130
     except MCPHTTPConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 2
