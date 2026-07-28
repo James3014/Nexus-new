@@ -24,6 +24,7 @@ class TargetWorktreeLease:
     created_from_exact_revision: bool
     commit_created: bool
     merge_performed: bool
+    target_detached: bool = False
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,7 @@ class WorktreeManager:
             raise RuntimeError("Target base revision did not resolve to the exact contract SHA")
 
         target_branch = f"nexus/task/{contract.task_id}"
+        target_detached = False
         active_targets = [
             entry for entry in self._registered_worktrees(controller_root)
             if "worktree" in entry
@@ -216,11 +218,10 @@ class WorktreeManager:
                         protected.append(legacy_candidate)
                     if branch_head not in protected:
                         raise RuntimeError("existing task branch candidate lacks durable protection")
-                    self._run_git(
-                        ["update-ref", branch_ref, contract.target_base_revision, branch_head],
-                        cwd=controller_root,
-                    )
-                add_args = ["worktree", "add", str(target_path), target_branch]
+                    target_detached = True
+                    add_args = ["worktree", "add", "--detach", str(target_path), contract.target_base_revision]
+                else:
+                    add_args = ["worktree", "add", str(target_path), target_branch]
             self._run_git(add_args, cwd=controller_root)
 
         initial_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
@@ -228,7 +229,7 @@ class WorktreeManager:
         initial_status = self._status_bytes(target_path)
         if initial_head != contract.target_base_revision:
             raise RuntimeError("Target worktree was not created from the exact revision")
-        if actual_branch != target_branch:
+        if actual_branch != target_branch and not (target_detached and not actual_branch):
             raise RuntimeError("Target worktree branch does not match the lease identity")
         if initial_status:
             raise RuntimeError("Target worktree must be clean")
@@ -247,6 +248,7 @@ class WorktreeManager:
             created_from_exact_revision=True,
             commit_created=False,
             merge_performed=False,
+            target_detached=target_detached,
         )
 
     def protect_candidate(

@@ -371,6 +371,8 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
 
     retried = manager.create_lease(contract)
     assert retried.initial_head == contract.target_base_revision
+    assert retried.target_detached is True
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == candidate
 
 
 def test_dirty_unique_target_is_retained_for_review(sh2_repo):
