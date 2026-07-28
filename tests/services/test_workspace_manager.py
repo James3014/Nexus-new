@@ -1,8 +1,34 @@
 from pathlib import Path
+import subprocess
 import pytest
 import os
 from unittest.mock import MagicMock, patch
 from nexus.services.workspace import WorkspaceManager
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _init_repo(repo: Path) -> str:
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "nexus@example.test")
+    _git(repo, "config", "user.name", "Nexus Test")
+    _git(repo, "config", "core.hooksPath", "/dev/null")
+    (repo / "tracked.txt").write_text("controller\n", encoding="utf-8")
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "branch", "-M", "main")
+    return _git(repo, "rev-parse", "HEAD")
+
 
 @pytest.fixture
 def workspace_mgr(tmp_path):
@@ -58,3 +84,53 @@ def test_sync_staged_to_sandbox(workspace_mgr, tmp_path):
         assert success is True
         # 應包含 git diff --staged, git apply, git add .
         assert mock_run.call_count >= 3
+
+
+def test_lease_rejects_placeholder_swarm_and_preserves_controller(tmp_path, monkeypatch):
+    controller = tmp_path / "controller"
+    head_before = _init_repo(controller)
+    placeholder = controller / ".nexus-swarm-001"
+    placeholder.mkdir()
+    (placeholder / "marker.txt").write_text("ordinary child\n", encoding="utf-8")
+    status_before = _git(controller, "status", "--porcelain=v1", "-z")
+    branch_before = _git(controller, "branch", "--show-current")
+    workspace_base = tmp_path / "workspaces"
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(workspace_base))
+    monkeypatch.setattr(WorkspaceManager, "_sync_brain_to_path", lambda self, path: None)
+
+    manager = WorkspaceManager(controller)
+    task_id, branch, path = manager.lease(task_id="T123")
+
+    assert task_id == "T123"
+    assert branch == "isolated/task-T123"
+    assert path.resolve() != placeholder.resolve()
+    assert path.resolve() == (workspace_base / "T123").resolve()
+    assert _git(path, "rev-parse", "--show-toplevel") == str(path.resolve())
+    assert str(path.resolve()) in _git(controller, "worktree", "list", "--porcelain")
+    assert _git(controller, "rev-parse", "HEAD") == head_before
+    assert _git(controller, "branch", "--show-current") == branch_before
+    assert _git(controller, "status", "--porcelain=v1", "-z") == status_before
+
+
+def test_lease_accepts_registered_swarm_worktree_and_preserves_controller(tmp_path, monkeypatch):
+    controller = tmp_path / "controller"
+    head_before = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), head_before)
+    status_before = _git(controller, "status", "--porcelain=v1", "-z")
+    branch_before = _git(controller, "branch", "--show-current")
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    monkeypatch.setattr(WorkspaceManager, "_sync_brain_to_path", lambda self, path: None)
+
+    manager = WorkspaceManager(controller)
+    task_id, branch, path = manager.lease(task_id="T456")
+
+    assert task_id == "T456"
+    assert branch == "isolated/task-T456"
+    assert path.resolve() == swarm.resolve()
+    assert _git(path, "rev-parse", "--show-toplevel") == str(swarm.resolve())
+    assert _git(path, "branch", "--show-current") == "isolated/task-T456"
+    assert (swarm / ".swarm_lease").read_text(encoding="utf-8") == "isolated/task-T456"
+    assert _git(controller, "rev-parse", "HEAD") == head_before
+    assert _git(controller, "branch", "--show-current") == branch_before
+    assert _git(controller, "status", "--porcelain=v1", "-z") == status_before
