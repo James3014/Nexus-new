@@ -250,6 +250,8 @@ class WorkerCompetitionCoordinator:
             if task_state.get("status") not in TERMINAL_TASK_STATUSES:
                 all_terminal = False
         state["candidate_states"] = candidates
+        if state.get("status") in {"INTEGRATED", "PUSHED"}:
+            return self._write(state)
         if all_terminal:
             decision = select_deterministic_winner(candidates, state.get("provider_order", []))
             state["status"] = decision["status"]
