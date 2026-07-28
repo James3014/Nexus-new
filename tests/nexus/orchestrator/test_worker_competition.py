@@ -112,3 +112,36 @@ def test_get_persists_winner_after_all_candidates_finish(tmp_path):
 
     assert current["status"] == "WINNER_SELECTED"
     assert current["winner"]["winner_task_id"].endswith("-codex")
+
+
+def test_get_preserves_integrated_and_pushed_terminal_status_on_refresh(tmp_path):
+    class FakeService:
+        state_dir = tmp_path / "service-state"
+
+        def __init__(self):
+            self.states = {}
+
+        def submit_task(self, request):
+            self.states[request["task_id"]] = {"task_id": request["task_id"], "status": "SUBMITTED"}
+            return self.states[request["task_id"]]
+
+        def get_task(self, task_id):
+            return self.states[task_id]
+
+    service = FakeService()
+    coordinator = WorkerCompetitionCoordinator(service)
+    request = {
+        "task_id": "refactor-003",
+        "competition_id": "refactor-competition-003",
+        "target_repo_root": str(tmp_path / "targets"),
+        "target_worktree_root": str(tmp_path / "targets"),
+    }
+    coordinator.submit(request, ["codex", "opencode"])
+
+    for status in ("INTEGRATED", "PUSHED"):
+        state = coordinator._read("refactor-competition-003")
+        state["status"] = status
+        coordinator._write(state)
+
+        refreshed = coordinator.get("refactor-competition-003")
+        assert refreshed["status"] == status
