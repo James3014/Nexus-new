@@ -1316,9 +1316,6 @@ class SelfHostedTaskService:
         packet = state.get("promotion_packet") or {}
         candidate_commit = packet.get("candidate_commit_sha") or state.get("candidate_commit_sha")
         candidate_ref = state.get("candidate_ref")
-        verified_receipt = state.get("verified_receipt") or {}
-        candidate_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
-        verified_receipt_hash = state.get("verified_receipt_hash")
         candidate_dict = state.get("candidate") or {}
         candidate_created = (
             state.get("candidate_commit_created")
@@ -1329,8 +1326,6 @@ class SelfHostedTaskService:
             packet
             or candidate_commit
             or candidate_ref
-            or candidate_state_hash
-            or verified_receipt_hash
             or candidate_created
         ):
             raise RuntimeError("task has candidate evidence present")
