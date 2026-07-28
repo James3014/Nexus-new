@@ -49,6 +49,7 @@ def test_controlled_integration_merges_only_to_nexus_integration(tmp_path):
     _git(repo, "add", "README")
     _git(repo, "commit", "-m", "base")
     base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration", base)
     _git(repo, "branch", "nexus/task/integration-task", base)
     target = tmp_path / "target"
     _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
@@ -66,6 +67,7 @@ def test_controlled_integration_merges_only_to_nexus_integration(tmp_path):
     assert receipt.merge_performed is True
     assert receipt.push_performed is False
     assert _git(repo, "rev-parse", "nexus/integration") == receipt.integration_commit_sha
+    assert _git(repo, "rev-parse", "main") == base
     assert not (tmp_path / "integrations" / "integration-task").exists()
 
 
@@ -76,9 +78,72 @@ def test_controlled_integration_rejects_protected_branch(tmp_path):
         manager._validate_branch("main")
 
 
+def test_controlled_integration_uses_durable_ref_for_detached_retry(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("base\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration/test", base)
+    target = tmp_path / "target"
+    _git(repo, "worktree", "add", "--detach", str(target), base)
+    (target / "change.txt").write_text("candidate\n")
+    _git(target, "add", "change.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    candidate_ref = f"refs/nexus-candidates/integration-task/{candidate}"
+    _git(repo, "update-ref", candidate_ref, candidate)
+    state = _candidate_state(repo, base, candidate, tree)
+    state["lease"]["target_detached"] = True
+    state["candidate_ref"] = candidate_ref
+
+    receipt = ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+        state, integration_branch="nexus/integration/test"
+    )
+
+    assert receipt.source_branch == candidate_ref
+    assert _git(repo, "rev-parse", "nexus/integration/test") == receipt.integration_commit_sha
+
+
 def test_controlled_integration_requires_exact_approved_binding(tmp_path):
     manager = ControlledIntegrationManager(integration_root=tmp_path / "integrations")
     state = {"status": "CANDIDATE_COMMITTED", "promotion_status": "APPROVED"}
 
     with pytest.raises(RuntimeError, match="approved binding"):
         manager.integrate_task_state(state)
+
+
+def test_controlled_integration_rolls_back_failed_verifier(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("base\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration/test", base)
+    _git(repo, "branch", "nexus/task/integration-task", base)
+    target = tmp_path / "target"
+    _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
+    (target / "change.txt").write_text("candidate\n")
+    _git(target, "add", "change.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    state = _candidate_state(repo, base, candidate, tree)
+    state["contract"]["verifier_commands"] = ["python3 -c 'raise SystemExit(1)'"]
+
+    with pytest.raises(RuntimeError, match="integration verifier failed"):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state, integration_branch="nexus/integration/test"
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration/test") == base
+    assert not (tmp_path / "integrations" / "integration-task").exists()

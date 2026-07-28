@@ -1,14 +1,16 @@
 import json
+import os
+import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
-import time
 
 import pytest
 
+from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
+from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
-from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerPreflight, WorkerOutcome
-from nexus.executors.worker_registry import WorkerRegistry
 
 
 def _request(tmp_path: Path, **overrides):
@@ -29,6 +31,28 @@ def _request(tmp_path: Path, **overrides):
     }
     values.update(overrides)
     return values
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _real_request(tmp_path: Path, task_id: str = "real-reconcile"):
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    _git(controller, "init", "-b", "main")
+    _git(controller, "config", "user.name", "Lifecycle Test")
+    _git(controller, "config", "user.email", "lifecycle@example.test")
+    (controller / "README").write_text("base\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "base")
+    head = _git(controller, "rev-parse", "HEAD")
+    target_root = tmp_path / "targets"
+    return _request(
+        tmp_path, task_id=task_id, controller_revision=head,
+        target_base_revision=head, controller_repo_root=str(controller),
+        target_repo_root=str(target_root / task_id), target_worktree_root=str(target_root),
+    )
 
 
 def test_what_why_are_mapped_to_architect_contract(tmp_path):
@@ -99,9 +123,9 @@ def test_submit_returns_before_background_runner_finishes(tmp_path):
     assert running["heartbeat_at"]
     release.set()
     deadline = time.monotonic() + 2
-    while time.monotonic() < deadline and service.get_task(request["task_id"])["status"] != "CANDIDATE_COMMITTED":
+    while time.monotonic() < deadline and service.get_task(request["task_id"])["status"] != "PENDING_HUMAN_APPROVAL":
         time.sleep(0.01)
-    assert service.get_task(request["task_id"])["status"] == "CANDIDATE_COMMITTED"
+    assert service.get_task(request["task_id"])["status"] == "PENDING_HUMAN_APPROVAL"
 
 
 def test_reconcile_fails_closed_when_worker_lost_before_receipt(tmp_path):
@@ -159,7 +183,7 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state")
     request = _request(tmp_path)
 
-    state = service._write_state(
+    service._write_state(
         request["task_id"],
         {
             "task_id": request["task_id"],
@@ -194,7 +218,7 @@ def test_terminal_retry_keeps_task_identity_and_increments_attempt(tmp_path):
 
     def runner(contract, request, update):
         calls.append(contract.task_id)
-        update("FINAL_BLOCK", {"cleanup_decision": "TARGET_CLEANED", "cleanup_performed": True})
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
         return {"promotion_status": "NOT_CREATED"}
 
     service = SelfHostedTaskService(
@@ -223,6 +247,15 @@ def test_noncanonical_state_root_requires_ephemeral_mode(tmp_path):
         SelfHostedTaskService(state_dir="/Users/jameschen/Workspace/nexus-sibling-state", auto_reconcile=False)
 
 
+def test_default_state_root_uses_configured_canonical_root(tmp_path, monkeypatch):
+    canonical = tmp_path / "canonical"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical))
+
+    service = SelfHostedTaskService(auto_reconcile=False)
+
+    assert service.state_dir == canonical.resolve()
+
+
 def test_archive_manifest_hash_is_reproducible(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("done", {"task_id": "done", "status": "FINAL_BLOCK"})
@@ -232,6 +265,402 @@ def test_archive_manifest_hash_is_reproducible(tmp_path):
 
     assert first["manifest_hash"] == second["manifest_hash"]
     assert first["entries"][0]["receipt_hash"]
+
+
+def test_archive_apply_persists_manifest_and_remains_readable(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("done", {"task_id": "done", "status": "FINAL_BLOCK", "updated_at": "2026-01-01T00:00:00+00:00"})
+    preview = service.archive_states(dry_run=True)
+
+    applied = service.archive_states(dry_run=False)
+    repeated = service.archive_states(dry_run=False)
+
+    assert applied["manifest_hash"] == preview["manifest_hash"]
+    assert Path(applied["manifest_path"]).is_file()
+    assert not (tmp_path / "state" / "done.json").exists()
+    assert service.get_task("done")["status"] == "FINAL_BLOCK"
+    assert repeated["entries"] == []
+
+
+def test_archived_integrated_task_retries_with_same_identity_and_versions_receipt(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _request(tmp_path, task_id="archived-integrated")
+    contract = service.build_contract(request)
+    first_attempt = "a" * 32
+    service._write_state("archived-integrated", {
+        "task_id": "archived-integrated", "status": "INTEGRATED",
+        "attempt_id": first_attempt, "attempts": [{"attempt_id": first_attempt}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "promotion_status": "INTEGRATED",
+        "candidate_ref": "refs/nexus-candidates/archived-integrated/old",
+        "promotion_packet": {"candidate_commit_sha": "c" * 40},
+        "final_disposition": "INTEGRATED", "cleanup_decision": "REMOVED",
+        "cleanup_performed": True, "updated_at": "2026-01-01T00:00:00+00:00",
+    })
+    first_archive = service.archive_states(dry_run=False)
+
+    submitted = service.submit_task(request)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        current = service._read_state("archived-integrated")
+        if current and current["status"] == "FINAL_BLOCK":
+            break
+        time.sleep(0.01)
+    current = service._read_state("archived-integrated")
+    second_archive = service.archive_states(dry_run=False)
+
+    assert submitted["task_id"] == "archived-integrated"
+    assert current["attempt_id"] != first_attempt
+    assert len(current["attempts"]) == 2
+    assert current["candidate_ref"] is None
+    assert current["candidate_history"][0]["final_disposition"] == "INTEGRATED"
+    assert calls == ["archived-integrated"]
+    assert Path(first_archive["entries"][0]["archive_location"]).is_file()
+    assert Path(second_archive["entries"][0]["archive_location"]).is_file()
+    assert first_archive["entries"][0]["archive_location"] != second_archive["entries"][0]["archive_location"]
+    assert service.get_task("archived-integrated")["attempt_id"] == current["attempt_id"]
+
+
+def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="pending-task")
+    contract = service.build_contract(request)
+    service._write_state("pending-task", {
+        "task_id": "pending-task", "status": "PENDING_HUMAN_APPROVAL",
+        "attempt_id": "a" * 32, "attempts": [{"attempt_id": "a" * 32}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "cleanup_decision": "REMOVED", "cleanup_performed": True,
+    })
+
+    blocked = service.submit_task(request)
+    assert blocked["attempt_id"] == "a" * 32
+    assert calls == []
+
+    service.dispose_candidate("pending-task", disposition="SUPERSEDED", superseded_by="next")
+    retried = service.submit_task(request)
+    assert retried["attempt_id"] != "a" * 32
+
+
+def test_cleanup_apply_invokes_governed_worktree_cleanup(tmp_path, monkeypatch):
+    calls = []
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="cleanup-task")
+    contract = service.build_contract(request)
+    lease = TargetWorktreeLease(
+        schema="nexus.target_worktree_lease.v1", lease_id="lease", task_id="cleanup-task",
+        controller_revision=contract.controller_revision, target_base_revision=contract.target_base_revision,
+        target_worktree=request["target_repo_root"], target_branch="nexus/task/cleanup-task",
+        initial_head=contract.target_base_revision, initial_status_sha256="0" * 64,
+        controller_status_sha256="0" * 64, created_from_exact_revision=True,
+        commit_created=False, merge_performed=False,
+    )
+    service._write_state("cleanup-task", {
+        "task_id": "cleanup-task", "status": "FINAL_BLOCK", "request": request,
+        "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
+        "attempt_id": "a" * 32, "lease": lease.__dict__,
+    })
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            pass
+        def cleanup_terminal_target(self, contract, lease, **kwargs):
+            calls.append(kwargs["dry_run"])
+            return SimpleNamespace(decision="REMOVED", blocker=None, performed=not kwargs["dry_run"], eligible=True)
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    service.cleanup_tasks(task_id="cleanup-task", dry_run=True)
+    applied = service.cleanup_tasks(task_id="cleanup-task", dry_run=False)
+
+    assert calls == [True, False]
+    assert applied["decisions"][0]["cleanup_decision"] == "REMOVED"
+    assert service._read_state("cleanup-task")["cleanup_performed"] is True
+
+
+def test_cleanup_rejects_approved_binding_mismatch(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="binding-cleanup")
+    contract = service.build_contract(request)
+    lease = TargetWorktreeLease(
+        schema="nexus.target_worktree_lease.v1", lease_id="lease", task_id="binding-cleanup",
+        controller_revision=contract.controller_revision, target_base_revision=contract.target_base_revision,
+        target_worktree=request["target_repo_root"], target_branch="nexus/task/binding-cleanup",
+        initial_head=contract.target_base_revision, initial_status_sha256="0" * 64,
+        controller_status_sha256="0" * 64, created_from_exact_revision=True,
+        commit_created=False, merge_performed=False,
+    )
+    service._write_state("binding-cleanup", {
+        "task_id": "binding-cleanup", "status": "INTEGRATED", "request": request,
+        "contract": contract.model_dump(mode="json"), "attempt_id": "a" * 32,
+        "lease": lease.__dict__, "promotion_status": "INTEGRATED",
+        "promotion_packet": {"candidate_commit_sha": "c" * 40},
+        "approved_binding": {"candidate_commit_sha": "d" * 40},
+    })
+
+    decision = service.cleanup_tasks(task_id="binding-cleanup", dry_run=False)["decisions"][0]
+
+    assert decision["cleanup_decision"] == "BLOCKED_BY_MISSING_REF"
+    assert decision["cleanup_blocker"] == "approval binding mismatch"
+
+
+def test_integration_failure_is_persisted(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("integration-fail", {
+        "task_id": "integration-fail", "status": "APPROVED", "attempt_id": "a" * 32,
+        "promotion_status": "APPROVED", "contract": {"target_worktree_root": str(tmp_path / "targets")},
+    })
+
+    class FailingIntegration:
+        def __init__(self, integration_root):
+            pass
+        def integrate_task_state(self, state, integration_branch):
+            raise RuntimeError("integration verifier failed")
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", FailingIntegration)
+    with pytest.raises(RuntimeError, match="integration verifier failed"):
+        service.integrate_approved("integration-fail")
+
+    state = service._read_state("integration-fail")
+    assert state["status"] == "INTEGRATION_FAILED"
+    assert state["promotion_status"] == "INTEGRATION_FAILED"
+    assert state["push_performed"] is False
+
+
+def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
+    calls = []
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("integration-once", {
+        "task_id": "integration-once", "status": "APPROVED", "attempt_id": "a" * 32,
+        "promotion_status": "APPROVED", "contract": {"target_worktree_root": str(tmp_path / "targets")},
+    })
+
+    class SuccessfulIntegration:
+        def __init__(self, integration_root):
+            pass
+        def integrate_task_state(self, state, integration_branch):
+            calls.append(integration_branch)
+            return SimpleNamespace(
+                integration_branch=integration_branch,
+                integration_base_sha="b" * 40,
+                integration_commit_sha="c" * 40,
+            )
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", SuccessfulIntegration)
+    first = service.integrate_approved("integration-once")
+    second = service.integrate_approved("integration-once")
+
+    assert first == second
+    assert calls == ["nexus/integration"]
+    assert first["integration_base_sha"] == "b" * 40
+    assert first["push_performed"] is False
+
+
+def test_lifecycle_receipt_exposes_required_fields(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("receipt", {"task_id": "receipt", "status": "FINAL_BLOCK"})
+
+    receipt = service.get_receipt("receipt")
+
+    required = {
+        "task_id", "attempt_id", "controller_worktree", "controller_revision",
+        "controller_status_sha256", "target_worktree", "target_initial_revision",
+        "target_branch", "target_created_at", "worker_provider", "worker_pid",
+        "heartbeat_at", "execution_outcome", "verification_verdict",
+        "candidate_commit_sha", "candidate_tree_sha", "candidate_ref",
+        "candidate_state_hash", "verified_receipt_hash", "promotion_status",
+        "approved_binding", "integration_branch", "integration_base_sha",
+        "integration_result_sha", "terminal_status", "cleanup_eligible",
+        "cleanup_decision", "cleanup_blocker", "cleanup_performed",
+        "cleanup_performed_at", "state_retention_status", "archive_eligible",
+        "archive_location",
+    }
+    assert required <= receipt.keys()
+
+
+def test_orphan_clean_target_is_reconciled_and_removed(tmp_path):
+    request = _real_request(tmp_path)
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    lease = WorktreeManager(root_dir=contract.target_worktree_root).create_lease(contract)
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "TARGET_LEASED",
+        "attempt_id": "a" * 32, "attempts": [{"attempt_id": "a" * 32}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "lease": lease.__dict__,
+        "worker_pid": 999999, "heartbeat_at": "2026-01-01T00:00:00+00:00",
+    })
+
+    reconciled = service.reconcile_task(contract.task_id)
+
+    assert reconciled["status"] == "FINAL_BLOCK"
+    assert reconciled["cleanup_decision"] == "REMOVED"
+    assert reconciled["cleanup_performed"] is True
+    assert not Path(lease.target_worktree).exists()
+
+
+def test_orphan_candidate_checkpoint_resumes_ref_and_cleanup(tmp_path):
+    request = _real_request(tmp_path, task_id="candidate-recovery")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "nexus_canary.txt").write_text("candidate\n")
+    _git(target, "add", "nexus_canary.txt")
+    _git(target, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "CANDIDATE_COMMITTED",
+        "attempt_id": "a" * 32, "attempts": [{"attempt_id": "a" * 32}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "lease": lease.__dict__,
+        "promotion_packet": {
+            "candidate_commit_sha": candidate, "candidate_tree_sha": tree,
+            "candidate_state_hash": "c" * 64, "verified_receipt_hash": "d" * 64,
+        },
+        "worker_pid": 999999, "heartbeat_at": "2026-01-01T00:00:00+00:00",
+    })
+
+    reconciled = service.reconcile_task(contract.task_id)
+
+    assert reconciled["status"] == "PENDING_HUMAN_APPROVAL"
+    assert reconciled["cleanup_decision"] == "REMOVED"
+    assert not target.exists()
+    assert _git(Path(contract.controller_repo_root), "rev-parse", reconciled["candidate_ref"]) == candidate
+
+
+def test_verified_retained_candidate_can_resume_ref_protection_and_cleanup(tmp_path):
+    request = _real_request(tmp_path, task_id="retained-candidate-recovery")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "nexus_canary.txt").write_text("candidate\n")
+    _git(target, "add", "nexus_canary.txt")
+    _git(target, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "RETAINED_FOR_REVIEW",
+        "attempt_id": "a" * 32, "attempts": [{"attempt_id": "a" * 32}],
+        "request": request, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "lease": lease.__dict__,
+        "promotion_packet": {
+            "candidate_commit_sha": candidate, "candidate_tree_sha": tree,
+            "candidate_state_hash": "c" * 64, "verified_receipt_hash": "d" * 64,
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+        },
+        "verified_receipt": {"verified": True},
+        "promotion_status": "NOT_CREATED", "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+        "worker_pid": 999999, "heartbeat_at": "2026-01-01T00:00:00+00:00",
+    })
+
+    recovered = service.recover_retained_candidate(contract.task_id)
+
+    assert recovered["status"] == "PENDING_HUMAN_APPROVAL"
+    assert recovered["cleanup_decision"] == "REMOVED"
+    assert not target.exists()
+    assert _git(Path(contract.controller_repo_root), "rev-parse", recovered["candidate_ref"]) == candidate
+
+
+def test_live_target_lease_is_not_reconciled_away(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("live", {
+        "task_id": "live", "status": "TARGET_LEASED", "attempt_id": "a" * 32,
+        "worker_pid": os.getpid(), "heartbeat_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    })
+
+    state = service.reconcile_task("live")
+
+    assert state["status"] == "TARGET_LEASED"
+
+
+def test_five_terminal_retries_keep_one_task_identity(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="five-attempts")
+    for expected in range(1, 6):
+        service.submit_task(request)
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            state = service._read_state("five-attempts")
+            if state["status"] == "FINAL_BLOCK" and len(calls) == expected:
+                break
+            time.sleep(0.01)
+
+    state = service._read_state("five-attempts")
+    assert state["task_id"] == "five-attempts"
+    assert len(state["attempts"]) == 5
+    assert len({attempt["attempt_id"] for attempt in state["attempts"]}) == 5
+    assert calls == ["five-attempts"] * 5
+
+
+def test_same_task_id_different_contract_fails_closed(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=lambda *args: {}, auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="contract-bound")
+    service.submit_task(request)
+
+    with pytest.raises(ValueError, match="different contract"):
+        service.submit_task({**request, "why": "different"})
+
+
+def test_different_active_controller_is_rejected(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=lambda *args: {}, auto_reconcile=False, ephemeral=True)
+    first = _request(tmp_path, task_id="first-active")
+    contract = service.build_contract(first)
+    service._write_state("first-active", {
+        "task_id": "first-active", "status": "WORKER_RUNNING",
+        "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
+    })
+    second = _request(
+        tmp_path, task_id="second-active",
+        controller_repo_root=str(tmp_path / "different-controller"),
+        target_repo_root=str(tmp_path / "targets" / "second-active"),
+    )
+
+    with pytest.raises(RuntimeError, match="active Controller lease"):
+        service.submit_task(second)
+
+
+def test_cancelled_task_records_terminal_cleanup_decision(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("cancel-me", {
+        "task_id": "cancel-me", "status": "SUBMITTED", "attempt_id": "a" * 32,
+        "worker_pid": None,
+    })
+
+    cancelled = service.cancel_task("cancel-me")
+
+    assert cancelled["status"] == "CANCELLED"
+    assert cancelled["cleanup_decision"] == "ALREADY_REMOVED"
+    assert cancelled["final_disposition"] == "CANCELLED"
 
 
 def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatch):
@@ -301,10 +730,14 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
             FakeManager.cleanup_calls += 1
 
         def protect_candidate(self, contract, lease, candidate_commit):
+            assert state["status"] == "CANDIDATE_COMMITTED"
+            assert state["promotion_packet"].candidate_commit_sha == candidate_commit
             return f"refs/nexus-candidates/{contract.task_id}"
 
         def cleanup_terminal_target(self, contract, lease, **kwargs):
-            return SimpleNamespace(decision="TARGET_CLEANED", blocker=None, performed=True)
+            assert state["status"] == "CANDIDATE_REF_PROTECTED"
+            assert state["candidate_ref"] == f"refs/nexus-candidates/{contract.task_id}"
+            return SimpleNamespace(decision="REMOVED", blocker=None, performed=True, eligible=True)
 
     lease_count = 0
 

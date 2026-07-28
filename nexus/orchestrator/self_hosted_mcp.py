@@ -4,22 +4,20 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
+from nexus.orchestrator.refactor_campaign import RefactorCampaignCoordinator, RefactorWave
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worker_competition import WorkerCompetitionCoordinator
-from nexus.orchestrator.refactor_campaign import RefactorCampaignCoordinator, RefactorWave
-
 
 WORKER_ENUM = list(SUPPORTED_WORKER_PROVIDERS)
 
 
 class NexusSelfHostedMCPServer:
     def __init__(self, service: Optional[SelfHostedTaskService] = None):
-        state_dir = os.getenv("NEXUS_SELF_HOSTED_STATE_DIR", str(Path.cwd() / ".nexus/self_hosted_tasks"))
-        self.service = service or SelfHostedTaskService(state_dir=state_dir)
+        state_dir = os.getenv("NEXUS_SELF_HOSTED_STATE_DIR")
+        self.service = service or SelfHostedTaskService(state_dir=state_dir or None)
         self.competition = WorkerCompetitionCoordinator(self.service)
         self.campaigns = RefactorCampaignCoordinator(self.competition)
 
@@ -216,6 +214,11 @@ class NexusSelfHostedMCPServer:
                 "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt.",
                 "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
             },
+            {
+                "name": "nexus_self_hosted_cancel_task",
+                "description": "Cancel a non-running task and apply its governed terminal Target cleanup.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
         ]
 
     @staticmethod
@@ -332,6 +335,8 @@ class NexusSelfHostedMCPServer:
                 disposition=str(arguments["disposition"]),
                 superseded_by=arguments.get("superseded_by"),
             )
+        if name == "nexus_self_hosted_cancel_task":
+            return self.service.cancel_task(task_id)
         raise ValueError(f"unknown tool: {name}")
 
     def handle(self, request: Mapping[str, Any]) -> Optional[dict[str, Any]]:

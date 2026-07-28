@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 import shlex
-from pathlib import Path
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
-
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "production"})
@@ -23,6 +22,7 @@ class IntegrationReceipt:
     integration_branch: str
     source_branch: str
     candidate_commit_sha: str
+    integration_base_sha: str
     integration_commit_sha: str
     verifier_passed: bool
     merge_performed: bool
@@ -91,8 +91,12 @@ class ControlledIntegrationManager:
         controller_root = Path(str(contract.get("controller_repo_root", ""))).expanduser().resolve()
         target_base_revision = str(contract.get("target_base_revision", ""))
         candidate_sha = str(packet.get("candidate_commit_sha", ""))
-        source_branch = str(lease.get("target_branch", ""))
-        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED"}:
+        source_branch = str(
+            state.get("candidate_ref")
+            if lease.get("target_detached")
+            else lease.get("target_branch", "")
+        )
+        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED", "INTEGRATING"}:
             raise RuntimeError("only a terminal candidate task can be integrated")
         approved = state.get("approved_binding") or {}
         binding_fields = (
@@ -129,11 +133,9 @@ class ControlledIntegrationManager:
             capture_output=True,
             text=True,
         ).returncode == 0
-        add_args = ["worktree", "add"]
         if not branch_exists:
-            add_args.extend(["-b", integration_branch, str(integration_path), target_base_revision])
-        else:
-            add_args.extend([str(integration_path), integration_branch])
+            raise RuntimeError("governed integration branch must already exist")
+        add_args = ["worktree", "add", str(integration_path), integration_branch]
         self._git(add_args, controller_root)
         removed = False
         integration_base_sha = self._git(["rev-parse", "HEAD"], integration_path)
@@ -149,7 +151,7 @@ class ControlledIntegrationManager:
         except Exception:
             subprocess.run(["git", "merge", "--abort"], cwd=integration_path, capture_output=True, text=True)
             subprocess.run(["git", "reset", "--merge", integration_base_sha], cwd=integration_path, capture_output=True, text=True)
-            self._git(["worktree", "remove", "--force", str(integration_path)], controller_root)
+            self._git(["worktree", "remove", str(integration_path)], controller_root)
             raise
         self._git(["worktree", "remove", str(integration_path)], controller_root)
         removed = True
@@ -159,6 +161,7 @@ class ControlledIntegrationManager:
             integration_branch=integration_branch,
             source_branch=source_branch,
             candidate_commit_sha=candidate_sha,
+            integration_base_sha=integration_base_sha,
             integration_commit_sha=integration_sha,
             verifier_passed=True,
             merge_performed=True,
