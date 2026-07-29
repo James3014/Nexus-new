@@ -282,30 +282,23 @@ def test_self_hosted_list_actionable_empty_and_populated(tmp_path: Path):
 def test_self_hosted_wait_and_list_actionable_subprocess(tmp_path: Path):
     import sys
     state_dir = str(tmp_path / "state")
-    req = _valid_request(tmp_path, task_id="test-sh-subproc-001")
+    task_id = "test-sh-subproc-001"
 
-    # Submit task first via python -m scripts.engine.nexus_cli
-    sub_cmd = [
-        sys.executable, "-m", "scripts.engine.nexus_cli", "self-hosted", "submit",
-        "--task-id", req["task_id"],
-        "--what", req["what"],
-        "--why", req["why"],
-        "--controller-revision", req["controller_revision"],
-        "--target-base-revision", req["target_base_revision"],
-        "--controller-repo-root", req["controller_repo_root"],
-        "--target-repo-root", req["target_repo_root"],
-        "--target-worktree-root", req["target_worktree_root"],
-        "--allowed-files", req["allowed_files"],
-        "--worker", req["worker"],
-        "--state-dir", state_dir,
-    ]
-    sub_res = subprocess.run(sub_cmd, capture_output=True, text=True)
-    assert sub_res.returncode == 0, f"Subprocess submit failed: {sub_res.stderr}"
+    # Seed a legal quiescent task state directly via SelfHostedTaskService
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._write_state(task_id, {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": task_id,
+        "status": "CANDIDATE_CAPTURED",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "target_worktree": str(tmp_path / "targets" / task_id),
+        "worker_pid": None,
+    })
 
     # Subprocess wait
     wait_cmd = [
         sys.executable, "-m", "scripts.engine.nexus_cli", "self-hosted", "wait",
-        "--task-id", "test-sh-subproc-001",
+        "--task-id", task_id,
         "--timeout", "1.0",
         "--poll-interval", "0.05",
         "--state-dir", state_dir,
@@ -313,11 +306,9 @@ def test_self_hosted_wait_and_list_actionable_subprocess(tmp_path: Path):
     wait_res = subprocess.run(wait_cmd, capture_output=True, text=True)
     assert wait_res.returncode == 0, f"Subprocess wait failed: {wait_res.stderr}"
     wait_data = json.loads(wait_res.stdout)
-    assert wait_data["task_id"] == "test-sh-subproc-001"
-
-    # Set promotion_status in state file so attention_required becomes True
-    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
-    service._mutate_state("test-sh-subproc-001", lambda s: s.update({"promotion_status": "PENDING_HUMAN_APPROVAL"}))
+    assert wait_data["task_id"] == task_id
+    assert wait_data["status"] == "CANDIDATE_CAPTURED"
+    assert wait_data["promotion_status"] == "PENDING_HUMAN_APPROVAL"
 
     # Subprocess list-actionable
     list_cmd = [
@@ -329,6 +320,7 @@ def test_self_hosted_wait_and_list_actionable_subprocess(tmp_path: Path):
     list_data = json.loads(list_res.stdout)
     assert list_data["schema"] == "nexus.self_hosted_actionable_tasks.v1"
     assert list_data["actionable_count"] >= 1
+    assert any(t["task_id"] == task_id for t in list_data["tasks"])
 
 
 def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
