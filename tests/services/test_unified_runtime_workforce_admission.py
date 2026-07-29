@@ -251,7 +251,20 @@ def test_local_authority_is_exactly_propagated_and_binds_mapping_request_identit
             "executor_model": "qwen2.5-coder:7b",
             "execution_topology": "legacy-topology",
             "protocol_mode": "legacy-protocol",
-            "legacy_context": {"keep": True},
+            "model_call_allowed": True,
+            "legacy_context": {"forged": True},
+            "workforce_admission": {"overall_decision": "BLOCK"},
+            "workforce_admission_lineage": {"status": "FORGED"},
+            "planner_decision_id": "forged-planner-decision",
+            "route_truth_source": "forged-request",
+            "policy_identity": {"policy_hash": "forged-policy"},
+            "policy_hash": "forged-policy",
+            "binding_hash": "forged-binding",
+            "aggregate_binding_hash": "forged-aggregate",
+            "selected_capabilities": ["forged-capability"],
+            "evidence_refs": ["forged-evidence"],
+            "task_id": "forged-task",
+            "workspace_revision": "forged-workspace",
         }
     )
 
@@ -272,7 +285,32 @@ def test_local_authority_is_exactly_propagated_and_binds_mapping_request_identit
     assert snapshot["executor_model"] == authority["resolved_model"]
     assert snapshot["execution_topology"] == "legacy-topology"
     assert snapshot["protocol_mode"] == "legacy-protocol"
-    assert snapshot["legacy_context"] == {"keep": True}
+    assert snapshot["model_call_allowed"] is True
+    planner_snapshot = receipt["plan_payload"]["signal_snapshot"]
+    for key in (
+        "workforce_admission",
+        "workforce_admission_lineage",
+        "planner_decision_id",
+        "selected_capabilities",
+    ):
+        assert snapshot[key] == planner_snapshot[key]
+    assert "route_truth_source" not in snapshot
+    assert "evidence_refs" not in snapshot
+    for key in (
+        "legacy_context",
+        "policy_identity",
+        "policy_hash",
+        "binding_hash",
+        "aggregate_binding_hash",
+        "task_id",
+        "workspace_revision",
+    ):
+        assert key not in snapshot
+    assert json.dumps(
+        snapshot["local_model_invocation_authority"],
+        sort_keys=True,
+        separators=(",", ":"),
+    ) == json.dumps(authority, sort_keys=True, separators=(",", ":"))
     assert local.calls == 1
     json.dumps(authority)
 
@@ -286,15 +324,52 @@ def test_local_authority_binds_dataclass_request_and_preserves_admitted_qwen_tag
     }
     request = _DataclassLocalRequest(
         task_id="workforce-admission-runtime-test",
-        planner_snapshot={"executor_provider": "wrong", "executor_model": "qwen2.5:7b"},
+        planner_snapshot={
+            "executor_provider": "wrong",
+            "executor_model": "qwen2.5:7b",
+            "execution_topology": "legacy-topology",
+            "protocol_mode": "legacy-protocol",
+            "model_call_allowed": False,
+            "workforce_admission": {"overall_decision": "BLOCK"},
+            "workforce_admission_lineage": {"status": "FORGED"},
+            "planner_decision_id": "forged-planner-decision",
+            "route_truth_source": "forged-request",
+            "policy_identity": {"policy_hash": "forged-policy"},
+            "binding_hash": "forged-binding",
+            "aggregate_binding_hash": "forged-aggregate",
+            "selected_capabilities": ["forged-capability"],
+            "evidence_refs": ["forged-evidence"],
+        },
     )
     receipt, local = _local_case(binding=binding, local_request=request)
 
     authority = receipt["local_model_invocation_authority"]
     assert authority["resolved_model"] == "qwen3:8b"
     assert isinstance(local.seen_request, _DataclassLocalRequest)
-    assert local.seen_request.planner_snapshot["executor_provider"] == "ollama"
-    assert local.seen_request.planner_snapshot["executor_model"] == "qwen3:8b"
+    snapshot = local.seen_request.planner_snapshot
+    assert snapshot["executor_provider"] == "ollama"
+    assert snapshot["executor_model"] == "qwen3:8b"
+    assert snapshot["execution_topology"] == "legacy-topology"
+    assert snapshot["protocol_mode"] == "legacy-protocol"
+    assert snapshot["model_call_allowed"] is False
+    planner_snapshot = receipt["plan_payload"]["signal_snapshot"]
+    for key in (
+        "workforce_admission",
+        "workforce_admission_lineage",
+        "planner_decision_id",
+        "selected_capabilities",
+    ):
+        assert snapshot[key] == planner_snapshot[key]
+    assert "route_truth_source" not in snapshot
+    assert "evidence_refs" not in snapshot
+    for key in ("policy_identity", "binding_hash", "aggregate_binding_hash", "evidence_refs"):
+        assert key not in snapshot
+    authority = receipt["local_model_invocation_authority"]
+    assert json.dumps(
+        snapshot["local_model_invocation_authority"],
+        sort_keys=True,
+        separators=(",", ":"),
+    ) == json.dumps(authority, sort_keys=True, separators=(",", ":"))
     assert local.calls == 1
 
 

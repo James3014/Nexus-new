@@ -4233,12 +4233,13 @@ class UnifiedRuntime:
             if isinstance(raw_snap, Mapping):
                 orig_snapshot = dict(raw_snap)
         if workforce_admission_enabled and local_authority is not None:
-            for key, value in orig_snapshot.items():
-                if key not in {
-                    "executor_provider",
-                    "executor_model",
-                    "local_model_invocation_authority",
-                } and value not in (None, "", "unknown"):
+            for key in (
+                "execution_topology",
+                "protocol_mode",
+                "model_call_allowed",
+            ):
+                value = orig_snapshot.get(key)
+                if value not in (None, "", "unknown"):
                     shared_snapshot[key] = value
             shared_snapshot["executor_provider"] = str(local_authority["resolved_provider"])
             shared_snapshot["executor_model"] = str(local_authority["resolved_model"])
