@@ -28,7 +28,15 @@ from nexus.engine.capability_contracts import (
 )
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
-from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
+from nexus.services.runtime_workforce_admission import (
+    RuntimeWorkforceAdmissionRecord,
+    _aggregate_hash,
+    _as_json_value,
+    _binding_payload,
+    _parse_demands,
+    _sha256_json,
+    evaluate_runtime_workforce_admission,
+)
 from nexus.evidence.receipt_base import (
     attach_r3_receipt_base,
     build_execution_attempt_id,
@@ -230,6 +238,261 @@ SELECTION_INJECTED_TRANSPORT = "injected_transport"
 SELECTION_ENVIRONMENT_DEFAULT = "environment_default"
 SELECTION_COMPATIBILITY_DEFAULT = "compatibility_default"
 SELECTION_PLANNER = "planner"
+GATEWAY_INVOCATION_AUTHORITY_SCHEMA = "nexus.gateway_invocation_authority.v1"
+
+
+def _required_identity(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name}_missing")
+    return value
+
+
+def _validate_online_admission_record(
+    *,
+    plan_payload: Mapping[str, Any],
+    admission_payload: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate the one Online record and its hashes from the canonical T2B payload."""
+    if not isinstance(admission_payload, Mapping):
+        raise ValueError("workforce_admission_missing")
+    if admission_payload.get("overall_decision") != "ALLOW":
+        raise ValueError("workforce_admission_overall_decision_not_allow")
+
+    snapshot = plan_payload.get("signal_snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("workforce_admission_signal_snapshot_missing")
+    try:
+        demands = _parse_demands(snapshot.get("workforce_demands"))
+    except Exception as exc:
+        # The runtime algorithm is fail-closed; expose a stable reason rather
+        # than an implementation-specific parser detail.
+        raise ValueError("workforce_admission_demands_malformed") from exc
+
+    records = admission_payload.get("records")
+    if not isinstance(records, list) or len(records) != len(demands.demands):
+        raise ValueError("workforce_admission_records_malformed")
+    policy_identity = admission_payload.get("policy_identity")
+    if not isinstance(policy_identity, Mapping):
+        raise ValueError("workforce_admission_policy_identity_missing")
+    policy_hash = _required_identity(
+        policy_identity.get("policy_hash"), "workforce_admission_policy_hash"
+    )
+
+    recomputed_hashes: list[str] = []
+    online_record: Mapping[str, Any] | None = None
+    online_demand_count = 0
+    for demand, record in zip(demands.demands, records):
+        if not isinstance(record, Mapping):
+            raise ValueError("workforce_admission_record_malformed")
+        if record.get("demand") != _as_json_value(demand.to_dict()):
+            raise ValueError("workforce_admission_record_demand_mismatch")
+        request = record.get("request")
+        decision = record.get("decision")
+        if not isinstance(request, Mapping) or not isinstance(decision, Mapping):
+            raise ValueError("workforce_admission_record_malformed")
+        expected_binding_hash = _sha256_json(
+            _binding_payload(demand, request, decision, policy_identity)
+        )
+        if record.get("binding_hash") != expected_binding_hash:
+            raise ValueError("workforce_admission_record_binding_hash_mismatch")
+        recomputed_hashes.append(expected_binding_hash)
+        if demand.execution_channel == "online":
+            online_demand_count += 1
+            if online_record is not None:
+                raise ValueError("workforce_admission_online_record_ambiguous")
+            online_record = record
+
+    if online_demand_count != 1 or online_record is None:
+        raise ValueError("workforce_admission_online_record_count_invalid")
+    if _aggregate_hash(
+        policy_hash,
+        [
+            RuntimeWorkforceAdmissionRecord(
+                schema="",
+                demand={},
+                request={},
+                decision={},
+                binding_hash=value,
+            )
+            for value in recomputed_hashes
+        ],
+    ) != admission_payload.get("aggregate_binding_hash"):
+        raise ValueError("workforce_admission_aggregate_binding_hash_mismatch")
+
+    decision = online_record.get("decision")
+    if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
+        raise ValueError("workforce_admission_online_record_decision_not_allow")
+    decision_policy_hash = _required_identity(
+        decision.get("policy_hash"), "workforce_admission_record_policy_hash"
+    )
+    if decision_policy_hash != policy_hash:
+        raise ValueError("workforce_admission_record_policy_hash_mismatch")
+    resolved_worker_id = _required_identity(
+        decision.get("resolved_worker_id"), "workforce_admission_resolved_worker_id"
+    )
+    resolved_provider = _required_identity(
+        decision.get("resolved_provider"), "workforce_admission_resolved_provider"
+    )
+    resolved_model = _required_identity(
+        decision.get("resolved_model"), "workforce_admission_resolved_model"
+    )
+    aggregate_binding_hash = _required_identity(
+        admission_payload.get("aggregate_binding_hash"),
+        "workforce_admission_aggregate_binding_hash",
+    )
+    record_binding_hash = _required_identity(
+        online_record.get("binding_hash"), "workforce_admission_record_binding_hash"
+    )
+    return {
+        "demand_id": str(online_record.get("demand", {}).get("demand_id") or ""),
+        "resolved_worker_id": resolved_worker_id,
+        "resolved_provider": resolved_provider,
+        "resolved_model": resolved_model,
+        "policy_hash": policy_hash,
+        "binding_hash": record_binding_hash,
+        "aggregate_binding_hash": aggregate_binding_hash,
+    }
+
+
+def _callable_provider_identity(invoker: Any) -> str:
+    values: list[str] = []
+    for attribute in ("provider", "online_invoker_provider"):
+        try:
+            value = getattr(invoker, attribute, None)
+        except Exception as exc:
+            raise ValueError("online_invoker_provider_malformed") from exc
+        if value is not None:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("online_invoker_provider_malformed")
+            values.append(value)
+    if len(set(values)) > 1:
+        raise ValueError("online_invoker_provider_ambiguous")
+    return values[0] if values else ""
+
+
+def _build_gateway_invocation_authority(
+    *,
+    request: UnifiedRuntimeRequest,
+    plan_payload: Mapping[str, Any],
+    admission_payload: Mapping[str, Any] | None,
+    invoker: Any,
+    effective_decision: str,
+    effective_reason: str = "",
+) -> dict[str, Any]:
+    authority: dict[str, Any] = {
+        "schema": GATEWAY_INVOCATION_AUTHORITY_SCHEMA,
+        "status": "BLOCKED",
+        "gate_passed": False,
+        "failure_reason": "",
+        "admission_overall_decision": str(
+            admission_payload.get("overall_decision") if isinstance(admission_payload, Mapping) else ""
+        ),
+        "admission_record_decision": "",
+        "resolved_worker_id": "",
+        "resolved_provider": "",
+        "resolved_model": "",
+        "policy_hash": "",
+        "binding_hash": "",
+        "aggregate_binding_hash": "",
+        "route_provider": "",
+        "transport_provider": "",
+        "online_model_name": "",
+        "invoker_provider": "",
+    }
+    try:
+        admitted = _validate_online_admission_record(
+            plan_payload=plan_payload,
+            admission_payload=admission_payload,
+        )
+        authority.update(admitted)
+        authority["admission_record_decision"] = "ALLOW"
+        if effective_decision != "ALLOW":
+            raise ValueError(effective_reason or "workforce_admission_effective_decision_not_allow")
+
+        route = request.route
+        route_provider = _required_identity(route.get("provider"), "online_route_provider")
+        transport_binding = route.get("online_transport_binding")
+        if not isinstance(transport_binding, Mapping):
+            raise ValueError("online_transport_binding_missing")
+        transport_provider = _required_identity(
+            transport_binding.get("provider"), "online_transport_provider"
+        )
+        online_model_name = _required_identity(
+            request.online_model_name, "online_model_name"
+        )
+        route_invoker_provider = route.get("online_invoker_provider")
+        if route_invoker_provider is not None:
+            route_invoker_provider = _required_identity(
+                route_invoker_provider, "online_invoker_provider"
+            )
+        callable_provider = _callable_provider_identity(invoker)
+        if route_invoker_provider and callable_provider and route_invoker_provider != callable_provider:
+            raise ValueError("online_invoker_provider_ambiguous")
+        invoker_provider = route_invoker_provider or callable_provider
+        if not invoker_provider:
+            raise ValueError("online_invoker_provider_missing")
+
+        authority.update(
+            {
+                "route_provider": route_provider,
+                "transport_provider": transport_provider,
+                "online_model_name": online_model_name,
+                "invoker_provider": invoker_provider,
+            }
+        )
+        if route_provider != admitted["resolved_provider"]:
+            raise ValueError("online_route_provider_mismatch")
+        if transport_provider != admitted["resolved_provider"]:
+            raise ValueError("online_transport_provider_mismatch")
+        if invoker_provider != admitted["resolved_provider"]:
+            raise ValueError("online_invoker_provider_mismatch")
+        if online_model_name != admitted["resolved_model"]:
+            raise ValueError("online_model_name_mismatch")
+    except ValueError as exc:
+        authority["failure_reason"] = str(exc)
+        return authority
+
+    authority["status"] = "ALLOW"
+    authority["gate_passed"] = True
+    return authority
+
+
+def _online_authority_failure_stage(
+    *,
+    task_id: str,
+    authority: Mapping[str, Any],
+) -> dict[str, Any]:
+    reason = str(authority.get("failure_reason") or "gateway_invocation_authority_blocked")
+    provider = str(authority.get("invoker_provider") or authority.get("resolved_provider") or "")
+    response = {
+        "provider": provider,
+        "task_id": task_id,
+        "invoked": False,
+        "output_delivered": False,
+        "gate_passed": False,
+        "provider_call_count": 0,
+        "response": "",
+        "raw_response": "",
+        "usage": {},
+        "error": reason,
+        "evidence_refs": [f"online:{task_id}:gateway_invocation_authority:{reason}"],
+        "gateway_invocation_authority": dict(authority),
+    }
+    return _stage(
+        "online",
+        status="FAILED",
+        invoked=False,
+        evidence_present=True,
+        gate_passed=False,
+        evidence_refs=list(response["evidence_refs"]),
+        reason=reason,
+        task_id=task_id,
+        response_task_id=task_id,
+        task_identity_shared=True,
+        provider_call_count=0,
+        context_trace={"gateway_invocation_authority": dict(authority)},
+        response=response,
+    )
 
 
 def _safe_task_id(value: str) -> str:
@@ -1169,6 +1432,8 @@ def build_subprocess_online_invoker(
             extra={"returncode": returncode, "stderr": stderr, "process_evidence": pe},
         )
 
+    invoke.provider = spec.provider  # type: ignore[attr-defined]
+    invoke.online_invoker_provider = spec.provider  # type: ignore[attr-defined]
     return invoke
 
 
@@ -1306,6 +1571,8 @@ def build_registered_online_invoker(
                 payload["transport"] = TRANSPORT_STRUCTURED_CALLABLE
         return payload
 
+    invoke.provider = key  # type: ignore[attr-defined]
+    invoke.online_invoker_provider = key  # type: ignore[attr-defined]
     return invoke
 
 
@@ -1719,6 +1986,8 @@ def build_structured_online_invoker(
             selection_source=selection_source,
         )
 
+    invoke.provider = provider  # type: ignore[attr-defined]
+    invoke.online_invoker_provider = provider  # type: ignore[attr-defined]
     return invoke
 
 
@@ -2008,6 +2277,7 @@ class UnifiedRuntime:
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
 
         workforce_admission_payload: dict[str, Any] | None = None
+        gateway_invocation_authority: dict[str, Any] | None = None
         if request.route.get("workforce_admission_enabled") is True:
             signal_snapshot = plan_payload.get("signal_snapshot")
             raw_workforce_demands = (
@@ -2015,12 +2285,30 @@ class UnifiedRuntime:
                 if isinstance(signal_snapshot, Mapping)
                 else None
             )
-            workforce_admission = evaluate_runtime_workforce_admission(
-                raw_workforce_demands,
-                request.route.get("workforce_bindings"),
-                self._workforce_policy_loader,
-            )
-            workforce_admission_payload = workforce_admission.to_dict()
+            try:
+                workforce_admission = evaluate_runtime_workforce_admission(
+                    raw_workforce_demands,
+                    request.route.get("workforce_bindings"),
+                    self._workforce_policy_loader,
+                )
+                workforce_admission_payload = (
+                    workforce_admission.to_dict()
+                    if callable(getattr(workforce_admission, "to_dict", None))
+                    else dict(workforce_admission)
+                    if isinstance(workforce_admission, Mapping)
+                    else None
+                )
+            except Exception:
+                workforce_admission_payload = None
+            if not isinstance(workforce_admission_payload, dict):
+                workforce_admission_payload = {
+                    "schema": "nexus.runtime_workforce_admission.v1",
+                    "policy_identity": {},
+                    "overall_decision": "BLOCK",
+                    "overall_reasons": ["workforce_admission_missing"],
+                    "records": [],
+                    "aggregate_binding_hash": "",
+                }
             workforce_lineage = _build_workforce_admission_lineage(
                 route=request.route,
                 attempt_number=attempt_number,
@@ -2044,6 +2332,20 @@ class UnifiedRuntime:
             effective_workforce_reason = (
                 "workforce_rebind_not_authorized" if rebind_blocked else ""
             )
+            if request.online_enabled:
+                gateway_invocation_authority = _build_gateway_invocation_authority(
+                    request=request,
+                    plan_payload=plan_payload,
+                    admission_payload=workforce_admission_payload,
+                    invoker=online_invoker,
+                    effective_decision=effective_workforce_decision,
+                    effective_reason=effective_workforce_reason,
+                )
+                plan_payload = dict(plan_payload)
+                stamped_snapshot = dict(plan_payload.get("signal_snapshot") or {})
+                stamped_snapshot["gateway_invocation_authority"] = gateway_invocation_authority
+                plan_payload["signal_snapshot"] = stamped_snapshot
+                plan_payload["gateway_invocation_authority"] = gateway_invocation_authority
             workforce_evidence_refs = [
                 f"runtime:workforce_admission:{workforce_decision}:"
                 f"{workforce_admission_payload.get('aggregate_binding_hash', '')[:16]}"
@@ -2101,6 +2403,11 @@ class UnifiedRuntime:
                         evidence_present=False,
                         gate_passed=False,
                     )
+                if request.online_enabled and gateway_invocation_authority is not None:
+                    terminal_stages["online"] = _online_authority_failure_stage(
+                        task_id=request.task_id,
+                        authority=gateway_invocation_authority,
+                    )
                 terminal_planner = dict(planner_stage)
                 terminal_planner["plan_payload"] = plan_payload
                 terminal_stages["planner"] = terminal_planner
@@ -2114,6 +2421,8 @@ class UnifiedRuntime:
                     "source_replan_request_id": execution_attempt["source_replan_request_id"],
                     "workforce_admission_lineage": workforce_lineage,
                 }
+                if gateway_invocation_authority is not None:
+                    terminal_context_trace["gateway_invocation_authority"] = gateway_invocation_authority
                 terminal_receipt = {
                     "schema": RECEIPT_SCHEMA,
                     "task_id": request.task_id,
@@ -2173,6 +2482,8 @@ class UnifiedRuntime:
                     },
                     "public_claim_allowed": False,
                 }
+                if gateway_invocation_authority is not None:
+                    terminal_receipt["gateway_invocation_authority"] = gateway_invocation_authority
                 attach_r3_receipt_base(terminal_receipt)
                 if receipt_path is not None:
                     path = Path(receipt_path)
@@ -2505,6 +2816,7 @@ class UnifiedRuntime:
             "online_payload": request.online_payload,
             "online_phase": request.online_phase,
             "online_model_name": request.online_model_name,
+            "online_enabled": request.online_enabled,
             "online_output_schema": dict(request.online_output_schema or {}),
             "planner": plan_payload,
             # with_nexus Online armor (World B) reads route + codeintel from context.
@@ -2527,6 +2839,8 @@ class UnifiedRuntime:
             "online_preflight_status": online_decision.preflight_status,
             "approved_online_providers": list(online_decision.approved_online_providers),
         }
+        if gateway_invocation_authority is not None:
+            context["gateway_invocation_authority"] = gateway_invocation_authority
         online_stage = self._run_online(request, online_invoker, context)
         if request.online_enabled:
             stages["online"] = online_stage
@@ -3176,6 +3490,8 @@ class UnifiedRuntime:
                 or bool(vap_packet_hash and request.local_enabled),
             },
         }
+        if gateway_invocation_authority is not None:
+            context_trace["gateway_invocation_authority"] = gateway_invocation_authority
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "task_id": request.task_id,
@@ -3250,6 +3566,8 @@ class UnifiedRuntime:
             receipt["workforce_admission"] = workforce_admission_payload
             receipt["workforce_admission_lineage"] = workforce_lineage
             receipt["plan_payload"] = plan_payload
+        if gateway_invocation_authority is not None:
+            receipt["gateway_invocation_authority"] = gateway_invocation_authority
         # RC-1: additive JSON-safe receipt_base + acyclic run_anchor hash DAG
         attach_r3_receipt_base(receipt)
         if receipt_path is not None:
@@ -3579,6 +3897,22 @@ class UnifiedRuntime:
         if not request.online_enabled:
             return _stage("online", status="NOT_REQUESTED", reason="online_route_disabled")
 
+        route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+        if route.get("workforce_admission_enabled") is True:
+            authority = context.get("gateway_invocation_authority")
+            if not isinstance(authority, Mapping):
+                authority = {
+                    "schema": GATEWAY_INVOCATION_AUTHORITY_SCHEMA,
+                    "status": "BLOCKED",
+                    "gate_passed": False,
+                    "failure_reason": "workforce_admission_missing",
+                }
+            if authority.get("gate_passed") is not True:
+                return _online_authority_failure_stage(
+                    task_id=str(context.get("task_id", "")),
+                    authority=authority,
+                )
+
         if invoker is None:
             return _stage("online", status="NOT_RUN", reason="online_invoker_not_supplied")
 
@@ -3646,6 +3980,11 @@ class UnifiedRuntime:
             response_task_id=response_task_id,
             task_identity_shared=task_identity_valid,
             reason="online_task_id_mismatch" if not task_identity_valid else "",
+            context_trace={
+                "gateway_invocation_authority": dict(context.get("gateway_invocation_authority"))
+                if isinstance(context.get("gateway_invocation_authority"), Mapping)
+                else {},
+            },
             response=payload,
         )
 
