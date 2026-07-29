@@ -3514,3 +3514,60 @@ def test_workforce_demand_disabled_flag_preserves_current_snapshot():
 
     assert "workforce_demands" not in plan_default["signal_snapshot"]
     assert plan_disabled["signal_snapshot"] == plan_default["signal_snapshot"]
+
+
+def test_workforce_demand_documentation_closure_not_escalating():
+    plan = CapabilityPlanner().plan(
+        task_desc="Documentation closure for self-hosted lifecycle targets",
+        task_type="docs_fix",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]["demands"]
+    assert len(demands) == 1
+    d = demands[0]
+    assert d["demand_id"] == "demand_online"
+    assert d["requested_role"] == "fast_bounded_implementation"
+    assert d["minimum_autonomy"] == "L2"
+    assert d["context_class"] == "nexus_bounded"
+
+
+def test_workforce_demand_review_integration_chooses_independent_review():
+    plan = CapabilityPlanner().plan(
+        task_desc="Review integration evidence only",
+        task_type="review",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]["demands"]
+    assert len(demands) == 1
+    d = demands[0]
+    assert d["demand_id"] == "demand_online"
+    assert d["requested_role"] == "independent_review"
+    assert d["minimum_autonomy"] == "L2+"
+    assert d["context_class"] == "nexus_bounded"
+
+
+def test_workforce_demand_true_runtime_closure_remains_main_engineering():
+    plan = CapabilityPlanner().plan(
+        task_desc="Perform self-hosted lifecycle runtime-closure for cross-module integration",
+        task_type="runtime-closure",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]["demands"]
+    assert len(demands) == 1
+    d = demands[0]
+    assert d["demand_id"] == "demand_online"
+    assert d["requested_role"] == "main_engineering"
+    assert d["minimum_autonomy"] == "L3_HISTORICAL"
+    assert d["context_class"] == "nexus_full"

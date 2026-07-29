@@ -1638,7 +1638,6 @@ class CapabilityPlanner:
                 "integration",
                 "runtime-closure",
                 "runtime_closure",
-                "closure",
                 "cross-module",
                 "cross_module",
             )
@@ -1649,12 +1648,19 @@ class CapabilityPlanner:
                 or is_cross_module
             )
 
+            is_explicit_type_review_audit = any(kw in task_type_str for kw in ("review", "audit"))
+
             is_review_audit = (
-                any(kw in task_type_str for kw in ("review", "audit"))
+                is_explicit_type_review_audit
                 or any(kw in task_desc_str for kw in ("review", "audit"))
             )
 
-            if is_complex:
+            if is_explicit_type_review_audit:
+                role = "independent_review"
+                autonomy = "L2+"
+                ctx = "nexus_bounded"
+                reason = "review_audit_task_independent_review"
+            elif is_complex:
                 role = "main_engineering"
                 autonomy = "L3_HISTORICAL"
                 ctx = "nexus_full"
