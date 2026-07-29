@@ -2636,6 +2636,12 @@ class UnifiedRuntime:
                 reason="blocked_by_evidence_seal",
                 invoked=False,
                 gate_passed=False,
+                provider_call_count=0,
+                context_trace=(
+                    {"gateway_invocation_authority": gateway_invocation_authority}
+                    if gateway_invocation_authority is not None
+                    else {}
+                ),
             )
             stages["verifier"] = _stage(
                 "verifier",
@@ -2696,6 +2702,45 @@ class UnifiedRuntime:
                 "contributed_capabilities": [],
                 "public_claim_allowed": False,
             }
+            terminal_planner = dict(planner_stage)
+            terminal_context_trace = {
+                "task_id": request.task_id,
+                "workspace_revision": request.workspace_revision,
+                "planner_decision_id": planner_decision_id,
+                "execution_depth": plan.execution_depth,
+                "execution_attempt": execution_attempt,
+                "parent_receipt_hash": execution_attempt["parent_receipt_hash"],
+                "source_replan_request_id": execution_attempt["source_replan_request_id"],
+            }
+            if workforce_admission_payload is not None:
+                terminal_planner["plan_payload"] = plan_payload
+                terminal_context_trace["workforce_admission_lineage"] = workforce_lineage
+            if gateway_invocation_authority is not None:
+                terminal_context_trace["gateway_invocation_authority"] = gateway_invocation_authority
+            blocked_receipt["planner"] = terminal_planner
+            blocked_receipt["execution_attempt"] = execution_attempt
+            blocked_receipt["context_trace"] = terminal_context_trace
+            if workforce_admission_payload is not None:
+                blocked_receipt["plan_payload"] = plan_payload
+                blocked_receipt["workforce_admission"] = workforce_admission_payload
+                blocked_receipt["workforce_admission_lineage"] = workforce_lineage
+            blocked_receipt.update(
+                {
+                    "capability_call_count": 0,
+                    "verifier_call_count": 0,
+                    "learning_call_count": 0,
+                    "provider_call_count": 0,
+                    "invocation_counts": {
+                        "capability": 0,
+                        "local": 0,
+                        "online": 0,
+                        "verifier": 0,
+                        "learning": 0,
+                    },
+                }
+            )
+            if gateway_invocation_authority is not None:
+                blocked_receipt["gateway_invocation_authority"] = gateway_invocation_authority
             if receipt_path is not None:
                 path = Path(receipt_path)
                 path.parent.mkdir(parents=True, exist_ok=True)

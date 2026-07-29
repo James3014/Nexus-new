@@ -721,6 +721,60 @@ def test_admitted_online_authority_is_exact_and_receipt_bound() -> None:
     assert calls == 1
 
 
+def test_evidence_seal_failure_preserves_admitted_online_authority_without_invoking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nexus.services.capability_evidence_bundle as evidence_bundle_module
+
+    monkeypatch.setattr(
+        evidence_bundle_module,
+        "verify_capability_evidence_bundle",
+        lambda _bundle: {"ok": False, "blockers": ["forced_seal_failure"]},
+    )
+    planner = _Planner(
+        _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL"))
+    )
+    loader = _Loader()
+    calls = 0
+
+    def counted_online(context):
+        nonlocal calls
+        calls += 1
+        return _online(context)
+
+    receipt = UnifiedRuntime(planner=planner, workforce_policy_loader=loader).run(
+        _request(_online_authority_route()),
+        online_invoker=counted_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    authority = receipt["gateway_invocation_authority"]
+    assert receipt["terminal_status"] == "BLOCKED"
+    assert receipt["online"]["reason"] == "blocked_by_evidence_seal"
+    assert receipt["online"]["invoked"] is False
+    assert receipt["online"]["provider_call_count"] == 0
+    assert receipt["provider_call_count"] == 0
+    assert receipt["online_call_count"] == 0
+    assert receipt["invocation_counts"] == {
+        "capability": 0,
+        "local": 0,
+        "online": 0,
+        "verifier": 0,
+        "learning": 0,
+    }
+    assert authority["schema"] == "nexus.gateway_invocation_authority.v1"
+    assert authority["status"] == "ALLOW"
+    assert authority["gate_passed"] is True
+    assert receipt["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert receipt["workforce_admission_lineage"] == receipt["plan_payload"]["workforce_admission_lineage"]
+    assert receipt["planner"]["plan_payload"]["gateway_invocation_authority"] == authority
+    assert receipt["plan_payload"]["signal_snapshot"]["gateway_invocation_authority"] == authority
+    assert receipt["online"]["context_trace"]["gateway_invocation_authority"] == authority
+    assert receipt["context_trace"]["gateway_invocation_authority"] == authority
+    assert calls == 0
+
+
 def _replan_pair(
     *,
     route: dict[str, object],
