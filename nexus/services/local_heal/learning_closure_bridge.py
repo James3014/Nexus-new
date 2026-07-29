@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,27 @@ INTERNAL_CLASSIFICATIONS = {
     "action_protocol_gap",
     "verifier_gap",
 }
+
+LEARNING_WRITEBACK_ENV = "NEXUS_LOCAL_HEAL_LEARNING_WRITEBACK"
+_DISABLED_WRITEBACK_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def _learning_writeback_disabled() -> bool:
+    return os.environ.get(LEARNING_WRITEBACK_ENV, "").strip().lower() in _DISABLED_WRITEBACK_VALUES
+
+
+def _disabled_writeback_evidence(target: str, **extra: Any) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "schema": "nexus.local_heal.learning_closure.v1",
+        "writeback_status": "disabled",
+        "writeback_disabled": True,
+        "disabled_by": LEARNING_WRITEBACK_ENV,
+        "writeback_target": target,
+        "training_export_allowed": False,
+        "internal_only": True,
+    }
+    evidence.update(extra)
+    return evidence
 
 
 def classify_learning_outcome(ctx: Any) -> str:
@@ -128,6 +150,8 @@ class LearningClosureBridge:
             }
 
     def write_lesson(self, ctx: Any) -> dict[str, Any]:
+        if _learning_writeback_disabled():
+            return _disabled_writeback_evidence("lesson")
         op = ctx.op if hasattr(ctx, "op") else ctx
         classification = classify_learning_outcome(ctx)
         if classification not in INTERNAL_CLASSIFICATIONS:
@@ -159,6 +183,11 @@ class LearningClosureBridge:
         selected_by: str,
         verifier_result: str,
     ) -> dict[str, Any]:
+        if _learning_writeback_disabled():
+            return _disabled_writeback_evidence(
+                "envelope_lesson",
+                candidate_id=envelope.candidate_id,
+            )
         op = ctx.op if hasattr(ctx, "op") else ctx
         
         failure_class = "none"
@@ -198,6 +227,11 @@ def write_candidate_learning_closures(
     bridge: LearningClosureBridge | None = None,
 ) -> list[dict[str, Any]]:
     bridge = bridge or LearningClosureBridge()
+    if _learning_writeback_disabled():
+        return [
+            _disabled_writeback_evidence("candidate_learning_closure", candidate_id=env.candidate_id)
+            for env in envelopes
+        ]
     lessons = []
     for env in envelopes:
         selected = (env.candidate_id == selected_id)
@@ -211,6 +245,14 @@ def write_candidate_learning_closures(
 
 
 def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None) -> dict[str, Any]:
+    if _learning_writeback_disabled():
+        result = _disabled_writeback_evidence("learning_closure")
+        op = ctx.op if hasattr(ctx, "op") else ctx
+        try:
+            setattr(op, "_learning_closure", result)
+        except Exception:
+            pass
+        return result
     op = ctx.op if hasattr(ctx, "op") else ctx
     try:
         lesson = (bridge or LearningClosureBridge()).write_lesson(ctx)

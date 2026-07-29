@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import os
@@ -61,11 +61,33 @@ class LocalModelProviderResponse:
 
 
 class LocalModelProvider:
+    """Physical local provider boundary and explicit identity contract."""
+
+    @property
+    def provider_identity(self) -> str:
+        return ""
+
+    @property
+    def model_identity(self) -> str:
+        return ""
+
+    @property
+    def model_binding_mode(self) -> str:
+        return "untagged"
+
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
         raise NotImplementedError
 
 
 class InertLocalModelProvider(LocalModelProvider):
+    @property
+    def provider_identity(self) -> str:
+        return "inert"
+
+    @property
+    def model_binding_mode(self) -> str:
+        return "none"
+
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
         return LocalModelProviderResponse(
             provider_invoked=True,
@@ -79,8 +101,28 @@ class InertLocalModelProvider(LocalModelProvider):
 
 
 class InjectedLocalModelProvider(LocalModelProvider):
-    def __init__(self, generate_fn: Callable[[LocalModelProviderRequest], str]) -> None:
+    def __init__(
+        self,
+        generate_fn: Callable[[LocalModelProviderRequest], str],
+        *,
+        provider_identity: str = "",
+        model_identity: str = "",
+    ) -> None:
         self._generate_fn = generate_fn
+        self._provider_identity = provider_identity
+        self._model_identity = model_identity
+
+    @property
+    def provider_identity(self) -> str:
+        return self._provider_identity
+
+    @property
+    def model_identity(self) -> str:
+        return self._model_identity
+
+    @property
+    def model_binding_mode(self) -> str:
+        return "fixed" if self._model_identity else "untagged"
 
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
         t0 = time.monotonic()
@@ -156,6 +198,22 @@ class RecordingLocalModelProvider(LocalModelProvider):
         self._inner = inner
         self.ledger: list[LedgerRecord] = []
 
+    @property
+    def provider_identity(self) -> str:
+        return str(getattr(self._inner, "provider_identity", "") or "")
+
+    @property
+    def model_identity(self) -> str:
+        return str(getattr(self._inner, "model_identity", "") or "")
+
+    @property
+    def model_binding_mode(self) -> str:
+        return str(getattr(self._inner, "model_binding_mode", "untagged") or "untagged")
+
+    @property
+    def ledger_count(self) -> int:
+        return len(self.ledger)
+
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
         t0 = time.monotonic()
         resp = None
@@ -227,7 +285,96 @@ class RecordingLocalModelProvider(LocalModelProvider):
         }
 
 
+class AuthorityBoundLocalModelProvider(LocalModelProvider):
+    """Fail-closed model binding guard around the recording physical provider."""
+
+    def __init__(self, inner: LocalModelProvider, *, resolved_model: str) -> None:
+        self._inner = inner
+        self._resolved_model = resolved_model
+        self._sticky_failure_reason = ""
+        self._last_actual_model = ""
+
+    @property
+    def provider_identity(self) -> str:
+        return str(getattr(self._inner, "provider_identity", "") or "")
+
+    @property
+    def model_identity(self) -> str:
+        return str(getattr(self._inner, "model_identity", "") or "")
+
+    @property
+    def model_binding_mode(self) -> str:
+        return str(getattr(self._inner, "model_binding_mode", "untagged") or "untagged")
+
+    @property
+    def ledger(self) -> Any:
+        return getattr(self._inner, "ledger", [])
+
+    @property
+    def ledger_summary(self) -> dict[str, Any]:
+        summary = getattr(self._inner, "ledger_summary", {})
+        return dict(summary) if isinstance(summary, dict) else {}
+
+    @property
+    def ledger_count(self) -> int:
+        summary = self.ledger_summary
+        if isinstance(summary.get("total_calls"), int):
+            return int(summary["total_calls"])
+        ledger = self.ledger
+        return len(ledger) if hasattr(ledger, "__len__") else 0
+
+    @property
+    def sticky_failure_reason(self) -> str:
+        return self._sticky_failure_reason
+
+    @property
+    def actual_model(self) -> str:
+        return self._last_actual_model
+
+    def _blocked_response(self, *, reported_model: str = "") -> LocalModelProviderResponse:
+        reason = self._sticky_failure_reason or "local_model_provider_model_mismatch"
+        self._last_actual_model = reported_model
+        return LocalModelProviderResponse(
+            provider_invoked=False,
+            model_called=False,
+            model_name=self._resolved_model,
+            output_text="",
+            error=reason,
+        )
+
+    def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
+        if self._sticky_failure_reason:
+            return self._blocked_response(reported_model=request.model_name)
+
+        if request.model_name != self._resolved_model:
+            self._sticky_failure_reason = "local_model_provider_request_model_mismatch"
+            return self._blocked_response(reported_model=request.model_name)
+
+        response = self._inner.generate(request)
+        reported_model = str(getattr(response, "model_name", "") or "")
+        self._last_actual_model = reported_model
+        if reported_model != self._resolved_model:
+            self._sticky_failure_reason = "local_model_provider_reported_model_mismatch"
+            return replace(
+                response,
+                provider_invoked=bool(response.provider_invoked),
+                model_called=False,
+                model_name=self._resolved_model,
+                output_text="",
+                error=self._sticky_failure_reason,
+            )
+        return response
+
+
 class OllamaLocalModelProvider(LocalModelProvider):
+    @property
+    def provider_identity(self) -> str:
+        return "ollama"
+
+    @property
+    def model_binding_mode(self) -> str:
+        return "request_bound"
+
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
         call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
         provider_name = (os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER") or os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER") or "").lower()
