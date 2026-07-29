@@ -1892,6 +1892,36 @@ def test_finalize_receipt_rejects_cross_task_final_stage_payload() -> None:
     assert finalized["receipt_complete"] is False
 
 
+def test_gateway_ask_unified_cleans_task_decision_before_later_direct_call(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.gateway import BattlesuitGateway
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    original_ask_structured = gateway.ask_structured
+
+    def injected_ask(*_args, **_kwargs):
+        return {"status": "APPROVED", "patch": "candidate"}, "raw-candidate"
+
+    monkeypatch.setattr(gateway, "ask_structured", injected_ask)
+    request = UnifiedRuntimeRequest(
+        task_id="gateway-cleanup-task",
+        workspace_revision="rev-cleanup",
+        task_statement="run one injected online task",
+        task_type="repair",
+        route={"recommended_flow": "direct", "workspace_root": str(tmp_path)},
+    )
+
+    receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert not hasattr(gateway, "_online_execution_decision")
+
+    monkeypatch.setattr(gateway, "ask_structured", original_ask_structured)
+    data, raw = gateway.ask_structured("direct legacy call", "{}")
+    assert data["error"] == "online_execution_not_authorized"
+    assert data["invoked"] is False
+    assert data["provider_call_count"] == 0
+    assert raw == "online_execution_not_authorized"
+
+
 # ── P0-T1: execution_depth consumption tests ────────────────────────────────
 
 
