@@ -1,0 +1,288 @@
+schema: nexus.model_three_arm_matrix.v1
+status: completed_initial_matrix
+owner: James Chen
+last_updated: '2026-07-29'
+authority_document: docs/arch/MODEL_WORKFORCE_POLICY.md
+result_authority: nexus/config/model_workforce.yaml
+route_authority: CapabilityPlanner
+latest_snapshot:
+  date: '2026-07-29'
+  attempted_model_count: 25
+  semantically_scored_model_count: 21
+  provider_blocked_model_count: 4
+  all_enrolled_models_attempted: true
+  stable_promotion_proven: false
+  full_receipt_closure_proven: false
+  summary_report: docs/reports/model_workforce_three_arm_calibration_20260729.md
+  machine_summary: docs/reports/model_workforce_three_arm_calibration_20260729.json
+public_claim_allowed: false
+
+admission_contract:
+  requires_real_invocation: true
+  requires_nonempty_response: true
+  requires_parseable_benchmark_envelope: true
+  catalog_presence_is_not_availability: true
+  duplicate_local_digest_is_one_model: true
+  embedding_models_excluded: true
+  provider_or_quota_failure_is_not_model_failure: true
+
+arm_contract:
+  arms: [bare, nexus_bounded, nexus_full]
+  same_model_identity: true
+  same_composite_task: true
+  same_deterministic_verifier: true
+  same_output_schema: true
+  direct_workspace_mutation: false
+  isolated_working_directory: /tmp/nexus-model-bench
+  bare:
+    nexus_context: none
+    purpose: model_baseline
+  nexus_bounded:
+    nexus_context: diagnosis_assertions_schema
+    purpose: measure_context_and_contract_uplift
+  nexus_full:
+    nexus_context: planner_evidence_verifier_learning_receipt
+    purpose: measure_governed_lifecycle_fit
+
+composite_task:
+  task_id: u3a-composite-v1
+  dimensions:
+    - started_call_accounting
+    - bounded_python_implementation
+    - evidence_claim_boundary
+  repetitions:
+    universal_gate: 1
+    promotion_gate: 2
+  verifier_assertions: 11
+
+role_grade_policy:
+  current_roles_are_provisional_until_three_arm_complete: true
+  no_final_role_from_bare_only: true
+  nexus_bounded_required_for_role_assignment: true
+  nexus_full_required_for_autonomy_promotion: true
+  provider_failure_excluded_from_semantic_score: true
+  exact_schema_and_external_verifier_required: true
+  production_ready_never_model_self_assessed: true
+  minimum_role_confidence:
+    provisional: one_complete_three_arm
+    stable: two_repetitions_and_role_specific_suite
+
+models:
+  # Required workforce: already used by Nexus runtime, local committee/cascade,
+  # or the user's active external-agent workflow.
+  codex_luna:
+    cohort: required
+    provider: codex
+    transport: codex_cli
+    model: gpt-5.6-luna
+    timeout_sec: 240
+    resource_tier: cloud_subscription
+
+  agy_flash:
+    cohort: required
+    provider: agy
+    transport: agy_cli
+    model: gemini-3.6-flash-high
+    timeout_sec: 240
+    resource_tier: cloud_subscription
+
+  grok_45:
+    cohort: required
+    provider: grok
+    transport: grok_cli
+    model: grok-4.5
+    timeout_sec: 240
+    resource_tier: cloud_subscription
+
+  gemini_36_flash:
+    cohort: required
+    provider: gemini
+    transport: gemini_cli
+    model: gemini-3.6-flash
+    timeout_sec: 240
+    resource_tier: cloud_subscription
+
+  opencode_mimo_free:
+    cohort: required
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/mimo-v2.5-free
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  opencode_ling_free:
+    cohort: required
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/ling-3.0-flash-free
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  local_advisor_3b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: qwen2.5-s2t-advisor:3b
+    timeout_sec: 180
+    resource_tier: local_light
+
+  local_qwen7b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: qwen2.5-coder:7b-instruct
+    timeout_sec: 240
+    resource_tier: local_medium
+
+  local_deepseek67b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: deepseek-coder:6.7b-instruct
+    timeout_sec: 240
+    resource_tier: local_medium
+
+  local_ornith9b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: ornith:9b
+    timeout_sec: 300
+    resource_tier: local_heavy
+
+  local_qwythos9b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: qwythos:9b
+    timeout_sec: 300
+    resource_tier: local_heavy
+
+  local_qwen35_9b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: nexus-qwen35-9b-q4km:latest
+    timeout_sec: 180
+    resource_tier: local_heavy
+    expected_current_blocker: thinking_not_disabled_in_runtime_provider
+    thinking_control: prompt_no_think
+
+  local_qwen14b:
+    cohort: required
+    provider: ollama
+    transport: ollama_http
+    model: qwen2.5-coder:14b-instruct-q3_K_M
+    timeout_sec: 300
+    resource_tier: local_resource_risk
+
+  mimo_cli:
+    cohort: required
+    provider: mimo
+    transport: mimo_cli
+    model: xiaomi/mimo-v2.5
+    timeout_sec: 240
+    resource_tier: paid_remote
+    expected_current_blocker: insufficient_account_balance
+
+  # Discovery candidates: installed or visible, but not yet granted a Nexus role.
+  opencode_big_pickle:
+    cohort: discovery
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/big-pickle
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  opencode_deepseek_v4_flash:
+    cohort: discovery
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/deepseek-v4-flash-free
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  opencode_laguna:
+    cohort: discovery
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/laguna-s-2.1-free
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  opencode_nemotron:
+    cohort: discovery
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/nemotron-3-ultra-free
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  opencode_north_mini_code:
+    cohort: discovery
+    provider: opencode
+    transport: opencode_cli
+    model: opencode/north-mini-code-free
+    timeout_sec: 240
+    resource_tier: free_remote
+
+  local_qwen15b:
+    cohort: discovery
+    provider: ollama
+    transport: ollama_http
+    model: qwen2.5:1.5b
+    timeout_sec: 120
+    resource_tier: local_light
+
+  local_qwen3_8b:
+    cohort: discovery
+    provider: ollama
+    transport: ollama_http
+    model: qwen3:8b
+    timeout_sec: 300
+    resource_tier: local_heavy
+
+  local_qwythos_v2_9b:
+    cohort: discovery
+    provider: ollama
+    transport: ollama_http
+    model: nexus-qwythos-v2-9b-q4km:latest
+    timeout_sec: 300
+    resource_tier: local_heavy
+    expected_current_blocker: thinking_not_disabled_in_runtime_provider
+    thinking_control: prompt_no_think
+
+  local_deepseek_coder_v2_lite:
+    cohort: discovery
+    provider: ollama
+    transport: ollama_http
+    model: deepseek-coder-v2:lite
+    timeout_sec: 300
+    resource_tier: local_resource_risk
+
+  local_deepseek14b:
+    cohort: discovery
+    provider: ollama
+    transport: ollama_http
+    model: deepseek-r1-14b-q4km:latest
+    timeout_sec: 300
+    resource_tier: local_resource_risk
+
+  local_gemma12b:
+    cohort: discovery
+    provider: ollama
+    transport: ollama_http
+    model: gemma4-coder-12b-q4km:latest
+    timeout_sec: 300
+    resource_tier: local_resource_risk
+
+excluded:
+  nomic_embed_text:
+    model: nomic-embed-text:latest
+    reason: embedding_not_generation_worker
+  duplicate_hf_aliases:
+    reason: duplicate_ollama_digest_of_canonical_local_model
+  openai_cli:
+    reason: sdk_cli_not_model_worker
+  full_vendor_catalogs:
+    reason: catalog_presence_without_explicit_enrollment_or_cost_authority
