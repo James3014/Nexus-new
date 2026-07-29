@@ -1,9 +1,15 @@
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+
+repo_root = str(Path(__file__).resolve().parents[3])
+if repo_root in sys.path:
+    sys.path.remove(repo_root)
+sys.path.insert(0, repo_root)
 
 import pytest
 
@@ -1558,3 +1564,85 @@ def test_close_retained_without_candidate_fails_closed_existing_dirty_target(tmp
 
     with pytest.raises(RuntimeError, match="Target path exists"):
         service.close_retained_without_candidate(task_id, superseded_by="ref-123")
+
+
+def test_close_task_without_candidate_final_block_success(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "final-block-no-candidate-001"
+    target_path = tmp_path / "targets" / task_id
+    assert not target_path.exists()
+
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "submitted_at": "2026-07-28T10:00:00+00:00",
+        "status_history": [{"status": "FINAL_BLOCK", "at": "2026-07-28T10:00:00+00:00"}],
+        "request": _request(tmp_path, task_id=task_id),
+        "contract": service.build_contract(_request(tmp_path, task_id=task_id)).model_dump(mode="json"),
+        "target_worktree": str(target_path),
+        "controller_worktree": str(tmp_path / "controller"),
+        "attempt_id": "att-001",
+        "promotion_status": "NOT_CREATED",
+        "worker_pid": None,
+        "execution": {"provider": "codex", "outcome": "EXECUTION_FAILED"},
+        "error": "worker crashed without producing candidate",
+        "cleanup_decision": "REMOVED",
+        "cleanup_eligible": True,
+        "cleanup_performed": True,
+        "cleanup_performed_at": "2026-07-28T10:05:00+00:00",
+        "state_retention_status": "TERMINAL",
+        "archive_eligible": False,
+    }
+    service._write_state(task_id, state)
+
+    actionable_before = service.list_actionable_tasks()
+    assert any(t["task_id"] == task_id for t in actionable_before["tasks"])
+
+    result = service.close_task_without_candidate(task_id, superseded_by="ref-evidence-789")
+
+    assert result["status"] == "SUPERSEDED"
+    assert result["final_disposition"] == "SUPERSEDED"
+    assert result["terminal_status"] == "SUPERSEDED"
+    assert result["state_retention_status"] == "TERMINAL"
+    assert result["archive_eligible"] is True
+    assert result["superseded_by"] == "ref-evidence-789"
+    assert result["promotion_status"] == "NOT_CREATED"
+
+    actionable_after = service.list_actionable_tasks()
+    assert not any(t["task_id"] == task_id for t in actionable_after["tasks"])
+
+
+def test_close_task_without_candidate_retained_for_review_success(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "retained-gen-no-candidate-001"
+    target_path = tmp_path / "targets" / task_id
+    assert not target_path.exists()
+
+    state = {
+        "task_id": task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(target_path),
+    }
+    service._write_state(task_id, state)
+
+    result = service.close_task_without_candidate(task_id, superseded_by="ref-gen-123")
+
+    assert result["status"] == "SUPERSEDED"
+    assert result["superseded_by"] == "ref-gen-123"
+
+
+def test_close_task_without_candidate_fails_closed_other_status(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "other-status-no-candidate-001"
+    state = {
+        "task_id": task_id,
+        "status": "SUBMITTED",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(tmp_path / "nonexistent"),
+    }
+    service._write_state(task_id, state)
+
+    with pytest.raises(RuntimeError, match="RETAINED_FOR_REVIEW or FINAL_BLOCK"):
+        service.close_task_without_candidate(task_id, superseded_by="ref-123")

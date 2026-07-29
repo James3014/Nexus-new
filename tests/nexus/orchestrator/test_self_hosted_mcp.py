@@ -1,4 +1,11 @@
 import json
+import sys
+from pathlib import Path
+
+repo_root = str(Path(__file__).resolve().parents[3])
+if repo_root in sys.path:
+    sys.path.remove(repo_root)
+sys.path.insert(0, repo_root)
 
 from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
@@ -81,8 +88,11 @@ class FakeService:
     def dispose_candidate(self, task_id, **kwargs):
         return {"task_id": task_id, "status": kwargs["disposition"]}
 
-    def close_retained_without_candidate(self, task_id, *, superseded_by):
+    def close_task_without_candidate(self, task_id, *, superseded_by):
         return {"task_id": task_id, "status": "SUPERSEDED", "superseded_by": superseded_by}
+
+    def close_retained_without_candidate(self, task_id, *, superseded_by):
+        return self.close_task_without_candidate(task_id, superseded_by=superseded_by)
 
     def cancel_task(self, task_id):
         return {"task_id": task_id, "status": "CANCELLED"}
@@ -117,6 +127,8 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_archive_state",
         "nexus_self_hosted_integrate_approved",
         "nexus_self_hosted_dispose_candidate",
+        "nexus_self_hosted_close_retained_without_candidate",
+        "nexus_self_hosted_close_without_candidate",
         "nexus_self_hosted_cancel_task",
     } <= names
     specs = {item["name"]: item for item in response["result"]["tools"]}
@@ -272,6 +284,28 @@ def test_close_retained_without_candidate_mcp_tool_call():
     payload = json.loads(response["result"]["content"][0]["text"])
     assert payload["status"] == "SUPERSEDED"
     assert payload["superseded_by"] == "evidence-123"
+
+
+def test_close_without_candidate_mcp_tool_call():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_close_without_candidate",
+                "arguments": {"task_id": "final-block-task-001", "superseded_by": "evidence-456"},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["status"] == "SUPERSEDED"
+    assert payload["superseded_by"] == "evidence-456"
+
 
 
 def test_unknown_tool_is_jsonrpc_error():

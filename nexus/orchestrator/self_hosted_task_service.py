@@ -1516,7 +1516,7 @@ class SelfHostedTaskService:
             "archive_eligible": True,
         }, attempt_id=state.get("attempt_id")) or state
 
-    def close_retained_without_candidate(
+    def close_task_without_candidate(
         self,
         task_id: str,
         *,
@@ -1530,8 +1530,8 @@ class SelfHostedTaskService:
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
 
-        if state.get("status") != "RETAINED_FOR_REVIEW":
-            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW status")
+        if state.get("status") not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW or FINAL_BLOCK status")
 
         if state.get("promotion_status") != "NOT_CREATED":
             raise RuntimeError("promotion_status must be NOT_CREATED")
@@ -1596,6 +1596,23 @@ class SelfHostedTaskService:
             },
             attempt_id=state.get("attempt_id"),
         ) or state
+
+    close_without_candidate = close_task_without_candidate
+
+    def close_retained_without_candidate(
+        self,
+        task_id: str,
+        *,
+        superseded_by: str,
+    ) -> dict[str, Any]:
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+
+        if state.get("status") != "RETAINED_FOR_REVIEW":
+            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW status")
+
+        return self.close_task_without_candidate(task_id, superseded_by=superseded_by)
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
