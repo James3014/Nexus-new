@@ -9,6 +9,10 @@ from typing import Callable, Dict, Optional
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
 
+NEXUS_SALVAGE_BOT_NAME = "Nexus Salvage Bot"
+NEXUS_SALVAGE_BOT_EMAIL = "nexus-salvage-bot@nexus.local"
+
+
 @dataclass(frozen=True)
 class TargetWorktreeLease:
     schema: str
@@ -297,6 +301,61 @@ class WorktreeManager:
             raise RuntimeError("candidate durable ref verification failed")
         return candidate_ref
 
+    def create_salvage_snapshot(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        attempt_id: str,
+    ) -> dict[str, str | bool]:
+        """Commit and protect dirty Target state without entering candidate flow."""
+        self.validate_lease_identity(contract, lease)
+        target = Path(lease.target_worktree).resolve()
+        controller = Path(contract.controller_repo_root).resolve()
+        if target == controller:
+            raise RuntimeError("Target is controller")
+        if self._worktree_entry(controller, target) is None:
+            raise RuntimeError("salvage requires a registered Target worktree")
+        if self.process_checker(target):
+            raise RuntimeError("active process uses Target")
+        if not self._status_bytes(target):
+            raise RuntimeError("Target has no dirty state to salvage")
+
+        salvage_ref = f"refs/nexus-salvage/worktree/{contract.task_id}-{attempt_id}"
+        try:
+            existing = self._run_git(
+                ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
+            )
+        except RuntimeError:
+            existing = None
+        if existing is not None:
+            raise RuntimeError(f"salvage ref already exists: {salvage_ref}")
+
+        self._run_git(["add", "--all"], cwd=target)
+        message = f"Nexus Salvage Bot: salvage-only snapshot {contract.task_id}/{attempt_id}"
+        self._run_git(
+            [
+                "-c", f"user.name={NEXUS_SALVAGE_BOT_NAME}",
+                "-c", f"user.email={NEXUS_SALVAGE_BOT_EMAIL}",
+                "commit", "-m", message,
+            ],
+            cwd=target,
+        )
+        salvage_commit = self._run_git(["rev-parse", "HEAD"], cwd=target)
+        if self._status_bytes(target):
+            raise RuntimeError("salvage commit did not capture the complete Target state")
+        self._run_git(
+            ["update-ref", salvage_ref, salvage_commit, ""],
+            cwd=controller,
+        )
+        if self._run_git(["rev-parse", salvage_ref], cwd=controller) != salvage_commit:
+            raise RuntimeError("salvage durable ref verification failed")
+        return {
+            "salvage_commit_sha": salvage_commit,
+            "salvage_ref": salvage_ref,
+            "salvage_only": True,
+            "promotion_eligible": False,
+        }
+
     def cleanup_terminal_target(
         self,
         contract: SelfHostedTaskContract,
@@ -304,6 +363,8 @@ class WorktreeManager:
         *,
         candidate_commit: Optional[str] = None,
         candidate_ref: Optional[str] = None,
+        salvage_commit: Optional[str] = None,
+        salvage_ref: Optional[str] = None,
         dry_run: bool = False,
     ) -> TargetCleanupReceipt:
         self.validate_lease_identity(contract, lease)
@@ -311,26 +372,61 @@ class WorktreeManager:
         controller = Path(contract.controller_repo_root).resolve()
         if target == controller:
             return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is controller", False, False)
+        if (candidate_commit is not None or candidate_ref is not None) and (
+            salvage_commit is not None or salvage_ref is not None
+        ):
+            return self._cleanup_receipt(
+                contract, lease, "BLOCKED_BY_MISSING_REF",
+                "candidate and salvage durable bindings cannot be combined", False, False,
+            )
+        durable_commit = candidate_commit or salvage_commit
+        durable_ref = candidate_ref or salvage_ref
+        missing_ref_blocker = (
+            "candidate ref is missing or mismatched"
+            if candidate_commit is not None or candidate_ref is not None
+            else "salvage ref is missing or mismatched"
+        )
         entry = self._worktree_entry(controller, target)
         if not target.exists() and entry is None:
             return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False, True)
         if entry is None:
-            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is not a registered worktree", False, False)
+            if self.process_checker(target):
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
+            if not target.is_dir() or target.is_symlink():
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "unregistered Target is not an empty directory", False, False)
+            try:
+                is_empty = not any(target.iterdir())
+            except OSError as exc:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
+            if not is_empty:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "unregistered Target is not an empty directory", False, False)
+            if durable_commit:
+                if not durable_ref:
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
+                try:
+                    protected = self._run_git(["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller)
+                except RuntimeError:
+                    protected = ""
+                if protected != durable_commit:
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
+            if not dry_run:
+                target.rmdir()
+            return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
         if self.process_checker(target):
             return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
         status = self._status_bytes(target)
         if status:
             return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "dirty target has no durable snapshot", False, False)
         head = self._run_git(["rev-parse", "HEAD"], cwd=target)
-        if candidate_commit:
-            if head != candidate_commit or not candidate_ref:
-                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", "candidate ref is missing or mismatched", False, False)
+        if durable_commit:
+            if head != durable_commit or not durable_ref:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
             try:
-                protected = self._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller)
+                protected = self._run_git(["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller)
             except RuntimeError:
                 protected = ""
-            if protected != candidate_commit:
-                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", "candidate ref is missing or mismatched", False, False)
+            if protected != durable_commit:
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
         elif head != lease.initial_head:
             return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target HEAD changed without durable snapshot", False, False)
         if not dry_run:

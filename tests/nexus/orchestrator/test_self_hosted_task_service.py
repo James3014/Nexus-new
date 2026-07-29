@@ -1567,6 +1567,143 @@ def test_close_retained_without_candidate_fails_closed_existing_dirty_target(tmp
         service.close_retained_without_candidate(task_id, superseded_by="ref-123")
 
 
+def test_close_retained_dirty_salvage_requires_integrated_replacement(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _real_request(tmp_path, task_id="retained-salvage-gated")
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "dirty.txt").write_text("verifier side effect\n", encoding="utf-8")
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "attempt_id": "attempt-salvage-gated",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    with pytest.raises(RuntimeError, match="superseded_by must name"):
+        service.close_retained_without_candidate(
+            request["task_id"], superseded_by="missing-integrated-task"
+        )
+
+    assert target.exists()
+    assert (target / "dirty.txt").exists()
+    assert service._read_state(request["task_id"])["status"] == "RETAINED_FOR_REVIEW"
+
+
+def test_close_retained_dirty_salvage_protects_ref_and_never_becomes_candidate(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _real_request(tmp_path, task_id="retained-salvage-success")
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "README").write_text("dirty verifier state\n", encoding="utf-8")
+    (target / "untracked.txt").write_text("complete salvage\n", encoding="utf-8")
+    replacement_id = "integrated-replacement"
+    service._write_state(replacement_id, {
+        "task_id": replacement_id,
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "integration_result_sha": "i" * 40,
+    })
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "attempt_id": "attempt-salvage-success",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.close_retained_without_candidate(
+        request["task_id"], superseded_by=replacement_id
+    )
+
+    salvage_commit = result["salvage_commit_sha"]
+    salvage_ref = result["salvage_ref"]
+    controller = Path(request["controller_repo_root"])
+    assert result["status"] == "SUPERSEDED"
+    assert result["promotion_status"] == "NOT_CREATED"
+    assert result["salvage_only"] is True
+    assert result["promotion_eligible"] is False
+    assert result["superseded_by"] == replacement_id
+    assert result.get("candidate_commit_sha") is None
+    assert result.get("candidate_ref") is None
+    assert result.get("promotion_packet") is None
+    assert not target.exists()
+    assert _git(controller, "rev-parse", salvage_ref) == salvage_commit
+    assert _git(controller, "show", "-s", "--format=%an", salvage_commit) == "Nexus Salvage Bot"
+    assert _git(controller, "show", "-s", "--format=%ae", salvage_commit) == "nexus-salvage-bot@nexus.local"
+    assert _git(controller, "show", "-s", "--format=%s", salvage_commit) == (
+        "Nexus Salvage Bot: salvage-only snapshot retained-salvage-success/attempt-salvage-success"
+    )
+    assert _git(controller, "show", f"{salvage_commit}:untracked.txt") == "complete salvage"
+
+
+def test_close_retained_dirty_salvage_ref_mismatch_keeps_target_and_task_retained(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _real_request(tmp_path, task_id="retained-salvage-ref-failure")
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "dirty.txt").write_text("must remain\n", encoding="utf-8")
+    replacement_id = "integrated-replacement-ref-failure"
+    service._write_state(replacement_id, {
+        "task_id": replacement_id,
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "integration_result_sha": "r" * 40,
+    })
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "attempt_id": "attempt-salvage-ref-failure",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+    original = WorktreeManager.create_salvage_snapshot
+
+    def mismatched_ref(self, contract, lease, attempt_id):
+        snapshot = original(self, contract, lease, attempt_id)
+        return {**snapshot, "salvage_ref": snapshot["salvage_ref"] + "-mismatch"}
+
+    monkeypatch.setattr(WorktreeManager, "create_salvage_snapshot", mismatched_ref)
+
+    result = service.close_retained_without_candidate(
+        request["task_id"], superseded_by=replacement_id
+    )
+
+    assert result["status"] == "RETAINED_FOR_REVIEW"
+    assert result["cleanup_decision"] == "BLOCKED_BY_MISSING_REF"
+    assert result["salvage_only"] is True
+    assert result["promotion_eligible"] is False
+    assert target.exists()
+    assert result["promotion_status"] == "NOT_CREATED"
+    assert result.get("candidate_commit_sha") is None
+    assert result.get("candidate_ref") is None
+
+
 def test_close_task_without_candidate_final_block_success(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     task_id = "final-block-no-candidate-001"
