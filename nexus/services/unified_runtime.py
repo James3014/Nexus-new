@@ -244,6 +244,73 @@ def _hash_json(value: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _validate_workforce_route(route: Mapping[str, Any]) -> None:
+    """Validate runtime workforce control flags before Planner or policy load."""
+    for field_name in ("workforce_admission_enabled", "workforce_rebind_authorized"):
+        if field_name in route and type(route[field_name]) is not bool:
+            raise ValueError(f"{field_name}_must_be_boolean")
+    if route.get("workforce_rebind_authorized") is True:
+        reason = route.get("workforce_rebind_reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("workforce_rebind_reason_required")
+
+
+def _build_workforce_admission_lineage(
+    *,
+    route: Mapping[str, Any],
+    attempt_number: int,
+    current_aggregate_binding_hash: Any,
+    current_planner_decision_id: str,
+    replan_authorization: ExecutionReplanAuthorization | None,
+    parent_receipt: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the additive, JSON-safe binding-continuity proof for admission."""
+    prior_admission = (
+        parent_receipt.get("workforce_admission")
+        if isinstance(parent_receipt, Mapping)
+        else None
+    )
+    source_aggregate = ""
+    if isinstance(prior_admission, Mapping):
+        source_aggregate = str(prior_admission.get("aggregate_binding_hash") or "")
+    current_aggregate = str(current_aggregate_binding_hash or "")
+    binding_changed = bool(source_aggregate and source_aggregate != current_aggregate)
+    rebind_authorized = route.get("workforce_rebind_authorized") is True
+    rebind_reason = str(route.get("workforce_rebind_reason") or "")
+
+    if attempt_number == 1:
+        status = "FIRST_ADMISSION"
+    elif not source_aggregate:
+        status = "ENABLED_ON_REPLAN"
+    elif binding_changed and rebind_authorized:
+        status = "REBOUND"
+    elif binding_changed:
+        status = "BLOCKED_REBIND"
+    else:
+        status = "UNCHANGED"
+
+    return {
+        "schema": "nexus.runtime_workforce_admission_lineage.v1",
+        "attempt_number": int(attempt_number),
+        "source_aggregate_binding_hash": source_aggregate,
+        "current_aggregate_binding_hash": current_aggregate,
+        "source_receipt_hash": (
+            replan_authorization.source_receipt_hash if replan_authorization is not None else ""
+        ),
+        "source_run_anchor_hash": (
+            replan_authorization.source_run_anchor_hash if replan_authorization is not None else ""
+        ),
+        "source_replan_request_id": (
+            replan_authorization.source_replan_request_id if replan_authorization is not None else ""
+        ),
+        "current_planner_decision_id": str(current_planner_decision_id),
+        "binding_changed": binding_changed,
+        "rebind_authorized": rebind_authorized,
+        "rebind_reason": rebind_reason,
+        "status": status,
+    }
+
+
 def _local_action_from_request(local_request: Any, local_stage: Mapping[str, Any]) -> str:
     """Resolve Local action for executor-identity attribution (advisor vs executor)."""
     action = ""
@@ -1709,6 +1776,7 @@ class UnifiedRuntime:
         learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
         receipt_path: str | Path | None = None,
     ) -> dict[str, Any]:
+        _validate_workforce_route(request.route)
         res = validate_receipt_base(previous_receipt, mode="strict")
         if not res.get("ok"):
             blockers = res.get("blockers") or ["validation_failed"]
@@ -1743,6 +1811,10 @@ class UnifiedRuntime:
             raise ValueError("replan_manual_review_required")
         if bool(replan_req.get("public_claim_allowed")):
             raise ValueError("replan_request_not_trusted")
+
+        if "workforce_admission" in previous_receipt:
+            if request.route.get("workforce_admission_enabled") is not True:
+                raise ValueError("replan_workforce_admission_required")
 
         recomputed = build_execution_replan_request(
             task_id=request.task_id,
@@ -1813,6 +1885,7 @@ class UnifiedRuntime:
         parent_receipt: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         request.validate()
+        _validate_workforce_route(request.route)
         planner_route = dict(request.route)
         planner_route.setdefault("local_enabled", request.local_enabled)
         planner_route.setdefault("online_enabled", request.online_enabled)
@@ -1948,40 +2021,82 @@ class UnifiedRuntime:
                 self._workforce_policy_loader,
             )
             workforce_admission_payload = workforce_admission.to_dict()
+            workforce_lineage = _build_workforce_admission_lineage(
+                route=request.route,
+                attempt_number=attempt_number,
+                current_aggregate_binding_hash=workforce_admission_payload.get(
+                    "aggregate_binding_hash", ""
+                ),
+                current_planner_decision_id=planner_decision_id,
+                replan_authorization=replan_authorization,
+                parent_receipt=parent_receipt,
+            )
             plan_payload = dict(plan_payload)
             plan_payload["workforce_admission"] = workforce_admission_payload
+            plan_payload["workforce_admission_lineage"] = workforce_lineage
             stamped_snapshot = dict(plan_payload.get("signal_snapshot") or {})
             stamped_snapshot["workforce_admission"] = workforce_admission_payload
+            stamped_snapshot["workforce_admission_lineage"] = workforce_lineage
             plan_payload["signal_snapshot"] = stamped_snapshot
             workforce_decision = str(workforce_admission_payload.get("overall_decision") or "BLOCK")
+            rebind_blocked = workforce_lineage["status"] == "BLOCKED_REBIND"
+            effective_workforce_decision = "BLOCK" if rebind_blocked else workforce_decision
+            effective_workforce_reason = (
+                "workforce_rebind_not_authorized" if rebind_blocked else ""
+            )
+            workforce_evidence_refs = [
+                f"runtime:workforce_admission:{workforce_decision}:"
+                f"{workforce_admission_payload.get('aggregate_binding_hash', '')[:16]}"
+            ]
+            workforce_stage_fields: dict[str, Any] = {
+                "workforce_admission_lineage": workforce_lineage,
+                "effective_decision": effective_workforce_decision,
+                "effective_reason": effective_workforce_reason,
+            }
+            if rebind_blocked:
+                workforce_evidence_refs.append(
+                    "runtime:workforce_rebind:BLOCKED_REBIND:not_authorized"
+                )
+                workforce_stage_fields["rebind_evidence"] = {
+                    "status": "BLOCKED_REBIND",
+                    "authorized": False,
+                    "reason": "workforce_rebind_not_authorized",
+                }
             workforce_stage = _stage(
                 "workforce_admission",
                 status=(
                     "SUCCEEDED"
-                    if workforce_decision == "ALLOW"
-                    else ("BLOCKED" if workforce_decision == "BLOCK" else "INCOMPLETE")
+                    if effective_workforce_decision == "ALLOW"
+                    else ("BLOCKED" if effective_workforce_decision == "BLOCK" else "INCOMPLETE")
                 ),
                 invoked=True,
                 evidence_present=True,
-                gate_passed=workforce_decision == "ALLOW",
-                evidence_refs=[
-                    f"runtime:workforce_admission:{workforce_decision}:"
-                    f"{workforce_admission_payload.get('aggregate_binding_hash', '')[:16]}"
-                ],
-                decision=workforce_decision,
+                gate_passed=effective_workforce_decision == "ALLOW",
+                evidence_refs=workforce_evidence_refs,
+                reason=effective_workforce_reason,
+                decision=effective_workforce_decision,
                 result=workforce_admission_payload,
                 aggregate_binding_hash=workforce_admission_payload.get("aggregate_binding_hash", ""),
+                **workforce_stage_fields,
             )
             stages["workforce_admission"] = workforce_stage
 
-            if workforce_decision in {"BLOCK", "ESCALATE"}:
-                terminal_status = "BLOCKED" if workforce_decision == "BLOCK" else "INCOMPLETE"
+            if workforce_decision in {"BLOCK", "ESCALATE"} or rebind_blocked:
+                terminal_status = (
+                    "BLOCKED"
+                    if workforce_decision == "BLOCK" or rebind_blocked
+                    else "INCOMPLETE"
+                )
                 terminal_stages = dict(stages)
                 for stage_name in ("local", "online", "verifier", "learning"):
                     terminal_stages[stage_name] = _stage(
                         stage_name,
                         status="NOT_REQUESTED",
-                        reason="blocked_by_workforce_admission",
+                        reason=(
+                            "blocked_by_workforce_rebind"
+                            if rebind_blocked
+                            else "blocked_by_workforce_admission"
+                        ),
                         invoked=False,
                         evidence_present=False,
                         gate_passed=False,
@@ -1989,6 +2104,16 @@ class UnifiedRuntime:
                 terminal_planner = dict(planner_stage)
                 terminal_planner["plan_payload"] = plan_payload
                 terminal_stages["planner"] = terminal_planner
+                terminal_context_trace = {
+                    "task_id": request.task_id,
+                    "workspace_revision": request.workspace_revision,
+                    "planner_decision_id": planner_decision_id,
+                    "execution_depth": plan.execution_depth,
+                    "execution_attempt": execution_attempt,
+                    "parent_receipt_hash": execution_attempt["parent_receipt_hash"],
+                    "source_replan_request_id": execution_attempt["source_replan_request_id"],
+                    "workforce_admission_lineage": workforce_lineage,
+                }
                 terminal_receipt = {
                     "schema": RECEIPT_SCHEMA,
                     "task_id": request.task_id,
@@ -1997,9 +2122,11 @@ class UnifiedRuntime:
                     "plan_hash": plan_hash,
                     "execution_depth": plan.execution_depth,
                     "execution_attempt": execution_attempt,
+                    "context_trace": terminal_context_trace,
                     "planner": terminal_planner,
                     "plan_payload": plan_payload,
                     "workforce_admission": workforce_admission_payload,
+                    "workforce_admission_lineage": workforce_lineage,
                     "capabilities": [],
                     "capability_results": {},
                     "local": terminal_stages["local"],
@@ -3118,7 +3245,10 @@ class UnifiedRuntime:
             "treatment_core_equal": treatment_core_equal,
         }
         if workforce_admission_payload is not None:
+            context_trace["workforce_admission_lineage"] = workforce_lineage
+            receipt["context_trace"] = context_trace
             receipt["workforce_admission"] = workforce_admission_payload
+            receipt["workforce_admission_lineage"] = workforce_lineage
             receipt["plan_payload"] = plan_payload
         # RC-1: additive JSON-safe receipt_base + acyclic run_anchor hash DAG
         attach_r3_receipt_base(receipt)

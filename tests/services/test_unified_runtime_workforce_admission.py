@@ -453,3 +453,336 @@ def test_admission_does_not_change_pre_admission_plan_hash_or_decision_id() -> N
     assert receipt["planner_decision_id"] == expected_hash
     assert receipt["plan_payload"]["plan_hash"] == expected_hash
     assert receipt["plan_payload"]["signal_snapshot"]["planner_decision_id"] == expected_hash
+
+
+@pytest.mark.parametrize(
+    "route, expected_error",
+    [
+        ({"workforce_admission_enabled": 1}, "workforce_admission_enabled_must_be_boolean"),
+        ({"workforce_rebind_authorized": "true"}, "workforce_rebind_authorized_must_be_boolean"),
+        ({"workforce_rebind_authorized": True}, "workforce_rebind_reason_required"),
+    ],
+)
+def test_malformed_workforce_route_controls_fail_before_planner_policy_or_downstream(
+    route: dict[str, object], expected_error: str
+) -> None:
+    planner = _Planner()
+    loader = _Loader()
+    calls = {"online": 0, "verifier": 0, "learning": 0}
+
+    def counted(name, result):
+        def invoke(*_args, **_kwargs):
+            calls[name] += 1
+            return result
+
+        return invoke
+
+    with pytest.raises(ValueError, match=expected_error):
+        UnifiedRuntime(planner=planner, workforce_policy_loader=loader).run(
+            _request(route),
+            online_invoker=counted("online", _online({"task_id": "workforce-admission-runtime-test"})),
+            verifier=counted("verifier", _verifier({"task_id": "workforce-admission-runtime-test"})),
+            learning=counted("learning", _learning({"task_id": "workforce-admission-runtime-test"})),
+        )
+
+    assert planner.plans == 0
+    assert loader.load_calls == 0
+    assert calls == {"online": 0, "verifier": 0, "learning": 0}
+
+
+def test_first_admission_stamps_json_safe_lineage_into_shared_context_and_receipt() -> None:
+    demands = _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL"))
+    planner = _Planner(demands)
+    loader = _Loader()
+    captured: dict[str, object] = {}
+
+    def online(context):
+        captured["online"] = context["planner"]
+        return _online(context)
+
+    def verifier(context):
+        captured["verifier"] = context["planner"]
+        return _verifier(context)
+
+    receipt = UnifiedRuntime(planner=planner, workforce_policy_loader=loader).run(
+        _request(
+            {
+                "workforce_admission_enabled": True,
+                "workforce_bindings": {"online": _bindings()["online"]},
+            }
+        ),
+        online_invoker=online,
+        verifier=verifier,
+        learning=_learning,
+    )
+
+    lineage = receipt["workforce_admission_lineage"]
+    assert lineage["schema"] == "nexus.runtime_workforce_admission_lineage.v1"
+    assert lineage["attempt_number"] == 1
+    assert lineage["status"] == "FIRST_ADMISSION"
+    assert lineage["source_aggregate_binding_hash"] == ""
+    assert lineage["binding_changed"] is False
+    assert lineage["rebind_authorized"] is False
+    assert lineage["current_planner_decision_id"] == receipt["planner_decision_id"]
+    assert json.loads(json.dumps(lineage)) == lineage
+    assert receipt["plan_payload"]["workforce_admission_lineage"] == lineage
+    assert receipt["plan_payload"]["signal_snapshot"]["workforce_admission_lineage"] == lineage
+    assert receipt["stages"][1]["workforce_admission_lineage"] == lineage
+    assert captured["online"]["workforce_admission_lineage"] == lineage
+    assert captured["verifier"]["workforce_admission_lineage"] == lineage
+    assert receipt["context_trace"]["workforce_admission_lineage"] == lineage
+
+
+def _replan_pair(
+    *,
+    route: dict[str, object],
+    loader: _Loader,
+    planner: _Planner,
+    receipt_path: Path | None = None,
+):
+    runtime = UnifiedRuntime(planner=planner, workforce_policy_loader=loader)
+    first = runtime.run(
+        _request(route),
+        online_invoker=_online,
+        verifier=lambda _ctx: {
+            "task_id": "workforce-admission-runtime-test",
+            "status": "FAILED",
+            "invoked": True,
+            "gate_passed": False,
+            "evidence": "replan required",
+            "evidence_refs": ["verifier:replan-required"],
+        },
+        learning=_learning,
+        receipt_path=receipt_path,
+    )
+    return runtime, first
+
+
+def test_unchanged_binding_replan_freshly_loads_policy_and_runs_second_attempt() -> None:
+    route = {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"online": _bindings()["online"]},
+    }
+    loader = _Loader()
+    planner = _Planner(_demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")))
+    runtime, first = _replan_pair(route=route, loader=loader, planner=planner)
+    calls = {"online": 0, "verifier": 0, "learning": 0}
+
+    def counted(name, result):
+        def invoke(context):
+            calls[name] += 1
+            return result(context) if callable(result) else result
+
+        return invoke
+
+    second = runtime.run_replan(
+        first,
+        _request(route),
+        online_invoker=counted("online", _online),
+        verifier=counted("verifier", _verifier),
+        learning=counted("learning", _learning),
+    )
+
+    lineage = second["workforce_admission_lineage"]
+    assert lineage["status"] == "UNCHANGED"
+    assert lineage["source_aggregate_binding_hash"] == first["workforce_admission"]["aggregate_binding_hash"]
+    assert lineage["current_aggregate_binding_hash"] == second["workforce_admission"]["aggregate_binding_hash"]
+    assert lineage["binding_changed"] is False
+    assert second["terminal_status"] == "SUCCEEDED"
+    assert calls == {"online": 1, "verifier": 1, "learning": 1}
+    assert loader.load_calls == 2
+    assert second["execution_attempt"]["attempt_number"] == 2
+
+
+def test_admission_can_be_enabled_on_replan_from_legacy_receipt() -> None:
+    legacy_route = {"recommended_flow": "direct"}
+    admitted_route = {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"online": _bindings()["online"]},
+    }
+    loader = _Loader()
+    planner = _Planner(_demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")))
+    runtime = UnifiedRuntime(planner=planner, workforce_policy_loader=loader)
+    first = runtime.run(
+        _request(legacy_route),
+        online_invoker=_online,
+        verifier=lambda _ctx: {
+            "task_id": "workforce-admission-runtime-test",
+            "status": "FAILED",
+            "invoked": True,
+            "gate_passed": False,
+            "evidence": "enable admission on replan",
+            "evidence_refs": ["verifier:enable-admission"],
+        },
+        learning=_learning,
+    )
+
+    second = runtime.run_replan(
+        first,
+        _request(admitted_route),
+        online_invoker=_online,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    assert "workforce_admission" not in first
+    assert second["workforce_admission_lineage"]["status"] == "ENABLED_ON_REPLAN"
+    assert second["workforce_admission_lineage"]["source_aggregate_binding_hash"] == ""
+    assert second["terminal_status"] == "SUCCEEDED"
+    assert loader.load_calls == 1
+
+
+@pytest.mark.parametrize("disabled_value", [False, None])
+def test_prior_admission_cannot_be_disabled_or_omitted_before_second_planner(
+    disabled_value: bool | None,
+) -> None:
+    route = {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"online": _bindings()["online"]},
+    }
+    loader = _Loader()
+    planner = _Planner(_demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")))
+    runtime, first = _replan_pair(route=route, loader=loader, planner=planner)
+    downgraded = dict(route)
+    if disabled_value is None:
+        downgraded.pop("workforce_admission_enabled")
+    else:
+        downgraded["workforce_admission_enabled"] = disabled_value
+
+    with pytest.raises(ValueError, match="replan_workforce_admission_required"):
+        runtime.run_replan(
+            first,
+            _request(downgraded),
+            online_invoker=_online,
+            verifier=_verifier,
+            learning=_learning,
+        )
+
+    assert planner.plans == 1
+    assert loader.load_calls == 1
+
+
+def test_changed_binding_without_authorization_blocks_after_admission_with_zero_second_attempt_calls() -> None:
+    first_binding = _bindings()["local"]
+    changed_binding = {
+        "worker_id": "local_qwen3_8b",
+        "provider": "ollama",
+        "model": "qwen3:8b",
+        "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
+    }
+    route = {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"local": first_binding},
+    }
+    loader = _Loader()
+    planner = _Planner(_demands(_demand("local", mutation=False)))
+    runtime, first = _replan_pair(route=route, loader=loader, planner=planner)
+    changed_route = dict(route)
+    changed_route["workforce_bindings"] = {"local": changed_binding}
+    calls = {"online": 0, "verifier": 0, "learning": 0}
+
+    def counted(name, result):
+        def invoke(*_args, **_kwargs):
+            calls[name] += 1
+            return result
+
+        return invoke
+
+    second = runtime.run_replan(
+        first,
+        _request(changed_route),
+        online_invoker=counted("online", _online({"task_id": "workforce-admission-runtime-test"})),
+        verifier=counted("verifier", _verifier({"task_id": "workforce-admission-runtime-test"})),
+        learning=counted("learning", _learning({"task_id": "workforce-admission-runtime-test"})),
+    )
+
+    workforce_stage = next(stage for stage in second["stages"] if stage["name"] == "workforce_admission")
+    assert second["terminal_status"] == "BLOCKED"
+    assert second["receipt_complete"] is False
+    assert workforce_stage["status"] == "BLOCKED"
+    assert workforce_stage["gate_passed"] is False
+    assert workforce_stage["decision"] == "BLOCK"
+    assert workforce_stage["reason"] == "workforce_rebind_not_authorized"
+    assert workforce_stage["effective_decision"] == "BLOCK"
+    assert workforce_stage["effective_reason"] == "workforce_rebind_not_authorized"
+    assert workforce_stage["result"]["overall_decision"] == "ALLOW"
+    assert second["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert second["workforce_admission_lineage"]["status"] == "BLOCKED_REBIND"
+    assert second["workforce_admission_lineage"]["binding_changed"] is True
+    assert "runtime:workforce_rebind:BLOCKED_REBIND:not_authorized" in second["evidence_refs"]
+    assert calls == {"online": 0, "verifier": 0, "learning": 0}
+    assert second["local"]["reason"] == "blocked_by_workforce_rebind"
+    assert all(
+        not (stage["name"] == "workforce_admission" and stage.get("gate_passed"))
+        for stage in second["stages"]
+    )
+
+
+def test_authorized_changed_binding_continues_as_rebound_and_preserves_source_receipt(
+    tmp_path: Path,
+) -> None:
+    first_path = tmp_path / "attempt-1.json"
+    second_path = tmp_path / "attempt-2.json"
+    route = {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"local": _bindings()["local"]},
+    }
+    loader = _Loader()
+    planner = _Planner(_demands(_demand("local", mutation=False)))
+    runtime, first = _replan_pair(
+        route=route,
+        loader=loader,
+        planner=planner,
+        receipt_path=first_path,
+    )
+    source_bytes = first_path.read_bytes()
+    changed_route = dict(route)
+    changed_route.update(
+        {
+            "workforce_rebind_authorized": True,
+            "workforce_rebind_reason": "approved worker rotation",
+            "workforce_bindings": {
+                "local": {
+                    "worker_id": "local_qwen3_8b",
+                    "provider": "ollama",
+                    "model": "qwen3:8b",
+                    "controls": [
+                        "bounded_context",
+                        "parser",
+                        "focused_tests",
+                        "external_verifier",
+                    ],
+                }
+            },
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def online(context):
+        captured["online"] = context["planner"]["workforce_admission_lineage"]
+        return _online(context)
+
+    second = runtime.run_replan(
+        first,
+        _request(changed_route),
+        online_invoker=online,
+        verifier=lambda context: _verifier(context),
+        learning=_learning,
+        receipt_path=second_path,
+    )
+
+    lineage = second["workforce_admission_lineage"]
+    assert second["terminal_status"] == "SUCCEEDED"
+    assert lineage["status"] == "REBOUND"
+    assert lineage["rebind_authorized"] is True
+    assert lineage["rebind_reason"] == "approved worker rotation"
+    assert lineage["source_receipt_hash"] == first["receipt_hash"]
+    assert lineage["source_run_anchor_hash"] == first["run_anchor_hash"]
+    assert lineage["source_replan_request_id"] == first["execution_replan_request"]["replan_request_id"]
+    assert lineage["current_planner_decision_id"] == second["planner_decision_id"]
+    assert captured["online"] == lineage
+    assert second["context_trace"]["workforce_admission_lineage"] == lineage
+    assert json.loads(second_path.read_text(encoding="utf-8"))["workforce_admission_lineage"] == lineage
+    assert source_bytes == first_path.read_bytes()
+    assert second["planner"]["plan_hash"] == second["planner_decision_id"]
+    assert second["plan_payload"]["plan_hash"] == second["planner_decision_id"]
