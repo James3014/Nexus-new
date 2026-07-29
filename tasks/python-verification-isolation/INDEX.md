@@ -4,14 +4,14 @@
 **owner:** James Chen
 **status:** active, governed and sequential
 **source_decision:** user-authorized remediation after AGY Controller contamination finding
-**controller_base_revision:** `06bd067d814e7667cbdcb40fe31e9fcfcd1d330a`
+**controller_base_revision:** `bf6afeddf921128b061a6bc65f6228650f22627d`
 **AUTO_CHAIN:** false
 
 ## Ordered cards
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0a | `python-verification-isolation-runtime-guard` | `00a-python-verification-isolation-runtime-guard.md` | PENDING | campaign bootstrap integrated, supersedes 00-python-verification-isolation-guard |
+| 0a | `python-verification-isolation-runtime-guard` | `00a-python-verification-isolation-runtime-guard.md` | COMPLETED | campaign bootstrap integrated, supersedes 00-python-verification-isolation-guard |
 | 1 | `tracked-bytecode-cleanup-core` | `01-tracked-bytecode-cleanup-core.md` | PENDING | runtime guard integrated |
 | 2 | `tracked-bytecode-cleanup-verifier-base` | `02-tracked-bytecode-cleanup-verifier-base.md` | PENDING | core cleanup integrated |
 | 3 | `tracked-bytecode-cleanup-concurrency` | `03-tracked-bytecode-cleanup-concurrency.md` | PENDING | verifier-base cleanup integrated |
@@ -19,7 +19,7 @@
 
 ## Current frontier
 
-`python-verification-isolation-runtime-guard` (`00a-python-verification-isolation-runtime-guard.md`) is the current frontier task card. No cleanup card may start until the runtime guard Candidate is integrated. No card may self-chain after completion, failure, Candidate formation, or BLOCK.
+`tracked-bytecode-cleanup-core` (`01-tracked-bytecode-cleanup-core.md`) is the current frontier task card. No cleanup card may start until the runtime guard Candidate is integrated. No card may self-chain after completion, failure, Candidate formation, or BLOCK.
 
 ## Completion condition
 
@@ -34,7 +34,7 @@ The campaign is complete only when:
 
 ## Completed cards
 
-None.
+- `python-verification-isolation-runtime-guard` (`00a-python-verification-isolation-runtime-guard.md`) - runtime guard candidate integrated at `bf6afeddf921128b061a6bc65f6228650f22627d`.
 
 ## Blocked or superseded cards
 

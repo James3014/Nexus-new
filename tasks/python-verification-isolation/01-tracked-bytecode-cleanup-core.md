@@ -5,8 +5,8 @@
 **status:** PENDING
 **task_id:** `tracked-bytecode-cleanup-core`
 **AUTO_CHAIN:** false
-**controller_base_revision:** `06bd067d814e7667cbdcb40fe31e9fcfcd1d330a`
-**depends_on:** `python-verification-isolation-guard` integrated
+**controller_base_revision:** `bf6afeddf921128b061a6bc65f6228650f22627d`
+**depends_on:** `python-verification-isolation-runtime-guard` integrated
 **commit_required:** true
 **candidate_required:** true
 **worker_may_commit:** true

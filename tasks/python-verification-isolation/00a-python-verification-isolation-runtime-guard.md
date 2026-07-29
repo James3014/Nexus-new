@@ -2,7 +2,8 @@
 
 **artifact_authority:** current
 **owner:** James Chen
-**status:** PENDING
+**status:** COMPLETED
+**candidate:** `5e44ce7fe97d65797503e6e14607d2100fb436fb` integrated at `bf6afeddf921128b061a6bc65f6228650f22627d`
 **task_id:** `python-verification-isolation-runtime-guard`
 **supersedes:** `python-verification-isolation-guard`
 **AUTO_CHAIN:** false
