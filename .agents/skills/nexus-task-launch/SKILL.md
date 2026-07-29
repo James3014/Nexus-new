@@ -11,21 +11,11 @@ create a branch, or use a direct connector edit/write operation.
 
 ## Required sequence
 
-1. Call `nexus_self_hosted_list_actionable_tasks` before any mutation. Record
-   the returned task action and the current controller revision.
-2. Call `nexus_self_hosted_submit_task` with one stable `task_id`, the exact
-   bounded `allowed_files`, the immutable controller revision, and the selected
-   target base. Do not create a `-v2` or `-v3` task ID; retries add only an
-   `attempt_id`.
-3. Call `nexus_self_hosted_wait_task` and follow its action envelope until
-   `ACTION_REQUIRED`, `FINAL_BLOCK`, or `TERMINAL`. A worker may edit only the
-   declared target files and must return a candidate commit plus verifier
-   evidence.
+1. Call `nexus_self_hosted_list_actionable_tasks` (or `nexus.bash` running `nexus self-hosted actionable` / `python -m scripts.ops.nexus_chatgpt_delivery actionable`) before any mutation. Record the returned task action and the current controller revision.
+2. Call `nexus_self_hosted_submit_task` (or `nexus.bash` running `nexus self-hosted submit` / `python -m scripts.ops.nexus_chatgpt_delivery launch`) with one stable `task_id`, the exact bounded `allowed_files`, the immutable controller revision, and the selected target base. Do not create a `-v2` or `-v3` task ID; retries add only an `attempt_id`.
+3. Call `nexus_self_hosted_wait_task` (or `nexus.bash` running `nexus self-hosted wait`) and follow its action envelope until `ACTION_REQUIRED`, `FINAL_BLOCK`, or `TERMINAL`. A worker may edit only the declared target files and must return a candidate commit plus verifier evidence.
 
-If the lifecycle tools are not visible or the existing connector cannot expose
-them, stop fail-closed with `REPO_READY_CONNECTOR_BLOCKED`. Never fall back to
-`open_workspace(mode=worktree)`, direct file mutation through the connector,
-stash/reset/clean of a dirty checkout, or an unmanaged worktree.
+If the lifecycle tools are not visible or the existing connector cannot expose them, stop fail-closed with `REPO_READY_CONNECTOR_BLOCKED`. Never fall back to `open_workspace(mode=worktree)`, direct file mutation through the connector (`edit`/`write`/`nexus.edit`/`nexus.write`), stash/reset/clean of a dirty checkout, or an unmanaged worktree.
 
 ## Acceptance handoff
 
