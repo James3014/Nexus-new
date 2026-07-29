@@ -857,18 +857,26 @@ def _governed_failure_response(
     actual_provider: str = "",
     actual_model: str = "",
     model_binding_mode: str = "",
+    raw_metadata: dict[str, Any] | None = None,
 ) -> LocalModelExecutorResponse:
     empty_hash = hashlib.sha256(b"").hexdigest()
-    raw_metadata = {
-        "error": reason,
-        "reason": reason,
-        "local_model_invocation_authority": authority,
-        "actual_provider": actual_provider,
-        "actual_model": actual_model,
-        "model_binding_mode": model_binding_mode,
-        "provider_call_count": 0,
-        "ledger_count": 0,
-    }
+    if raw_metadata is None:
+        raw_metadata = {
+            "provider_call_count": 0,
+            "ledger_count": 0,
+        }
+    raw_metadata.update(
+        {
+            "error": reason,
+            "reason": reason,
+            "local_model_invocation_authority": authority,
+            "actual_provider": actual_provider,
+            "actual_model": actual_model,
+            "model_binding_mode": model_binding_mode,
+            "public_claim_allowed": False,
+            "production_ready": False,
+        }
+    )
     return LocalModelExecutorResponse(
         invoked=False,
         local_model_called=False,
@@ -1038,6 +1046,7 @@ def _stamp_governed_response(
             actual_provider=actual_provider,
             actual_model=actual_model,
             model_binding_mode=binding_mode,
+            raw_metadata=raw_metadata,
         )
 
     return response

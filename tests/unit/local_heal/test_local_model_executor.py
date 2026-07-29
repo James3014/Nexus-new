@@ -15,10 +15,12 @@ from nexus.services.local_heal.local_model_executor import (
     compute_verifier_failure_evidence,
 )
 from nexus.services.local_heal.local_model_provider import (
+    AuthorityBoundLocalModelProvider,
     InertLocalModelProvider,
     InjectedLocalModelProvider,
     LocalModelProviderRequest,
     LocalModelProviderResponse,
+    RecordingLocalModelProvider,
 )
 def make_test_request(
     task_id: str,
@@ -8030,6 +8032,7 @@ def test_governed_identity_failures_are_zero_call(case: str, expected: str) -> N
     assert response.error == expected
     assert response.raw_model_metadata["local_model_invocation_authority"] == authority
     assert response.raw_model_metadata["provider_call_count"] == 0
+    assert response.raw_model_metadata["ledger_count"] == 0
     assert calls == []
 
 
@@ -8047,6 +8050,7 @@ def test_governed_committee_topologies_fail_before_provider_call(topology: str) 
     assert response.candidate_patch == ""
     assert response.raw_model_metadata["local_model_invocation_authority"] == authority
     assert response.raw_model_metadata["provider_call_count"] == 0
+    assert response.raw_model_metadata["ledger_count"] == 0
     assert calls == []
 
 
@@ -8060,6 +8064,7 @@ def test_governed_committee_signal_flag_fails_closed() -> None:
     assert response.error == "local_model_committee_authority_required"
     assert response.raw_model_metadata["local_model_invocation_authority"] == authority
     assert response.raw_model_metadata["provider_call_count"] == 0
+    assert response.raw_model_metadata["ledger_count"] == 0
     assert calls == []
 
 
@@ -8082,11 +8087,42 @@ def test_governed_reported_model_mismatch_is_sticky_and_fail_closed() -> None:
                 output_text="candidate",
             )
 
-    response = LocalModelExecutor.run(req, provider=WrongModelProvider())
+    recording_provider = RecordingLocalModelProvider(WrongModelProvider())
+    guarded_provider = AuthorityBoundLocalModelProvider(
+        recording_provider,
+        resolved_model="admitted-model",
+    )
+    response = LocalModelExecutor.run(req, provider=guarded_provider)
 
     assert calls == 1
     assert response.invoked is False
     assert response.local_model_called is False
     assert response.candidate_patch == ""
+    assert response.candidate_hash == hashlib.sha256(b"").hexdigest()
     assert response.error == "local_model_provider_reported_model_mismatch"
+    assert response.reasoning_summary == "local_model_provider_reported_model_mismatch"
     assert response.raw_model_metadata["local_model_invocation_authority"] == authority
+    assert response.raw_model_metadata["actual_provider"] == "fixture"
+    assert response.raw_model_metadata["actual_model"] == "wrong-model"
+    assert response.raw_model_metadata["model_binding_mode"] == "fixed"
+    assert response.raw_model_metadata["provider_call_count"] == 1
+    assert response.raw_model_metadata["ledger_count"] == 1
+    assert response.raw_model_metadata["llm_call_ledger"]["total_calls"] == 1
+    assert len(response.raw_model_metadata["llm_call_ledger_records"]) == 1
+    assert response.raw_model_metadata["public_claim_allowed"] is False
+    assert response.raw_model_metadata["production_ready"] is False
+
+    second_response = LocalModelExecutor.run(req, provider=guarded_provider)
+
+    assert calls == 1
+    assert guarded_provider.ledger_count == 1
+    assert len(guarded_provider.ledger) == 1
+    assert second_response.error == "local_model_provider_reported_model_mismatch"
+    assert second_response.invoked is False
+    assert second_response.local_model_called is False
+    assert second_response.candidate_patch == ""
+    assert second_response.candidate_hash == hashlib.sha256(b"").hexdigest()
+    assert second_response.raw_model_metadata["provider_call_count"] == 1
+    assert second_response.raw_model_metadata["ledger_count"] == 1
+    assert second_response.raw_model_metadata["llm_call_ledger"]["total_calls"] == 1
+    assert len(second_response.raw_model_metadata["llm_call_ledger_records"]) == 1
