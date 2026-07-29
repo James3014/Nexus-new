@@ -911,6 +911,7 @@ def test_wait_task_timeout_returns_in_progress_envelope(tmp_path):
     assert waited["task_action"]["next_action"] == "wait_for_task"
     assert waited["task_action"]["recommended_tool"] == "nexus_self_hosted_wait_task"
     release.set()
+    service.wait_task("wait-timeout", timeout_seconds=2.0)
 
 
 def test_list_actionable_tasks_excludes_integrated_terminal_state(tmp_path):

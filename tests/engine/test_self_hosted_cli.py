@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from scripts.engine.nexus_cli import nexus
 from scripts.engine.commands.self_hosted_actions import set_test_runner
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
 @pytest.fixture(autouse=True)
@@ -315,10 +316,8 @@ def test_self_hosted_wait_and_list_actionable_subprocess(tmp_path: Path):
     assert wait_data["task_id"] == "test-sh-subproc-001"
 
     # Set promotion_status in state file so attention_required becomes True
-    state_file = Path(state_dir) / "test-sh-subproc-001.json"
-    state_data = json.loads(state_file.read_text(encoding="utf-8"))
-    state_data["promotion_status"] = "PENDING_HUMAN_APPROVAL"
-    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._mutate_state("test-sh-subproc-001", lambda s: s.update({"promotion_status": "PENDING_HUMAN_APPROVAL"}))
 
     # Subprocess list-actionable
     list_cmd = [
@@ -353,16 +352,24 @@ def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
     ]
     runner.invoke(nexus, submit_cmd)
 
-    state_file = Path(state_dir) / "test-sh-approve-001.json"
-    state_data = json.loads(state_file.read_text(encoding="utf-8"))
-    state_data["promotion_status"] = "PENDING_HUMAN_APPROVAL"
-    state_data["promotion_packet"] = {
-        "candidate_commit_sha": "a" * 40,
-        "candidate_tree_sha": "b" * 40,
-        "candidate_state_hash": "c" * 64,
-        "verified_receipt_hash": "d" * 64,
-    }
-    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+    wait_cmd = [
+        "nexus", "self-hosted", "wait",
+        "--task-id", req["task_id"],
+        "--timeout", "2.0",
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, wait_cmd)
+
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    def _mutate_approve(s):
+        s["promotion_status"] = "PENDING_HUMAN_APPROVAL"
+        s["promotion_packet"] = {
+            "candidate_commit_sha": "a" * 40,
+            "candidate_tree_sha": "b" * 40,
+            "candidate_state_hash": "c" * 64,
+            "verified_receipt_hash": "d" * 64,
+        }
+    service._mutate_state(req["task_id"], _mutate_approve)
 
     approve_mismatch_cmd = [
         "nexus", "self-hosted", "approve",
@@ -416,6 +423,14 @@ def test_self_hosted_integrate_requires_approved(tmp_path: Path):
     ]
     runner.invoke(nexus, submit_cmd)
 
+    wait_cmd = [
+        "nexus", "self-hosted", "wait",
+        "--task-id", req["task_id"],
+        "--timeout", "2.0",
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, wait_cmd)
+
     integrate_cmd = [
         "nexus", "self-hosted", "integrate",
         "--task-id", "test-sh-integrate-001",
@@ -447,10 +462,16 @@ def test_self_hosted_dispose_candidate(tmp_path: Path):
     ]
     runner.invoke(nexus, submit_cmd)
 
-    state_file = Path(state_dir) / "test-sh-dispose-001.json"
-    state_data = json.loads(state_file.read_text(encoding="utf-8"))
-    state_data["promotion_status"] = "PENDING_HUMAN_APPROVAL"
-    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+    wait_cmd = [
+        "nexus", "self-hosted", "wait",
+        "--task-id", req["task_id"],
+        "--timeout", "2.0",
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, wait_cmd)
+
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._mutate_state(req["task_id"], lambda s: s.update({"promotion_status": "PENDING_HUMAN_APPROVAL"}))
 
     dispose_cmd = [
         "nexus", "self-hosted", "dispose",
@@ -486,10 +507,16 @@ def test_self_hosted_cancel_task(tmp_path: Path):
     ]
     runner.invoke(nexus, submit_cmd)
 
-    state_file = Path(state_dir) / "test-sh-cancel-001.json"
-    state_data = json.loads(state_file.read_text(encoding="utf-8"))
-    state_data["worker_pid"] = None
-    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+    wait_cmd = [
+        "nexus", "self-hosted", "wait",
+        "--task-id", req["task_id"],
+        "--timeout", "2.0",
+        "--state-dir", state_dir,
+    ]
+    runner.invoke(nexus, wait_cmd)
+
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._mutate_state(req["task_id"], lambda s: s.update({"worker_pid": None}))
 
     cancel_cmd = [
         "nexus", "self-hosted", "cancel",
@@ -515,18 +542,15 @@ def test_self_hosted_close_without_candidate_cmd(tmp_path: Path):
     state_dir = str(tmp_path / "state")
     task_id = "test-sh-close-001"
 
-    state_dir_path = Path(state_dir)
-    state_dir_path.mkdir(parents=True, exist_ok=True)
-    state_file = state_dir_path / f"{task_id}.json"
-    state_data = {
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._write_state(task_id, {
         "schema": "nexus.self_hosted_task_state.v1",
         "task_id": task_id,
         "status": "FINAL_BLOCK",
         "promotion_status": "NOT_CREATED",
         "target_worktree": str(tmp_path / "targets" / task_id),
         "worker_pid": None,
-    }
-    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+    })
 
     close_cmd = [
         "nexus", "self-hosted", "close-without-candidate",
