@@ -23,6 +23,7 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.unified_runtime import (
     ONLINE_CLI_SPEC_REGISTRY,
     OnlineCliSpec,
+    REGISTERED_CLI_MODEL_BINDING_FLAGS,
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_execution_replan_request,
@@ -1890,6 +1891,36 @@ def test_finalize_receipt_rejects_cross_task_final_stage_payload() -> None:
     assert finalized["verifier"]["reason"] == "verifier_task_id_mismatch"
     assert finalized["claim_boundary"]["public_claim_allowed"] is False
     assert finalized["receipt_complete"] is False
+
+
+def test_gateway_ask_unified_cleans_task_decision_before_later_direct_call(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.gateway import BattlesuitGateway
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    original_ask_structured = gateway.ask_structured
+
+    def injected_ask(*_args, **_kwargs):
+        return {"status": "APPROVED", "patch": "candidate"}, "raw-candidate"
+
+    monkeypatch.setattr(gateway, "ask_structured", injected_ask)
+    request = UnifiedRuntimeRequest(
+        task_id="gateway-cleanup-task",
+        workspace_revision="rev-cleanup",
+        task_statement="run one injected online task",
+        task_type="repair",
+        route={"recommended_flow": "direct", "workspace_root": str(tmp_path)},
+    )
+
+    receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert not hasattr(gateway, "_online_execution_decision")
+
+    monkeypatch.setattr(gateway, "ask_structured", original_ask_structured)
+    data, raw = gateway.ask_structured("direct legacy call", "{}")
+    assert data["error"] == "online_execution_not_authorized"
+    assert data["invoked"] is False
+    assert data["provider_call_count"] == 0
+    assert raw == "online_execution_not_authorized"
 
 
 # ── P0-T1: execution_depth consumption tests ────────────────────────────────
@@ -4014,6 +4045,28 @@ def test_bare_codex_exec_uses_argv_and_none_stdin(tmp_path):
     assert res["gate_passed"] is True
 
 
+def test_admitted_codex_model_is_bound_in_physical_argv():
+    recorded = {}
+
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+
+        class Res:
+            stdout = "codex bound"
+            stderr = ""
+            returncode = 0
+
+        return Res()
+
+    model = "gpt-5.6-luna"
+    spec = OnlineCliSpec(provider="codex", command=("codex",), model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t2-bound", "task_statement": "reply codex"})
+
+    assert recorded["argv"] == ["codex", "exec", "-m", model, "reply codex"]
+    assert res["gate_passed"] is True
+
+
 def test_bare_opencode_uses_registered_free_model(tmp_path):
     recorded = {}
     def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
@@ -4031,6 +4084,184 @@ def test_bare_opencode_uses_registered_free_model(tmp_path):
     assert recorded["argv"] == ["opencode", "run", "--model", "opencode/deepseek-v4-flash-free", "reply opencode"]
     assert recorded["input"] in (None, "")
     assert res["gate_passed"] is True
+
+
+def test_admitted_opencode_model_is_bound_in_physical_argv():
+    recorded = {}
+
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+
+        class Res:
+            stdout = "opencode bound"
+            stderr = ""
+            returncode = 0
+
+        return Res()
+
+    model = "opencode/mimo-v2.5-free"
+    spec = OnlineCliSpec(provider="opencode", command=("opencode",), model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    res = invoker({"task_id": "t3-bound", "task_statement": "reply opencode"})
+
+    assert recorded["argv"] == ["opencode", "run", "--model", model, "reply opencode"]
+    assert res["gate_passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "command"),
+    [
+        ("codex", ("codex", "exec", "--json")),
+        ("opencode", ("opencode", "run", "--format", "json")),
+    ],
+)
+def test_legacy_custom_registered_cli_command_preserves_argv_without_authority(provider, command):
+    calls = []
+
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        calls.append((argv, input))
+
+        class Res:
+            stdout = "legacy custom ok"
+            stderr = ""
+            returncode = 0
+
+        return Res()
+
+    model = f"{provider}-legacy-model"
+    spec = OnlineCliSpec(provider=provider, command=command, model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+
+    result = invoker({"task_id": f"{provider}-legacy-custom", "task_statement": "legacy prompt"})
+
+    assert len(calls) == 1
+    assert calls[0] == (list(command), "legacy prompt")
+    assert result["gate_passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "command"),
+    [
+        ("codex", ("codex", "exec")),
+        ("codex", ("codex", "exec", "-m", "wrong-model")),
+        ("opencode", ("opencode", "run")),
+        ("opencode", ("opencode", "run", "--model", "wrong-model")),
+    ],
+)
+def test_governed_custom_registered_cli_command_requires_exact_model_binding(provider, command):
+    calls = []
+
+    def runner(*_args, **_kwargs):
+        calls.append(True)
+        raise AssertionError("governed model-binding failure reached provider runner")
+
+    model = f"{provider}-admitted-model"
+    authority = {
+        "schema": "nexus.gateway_invocation_authority.v1",
+        "status": "ALLOW",
+        "gate_passed": True,
+        "resolved_provider": provider,
+        "resolved_model": model,
+    }
+    spec = OnlineCliSpec(provider=provider, command=command, model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+
+    result = invoker(
+        {
+            "task_id": f"{provider}-governed-invalid-custom",
+            "task_statement": "must not run",
+            "gateway_invocation_authority": authority,
+        }
+    )
+
+    assert result["error"] == "registered_cli_model_binding_command_shape_unsupported"
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("provider", ["codex", "opencode"])
+def test_governed_exact_custom_registered_cli_command_runs_with_admitted_model(provider):
+    model = f"{provider}-admitted-model"
+    subcommand, model_flag = REGISTERED_CLI_MODEL_BINDING_FLAGS[provider]
+    command = (provider, subcommand, model_flag, model)
+    recorded = {}
+
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+        recorded["input"] = input
+
+        class Res:
+            stdout = "governed custom ok"
+            stderr = ""
+            returncode = 0
+
+        return Res()
+
+    authority = {
+        "schema": "nexus.gateway_invocation_authority.v1",
+        "status": "ALLOW",
+        "gate_passed": True,
+        "resolved_provider": provider,
+        "resolved_model": model,
+    }
+    spec = OnlineCliSpec(provider=provider, command=command, model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+
+    result = invoker(
+        {
+            "task_id": f"{provider}-governed-exact-custom",
+            "task_statement": "governed prompt",
+            "gateway_invocation_authority": authority,
+        }
+    )
+
+    assert recorded["argv"] == list(command)
+    assert recorded["input"] == "governed prompt"
+    assert result["invoked"] is True
+    assert result["provider_call_count"] == 1
+    assert result["gate_passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "spec_model", "context_model", "error"),
+    [
+        ("codex", "wrong-model", "", "gateway_invocation_authority_model_mismatch"),
+        ("opencode", "", "", "gateway_invocation_authority_model_missing"),
+    ],
+)
+def test_authority_model_mismatch_or_omission_never_reaches_runner(
+    provider, spec_model, context_model, error
+):
+    calls = []
+
+    def runner(*_args, **_kwargs):
+        calls.append(True)
+        raise AssertionError("model-binding failure reached provider runner")
+
+    authority = {
+        "schema": "nexus.gateway_invocation_authority.v1",
+        "status": "ALLOW",
+        "gate_passed": True,
+        "resolved_provider": provider,
+        "resolved_model": "admitted-model",
+    }
+    spec = OnlineCliSpec(provider=provider, command=(provider,), model_name=spec_model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+    context = {
+        "task_id": f"{provider}-model-guard",
+        "task_statement": "must not run",
+        "gateway_invocation_authority": authority,
+    }
+    if context_model:
+        context["online_model_name"] = context_model
+
+    result = invoker(context)
+
+    assert result["error"] == error
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert calls == []
 
 
 def test_explicit_multi_argument_command_uses_stdin(tmp_path):

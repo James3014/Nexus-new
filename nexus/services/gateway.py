@@ -183,6 +183,7 @@ class BattlesuitGateway:
             "forbidden_repeat_signature": "Identifier for the rejected logic"
         }
     }
+    GATEWAY_INVOCATION_AUTHORITY_SCHEMA = "nexus.gateway_invocation_authority.v1"
 
     PATCH_SCHEMA_INSTRUCTION = (
         "You are a code repair agent. Generate a patch using Aider-style Search/Replace blocks. "
@@ -377,6 +378,7 @@ class BattlesuitGateway:
         output_schema: Optional[Dict[str, Any]] = None,
         system_instruction: Optional[str] = None,
         model_name: Optional[str] = None,
+        gateway_invocation_authority: Mapping[str, Any] | None = None,
     ) -> tuple[Any, str]:
         """Night Shift / automation path: request arbitrary structured JSON through the battlesuit."""
         selected_model = model_name or self.model_selector(phase)
@@ -384,7 +386,14 @@ class BattlesuitGateway:
         # Only use OUTPUT_SCHEMA if explicitly requested (not None)
         schema = output_schema if output_schema is not None else (self.OUTPUT_SCHEMA if system_instruction is None else None)
         sys_msg = self._build_system_instruction(schema, system_instruction)
-        return self._ask_via_cli(full_content, selected_model, sys_msg)
+        if gateway_invocation_authority is None:
+            return self._ask_via_cli(full_content, selected_model, sys_msg)
+        return self._ask_via_cli(
+            full_content,
+            selected_model,
+            sys_msg,
+            gateway_invocation_authority=gateway_invocation_authority,
+        )
 
     def ask_unified(
         self,
@@ -452,6 +461,8 @@ class BattlesuitGateway:
             )
         route["online_execution_decision"] = prior.to_dict()
         route["online_policy"] = prior.online_policy
+        had_bound_decision = hasattr(self, "_online_execution_decision")
+        previous_bound_decision = getattr(self, "_online_execution_decision", None)
         self._online_execution_decision = prior
         try:
             object.__setattr__(request, "route", route)
@@ -532,12 +543,19 @@ class BattlesuitGateway:
                     default=str,
                 )
                 capability_context_forwarded = True
+            structured_kwargs = {
+                "phase": str(context.get("online_phase") or "R"),
+                "output_schema": context.get("online_output_schema") or None,
+                "model_name": context.get("online_model_name") or None,
+            }
+            if isinstance(context, Mapping) and "gateway_invocation_authority" in context:
+                structured_kwargs["gateway_invocation_authority"] = context.get(
+                    "gateway_invocation_authority"
+                )
             result, raw_text = self.ask_structured(
                 str(context.get("online_prompt") or context.get("task_statement") or "") + local_context,
                 str(context.get("online_payload") or ""),
-                phase=str(context.get("online_phase") or "R"),
-                output_schema=context.get("online_output_schema") or None,
-                model_name=context.get("online_model_name") or None,
+                **structured_kwargs,
             )
             result_mapping = result if isinstance(result, dict) else {}
             route_error = str(raw_text or "").strip().lower() in {"gemini_missing", "error", "failed"}
@@ -563,6 +581,7 @@ class BattlesuitGateway:
                 if delivered
                 else []
             )
+
             return normalize_online_invoker_payload(
                 provider=provider_identity,
                 task_id=task_id,
@@ -578,6 +597,13 @@ class BattlesuitGateway:
                 transport=binding.transport or "gateway_compatibility",
                 selection_source=binding.selection_source or "compatibility_default",
             )
+
+        gateway_online_invoker.provider = (
+            binding.provider
+            if binding.provider not in {"", "gateway"}
+            else ("injected" if structured_injected else (gateway_provider or "gateway"))
+        )  # type: ignore[attr-defined]
+        gateway_online_invoker.online_invoker_provider = gateway_online_invoker.provider  # type: ignore[attr-defined]
 
         runtime_online_invoker = online_invoker
         # P4: World A mainchain — optional with_nexus Online armor (no new topology).
@@ -597,6 +623,7 @@ class BattlesuitGateway:
                     runtime_online_invoker = build_registered_online_invoker(
                         binding.provider,
                         command=command,
+                        model_name=request.online_model_name,
                         timeout_sec=(
                             float(route.get("timeout_sec", 120.0))
                             if isinstance(route, Mapping)
@@ -670,18 +697,24 @@ class BattlesuitGateway:
         final_online = runtime_online_invoker or gateway_online_invoker
         # Canonical formal entry: MainchainEntry → CapabilityPlanner → UnifiedRuntime.
         # No direct UnifiedRuntime fallback as an alternate product path.
-        from nexus.services.mainchain_entry import run_mainchain
+        try:
+            from nexus.services.mainchain_entry import run_mainchain
 
-        return run_mainchain(
-            request,
-            online_invoker=final_online,
-            local_service=local_service,
-            capability_invokers=capability_invokers,
-            verifier=verifier,
-            learning=learning,
-            receipt_path=receipt_path,
-            with_nexus_armor=bool(armor_on),
-        )
+            return run_mainchain(
+                request,
+                online_invoker=final_online,
+                local_service=local_service,
+                capability_invokers=capability_invokers,
+                verifier=verifier,
+                learning=learning,
+                receipt_path=receipt_path,
+                with_nexus_armor=bool(armor_on),
+            )
+        finally:
+            if had_bound_decision:
+                self._online_execution_decision = previous_bound_decision
+            else:
+                self.__dict__.pop("_online_execution_decision", None)
 
     def bind_online_execution_decision(self, decision: Any) -> None:
         """Bind a previously resolved OnlineExecutionDecision for physical CLI paths.
@@ -727,18 +760,24 @@ class BattlesuitGateway:
         content: str,
         sys_msg: str,
         provider: str,
+        model_name: str,
         timeout_sec: int,
         gateway_telemetry: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
-        """Invoke a registered print-mode Online CLI (grok/agy/codex) with bound authorization."""
+        """Invoke a registered print-mode Online CLI with bound authorization."""
         from nexus.services.unified_runtime import build_registered_online_invoker
 
-        invoker = build_registered_online_invoker(provider, timeout_sec=float(timeout_sec))
+        invoker = build_registered_online_invoker(
+            provider,
+            model_name=model_name,
+            timeout_sec=float(timeout_sec),
+        )
         prompt = f"{sys_msg}\n\n{content}" if sys_msg else content
         context = {
             "task_id": str(os.getenv("NEXUS_TASK_ID") or "gateway-print"),
             "online_prompt": prompt,
             "online_payload": "",
+            "online_model_name": model_name,
             "online_execution_decision": (
                 self._online_execution_decision.to_dict()
                 if hasattr(self._online_execution_decision, "to_dict")
@@ -781,9 +820,160 @@ class BattlesuitGateway:
         }
         return ok, raw
 
-    def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
+    def _gateway_authority_failure(
+        self,
+        reason: str,
+        *,
+        supplied_authority: Any,
+        model_name: str,
+        admitted_provider: Any = "",
+        admitted_model: Any = "",
+    ) -> tuple[dict[str, Any], str]:
+        if isinstance(supplied_authority, Mapping):
+            authority_evidence: Any = dict(supplied_authority)
+        else:
+            authority_evidence = {
+                "supplied_type": type(supplied_authority).__name__,
+                "supplied_value": repr(supplied_authority),
+            }
+        failure_evidence = {
+            "reason": reason,
+            "actual_provider": str(self.oauth_provider or ""),
+            "actual_model": str(model_name or ""),
+            "admitted_provider": str(admitted_provider or ""),
+            "admitted_model": str(admitted_model or ""),
+        }
+        result = {
+            "status": "FAILED",
+            "summary": reason,
+            "error": reason,
+            "error_category": "gateway_invocation_authority",
+            "invoked": False,
+            "output_delivered": False,
+            "gate_passed": False,
+            "provider_call_count": 0,
+            "provider": str(self.oauth_provider or ""),
+            "model_name": str(model_name or ""),
+            "response": "",
+            "raw_response": "",
+            "usage": {},
+            "gateway_invocation_authority": authority_evidence,
+            "normalized_failure_evidence": failure_evidence,
+        }
+        return result, reason
+
+    def _validate_gateway_invocation_authority(
+        self,
+        authority: Any,
+        *,
+        model_name: str,
+    ) -> tuple[dict[str, Any], str] | None:
+        """Validate one per-call T3A1 identity before any physical edge work."""
+        if authority is None:
+            return None
+        if not isinstance(authority, Mapping):
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_malformed",
+                supplied_authority=authority,
+                model_name=model_name,
+            )
+        if authority.get("schema") != self.GATEWAY_INVOCATION_AUTHORITY_SCHEMA:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_malformed",
+                supplied_authority=authority,
+                model_name=model_name,
+            )
+        if authority.get("status") != "ALLOW":
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_status_not_allow",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=authority.get("resolved_provider"),
+                admitted_model=authority.get("resolved_model"),
+            )
+        if authority.get("gate_passed") is not True:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_gate_not_passed",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=authority.get("resolved_provider"),
+                admitted_model=authority.get("resolved_model"),
+            )
+        admitted_provider = authority.get("resolved_provider")
+        if not isinstance(admitted_provider, str) or not admitted_provider.strip():
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_provider_missing",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=authority.get("resolved_model"),
+            )
+        admitted_model = authority.get("resolved_model")
+        if not isinstance(admitted_model, str) or not admitted_model.strip():
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_model_missing",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=admitted_model,
+            )
+
+        actual_provider = str(self.oauth_provider or "")
+        if actual_provider != admitted_provider:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_provider_mismatch",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=admitted_model,
+            )
+        if str(model_name or "") != admitted_model:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_model_mismatch",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=admitted_model,
+            )
+        from nexus.services.unified_runtime import (
+            REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS,
+        )
+
+        if actual_provider in REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_model_binding_unsupported",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=admitted_model,
+            )
+        if actual_provider not in {"ollama", "gemini", "grok", "agy", "codex", "openai", "opencode"}:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_provider_unsupported",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=admitted_model,
+            )
+        return None
+
+    def _ask_via_cli(
+        self,
+        content: str,
+        model_name: str,
+        sys_msg: str,
+        complexity_score: float = 0.5,
+        gateway_invocation_authority: Mapping[str, Any] | None = None,
+    ):
         """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""
         import time
+
+        authority_failure = self._validate_gateway_invocation_authority(
+            gateway_invocation_authority,
+            model_name=model_name,
+        )
+        if authority_failure is not None:
+            return authority_failure
 
         if not self._online_physical_allowed():
             # Fail closed for direct physical Online paths (surgical/ask/structured).
@@ -863,6 +1053,49 @@ class BattlesuitGateway:
 
 
         
+        # 🚀 [Compact Prompt Gateway] 壓縮 System Prompt 與 Context 以降低 Token 消耗與 Wall-time
+        if os.getenv("NEXUS_GATEWAY_COMPACT_PROMPT", "0") == "1":
+            sys_msg = sys_msg.replace("Do not use tools, do not inspect files, and do not create an execution plan.", "No tools/files/plans.")
+            content = re.sub(r"[ \t]+", " ", content)
+            content = re.sub(r"\n\n+", "\n", content)
+
+        if self.oauth_provider == "ollama":
+            return self._ask_via_ollama(
+                content=content,
+                model_name=model_name,
+                sys_msg=sys_msg,
+                timeout_sec=dynamic_timeout,
+                gateway_telemetry=gateway_telemetry,
+            )
+
+        # Multi-provider Online path: grok/agy/codex use registered print-mode CLIs.
+        # Do NOT route every Online provider through the Gemini binary (discovery bug).
+        provider_key = str(self.oauth_provider or "").strip().lower()
+        if provider_key in {"grok", "agy", "codex", "openai", "opencode"}:
+            return self._ask_via_registered_print_cli(
+                content=content,
+                sys_msg=sys_msg,
+                provider=provider_key,
+                model_name=model_name,
+                timeout_sec=dynamic_timeout,
+                gateway_telemetry=gateway_telemetry,
+            )
+        # Prefer Antigravity (agy) when available — Gemini Code Assist individual tier is blocked.
+        if (
+            gateway_invocation_authority is None
+            and provider_key in {"gemini", "auto", ""}
+            and shutil.which("agy")
+            and os.getenv("NEXUS_PREFER_AGY", "1") == "1"
+        ):
+            return self._ask_via_registered_print_cli(
+                content=content,
+                sys_msg=sys_msg,
+                provider="agy",
+                model_name=model_name,
+                timeout_sec=dynamic_timeout,
+                gateway_telemetry=gateway_telemetry,
+            )
+
         custom_env = build_gemini_env(os.environ.copy())
 
         # Resolve binaries dynamically to avoid hard failure on host-specific paths.
@@ -883,42 +1116,6 @@ class BattlesuitGateway:
                 "Gateway bootstrap failed: cannot locate 'gemini' binary",
                 category="binary_missing",
             ), "gemini_missing"
-
-        # 🚀 [Compact Prompt Gateway] 壓縮 System Prompt 與 Context 以降低 Token 消耗與 Wall-time
-        if os.getenv("NEXUS_GATEWAY_COMPACT_PROMPT", "0") == "1":
-            sys_msg = sys_msg.replace("Do not use tools, do not inspect files, and do not create an execution plan.", "No tools/files/plans.")
-            content = re.sub(r"[ \t]+", " ", content)
-            content = re.sub(r"\n\n+", "\n", content)
-
-        if self.oauth_provider == "ollama":
-            return self._ask_via_ollama(
-                content=content,
-                model_name=model_name,
-                sys_msg=sys_msg,
-                timeout_sec=dynamic_timeout,
-                gateway_telemetry=gateway_telemetry,
-            )
-
-        # Multi-provider Online path: grok/agy/codex use registered print-mode CLIs.
-        # Do NOT route every Online provider through the Gemini binary (discovery bug).
-        provider_key = str(self.oauth_provider or "").strip().lower()
-        if provider_key in {"grok", "agy", "codex", "openai"}:
-            return self._ask_via_registered_print_cli(
-                content=content,
-                sys_msg=sys_msg,
-                provider=provider_key,
-                timeout_sec=dynamic_timeout,
-                gateway_telemetry=gateway_telemetry,
-            )
-        # Prefer Antigravity (agy) when available — Gemini Code Assist individual tier is blocked.
-        if provider_key in {"gemini", "auto", ""} and shutil.which("agy") and os.getenv("NEXUS_PREFER_AGY", "1") == "1":
-            return self._ask_via_registered_print_cli(
-                content=content,
-                sys_msg=sys_msg,
-                provider="agy",
-                timeout_sec=dynamic_timeout,
-                gateway_telemetry=gateway_telemetry,
-            )
 
         invocation_build_start = time.monotonic()
         invocation = build_gemini_cli_invocation(

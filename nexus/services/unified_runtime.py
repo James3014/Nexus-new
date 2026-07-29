@@ -223,6 +223,18 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
     },
 }
 
+# These providers have no verified registered-CLI model-binding contract. An
+# admitted physical call must not silently fall back to a provider default.
+REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS: frozenset[str] = frozenset(
+    {"agy", "grok", "openai"}
+)
+
+# Explicit provider contracts. These are not inferred from installed CLIs.
+REGISTERED_CLI_MODEL_BINDING_FLAGS: dict[str, tuple[str, str]] = {
+    "codex": ("exec", "-m"),
+    "opencode": ("run", "--model"),
+}
+
 # Local-only providers may appear on Gateway defaults (auto-detect) but are not
 # Online CLI registry members. They must not be promoted into Online route.provider
 # merely because they are locally available.
@@ -245,6 +257,40 @@ def _required_identity(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name}_missing")
     return value
+
+
+def _optional_identity(value: Any) -> str:
+    text = value if isinstance(value, str) else str(value or "")
+    return text if text.strip() else ""
+
+
+def _registered_cli_model_binding_failure(
+    provider: str,
+    *,
+    model_name: str,
+    authority: Any,
+) -> str:
+    """Validate the model edge before registered CLI discovery or execution."""
+    if authority is None:
+        return ""
+    key = str(provider or "").strip().lower()
+    if not isinstance(authority, Mapping):
+        return "gateway_invocation_authority_malformed"
+    admitted_provider = authority.get("resolved_provider")
+    if not isinstance(admitted_provider, str) or not admitted_provider.strip():
+        return "gateway_invocation_authority_provider_missing"
+    if key != admitted_provider:
+        return "gateway_invocation_authority_provider_mismatch"
+    if key in REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS:
+        return "gateway_invocation_authority_model_binding_unsupported"
+    admitted_model = authority.get("resolved_model")
+    if not isinstance(admitted_model, str) or not admitted_model.strip():
+        return "gateway_invocation_authority_model_missing"
+    if not model_name:
+        return "gateway_invocation_authority_model_missing"
+    if model_name != admitted_model:
+        return "gateway_invocation_authority_model_mismatch"
+    return ""
 
 
 def _validate_online_admission_record(
@@ -879,6 +925,7 @@ class OnlineCliSpec:
     command: tuple[str, ...]
     timeout_sec: float = 120.0
     working_directory: str = ""
+    model_name: str = ""
 
     def validate(self) -> None:
         if not str(self.provider or "").strip():
@@ -1184,6 +1231,7 @@ def resolve_registered_online_cli_spec(
     provider: str,
     *,
     command: tuple[str, ...] | list[str] | str | None = None,
+    model_name: str | None = None,
     timeout_sec: float = 120.0,
     environ: Mapping[str, str] | None = None,
     working_directory: str = "",
@@ -1222,6 +1270,7 @@ def resolve_registered_online_cli_spec(
         command=resolved_command,
         timeout_sec=timeout_sec,
         working_directory=working_directory,
+        model_name=_optional_identity(model_name),
     )
     spec.validate()
     return spec
@@ -1239,6 +1288,32 @@ def build_subprocess_online_invoker(
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(context.get("task_id", ""))
+        context_model = _optional_identity(
+            context.get("online_model_name") or context.get("model_name")
+        )
+        admitted_model = _optional_identity(spec.model_name) or context_model
+        authority_failure = _registered_cli_model_binding_failure(
+            spec.provider,
+            model_name=admitted_model,
+            authority=context.get("gateway_invocation_authority"),
+        )
+        if authority_failure:
+            return normalize_online_invoker_payload(
+                provider=spec.provider,
+                task_id=task_id,
+                invoked=False,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=0,
+                response="",
+                raw_response="",
+                usage={},
+                error=authority_failure,
+                evidence_refs=[f"online:{spec.provider}:{task_id}:{authority_failure}"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"live_provider_claim": False},
+            )
         attempt_info = context.get("execution_attempt") if isinstance(context.get("execution_attempt"), Mapping) else {}
         attempt_id = str(
             context.get("attempt_id")
@@ -1299,16 +1374,53 @@ def build_subprocess_online_invoker(
         stdin_input: str | None = None
         prompt_transport = "stdin"
 
-        if print_flag and len(argv) == 1:
-            if spec.provider == "agy":
+        model_binding = REGISTERED_CLI_MODEL_BINDING_FLAGS.get(spec.provider)
+        if context.get("gateway_invocation_authority") is not None and admitted_model and model_binding and len(argv) != 1:
+            subcommand, model_flag = model_binding
+            accepted_model_flags = {model_flag}
+            if spec.provider == "codex":
+                accepted_model_flags.add("--model")
+            if (
+                len(argv) < 4
+                or argv[1] != subcommand
+                or argv[2] not in accepted_model_flags
+                or argv[3] != admitted_model
+            ):
+                return normalize_online_invoker_payload(
+                    provider=spec.provider,
+                    task_id=task_id,
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    raw_response="",
+                    usage={},
+                    error="registered_cli_model_binding_command_shape_unsupported",
+                    evidence_refs=[
+                        f"online:{spec.provider}:{task_id}:"
+                        "registered_cli_model_binding_command_shape_unsupported"
+                    ],
+                    transport=TRANSPORT_REGISTERED_CLI,
+                    selection_source=SELECTION_EXPLICIT_REQUEST,
+                    extra={"live_provider_claim": False},
+                )
+            stdin_input = stdin
+            prompt_transport = "stdin"
+        elif print_flag and len(argv) == 1:
+            if model_binding and admitted_model:
+                subcommand, model_flag = model_binding
+                argv = [argv[0], subcommand, model_flag, admitted_model, stdin]
+            elif spec.provider == "agy":
                 argv = [argv[0], "--dangerously-skip-permissions", print_flag, stdin]
             else:
                 argv = [argv[0], print_flag, stdin]
             stdin_input = ""
             prompt_transport = "argv"
         elif spec.provider == "opencode" and len(argv) == 1:
-            model = str(meta.get("default_model", "") or "").strip()
-            argv = [argv[0], "run", "--model", model, stdin]
+            subcommand, model_flag = REGISTERED_CLI_MODEL_BINDING_FLAGS["opencode"]
+            model = admitted_model or str(meta.get("default_model", "") or "").strip()
+            argv = [argv[0], subcommand, model_flag, model, stdin]
             stdin_input = ""
             prompt_transport = "argv"
         else:
@@ -1441,6 +1553,7 @@ def build_registered_online_invoker(
     provider: str,
     *,
     command: tuple[str, ...] | list[str] | str | None = None,
+    model_name: str | None = None,
     timeout_sec: float = 120.0,
     environ: Mapping[str, str] | None = None,
     runner: Callable[..., Any] = subprocess.run,
@@ -1467,6 +1580,7 @@ def build_registered_online_invoker(
         spec = resolve_registered_online_cli_spec(
             key,
             command=command,
+            model_name=model_name,
             timeout_sec=timeout_sec,
             environ=environ,
         )
@@ -1486,6 +1600,32 @@ def build_registered_online_invoker(
         )
 
         task_id = str(context.get("task_id", ""))
+        context_model = _optional_identity(
+            context.get("online_model_name") or context.get("model_name")
+        )
+        admitted_model = _optional_identity(model_name) or context_model
+        authority_failure = _registered_cli_model_binding_failure(
+            key,
+            model_name=admitted_model,
+            authority=context.get("gateway_invocation_authority"),
+        )
+        if authority_failure:
+            return normalize_online_invoker_payload(
+                provider=key,
+                task_id=task_id,
+                invoked=False,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=0,
+                response="",
+                raw_response="",
+                usage={},
+                error=authority_failure,
+                evidence_refs=[f"online:{key}:{task_id}:{authority_failure}"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"live_provider_claim": False},
+            )
         decision = decision_from_context(context if isinstance(context, Mapping) else {})
         inject_authorized = bool(
             decision is not None
@@ -1515,6 +1655,7 @@ def build_registered_online_invoker(
             spec = resolve_registered_online_cli_spec(
                 key,
                 command=command,
+                model_name=admitted_model,
                 timeout_sec=timeout_sec,
                 environ=environ,
             )
