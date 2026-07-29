@@ -207,6 +207,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_approve,
     run_self_hosted_cancel,
     run_self_hosted_close_without_candidate,
+    run_self_hosted_cleanup,
     run_self_hosted_dispose,
     run_self_hosted_integrate,
     run_self_hosted_list_actionable,
@@ -3508,6 +3509,25 @@ def self_hosted_list_actionable(state_dir: str | None) -> None:
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
+@self_hosted_group.command(name="cleanup")
+@click.option("--task-id", required=True, help="Exact task ID to clean up.")
+@click.option("--apply", is_flag=True, help="Apply eligible cleanup; default is dry-run.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_cleanup(
+    task_id: str,
+    apply: bool,
+    state_dir: str | None,
+) -> None:
+    """Preview or apply governed cleanup for one self-hosted task."""
+    res = run_self_hosted_cleanup(
+        task_id=task_id,
+        apply=apply,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
 @self_hosted_group.command(name="approve")
 @click.option("--task-id", required=True, help="Task ID to approve.")
 @click.option("--candidate-commit-sha", required=True, help="Candidate commit SHA.")
@@ -3616,5 +3636,4 @@ def self_hosted_cancel(
 if __name__ == "__main__":
 
     nexus()
-
 
