@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -30,16 +31,20 @@ class CodexExecutionReceipt:
 
 
 class CodexCliExecutor:
+    DEFAULT_MODEL = "gpt-5.5"
+
     def __init__(
         self,
         executable: str = "codex",
         timeout_seconds: float = 900.0,
-        model: str = "gpt-5.5",
+        model: str | None = None,
         on_process_group: Optional[Callable[[Optional[int]], None]] = None,
     ):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
-        self.model = model
+        self.model = model if model is not None else (
+            os.getenv("NEXUS_CODEX_WORKER_MODEL", "").strip() or self.DEFAULT_MODEL
+        )
         self.on_process_group = on_process_group
 
     def _request(

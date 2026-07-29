@@ -66,8 +66,22 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
     codex = workers["codex_luna"]
     assert codex["state"] == "PROVEN_MAINCHAIN"
     assert codex["capability_grade"] == "L3_HISTORICAL"
-    assert codex["availability"] == "BLOCKED_CLIENT_UPGRADE"
-    assert codex["current_assignment"] == "none_until_client_upgrade_and_live_recheck"
+    assert codex["autonomy"] == "L3_HISTORICAL"
+    assert codex["availability"] == "AVAILABLE"
+    assert codex["current_assignment"] == "available_for_governed_mainchain_assignment"
+    assert codex["requires"] == ["governed_adapter", "independent_verification", "receipt"]
+    assert set(codex["forbidden_claims"]) == {
+        "product_authority",
+        "protected_main_merge",
+        "remote_push",
+    }
+    assert codex["runtime_verification"] == {
+        "date": "2026-07-29",
+        "cli_version": "0.146.0",
+        "model": "gpt-5.6-luna",
+        "mode": "read_only_smoke",
+        "stdout": "OK",
+    }
 
     agy = workers["agy_flash"]
     assert agy["state"] == "PROVEN_MAINCHAIN"

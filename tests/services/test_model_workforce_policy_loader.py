@@ -183,17 +183,43 @@ def test_admission_blocks_non_admissible_states_and_unavailability() -> None:
     dec_laguna = loader.admit(req_laguna)
     assert dec_laguna.decision == AdmissionDecision.BLOCK
 
-    # BLOCKED_CLIENT_UPGRADE availability
-    req_codex = WorkforceAdmissionRequest(
+
+
+def _codex_request(provided_controls: list[str]) -> WorkforceAdmissionRequest:
+    return WorkforceAdmissionRequest(
         requested_worker_id="codex_luna",
         role="main_engineering",
         autonomy="L3_HISTORICAL",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["codex_cli_upgrade", "governed_adapter", "independent_verification", "receipt"],  # type: ignore[arg-type]
+        provided_controls=provided_controls,  # type: ignore[arg-type]
     )
-    dec_codex = loader.admit(req_codex)
-    assert dec_codex.decision == AdmissionDecision.BLOCK
+
+
+def test_codex_luna_allows_governed_mainchain_assignment_with_all_controls() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+
+    decision = loader.admit(
+        _codex_request(["governed_adapter", "independent_verification", "receipt"])
+    )
+
+    assert decision.decision == AdmissionDecision.ALLOW
+    assert decision.resolved_worker_id == "codex_luna"
+    assert decision.resolved_model == "gpt-5.6-luna"
+    assert decision.required_controls == (
+        "governed_adapter",
+        "independent_verification",
+        "receipt",
+    )
+
+
+def test_codex_luna_blocks_when_receipt_control_is_missing() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+
+    decision = loader.admit(_codex_request(["governed_adapter", "independent_verification"]))
+
+    assert decision.decision == AdmissionDecision.BLOCK
+    assert decision.missing_controls == ("receipt",)
 
 
 def test_admission_blocks_missing_required_controls() -> None:
