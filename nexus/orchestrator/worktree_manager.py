@@ -83,12 +83,18 @@ class WorktreeManager:
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.process_checker = process_checker or self._path_has_process
 
-    def _run_git(self, args: list[str], cwd: Optional[str | Path] = None) -> str:
+    def _run_git(
+        self,
+        args: list[str],
+        cwd: Optional[str | Path] = None,
+        env: Optional[dict[str, str]] = None,
+    ) -> str:
         result = subprocess.run(
             ["git", *args],
             capture_output=True,
             text=True,
             cwd=cwd,
+            env=env,
         )
         if result.returncode != 0:
             raise RuntimeError(

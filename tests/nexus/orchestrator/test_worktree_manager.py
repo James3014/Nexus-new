@@ -532,4 +532,33 @@ def test_five_clean_attempts_do_not_grow_worktrees(sh2_repo):
         assert manager.cleanup_terminal_target(contract, lease).decision == "REMOVED"
 
     assert len(manager._registered_worktrees(sh2_repo["controller"])) == baseline
+
+
+def test_run_git_passes_custom_env_to_subprocess(temp_git_repo):
+    worktree_root = temp_git_repo / ".nexus" / "worktrees"
+    manager = WorktreeManager(root_dir=str(worktree_root))
+    hooks_dir = temp_git_repo / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    post_commit = hooks_dir / "post-commit"
+    post_commit.write_text(
+        "#!/bin/sh\necho \"HOOK_ENV=$CUSTOM_WORKTREE_ENV\" > hook_out.txt\n",
+        encoding="utf-8",
+    )
+    post_commit.chmod(0o755)
+    _git(temp_git_repo, "config", "core.hooksPath", str(hooks_dir))
+
+    manager._run_git(
+        ["commit", "--allow-empty", "-m", "env test"],
+        cwd=temp_git_repo,
+        env={**os.environ, "CUSTOM_WORKTREE_ENV": "isolated_value"},
+    )
+
+    assert (temp_git_repo / "hook_out.txt").read_text(encoding="utf-8").strip() == "HOOK_ENV=isolated_value"
+
+
+def test_run_git_without_env_uses_default_process_environment(temp_git_repo):
+    worktree_root = temp_git_repo / ".nexus" / "worktrees"
+    manager = WorktreeManager(root_dir=str(worktree_root))
+    output = manager._run_git(["rev-parse", "HEAD"], cwd=temp_git_repo)
+    assert len(output) == 40
 # integrity-seal: 1776512137

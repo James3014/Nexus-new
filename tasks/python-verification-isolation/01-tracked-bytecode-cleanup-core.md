@@ -6,7 +6,7 @@
 **task_id:** `tracked-bytecode-cleanup-core`
 **AUTO_CHAIN:** false
 **controller_base_revision:** `bf6afeddf921128b061a6bc65f6228650f22627d`
-**depends_on:** `python-verification-isolation-runtime-guard` integrated
+**depends_on:** `candidate-commit-subprocess-env-isolation` integrated
 **commit_required:** true
 **candidate_required:** true
 **worker_may_commit:** true
