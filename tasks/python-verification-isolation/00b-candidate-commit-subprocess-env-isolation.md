@@ -2,7 +2,7 @@
 
 **artifact_authority:** current
 **owner:** James Chen
-**status:** PENDING
+**status:** COMPLETED
 **task_id:** `candidate-commit-subprocess-env-isolation`
 **AUTO_CHAIN:** false
 **controller_base_revision:** `bf6afeddf921128b061a6bc65f6228650f22627d`
@@ -55,3 +55,10 @@ git diff --check
 - `CandidateCommitter` uses subprocess `env` without touching `os.environ`.
 - Unit tests pass proving subprocess isolation and thread safety against environment leakage.
 - All verification commands pass.
+
+## Completion evidence
+
+- Candidate: `ff4c421b32c917fb47894cdaafbd27e0bcab5fcf`
+- Integrated Controller: `06e211496e05be3d42a7d079ef6f215977774f95`
+- Independent verification: 43 focused tests passed with no working-tree mutation.
+- Residual follow-up: AGY account isolation changes `HOME`, so governed Git commits require a separate Git HOME selection contract before cleanup tasks may start.

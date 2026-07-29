@@ -4,7 +4,7 @@
 **owner:** James Chen
 **status:** active, governed and sequential
 **source_decision:** user-authorized remediation after AGY Controller contamination finding
-**controller_base_revision:** `bf6afeddf921128b061a6bc65f6228650f22627d`
+**controller_base_revision:** `06e211496e05be3d42a7d079ef6f215977774f95`
 **AUTO_CHAIN:** false
 
 ## Ordered cards
@@ -12,15 +12,16 @@
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
 | 0a | `python-verification-isolation-runtime-guard` | `00a-python-verification-isolation-runtime-guard.md` | COMPLETED | campaign bootstrap integrated, supersedes 00-python-verification-isolation-guard |
-| 0b | `candidate-commit-subprocess-env-isolation` | `00b-candidate-commit-subprocess-env-isolation.md` | PENDING | runtime guard integrated |
-| 1 | `tracked-bytecode-cleanup-core` | `01-tracked-bytecode-cleanup-core.md` | PENDING | candidate-commit-subprocess-env-isolation integrated |
+| 0b | `candidate-commit-subprocess-env-isolation` | `00b-candidate-commit-subprocess-env-isolation.md` | COMPLETED | runtime guard integrated |
+| 0c | `candidate-commit-git-home-isolation` | `00c-candidate-commit-git-home-isolation.md` | PENDING | subprocess env isolation integrated |
+| 1 | `tracked-bytecode-cleanup-core` | `01-tracked-bytecode-cleanup-core.md` | PENDING | candidate-commit-git-home-isolation integrated, then exact deletion contract integrated |
 | 2 | `tracked-bytecode-cleanup-verifier-base` | `02-tracked-bytecode-cleanup-verifier-base.md` | PENDING | core cleanup integrated |
 | 3 | `tracked-bytecode-cleanup-concurrency` | `03-tracked-bytecode-cleanup-concurrency.md` | PENDING | verifier-base cleanup integrated |
 | 4 | `tracked-bytecode-cleanup-django-tests` | `04-tracked-bytecode-cleanup-django-tests.md` | PENDING | concurrency cleanup integrated |
 
 ## Current frontier
 
-`candidate-commit-subprocess-env-isolation` (`00b-candidate-commit-subprocess-env-isolation.md`) is the current frontier task card. No cleanup card may start until candidate-commit-subprocess-env-isolation Candidate is integrated. No card may self-chain after completion, failure, Candidate formation, or BLOCK.
+`candidate-commit-git-home-isolation` (`00c-candidate-commit-git-home-isolation.md`) is the current frontier task card. No cleanup or deletion-contract card may start until the Git HOME isolation Candidate is integrated. No card may self-chain after completion, failure, Candidate formation, or BLOCK.
 
 ## Completion condition
 
@@ -36,6 +37,7 @@ The campaign is complete only when:
 ## Completed cards
 
 - `python-verification-isolation-runtime-guard` (`00a-python-verification-isolation-runtime-guard.md`) - runtime guard candidate integrated at `bf6afeddf921128b061a6bc65f6228650f22627d`.
+- `candidate-commit-subprocess-env-isolation` (`00b-candidate-commit-subprocess-env-isolation.md`) - Candidate `ff4c421b32c917fb47894cdaafbd27e0bcab5fcf` integrated at `06e211496e05be3d42a7d079ef6f215977774f95`; subprocess-only MUSE isolation proven, but Git HOME separation remains the current follow-up.
 
 ## Blocked or superseded cards
 

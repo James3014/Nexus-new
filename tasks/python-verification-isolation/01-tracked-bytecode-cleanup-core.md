@@ -5,8 +5,8 @@
 **status:** PENDING
 **task_id:** `tracked-bytecode-cleanup-core`
 **AUTO_CHAIN:** false
-**controller_base_revision:** `bf6afeddf921128b061a6bc65f6228650f22627d`
-**depends_on:** `candidate-commit-subprocess-env-isolation` integrated
+**controller_base_revision:** `06e211496e05be3d42a7d079ef6f215977774f95`
+**depends_on:** `candidate-commit-git-home-isolation` integrated, then `exact-authorized-deletion-contract` integrated
 **commit_required:** true
 **candidate_required:** true
 **worker_may_commit:** true
