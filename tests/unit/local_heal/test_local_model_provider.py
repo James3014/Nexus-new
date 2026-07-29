@@ -138,6 +138,38 @@ def test_ollama_provider_passes_options_to_api() -> None:
             payload = json.loads(req_obj.data.decode("utf-8"))
             assert "options" in payload
             assert payload["options"] == opts
+            assert "think" not in payload
+
+
+def test_ollama_provider_passes_think_as_top_level_api_field() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_NAME": "qwen3:8b",
+    }):
+        provider = OllamaLocalModelProvider()
+        req = LocalModelProviderRequest(
+            task_id="t9",
+            prompt="return json only",
+            evidence_refs=(),
+            options={"temperature": 0.0},
+            think=False,
+        )
+
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = b'{"response": "{}"}'
+        mock_response.__enter__.return_value = mock_response
+
+        with mock.patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+            resp = provider.generate(req)
+            assert resp.model_called is True
+
+            req_obj = mock_urlopen.call_args[0][0]
+            import json
+            payload = json.loads(req_obj.data.decode("utf-8"))
+            assert payload["think"] is False
+            assert payload["options"] == {"temperature": 0.0}
+            assert "think" not in payload["options"]
 
 
 def test_recording_provider_records_success() -> None:

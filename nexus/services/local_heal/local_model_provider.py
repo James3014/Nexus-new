@@ -21,6 +21,7 @@ class LocalModelProviderRequest:
     timeout_sec: float = 120.0
     max_output_chars: int = 4000
     options: dict[str, Any] | None = None
+    think: bool | None = None
     api_type: str = "generate"
     # N30R-V3 Phase 2: caller-supplied phase for authoritative ledger records.
     # One of: "planning", "spec_gen", "patch", "retry", "judge", "proposer", ""
@@ -286,6 +287,8 @@ class OllamaLocalModelProvider(LocalModelProvider):
             }
         if request.options:
             payload["options"] = request.options
+        if request.think is not None:
+            payload["think"] = request.think
 
         t0 = time.monotonic()
         try:
