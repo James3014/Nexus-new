@@ -428,6 +428,38 @@ def test_dirty_unique_target_is_retained_for_review(sh2_repo):
     assert target.exists()
 
 
+def test_empty_unregistered_target_is_removed(sh2_repo):
+    contract = _contract(sh2_repo, task_id="empty-unregistered")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(target))
+    target.mkdir()
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+
+
+def test_nonempty_unregistered_target_remains_blocked(sh2_repo):
+    contract = _contract(sh2_repo, task_id="nonempty-unregistered")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(target))
+    target.mkdir()
+    (target / "retained.txt").write_text("must remain\n", encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert receipt.blocker == "unregistered Target is not an empty directory"
+    assert target.exists()
+    assert (target / "retained.txt").exists()
+
+
 def test_active_process_blocks_terminal_cleanup(sh2_repo):
     contract = _contract(sh2_repo)
     manager = WorktreeManager(

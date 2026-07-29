@@ -149,6 +149,21 @@ class SelfHostedTaskService:
         packet = state.get("promotion_packet") or {}
         return state.get("candidate_commit_sha") or packet.get("candidate_commit_sha")
 
+    def _require_integrated_replacement(self, task_id: str, superseded_by: str) -> None:
+        replacement = self._read_state(superseded_by)
+        if (
+            replacement is None
+            or superseded_by == task_id
+            or replacement.get("task_id") != superseded_by
+            or replacement.get("status") != "INTEGRATED"
+            or replacement.get("promotion_status") != "INTEGRATED"
+            or not str(replacement.get("integration_result_sha") or "").strip()
+        ):
+            raise RuntimeError(
+                "superseded_by must name an existing INTEGRATED self-hosted task "
+                "with promotion_status=INTEGRATED and integration_result_sha"
+            )
+
     @classmethod
     def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         status = str(state.get("status") or "UNKNOWN")
@@ -1356,6 +1371,10 @@ class SelfHostedTaskService:
             "candidate_ref": None,
             "candidate_state_hash": None,
             "verified_receipt_hash": None,
+            "salvage_commit_sha": None,
+            "salvage_ref": None,
+            "salvage_only": False,
+            "promotion_eligible": False,
             "approved_binding": None,
             "integration_branch": None,
             "integration_base_sha": None,
@@ -1454,6 +1473,10 @@ class SelfHostedTaskService:
                     current["candidate_ref"] = None
                     current["candidate_state_hash"] = None
                     current["verified_receipt_hash"] = None
+                    current["salvage_commit_sha"] = None
+                    current["salvage_ref"] = None
+                    current["salvage_only"] = False
+                    current["promotion_eligible"] = False
                     current["verified_receipt"] = None
                     current["promotion_packet"] = None
                     current["approved_binding"] = None
@@ -1564,18 +1587,124 @@ class SelfHostedTaskService:
         contract = state.get("contract") or {}
         lease = state.get("lease") or {}
         target_raw = state.get("target_worktree") or lease.get("target_worktree") or contract.get("target_repo_root")
+        cleanup_values: dict[str, Any] = {
+            "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
+            "cleanup_eligible": state.get("cleanup_eligible", True),
+            "cleanup_performed": state.get("cleanup_performed", False),
+            "cleanup_performed_at": state.get("cleanup_performed_at"),
+        }
         if target_raw:
             target_path = Path(str(target_raw)).expanduser().resolve()
-            if target_path.exists():
-                raise RuntimeError(f"recorded Target path exists: {target_path}")
             controller_raw = state.get("controller_worktree") or contract.get("controller_repo_root")
-            if controller_raw:
+            lease_object = TargetWorktreeLease(**dict(lease)) if lease else None
+            if target_path.exists() and (not controller_raw or not lease_object):
+                raise RuntimeError(f"recorded Target path exists: {target_path}")
+            if target_path.exists() and controller_raw and lease_object:
                 controller_path = Path(str(controller_raw)).expanduser().resolve()
-                if controller_path.is_dir():
-                    target_worktree_root = contract.get("target_worktree_root") or str(target_path.parent)
-                    manager = WorktreeManager(root_dir=str(target_worktree_root))
-                    if manager._worktree_entry(controller_path, target_path) is not None:
-                        raise RuntimeError(f"recorded Target path is a registered worktree: {target_path}")
+                if not controller_path.is_dir():
+                    raise RuntimeError(f"recorded Target path exists: {target_path}")
+                manager = WorktreeManager(
+                    root_dir=str(contract.get("target_worktree_root") or target_path.parent)
+                )
+                entry = manager._worktree_entry(controller_path, target_path)
+                if entry is not None:
+                    if state.get("status") != "RETAINED_FOR_REVIEW":
+                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    has_recorded_salvage = bool(
+                        state.get("salvage_commit_sha") and state.get("salvage_ref")
+                    )
+                    if not manager._status_bytes(target_path) and not has_recorded_salvage:
+                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    self._require_integrated_replacement(task_id, superseded_by)
+                    salvage = {
+                        "salvage_commit_sha": state.get("salvage_commit_sha"),
+                        "salvage_ref": state.get("salvage_ref"),
+                        "salvage_only": state.get("salvage_only"),
+                        "promotion_eligible": state.get("promotion_eligible"),
+                    }
+                    try:
+                        if not salvage["salvage_commit_sha"] or not salvage["salvage_ref"]:
+                            salvage = manager.create_salvage_snapshot(
+                                self._contract_from_state(state),
+                                lease_object,
+                                str(state.get("attempt_id") or ""),
+                            )
+                        elif salvage["salvage_only"] is not True or salvage["promotion_eligible"] is not False:
+                            raise RuntimeError("recorded salvage metadata is invalid")
+                        self._checkpoint(
+                            task_id,
+                            "RETAINED_FOR_REVIEW",
+                            {
+                                **salvage,
+                                "promotion_status": "NOT_CREATED",
+                                "superseded_by": superseded_by,
+                                "cleanup_decision": "SALVAGED",
+                                "cleanup_blocker": None,
+                                "cleanup_performed": False,
+                                "cleanup_eligible": False,
+                                "state_retention_status": "TERMINAL",
+                            },
+                            attempt_id=state.get("attempt_id"),
+                        )
+                        cleanup = manager.cleanup_terminal_target(
+                            self._contract_from_state(state),
+                            lease_object,
+                            salvage_commit=str(salvage["salvage_commit_sha"]),
+                            salvage_ref=str(salvage["salvage_ref"]),
+                        )
+                    except Exception as exc:
+                        retained = self._checkpoint(
+                            task_id,
+                            "RETAINED_FOR_REVIEW",
+                            {
+                                **salvage,
+                                "promotion_status": "NOT_CREATED",
+                                "superseded_by": superseded_by,
+                                "cleanup_decision": "CLEANUP_BLOCKED",
+                                "cleanup_blocker": str(exc),
+                                "cleanup_performed": False,
+                                "cleanup_eligible": False,
+                                "state_retention_status": "TERMINAL",
+                            },
+                            attempt_id=state.get("attempt_id"),
+                        ) or state
+                        return retained
+                    if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
+                        return self._checkpoint(
+                            task_id,
+                            "RETAINED_FOR_REVIEW",
+                            {
+                                **salvage,
+                                "promotion_status": "NOT_CREATED",
+                                "superseded_by": superseded_by,
+                                "cleanup_decision": cleanup.decision,
+                                "cleanup_blocker": cleanup.blocker,
+                                "cleanup_performed": cleanup.performed,
+                                "cleanup_eligible": cleanup.eligible,
+                                "state_retention_status": "TERMINAL",
+                            },
+                            attempt_id=state.get("attempt_id"),
+                        ) or state
+                    cleanup_values = {
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_eligible": cleanup.eligible,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                        **salvage,
+                    }
+                else:
+                    cleanup = manager.cleanup_terminal_target(
+                        self._contract_from_state(state),
+                        lease_object,
+                    )
+                    if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
+                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    cleanup_values = {
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_eligible": cleanup.eligible,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                    }
 
         return self._checkpoint(
             task_id,
@@ -1589,10 +1718,7 @@ class SelfHostedTaskService:
                 "archive_eligible": True,
                 "merge_performed": False,
                 "push_performed": False,
-                "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
-                "cleanup_eligible": state.get("cleanup_eligible", True),
-                "cleanup_performed": state.get("cleanup_performed", False),
-                "cleanup_performed_at": state.get("cleanup_performed_at"),
+                **cleanup_values,
             },
             attempt_id=state.get("attempt_id"),
         ) or state
@@ -1844,12 +1970,17 @@ class SelfHostedTaskService:
             "candidate_ref": state.get("candidate_ref"),
             "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
             "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+            "salvage_commit_sha": state.get("salvage_commit_sha"),
+            "salvage_ref": state.get("salvage_ref"),
+            "salvage_only": state.get("salvage_only", False),
+            "promotion_eligible": state.get("promotion_eligible", False),
             "promotion_status": state.get("promotion_status"),
             "approved_binding": state.get("approved_binding"),
             "integration_branch": state.get("integration_branch"),
             "integration_base_sha": state.get("integration_base_sha"),
             "integration_result_sha": state.get("integration_result_sha"),
             "terminal_status": state.get("terminal_status"),
+            "superseded_by": state.get("superseded_by"),
             "cleanup_eligible": state.get("cleanup_eligible"),
             "cleanup_decision": state.get("cleanup_decision"),
             "cleanup_blocker": state.get("cleanup_blocker"),
