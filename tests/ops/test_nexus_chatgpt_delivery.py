@@ -260,6 +260,9 @@ def test_skills_do_not_contain_contradictory_connector_blocked_rule_when_nexus_b
     assert "If the lifecycle tools are not visible or the existing connector cannot expose them, stop fail-closed with `REPO_READY_CONNECTOR_BLOCKED`." not in launch_skill
     assert "REPO_READY_CONNECTOR_BLOCKED is the terminal result when the required\nconnector tools are unavailable." not in merge_skill
 
-    assert "nexus.bash must be used for governed lifecycle operations" in launch_skill
-    assert "REPO_READY_CONNECTOR_BLOCKED applies only when neither native lifecycle tools nor `nexus.bash` with repo-owned CLI wrappers are available." in launch_skill
+    launch_text = " ".join(launch_skill.replace("`", "").split())
+    merge_text = " ".join(merge_skill.replace("`", "").split())
 
+    assert "nexus.bash must be used for governed lifecycle operations" in launch_text
+    assert "REPO_READY_CONNECTOR_BLOCKED applies only when neither native lifecycle tools nor nexus.bash with repo-owned CLI wrappers are available." in launch_text
+    assert "nexus.bash must be used for governed lifecycle operations" in merge_text
