@@ -1375,7 +1375,7 @@ def build_subprocess_online_invoker(
         prompt_transport = "stdin"
 
         model_binding = REGISTERED_CLI_MODEL_BINDING_FLAGS.get(spec.provider)
-        if admitted_model and model_binding and len(argv) != 1:
+        if context.get("gateway_invocation_authority") is not None and admitted_model and model_binding and len(argv) != 1:
             subcommand, model_flag = model_binding
             accepted_model_flags = {model_flag}
             if spec.provider == "codex":

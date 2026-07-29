@@ -23,6 +23,7 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.unified_runtime import (
     ONLINE_CLI_SPEC_REGISTRY,
     OnlineCliSpec,
+    REGISTERED_CLI_MODEL_BINDING_FLAGS,
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_execution_replan_request,
@@ -4105,6 +4106,121 @@ def test_admitted_opencode_model_is_bound_in_physical_argv():
 
     assert recorded["argv"] == ["opencode", "run", "--model", model, "reply opencode"]
     assert res["gate_passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "command"),
+    [
+        ("codex", ("codex", "exec", "--json")),
+        ("opencode", ("opencode", "run", "--format", "json")),
+    ],
+)
+def test_legacy_custom_registered_cli_command_preserves_argv_without_authority(provider, command):
+    calls = []
+
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        calls.append((argv, input))
+
+        class Res:
+            stdout = "legacy custom ok"
+            stderr = ""
+            returncode = 0
+
+        return Res()
+
+    model = f"{provider}-legacy-model"
+    spec = OnlineCliSpec(provider=provider, command=command, model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+
+    result = invoker({"task_id": f"{provider}-legacy-custom", "task_statement": "legacy prompt"})
+
+    assert len(calls) == 1
+    assert calls[0] == (list(command), "legacy prompt")
+    assert result["gate_passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "command"),
+    [
+        ("codex", ("codex", "exec")),
+        ("codex", ("codex", "exec", "-m", "wrong-model")),
+        ("opencode", ("opencode", "run")),
+        ("opencode", ("opencode", "run", "--model", "wrong-model")),
+    ],
+)
+def test_governed_custom_registered_cli_command_requires_exact_model_binding(provider, command):
+    calls = []
+
+    def runner(*_args, **_kwargs):
+        calls.append(True)
+        raise AssertionError("governed model-binding failure reached provider runner")
+
+    model = f"{provider}-admitted-model"
+    authority = {
+        "schema": "nexus.gateway_invocation_authority.v1",
+        "status": "ALLOW",
+        "gate_passed": True,
+        "resolved_provider": provider,
+        "resolved_model": model,
+    }
+    spec = OnlineCliSpec(provider=provider, command=command, model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+
+    result = invoker(
+        {
+            "task_id": f"{provider}-governed-invalid-custom",
+            "task_statement": "must not run",
+            "gateway_invocation_authority": authority,
+        }
+    )
+
+    assert result["error"] == "registered_cli_model_binding_command_shape_unsupported"
+    assert result["invoked"] is False
+    assert result["provider_call_count"] == 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("provider", ["codex", "opencode"])
+def test_governed_exact_custom_registered_cli_command_runs_with_admitted_model(provider):
+    model = f"{provider}-admitted-model"
+    subcommand, model_flag = REGISTERED_CLI_MODEL_BINDING_FLAGS[provider]
+    command = (provider, subcommand, model_flag, model)
+    recorded = {}
+
+    def runner(argv, input=None, cwd=None, capture_output=True, text=True, timeout=120.0, check=False):
+        recorded["argv"] = argv
+        recorded["input"] = input
+
+        class Res:
+            stdout = "governed custom ok"
+            stderr = ""
+            returncode = 0
+
+        return Res()
+
+    authority = {
+        "schema": "nexus.gateway_invocation_authority.v1",
+        "status": "ALLOW",
+        "gate_passed": True,
+        "resolved_provider": provider,
+        "resolved_model": model,
+    }
+    spec = OnlineCliSpec(provider=provider, command=command, model_name=model)
+    invoker = build_subprocess_online_invoker(spec, runner=runner)
+
+    result = invoker(
+        {
+            "task_id": f"{provider}-governed-exact-custom",
+            "task_statement": "governed prompt",
+            "gateway_invocation_authority": authority,
+        }
+    )
+
+    assert recorded["argv"] == list(command)
+    assert recorded["input"] == "governed prompt"
+    assert result["invoked"] is True
+    assert result["provider_call_count"] == 1
+    assert result["gate_passed"] is True
 
 
 @pytest.mark.parametrize(
