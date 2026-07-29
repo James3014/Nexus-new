@@ -48,6 +48,13 @@
 - Report retrieved lessons with: source path, applicability, and how they change the current plan.
 - If no relevant lesson is found, state `no relevant prior lesson found`.
 
+## 🤖 Model Workforce Authority
+- Before any planning, routing, delegation, model-selection, Local Assist, Cloud Assist, committee, or external-agent task, agents MUST read `docs/arch/MODEL_WORKFORCE_POLICY.md` and `nexus/config/model_workforce.yaml`.
+- Installed binaries, cached model lists, historical reports, and model self-descriptions are discovery evidence only. They do not grant assignment authority or a higher autonomy level.
+- CapabilityPlanner and HybridRouteDecision remain the route authority. The workforce policy constrains eligible workers and escalation; it must not create a parallel router or topology selector.
+- Fresh runtime discovery and physical receipts override stale roster details. Update the fixed authority files above instead of creating parallel `v2`, `final`, or dated model-policy reports.
+- Local model output is always a candidate. It cannot independently establish correctness, promotion, `production_ready`, `public_claim_allowed`, merge authority, or cleanup authority.
+
 ## 🚫 No Full Corpus Read
 - Agents MUST NOT read all reports, ADRs, or lesson files before normal tasks.
 - Full-corpus scans are allowed only for dedicated audit/indexing tasks.
