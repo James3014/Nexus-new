@@ -312,6 +312,8 @@ class CommitteeRoutedToolRequest:
     delegated_retry_candidate_models: list[str] = field(default_factory=list)
     delegated_member_specs: list[dict[str, Any]] = field(default_factory=list)
     parent_demand_id: str = ""
+    committee_admission_enabled: bool = False
+    committee_member_admission_bindings: dict[str, Any] = field(default_factory=dict)
     max_candidates: int = 3
     mutation_allowed: bool = True
     verifier_allowed: bool = True
@@ -338,6 +340,7 @@ class CommitteeRoutedToolResult:
     failure_reasons: list[str] = field(default_factory=list)
     committee_member_demands: list[dict[str, Any]] = field(default_factory=list)
     committee_member_demand_failures: list[str] = field(default_factory=list)
+    committee_member_admission: dict[str, Any] = field(default_factory=dict)
     receipt_fragment: dict[str, Any] = field(default_factory=dict)
 
 
@@ -382,6 +385,7 @@ def build_committee_receipt_fragment(result: CommitteeRoutedToolResult) -> dict:
         "committee_member_demand_wiring_status": (
             "FAIL_CLOSED" if result.committee_member_demand_failures else "WIRED"
         ),
+        "committee_member_admission": result.committee_member_admission,
         "p4_fail_closed": result.receipt_fragment.get("p4_fail_closed", bool(result.failure_reasons)),
     }
 
@@ -591,6 +595,37 @@ def evaluate_and_execute(
             },
         )
 
+    committee_admission: dict[str, Any] = {
+        "schema": "nexus.committee_member_admission.v1",
+        "overall_decision": "NOT_ENABLED",
+        "zero_call_required": False,
+        "records": [],
+        "overall_reasons": [],
+    }
+    if request.committee_admission_enabled:
+        from nexus.services.local_heal.committee_activation_gate import evaluate_committee_member_admission
+
+        committee_admission = evaluate_committee_member_admission(
+            list(demand_bundle["demands"]),
+            bindings=request.committee_member_admission_bindings,
+        )
+        if committee_admission.get("overall_decision") != "ALLOW":
+            return CommitteeRoutedToolResult(
+                invoked=False,
+                invocation_allowed=False,
+                blocked_reason="committee_member_aggregate_admission_failed",
+                failure_reasons=list(committee_admission.get("overall_reasons") or []),
+                committee_member_demands=list(demand_bundle["demands"]),
+                committee_member_demand_failures=[],
+                committee_member_admission=committee_admission,
+                receipt_fragment={
+                    **gate,
+                    "committee_member_demands": demand_bundle["demands"],
+                    "committee_member_admission": committee_admission,
+                    "p4_fail_closed": True,
+                },
+            )
+
     # Gate allows — must have a candidate producer
     producer_present = candidate_producer is not None
     producer_name = type(candidate_producer).__name__ if candidate_producer else ""
@@ -604,6 +639,7 @@ def evaluate_and_execute(
             candidate_producer_invoked=False,
             failure_reasons=["missing_committee_candidate_producer"],
             committee_member_demands=list(demand_bundle["demands"]),
+            committee_member_admission=committee_admission,
             receipt_fragment={
                 **gate,
                 "committee_member_demands": demand_bundle["demands"],
@@ -632,6 +668,7 @@ def evaluate_and_execute(
             candidate_producer_error=producer_error,
             failure_reasons=[f"candidate_producer_error: {e}"],
             committee_member_demands=list(demand_bundle["demands"]),
+            committee_member_admission=committee_admission,
             receipt_fragment={
                 **gate,
                 "committee_member_demands": demand_bundle["demands"],
@@ -651,6 +688,7 @@ def evaluate_and_execute(
     if not valid_candidates:
         result = _build_zero_winner_result(gate, raw_candidates, rejections)
         result.committee_member_demands = list(demand_bundle["demands"])
+        result.committee_member_admission = committee_admission
         result.raw_candidate_count = len(raw_candidates)
         result.candidate_producer_present = True
         result.candidate_producer_name = producer_name
@@ -850,9 +888,11 @@ def evaluate_and_execute(
         solved_by_committee=solved,
         failure_reasons=[],
         committee_member_demands=list(demand_bundle["demands"]),
+        committee_member_admission=committee_admission,
         receipt_fragment={
             **gate,
             "committee_member_demands": demand_bundle["demands"],
+            "committee_member_admission": committee_admission,
             "committee_member_demand_wiring_status": "WIRED",
             "p4_candidate_producer_present": True,
             "p4_candidate_producer_name": producer_name,
