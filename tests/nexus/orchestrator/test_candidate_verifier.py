@@ -350,3 +350,24 @@ def test_candidate_verifier_protects_explicit_contract_paths(scenario):
     assert receipt.verified is False
     assert receipt.protected_contract_gate_passed is False
     assert receipt.failure_reasons == ["protected_contract_changed:bounded.txt"]
+
+
+def test_candidate_verifier_fails_closed_when_verifier_mutates_candidate_state(scenario):
+    contract, lease, candidate, controller = scenario
+    mutating_contract = contract.model_copy(
+        update={
+            "verifier_commands": [
+                "python3 -c 'from pathlib import Path; Path(\"side_effect.txt\").write_text(\"mutated\")'"
+            ]
+        }
+    )
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        mutating_contract,
+        lease,
+        candidate,
+    )
+
+    assert receipt.verified is False
+    assert receipt.candidate_commit_allowed is False
+    assert "verifier_mutated_candidate_state" in receipt.failure_reasons

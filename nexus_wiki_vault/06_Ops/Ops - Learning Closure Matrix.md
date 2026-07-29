@@ -4176,9 +4176,9 @@ version_scope:
 
 ## 2026-07-28: Self-Hosted Lifecycle Adoption Operational Closure
 
-1. Tracked bytecode contamination from broad pytest
-- Observed failure: tracked bytecode contamination from broad pytest
-- Exact prevention: bounded verifiers plus PYTHONDONTWRITEBYTECODE=1 and tracked-artifact audit
+1. Tracked bytecode contamination and inherited MUSE_RUN_CODEX_LOOP drift audit triggers
+- Observed failure: tracked bytecode contamination from broad pytest, verifier side effects mutating candidate state, and inherited MUSE_RUN_CODEX_LOOP triggering full-repository drift audit hooks during candidate commit.
+- Exact prevention: run_cli_worker forces PYTHONDONTWRITEBYTECODE=1 even if caller requests 0; CandidateVerifier captures post-verifier state and fails with verifier_mutated_candidate_state on side effects; CandidateCommitter forces MUSE_RUN_CODEX_LOOP=0 during git commit and restores caller environment in finally. Note: owner-governance follow-up for AGENTS.md policy alignment will be performed by owner after runtime integration.
 
 2. macOS say or notification subprocess pipe inheritance blocking worker closeout
 - Observed failure: macOS say or notification subprocess pipe inheritance blocking worker closeout

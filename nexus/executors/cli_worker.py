@@ -122,10 +122,10 @@ def run_cli_worker(
 
     started = time.monotonic()
     executable_sha256 = _hash_file(request.executable)
-    environment = None
+    environment = os.environ.copy()
     if request.env is not None:
-        environment = os.environ.copy()
         environment.update({str(key): str(value) for key, value in request.env.items()})
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     process: Optional[subprocess.Popen[bytes]] = None
     try:
         process = subprocess.Popen(

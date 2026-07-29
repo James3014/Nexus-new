@@ -109,3 +109,23 @@ def test_worker_requires_existing_target_cwd(tmp_path):
             argv=("-c", "print('ok')"),
             cwd=str(tmp_path / "missing"),
         )
+
+
+def test_worker_forces_pythondontwritebytecode_and_prevents_bytecode_generation(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "0")
+    script_path = tmp_path / "test_bytecode.py"
+    script_path.write_text("import os\nprint('BYTECODE_ENV=' + os.environ.get('PYTHONDONTWRITEBYTECODE', ''))\n", encoding="utf-8")
+
+    request = CliWorkerRequest(
+        executable=sys.executable,
+        argv=(str(script_path),),
+        cwd=str(tmp_path),
+        env={"PYTHONDONTWRITEBYTECODE": "0"},
+    )
+    result = run_cli_worker(request)
+
+    assert result.status is CliWorkerStatus.COMPLETED
+    assert result.exit_code == 0
+    assert b"BYTECODE_ENV=1" in result.stdout
+    pycache_dir = tmp_path / "__pycache__"
+    assert not pycache_dir.exists()

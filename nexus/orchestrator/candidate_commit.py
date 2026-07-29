@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
@@ -82,18 +83,26 @@ class CandidateCommitter:
         ).splitlines()
         if staged_after != paths:
             raise RuntimeError("staged candidate paths differ from verified paths")
-        self.worktree_manager._run_git(
-            [
-                "-c",
-                f"user.name={self.AUTHOR_NAME}",
-                "-c",
-                f"user.email={self.AUTHOR_EMAIL}",
-                "commit",
-                "-m",
-                f"candidate({contract.task_id}): governed worker result",
-            ],
-            cwd=target,
-        )
+        original_codex_loop = os.environ.get("MUSE_RUN_CODEX_LOOP")
+        os.environ["MUSE_RUN_CODEX_LOOP"] = "0"
+        try:
+            self.worktree_manager._run_git(
+                [
+                    "-c",
+                    f"user.name={self.AUTHOR_NAME}",
+                    "-c",
+                    f"user.email={self.AUTHOR_EMAIL}",
+                    "commit",
+                    "-m",
+                    f"candidate({contract.task_id}): governed worker result",
+                ],
+                cwd=target,
+            )
+        finally:
+            if original_codex_loop is None:
+                os.environ.pop("MUSE_RUN_CODEX_LOOP", None)
+            else:
+                os.environ["MUSE_RUN_CODEX_LOOP"] = original_codex_loop
         commit_sha = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
         tree_sha = self.worktree_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target)
         committed_paths = self.worktree_manager._run_git(

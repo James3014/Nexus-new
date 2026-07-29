@@ -1,8 +1,9 @@
 # Python Verification Isolation Guard
 
-**artifact_authority:** current
+**artifact_authority:** reference
 **owner:** James Chen
-**status:** PENDING
+**status:** SUPERSEDED
+**superseded_by:** `00a-python-verification-isolation-runtime-guard.md` (`python-verification-isolation-runtime-guard`)
 **task_id:** `python-verification-isolation-guard`
 **AUTO_CHAIN:** false
 **controller_base_revision:** `06bd067d814e7667cbdcb40fe31e9fcfcd1d330a`
@@ -12,6 +13,9 @@
 **worker_may_approve:** false
 **worker_may_integrate:** false
 **worker_may_push:** false
+
+> [!NOTE]
+> This card was SUPERSEDED after RepositoryContractGate correctly rejected AGENTS.md policy self-modification attempted by AGY Worker. Enforcement logic moved to non-self-modifying runtime-only successor card `00a-python-verification-isolation-runtime-guard.md`.
 
 ## Objective
 
