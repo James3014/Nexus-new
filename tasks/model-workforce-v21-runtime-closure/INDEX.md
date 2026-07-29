@@ -10,8 +10,8 @@
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `model-workforce-v21-runtime-closure-g0-governance` | `00-g0-controller-governance-bootstrap.md` | IN_PROGRESS | none |
-| 1 | `model-workforce-v21-runtime-closure-t3b2b` | `01-t3b2b-formal-local-executor.md` | PENDING | G0 candidate approved and integrated |
+| 0 | `model-workforce-v21-runtime-closure-g0-governance` | `00-g0-controller-governance-bootstrap.md` | COMPLETED | none |
+| 1 | `model-workforce-v21-runtime-closure-t3b2b` | `01-t3b2b-formal-local-executor.md` | IN_PROGRESS | G0 candidate approved and integrated |
 | 2 | `model-workforce-v21-runtime-closure-t3a3` | `02-t3a3-formal-gateway.md` | PENDING | T3B2B complete |
 | 3 | `model-workforce-v21-runtime-closure-t3c1` | `03-t3c1-committee-member-demand.md` | PENDING | T3A3 complete |
 | 4 | `model-workforce-v21-runtime-closure-t3c2` | `04-t3c2-committee-aggregate-admission.md` | PENDING | T3C1 complete |
@@ -26,11 +26,11 @@
 
 ## Current frontier
 
-Only `model-workforce-v21-runtime-closure-g0-governance` may execute. A successor requires explicit owner approval, lifecycle state, and the preceding card's exit evidence. No card may self-chain after completion, failure, or BLOCK.
+Only `model-workforce-v21-runtime-closure-t3b2b` may execute. Owner activation was supplied in-session for the isolated Target on branch `nexus/task/model-workforce-v21-runtime-closure-t3b2b`. A successor still requires explicit owner approval, lifecycle state, and this card's exit evidence. No card may self-chain after completion, failure, or BLOCK.
 
 ## Completed cards
 
-None in this campaign.
+- `model-workforce-v21-runtime-closure-g0-governance` - governance bootstrap candidate merged at `66a58cbd06254b9f2ad987572c18ab01a6e75173`.
 
 ## Blocked or superseded cards
 

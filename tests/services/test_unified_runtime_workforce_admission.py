@@ -4,15 +4,24 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
+import sys
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path[:1]:
+    sys.path.insert(0, str(ROOT))
+
 from nexus.engine.capability_contracts import CapabilityPlan
+from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
+from nexus.services.local_heal.local_model_executor import LocalModelExecutorResponse
+from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
+from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
 
 
-ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "nexus/config/model_workforce.yaml"
 
 
@@ -173,12 +182,17 @@ class _CapturingLocal:
         self.calls += 1
         self.seen_request = request
         return {
+            "schema": "nexus.local_assist.response.v1",
             "task_id": "workforce-admission-runtime-test",
             "local_model_invoked": True,
             "invoked": True,
             "output_delivered": True,
             "action": "candidate",
+            "executor_invoked": True,
             "physical_callable": "LocalModelExecutor.run",
+            "receipt_path": "/tmp/workforce-admission-local-receipt.json",
+            "provider_call_count": 1,
+            "model_call_count": 1,
             "evidence_refs": ["local:workforce-admission:test"],
             "verifier_summary": {
                 "verifier_status": "pass",
@@ -189,6 +203,10 @@ class _CapturingLocal:
                 "isolation_status": "isolated",
                 "selected_candidate_hash": "abc123",
                 "selected_candidate_hash_matches_applied": True,
+            },
+            "claim_boundary": {
+                "local_model_executor_invoked": True,
+                "executor_invoked": True,
             },
             "outcome_contributed": True,
         }
@@ -294,7 +312,7 @@ def test_local_authority_is_exactly_propagated_and_binds_mapping_request_identit
         "selected_capabilities",
     ):
         assert snapshot[key] == planner_snapshot[key]
-    assert "route_truth_source" not in snapshot
+    assert snapshot["route_truth_source"] == "CapabilityPlanner"
     assert "evidence_refs" not in snapshot
     for key in (
         "legacy_context",
@@ -360,7 +378,7 @@ def test_local_authority_binds_dataclass_request_and_preserves_admitted_qwen_tag
         "selected_capabilities",
     ):
         assert snapshot[key] == planner_snapshot[key]
-    assert "route_truth_source" not in snapshot
+    assert snapshot["route_truth_source"] == "CapabilityPlanner"
     assert "evidence_refs" not in snapshot
     for key in ("policy_identity", "binding_hash", "aggregate_binding_hash", "evidence_refs"):
         assert key not in snapshot
@@ -385,6 +403,206 @@ def test_conflicting_local_request_identity_cannot_override_admitted_identity() 
     assert local.seen_request["planner_snapshot"]["executor_provider"] == "ollama"
     assert local.seen_request["planner_snapshot"]["executor_model"] == "qwen2.5-coder:7b-instruct"
     assert local.calls == 1
+
+
+def _formal_local_request(tmp_path: Path, *, task_id: str = "workforce-admission-runtime-test") -> LocalAssistRequest:
+    target = tmp_path / "target.py"
+    target.write_text("def target():\n    return 1\n", encoding="utf-8")
+    return LocalAssistRequest(
+        schema="nexus.local_assist.request.v1",
+        task_id=task_id,
+        parent_task_id=task_id,
+        workspace_root=str(tmp_path),
+        workspace_revision="rev-workforce-admission",
+        task_statement="Produce an isolated bounded candidate for target.py.",
+        action="verified-subtask",
+        allowed_files=("target.py",),
+        target_file="target.py",
+        target_symbol="target",
+        evidence_refs=("tests/services/test_unified_runtime_workforce_admission.py",),
+        verifier_command=(sys.executable, "-c", "print('verified')"),
+        requested_role="candidate",
+        planner_snapshot={
+            "execution_topology": "single_local_model",
+            "protocol_mode": "unified_diff",
+            "model_call_allowed": True,
+        },
+    )
+
+
+def _formal_patch() -> str:
+    return (
+        "--- a/target.py\n"
+        "+++ b/target.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def target():\n"
+        "-    return 1\n"
+        "+    return 2\n"
+    )
+
+
+def test_workforce_admission_invokes_formal_local_assist_executor_with_receipt_lineage(
+    tmp_path: Path,
+) -> None:
+    local_request = _formal_local_request(tmp_path)
+    executor_requests: list[object] = []
+    provider = InjectedLocalModelProvider(
+        lambda _request: _formal_patch(),
+        provider_identity="ollama",
+        model_identity="qwen2.5-coder:7b-instruct",
+    )
+
+    def bounded_executor(executor_request, *, provider=None):
+        executor_requests.append(executor_request)
+        return LocalModelExecutorResponse(
+            invoked=True,
+            local_model_called=True,
+            candidate_patch=_formal_patch(),
+            candidate_hash="model-candidate",
+            reasoning_summary="bounded candidate",
+            raw_model_metadata={
+                "llm_call_ledger_records": [
+                    {
+                        "duration_sec": 0.01,
+                        "prompt_hash": "prompt-hash",
+                        "status": "ok",
+                    }
+                ],
+                "selected_capabilities": ["local_model_executor"],
+                "selected_capabilities_used": ["local_model_executor"],
+                "capability_usage_status": {"local_model_executor": "used"},
+            },
+            provider="ollama",
+            model_name="qwen2.5-coder:7b-instruct",
+            error="",
+            timeout=False,
+            evidence_refs=executor_request.evidence_refs,
+        )
+
+    def isolated_apply(apply_request):
+        return IsolatedApplyReceipt(
+            task_id=apply_request.task_id,
+            workspace_path=str(tmp_path / "isolated"),
+            target_file=apply_request.target_file,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=apply_request.selected_candidate_hash,
+            applied_patch_hash=apply_request.selected_candidate_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+        )
+
+    def isolated_verifier(verifier_request):
+        return IsolatedVerifierReceipt(
+            task_id=verifier_request.task_id,
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="verified",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+    receipt = UnifiedRuntime(
+        planner=_Planner(_demands(_demand("local")), selected=["local_model_executor"]),
+        local_service=LocalAssistService(
+            provider=provider,
+            executor_runner=bounded_executor,
+            apply_runner=isolated_apply,
+            verifier_runner=isolated_verifier,
+        ),
+        workforce_policy_loader=_Loader(),
+    ).run(
+        replace(
+            _request(
+                {
+                    "workforce_admission_enabled": True,
+                    "workforce_bindings": {"local": _bindings()["local"]},
+                },
+                local=True,
+                online=False,
+            ),
+            local_request=local_request,
+        ),
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    local = receipt["local"]
+    lineage = local["formal_local_runtime_lineage"]
+    assert local["status"] == "SUCCEEDED"
+    assert local["gate_passed"] is True
+    assert lineage["schema"] == "nexus.formal_local_runtime_lineage.v1"
+    assert lineage["entrypoint"] == "UnifiedRuntime._run_local"
+    assert lineage["service"] == "LocalAssistService.handle"
+    assert lineage["executor"] == "LocalModelExecutor.run"
+    assert lineage["gate_passed"] is True
+    assert lineage["provider_call_count"] == 1
+    assert lineage["model_call_count"] == 1
+    assert lineage["candidate_isolation_status"] == "isolated"
+    assert lineage["verifier_reached"] is True
+    assert lineage["verifier_status"] == "pass"
+    assert receipt["context_trace"]["formal_local_runtime_lineage"] == lineage
+    response = local["response"]
+    assert response["schema"] == "nexus.local_assist.response.v1"
+    assert response["physical_callable"] == "LocalModelExecutor.run"
+    assert response["executor_invoked"] is True
+    assert response["provider_call_count"] == 1
+    assert response["candidate_summary"]["isolation_status"] == "isolated"
+    assert response["verifier_summary"]["verifier_status"] == "pass"
+    assert len(executor_requests) == 1
+    executor_request = executor_requests[0]
+    assert executor_request.model_name == "qwen2.5-coder:7b-instruct"
+    assert executor_request.route_context["signal_snapshot"]["local_model_invocation_authority"] == receipt[
+        "local_model_invocation_authority"
+    ]
+    disk_receipt = json.loads(Path(response["receipt_path"]).read_text(encoding="utf-8"))
+    assert disk_receipt["physical_callable"] == "LocalModelExecutor.run"
+    assert disk_receipt["executor_invoked"] is True
+    assert (tmp_path / "target.py").read_text(encoding="utf-8") == "def target():\n    return 1\n"
+
+
+def test_workforce_local_provider_mismatch_is_zero_model_call(tmp_path: Path) -> None:
+    provider = InjectedLocalModelProvider(
+        lambda _request: _formal_patch(),
+        provider_identity="injected",
+        model_identity="qwen2.5-coder:7b-instruct",
+    )
+    receipt = UnifiedRuntime(
+        planner=_Planner(_demands(_demand("local")), selected=["local_model_executor"]),
+        local_service=LocalAssistService(provider=provider),
+        workforce_policy_loader=_Loader(),
+    ).run(
+        replace(
+            _request(
+                {
+                    "workforce_admission_enabled": True,
+                    "workforce_bindings": {"local": _bindings()["local"]},
+                },
+                local=True,
+                online=False,
+            ),
+            local_request=_formal_local_request(tmp_path),
+        ),
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    local = receipt["local"]
+    lineage = local["formal_local_runtime_lineage"]
+    assert local["status"] == "FAILED"
+    assert local["invoked"] is False
+    assert local["gate_passed"] is False
+    assert local["provider_call_count"] == 0
+    assert local["model_call_count"] == 0
+    assert lineage["gate_passed"] is False
+    assert lineage["failure_reason"] == "local_model_provider_identity_mismatch"
+    assert lineage["provider_call_count"] == 0
+    assert lineage["model_call_count"] == 0
+    assert local["response"]["provider_call_count"] == 0
+    assert local["response"]["model_call_count"] == 0
+    assert local["response"]["local_model_invoked"] is False
 
 
 @pytest.mark.parametrize("tamper", ["missing", "malformed", "binding", "aggregate", "policy"])

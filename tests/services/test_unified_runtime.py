@@ -10,6 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path[:1]:
+    sys.path.insert(0, str(ROOT))
 
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import CapabilityPlanner
