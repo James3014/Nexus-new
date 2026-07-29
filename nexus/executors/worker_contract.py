@@ -194,6 +194,8 @@ class WorkerExecutionReceipt:
     merge_performed: bool
     push_performed: bool
     failure_reason: Optional[str] = None
+    account_alias_hash: Optional[str] = None
+    provider_attempt_count: Optional[int] = None
 
 
 class WorkerProviderUnavailable(RuntimeError):
