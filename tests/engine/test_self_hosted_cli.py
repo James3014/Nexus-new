@@ -3,8 +3,9 @@ import sys
 from pathlib import Path
 
 repo_root = str(Path(__file__).resolve().parents[2])
-if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
+if repo_root in sys.path:
+    sys.path.remove(repo_root)
+sys.path.insert(0, repo_root)
 
 import pytest
 from click.testing import CliRunner

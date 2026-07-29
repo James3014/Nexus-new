@@ -7,8 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 repo_root = str(Path(__file__).resolve().parents[3])
-if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
+if repo_root in sys.path:
+    sys.path.remove(repo_root)
+sys.path.insert(0, repo_root)
 
 import pytest
 
