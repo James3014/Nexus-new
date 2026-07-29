@@ -732,10 +732,22 @@ def test_evidence_seal_failure_preserves_admitted_online_authority_without_invok
         lambda _bundle: {"ok": False, "blockers": ["forced_seal_failure"]},
     )
     planner = _Planner(
-        _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL"))
+        _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")),
+        selected=["memory"],
     )
     loader = _Loader()
     calls = 0
+    capability_calls = 0
+
+    def counted_memory(context):
+        nonlocal capability_calls
+        capability_calls += 1
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "evidence_refs": ["capability:memory:workforce-admission:test"],
+        }
 
     def counted_online(context):
         nonlocal calls
@@ -745,6 +757,7 @@ def test_evidence_seal_failure_preserves_admitted_online_authority_without_invok
     receipt = UnifiedRuntime(planner=planner, workforce_policy_loader=loader).run(
         _request(_online_authority_route()),
         online_invoker=counted_online,
+        capability_invokers={"memory": counted_memory},
         verifier=_verifier,
         learning=_learning,
     )
@@ -756,8 +769,14 @@ def test_evidence_seal_failure_preserves_admitted_online_authority_without_invok
     assert receipt["online"]["provider_call_count"] == 0
     assert receipt["provider_call_count"] == 0
     assert receipt["online_call_count"] == 0
+    assert receipt["local_call_count"] == 0
+    assert receipt["verifier_call_count"] == 0
+    assert receipt["learning_call_count"] == 0
+    assert capability_calls == 1
+    assert receipt["capability_results"]["memory"]["invoked"] is True
+    assert receipt["capability_call_count"] == 1
     assert receipt["invocation_counts"] == {
-        "capability": 0,
+        "capability": 1,
         "local": 0,
         "online": 0,
         "verifier": 0,
@@ -768,10 +787,13 @@ def test_evidence_seal_failure_preserves_admitted_online_authority_without_invok
     assert authority["gate_passed"] is True
     assert receipt["workforce_admission"]["overall_decision"] == "ALLOW"
     assert receipt["workforce_admission_lineage"] == receipt["plan_payload"]["workforce_admission_lineage"]
-    assert receipt["planner"]["plan_payload"]["gateway_invocation_authority"] == authority
-    assert receipt["plan_payload"]["signal_snapshot"]["gateway_invocation_authority"] == authority
-    assert receipt["online"]["context_trace"]["gateway_invocation_authority"] == authority
-    assert receipt["context_trace"]["gateway_invocation_authority"] == authority
+    authority_surfaces = (
+        receipt["planner"]["plan_payload"]["gateway_invocation_authority"],
+        receipt["plan_payload"]["signal_snapshot"]["gateway_invocation_authority"],
+        receipt["online"]["context_trace"]["gateway_invocation_authority"],
+        receipt["context_trace"]["gateway_invocation_authority"],
+    )
+    assert all(surface == authority for surface in authority_surfaces)
     assert calls == 0
 
 

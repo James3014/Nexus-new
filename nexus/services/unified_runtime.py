@@ -2720,18 +2720,24 @@ class UnifiedRuntime:
             blocked_receipt["planner"] = terminal_planner
             blocked_receipt["execution_attempt"] = execution_attempt
             blocked_receipt["context_trace"] = terminal_context_trace
+            capability_call_count = sum(
+                1
+                for capability_stage in capability_results.values()
+                if isinstance(capability_stage, Mapping)
+                and capability_stage.get("invoked") is True
+            )
             if workforce_admission_payload is not None:
                 blocked_receipt["plan_payload"] = plan_payload
                 blocked_receipt["workforce_admission"] = workforce_admission_payload
                 blocked_receipt["workforce_admission_lineage"] = workforce_lineage
             blocked_receipt.update(
                 {
-                    "capability_call_count": 0,
+                    "capability_call_count": capability_call_count,
                     "verifier_call_count": 0,
                     "learning_call_count": 0,
                     "provider_call_count": 0,
                     "invocation_counts": {
-                        "capability": 0,
+                        "capability": capability_call_count,
                         "local": 0,
                         "online": 0,
                         "verifier": 0,
