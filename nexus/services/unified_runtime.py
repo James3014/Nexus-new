@@ -27,6 +27,8 @@ from nexus.engine.capability_contracts import (
     next_execution_depth_after_failure,
 )
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 from nexus.evidence.receipt_base import (
     attach_r3_receipt_base,
     build_execution_attempt_id,
@@ -1661,9 +1663,18 @@ class UnifiedRuntime:
     result remains visible in the receipt and prevents completion.
     """
 
-    def __init__(self, *, planner: CapabilityPlanner | None = None, local_service: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        planner: CapabilityPlanner | None = None,
+        local_service: Any = None,
+        workforce_policy_loader: Any = None,
+    ) -> None:
         self._planner = planner or CapabilityPlanner()
         self._local_service = local_service
+        self._workforce_policy_loader = (
+            workforce_policy_loader if workforce_policy_loader is not None else WorkforcePolicyLoader()
+        )
 
     def run(
         self,
@@ -1804,6 +1815,7 @@ class UnifiedRuntime:
         request.validate()
         planner_route = dict(request.route)
         planner_route.setdefault("local_enabled", request.local_enabled)
+        planner_route.setdefault("online_enabled", request.online_enabled)
         # Opt-in Nexus Light: merge deterministic preflight/postflight invokers.
         # Default route is unchanged when flags are absent.
         merged_invokers: dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] = dict(
@@ -1921,6 +1933,129 @@ class UnifiedRuntime:
         )
 
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
+
+        workforce_admission_payload: dict[str, Any] | None = None
+        if request.route.get("workforce_admission_enabled") is True:
+            signal_snapshot = plan_payload.get("signal_snapshot")
+            raw_workforce_demands = (
+                signal_snapshot.get("workforce_demands")
+                if isinstance(signal_snapshot, Mapping)
+                else None
+            )
+            workforce_admission = evaluate_runtime_workforce_admission(
+                raw_workforce_demands,
+                request.route.get("workforce_bindings"),
+                self._workforce_policy_loader,
+            )
+            workforce_admission_payload = workforce_admission.to_dict()
+            plan_payload = dict(plan_payload)
+            plan_payload["workforce_admission"] = workforce_admission_payload
+            stamped_snapshot = dict(plan_payload.get("signal_snapshot") or {})
+            stamped_snapshot["workforce_admission"] = workforce_admission_payload
+            plan_payload["signal_snapshot"] = stamped_snapshot
+            workforce_decision = str(workforce_admission_payload.get("overall_decision") or "BLOCK")
+            workforce_stage = _stage(
+                "workforce_admission",
+                status=(
+                    "SUCCEEDED"
+                    if workforce_decision == "ALLOW"
+                    else ("BLOCKED" if workforce_decision == "BLOCK" else "INCOMPLETE")
+                ),
+                invoked=True,
+                evidence_present=True,
+                gate_passed=workforce_decision == "ALLOW",
+                evidence_refs=[
+                    f"runtime:workforce_admission:{workforce_decision}:"
+                    f"{workforce_admission_payload.get('aggregate_binding_hash', '')[:16]}"
+                ],
+                decision=workforce_decision,
+                result=workforce_admission_payload,
+                aggregate_binding_hash=workforce_admission_payload.get("aggregate_binding_hash", ""),
+            )
+            stages["workforce_admission"] = workforce_stage
+
+            if workforce_decision in {"BLOCK", "ESCALATE"}:
+                terminal_status = "BLOCKED" if workforce_decision == "BLOCK" else "INCOMPLETE"
+                terminal_stages = dict(stages)
+                for stage_name in ("local", "online", "verifier", "learning"):
+                    terminal_stages[stage_name] = _stage(
+                        stage_name,
+                        status="NOT_REQUESTED",
+                        reason="blocked_by_workforce_admission",
+                        invoked=False,
+                        evidence_present=False,
+                        gate_passed=False,
+                    )
+                terminal_planner = dict(planner_stage)
+                terminal_planner["plan_payload"] = plan_payload
+                terminal_stages["planner"] = terminal_planner
+                terminal_receipt = {
+                    "schema": RECEIPT_SCHEMA,
+                    "task_id": request.task_id,
+                    "workspace_revision": request.workspace_revision,
+                    "planner_decision_id": planner_decision_id,
+                    "plan_hash": plan_hash,
+                    "execution_depth": plan.execution_depth,
+                    "execution_attempt": execution_attempt,
+                    "planner": terminal_planner,
+                    "plan_payload": plan_payload,
+                    "workforce_admission": workforce_admission_payload,
+                    "capabilities": [],
+                    "capability_results": {},
+                    "local": terminal_stages["local"],
+                    "online": terminal_stages["online"],
+                    "verifier": terminal_stages["verifier"],
+                    "learning": terminal_stages["learning"],
+                    "stages": list(terminal_stages.values()),
+                    "evidence_refs": sorted(
+                        {
+                            *list(request.evidence_refs),
+                            *list(workforce_stage["evidence_refs"]),
+                        }
+                    ),
+                    "receipt_complete": False,
+                    "capability_closure_complete": False,
+                    "terminal_status": terminal_status,
+                    "claim_boundary": {
+                        "task_identity_shared": True,
+                        "planner_shared": True,
+                        "local_online_continuation": False,
+                        "receipt_complete": False,
+                        "capability_closure_complete": False,
+                        "outcome_contributed": False,
+                        "value_measured": False,
+                        "public_claim_allowed": False,
+                    },
+                    "selection_authority": "CapabilityPlanner",
+                    "selected_capabilities": list(plan.selected_capabilities),
+                    "executed_capabilities": [],
+                    "contributed_capabilities": [],
+                    "consumed_evidence_ids": [],
+                    "capability_call_count": 0,
+                    "local_call_count": 0,
+                    "online_call_count": 0,
+                    "verifier_call_count": 0,
+                    "learning_call_count": 0,
+                    "provider_call_count": 0,
+                    "invocation_counts": {
+                        "capability": 0,
+                        "local": 0,
+                        "online": 0,
+                        "verifier": 0,
+                        "learning": 0,
+                    },
+                    "public_claim_allowed": False,
+                }
+                attach_r3_receipt_base(terminal_receipt)
+                if receipt_path is not None:
+                    path = Path(receipt_path)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    terminal_receipt["receipt_path"] = str(path)
+                    path.write_text(
+                        json.dumps(terminal_receipt, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                return terminal_receipt
 
         capability_results: dict[str, dict[str, Any]] = {}
         postflight_names = {
@@ -2982,6 +3117,9 @@ class UnifiedRuntime:
             "treatment_fingerprint_d": treatment_fingerprint_d,
             "treatment_core_equal": treatment_core_equal,
         }
+        if workforce_admission_payload is not None:
+            receipt["workforce_admission"] = workforce_admission_payload
+            receipt["plan_payload"] = plan_payload
         # RC-1: additive JSON-safe receipt_base + acyclic run_anchor hash DAG
         attach_r3_receipt_base(receipt)
         if receipt_path is not None:
