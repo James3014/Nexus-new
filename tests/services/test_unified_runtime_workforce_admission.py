@@ -1090,6 +1090,146 @@ def _online_authority_route() -> dict[str, object]:
     }
 
 
+def _gateway_fake_codex(tmp_path: Path) -> tuple[Path, Path]:
+    script = tmp_path / "fake-codex"
+    call_log = tmp_path / "fake-codex-call.json"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import pathlib\n"
+        "import sys\n"
+        f"pathlib.Path({str(call_log)!r}).write_text("
+        "json.dumps({'argv': sys.argv}), encoding='utf-8')\n"
+        "print('gateway workforce ok')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script, call_log
+
+
+def _gateway_workforce_request(
+    tmp_path: Path,
+    *,
+    route_update: dict[str, object] | None = None,
+    model_name: str | None = None,
+) -> UnifiedRuntimeRequest:
+    script, _ = _gateway_fake_codex(tmp_path)
+    route: dict[str, object] = {
+        "recommended_flow": "direct",
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"online": _bindings()["online"]},
+        "online_policy": "auto",
+        "online_command": str(script),
+        "workspace_root": str(tmp_path),
+    }
+    if route_update:
+        route.update(route_update)
+    return UnifiedRuntimeRequest(
+        task_id="gateway-workforce-admission-test",
+        workspace_revision="rev-workforce-admission",
+        task_statement="run gateway workforce admission through bounded runtime-closure transport",
+        task_type="runtime-closure",
+        route=route,
+        online_enabled=True,
+        online_model_name=model_name,
+    )
+
+
+def test_gateway_ask_unified_derives_physical_online_binding_from_workforce_admission(
+    tmp_path: Path,
+) -> None:
+    from nexus.services.gateway import BattlesuitGateway
+
+    request = _gateway_workforce_request(tmp_path)
+    call_log = tmp_path / "fake-codex-call.json"
+    receipt = BattlesuitGateway(project_root=tmp_path).ask_unified(
+        request,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    authority = receipt["gateway_invocation_authority"]
+    assert authority["status"] == "ALLOW"
+    assert authority["gate_passed"] is True
+    assert authority["resolved_provider"] == "codex"
+    assert authority["resolved_model"] == "gpt-5.6-luna"
+    assert authority["route_provider"] == "codex"
+    assert authority["transport_provider"] == "codex"
+    assert authority["invoker_provider"] == "codex"
+    assert authority["online_model_name"] == "gpt-5.6-luna"
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert receipt["online"]["response"]["provider_call_count"] == 1
+    assert receipt["online"]["context_trace"]["gateway_invocation_authority"] == authority
+    assert receipt["context_trace"]["gateway_invocation_authority"] == authority
+    called = json.loads(call_log.read_text(encoding="utf-8"))
+    assert called["argv"][1:4] == ["exec", "-m", "gpt-5.6-luna"]
+
+
+@pytest.mark.parametrize(
+    ("route_update", "model_name", "expected_reason"),
+    [
+        ({"provider": "grok"}, None, "online_route_provider_mismatch"),
+        (
+            {"online_transport_binding": {"provider": "grok"}},
+            None,
+            "online_transport_provider_mismatch",
+        ),
+        ({"online_invoker_provider": "grok"}, None, "online_invoker_provider_ambiguous"),
+        ({}, "gpt-5.6-luna-tampered", "online_model_name_mismatch"),
+        ({"online_transport_binding": "malformed"}, None, "online_transport_binding_missing"),
+    ],
+)
+def test_gateway_ask_unified_mismatch_denials_never_start_physical_transport(
+    tmp_path: Path,
+    route_update: dict[str, object],
+    model_name: str | None,
+    expected_reason: str,
+) -> None:
+    from nexus.services.gateway import BattlesuitGateway
+
+    request = _gateway_workforce_request(
+        tmp_path,
+        route_update=route_update,
+        model_name=model_name,
+    )
+    call_log = tmp_path / "fake-codex-call.json"
+    receipt = BattlesuitGateway(project_root=tmp_path).ask_unified(
+        request,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    assert receipt["gateway_invocation_authority"]["gate_passed"] is False
+    assert receipt["online"]["status"] == "FAILED"
+    assert receipt["online"]["reason"] == expected_reason
+    assert receipt["online"]["invoked"] is False
+    assert receipt["online"]["response"]["provider_call_count"] == 0
+    assert not call_log.exists()
+
+
+def test_gateway_ask_unified_missing_workforce_binding_denies_before_physical_transport(
+    tmp_path: Path,
+) -> None:
+    from nexus.services.gateway import BattlesuitGateway
+
+    request = _gateway_workforce_request(
+        tmp_path,
+        route_update={"workforce_bindings": {}},
+    )
+    call_log = tmp_path / "fake-codex-call.json"
+    receipt = BattlesuitGateway(project_root=tmp_path).ask_unified(
+        request,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    assert receipt["terminal_status"] == "BLOCKED"
+    assert receipt["gateway_invocation_authority"]["gate_passed"] is False
+    assert receipt["online"]["invoked"] is False
+    assert receipt["online"]["response"]["provider_call_count"] == 0
+    assert not call_log.exists()
+
+
 def _run_online_authority_case(
     route: dict[str, object],
     *,

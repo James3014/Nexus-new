@@ -429,6 +429,26 @@ class BattlesuitGateway:
         if not isinstance(route, Mapping):
             route = {}
         route = dict(route)
+        if route.get("workforce_admission_enabled") is True and bool(
+            getattr(request, "online_enabled", True)
+        ):
+            bindings = route.get("workforce_bindings")
+            online_binding = bindings.get("online") if isinstance(bindings, Mapping) else None
+            if isinstance(online_binding, Mapping):
+                admitted_provider = str(online_binding.get("provider") or "").strip().lower()
+                admitted_model = str(online_binding.get("model") or "").strip()
+                if admitted_provider:
+                    existing_provider = str(route.get("provider") or "").strip().lower()
+                    route.setdefault("provider", admitted_provider)
+                    if "online_transport_binding" not in route:
+                        route["online_transport_binding"] = {"provider": admitted_provider}
+                    if not existing_provider or existing_provider == admitted_provider:
+                        route.setdefault("online_invoker_provider", admitted_provider)
+                if admitted_model and not getattr(request, "online_model_name", None):
+                    try:
+                        object.__setattr__(request, "online_model_name", admitted_model)
+                    except Exception:
+                        pass
         requested_provider = str(route.get("provider", "") or "").strip().lower()
         gateway_provider = str(self.oauth_provider or "").strip().lower()
         bound_transport = getattr(self.ask_structured, "__func__", None)
