@@ -166,6 +166,26 @@ def run_self_hosted_dispose(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_close_without_candidate(
+    task_id: str,
+    superseded_by: str,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    if not task_id or not str(task_id).strip():
+        raise NexusCliActionError("task_id is required", exit_code=1)
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.close_task_without_candidate(
+            task_id,
+            superseded_by=superseded_by,
+        )
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_cancel(
     task_id: str,
     state_dir: str | Path | None = None,
@@ -180,5 +200,3 @@ def run_self_hosted_cancel(
         if isinstance(exc, NexusCliActionError):
             raise
         raise NexusCliActionError(str(exc), exit_code=1) from exc
-
-

@@ -1,5 +1,11 @@
 import json
+import sys
 from pathlib import Path
+
+repo_root = str(Path(__file__).resolve().parents[2])
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 import pytest
 from click.testing import CliRunner
 
@@ -503,4 +509,33 @@ def test_self_hosted_cancel_task(tmp_path: Path):
     assert res_bad.exit_code != 0
 
 
+def test_self_hosted_close_without_candidate_cmd(tmp_path: Path):
+    runner = CliRunner()
+    state_dir = str(tmp_path / "state")
+    task_id = "test-sh-close-001"
 
+    state_dir_path = Path(state_dir)
+    state_dir_path.mkdir(parents=True, exist_ok=True)
+    state_file = state_dir_path / f"{task_id}.json"
+    state_data = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(tmp_path / "targets" / task_id),
+        "worker_pid": None,
+    }
+    state_file.write_text(json.dumps(state_data), encoding="utf-8")
+
+    close_cmd = [
+        "nexus", "self-hosted", "close-without-candidate",
+        "--task-id", task_id,
+        "--superseded-by", "ref-evidence-999",
+        "--state-dir", state_dir,
+    ]
+    res = runner.invoke(nexus, close_cmd)
+    assert res.exit_code == 0, f"close-without-candidate failed: {res.output}"
+    out_data = json.loads(res.output)
+    assert out_data["status"] == "SUPERSEDED"
+    assert out_data["superseded_by"] == "ref-evidence-999"
+    assert out_data["promotion_status"] == "NOT_CREATED"

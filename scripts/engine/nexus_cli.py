@@ -206,6 +206,7 @@ from scripts.engine.commands.multi_agent_actions import (
 from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_approve,
     run_self_hosted_cancel,
+    run_self_hosted_close_without_candidate,
     run_self_hosted_dispose,
     run_self_hosted_integrate,
     run_self_hosted_list_actionable,
@@ -3570,6 +3571,25 @@ def self_hosted_dispose(
     res = run_self_hosted_dispose(
         task_id=task_id,
         disposition=disposition.upper(),
+        superseded_by=superseded_by,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="close-without-candidate")
+@click.option("--task-id", required=True, help="Task ID to close without candidate.")
+@click.option("--superseded-by", required=True, help="Replacing task or evidence ID.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_close_without_candidate(
+    task_id: str,
+    superseded_by: str,
+    state_dir: str | None,
+) -> None:
+    """Close a RETAINED_FOR_REVIEW or FINAL_BLOCK task that produced no candidate evidence."""
+    res = run_self_hosted_close_without_candidate(
+        task_id=task_id,
         superseded_by=superseded_by,
         state_dir=state_dir,
     )

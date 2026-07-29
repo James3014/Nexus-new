@@ -245,6 +245,18 @@ class NexusSelfHostedMCPServer:
                 },
             },
             {
+                "name": "nexus_self_hosted_close_without_candidate",
+                "description": "Fail-closed operation to close a RETAINED_FOR_REVIEW or FINAL_BLOCK task that never produced a candidate.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id", "superseded_by"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "superseded_by": {"type": "string"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_self_hosted_cancel_task",
                 "description": "Cancel a non-running task and apply its governed terminal Target cleanup.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
@@ -375,6 +387,11 @@ class NexusSelfHostedMCPServer:
             )
         if name == "nexus_self_hosted_close_retained_without_candidate":
             return self.service.close_retained_without_candidate(
+                task_id,
+                superseded_by=str(arguments.get("superseded_by", "")),
+            )
+        if name == "nexus_self_hosted_close_without_candidate":
+            return self.service.close_task_without_candidate(
                 task_id,
                 superseded_by=str(arguments.get("superseded_by", "")),
             )
