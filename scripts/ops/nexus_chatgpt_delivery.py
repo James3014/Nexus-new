@@ -144,7 +144,7 @@ def action_command_for_task(
     if not task_id:
         return {"task_id": None, "command": None, "missing": ["task_id"]}
 
-    base = ["nexus", "self-hosted"]
+    base = [sys.executable, "-m", "scripts.engine.nexus_cli", "self-hosted"]
     missing: list[str] = []
     if recommended_tool == "nexus_self_hosted_approve_promotion":
         candidate = action.get("candidate") or {}

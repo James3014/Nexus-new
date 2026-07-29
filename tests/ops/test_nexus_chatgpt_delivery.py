@@ -159,7 +159,7 @@ def test_launch_surfaces_existing_approval_before_new_submission(tmp_path: Path)
     assert service.submitted_requests == []
     command = payload["actionable"]["next_commands"][0]
     assert command["connector_tool"] == "nexus.bash"
-    assert command["command"].startswith("nexus self-hosted approve --task-id chatgpt-cutover")
+    assert command["command"].startswith(f"{sys.executable} -m scripts.engine.nexus_cli self-hosted approve --task-id chatgpt-cutover")
 
 
 def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
@@ -204,7 +204,7 @@ def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
     assert request["target_repo_root"] == str((tmp_path / "targets" / "chatgpt-delivery-cutover").resolve())
     command = payload["actionable"]["next_commands"][0]["command"]
     assert command == (
-        "nexus self-hosted integrate --task-id chatgpt-delivery-cutover "
+        f"{sys.executable} -m scripts.engine.nexus_cli self-hosted integrate --task-id chatgpt-delivery-cutover "
         f"--integration-branch {DEFAULT_INTEGRATION_BRANCH}"
     )
 
@@ -225,3 +225,41 @@ def test_cli_guard_tool_returns_blocking_json(capsys):
     assert exit_code == 2
     assert captured["allowed"] is False
     assert captured["required_tool"] == "nexus.bash"
+
+
+def test_action_command_uses_real_executable_path_and_avoids_nonexistent_nexus_binary():
+    task = _actionable_task()
+    cmd_info = action_command_for_task(task)
+    cmd_str = cmd_info["command"]
+    assert cmd_str is not None
+    assert not cmd_str.startswith("nexus ")
+    exe_path = cmd_str.split()[0]
+    assert Path(exe_path).exists()
+    assert f"{sys.executable} -m scripts.engine.nexus_cli self-hosted approve" in cmd_str
+
+
+def test_subcommand_is_list_actionable_not_wrong_actionable():
+    from scripts.engine.nexus_cli import self_hosted_group
+
+    assert "list-actionable" in self_hosted_group.commands
+    assert "actionable" not in self_hosted_group.commands
+
+    launch_skill = (Path(__file__).resolve().parents[2] / ".agents" / "skills" / "nexus-task-launch" / "SKILL.md").read_text(encoding="utf-8")
+    merge_skill = (Path(__file__).resolve().parents[2] / ".agents" / "skills" / "nexus-merge-gate" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "nexus self-hosted actionable" not in launch_skill
+    assert "nexus self-hosted actionable" not in merge_skill
+    assert "self-hosted list-actionable" in launch_skill
+    assert "self-hosted list-actionable" in merge_skill
+
+
+def test_skills_do_not_contain_contradictory_connector_blocked_rule_when_nexus_bash_available():
+    launch_skill = (Path(__file__).resolve().parents[2] / ".agents" / "skills" / "nexus-task-launch" / "SKILL.md").read_text(encoding="utf-8")
+    merge_skill = (Path(__file__).resolve().parents[2] / ".agents" / "skills" / "nexus-merge-gate" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "If the lifecycle tools are not visible or the existing connector cannot expose them, stop fail-closed with `REPO_READY_CONNECTOR_BLOCKED`." not in launch_skill
+    assert "REPO_READY_CONNECTOR_BLOCKED is the terminal result when the required\nconnector tools are unavailable." not in merge_skill
+
+    assert "nexus.bash must be used for governed lifecycle operations" in launch_skill
+    assert "REPO_READY_CONNECTOR_BLOCKED applies only when neither native lifecycle tools nor `nexus.bash` with repo-owned CLI wrappers are available." in launch_skill
+
