@@ -235,6 +235,12 @@ def test_p4_e2e_receipt_full_success():
         assert result.selected_candidate_verifier_status == "pass"
         assert result.receipt_fragment.get("p4_selected_candidate_hash_matches_applied") is True
         assert result.receipt_fragment.get("p4_committee_claim_gate_passed") is True
+        assert result.receipt_fragment.get("committee_member_demand_wiring_status") == "WIRED"
+        assert len(result.receipt_fragment.get("committee_member_demands", [])) == 3
+        assert all(
+            item["route_authority"] == "CapabilityPlanner"
+            for item in result.receipt_fragment["committee_member_demands"]
+        )
         assert result.solved_by_committee is True
         assert result.receipt_fragment.get("p4_fail_closed") is not True
 

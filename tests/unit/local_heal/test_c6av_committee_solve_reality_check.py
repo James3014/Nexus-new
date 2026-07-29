@@ -101,6 +101,41 @@ def test_r_phase_committee_active():
         assert ss["judge_model"] not in models, "judge must not be a proposer"
 
 
+def test_t3c1_projects_planner_members_without_route_mutation():
+    from nexus.services.local_heal.committee_routed_tool import build_committee_member_demands
+
+    snapshot = {
+        "proposer_specs": [{"model": "a", "role": "primary"}, {"model": "b", "role": "secondary"}],
+        "judge_model": "judge",
+        "diagnosis_models": ["a", "b"],
+        "audit_models": ["a", "b"],
+        "delegated_retry_candidate_models": ["a", "b"],
+        "route_authority": "CapabilityPlanner",
+    }
+    result = build_committee_member_demands(snapshot, parent_demand_id="demand_local")
+    assert result["wiring_status"] == "WIRED"
+    assert result["failure_reasons"] == []
+    assert len(result["demands"]) == 9
+    assert {item["phase"] for item in result["demands"]} == {
+        "proposal", "judge", "diagnosis", "audit", "delegated_retry"
+    }
+    assert all(item["parent_demand_id"] == "demand_local" for item in result["demands"])
+    assert all(item["route_authority"] == "CapabilityPlanner" for item in result["demands"])
+    assert snapshot["proposer_specs"][0] == {"model": "a", "role": "primary"}
+
+
+def test_t3c1_missing_member_fails_closed_without_replacement():
+    from nexus.services.local_heal.committee_routed_tool import build_committee_member_demands
+
+    result = build_committee_member_demands(
+        {"proposer_specs": [{"model": "a", "role": "primary"}], "judge_model": "judge"},
+        parent_demand_id="demand_local",
+    )
+    assert result["wiring_status"] == "FAIL_CLOSED"
+    assert "proposal:requires_at_least_two_members" in result["failure_reasons"]
+    assert "missing_diagnosis_models" not in result["failure_reasons"]
+
+
 # ─── Phase 0.4: run() calls D/A but both no-op; parent does NOT ───
 
 def test_run_calls_diagnose_and_audit():
@@ -149,4 +184,3 @@ def test_da_committee_gates_open_with_planner_snapshot():
     with patch.object(orch, "_invoke_audit_model", return_value=mock_a):
         a_result = orch.audit_with_committee(ctx)
     assert a_result is not None, "A gate now opens with planner snapshot (C6AW)"
-

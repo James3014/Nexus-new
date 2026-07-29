@@ -9,6 +9,7 @@ from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.orchestrator import HealOrchestrator
 from nexus.services.local_heal.output_understanding import build_output_understanding_result
 from nexus.committee.controller import CommitteeControllerV263
+from nexus.services.local_heal.committee_routed_tool import build_committee_member_demands
 
 COMMITTEE_ROUTE_SCHEMA = "nexus.local_heal.committee_trace.v1"
 COMMITTEE_ROUTE_POLICY = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
@@ -305,6 +306,22 @@ class CommitteeOrchestrator(HealOrchestrator):
             if model_name in seen_models:
                 raise ValueError("Duplicate proposer model in signal_snapshot")
             seen_models.add(model_name)
+
+        # T3C1: project the exact Planner-selected members into independent
+        # workforce demand records.  This is a data projection only; it does
+        # not admit, replace, route, or invoke any member.
+        member_bundle = build_committee_member_demands(
+            signal_snapshot,
+            parent_demand_id=str(getattr(ctx.op, "instance_id", "") or "").strip(),
+        )
+        ctx.op._committee_member_demands = member_bundle.get("demands", [])
+        ctx.op._committee_member_demand_failures = member_bundle.get("failure_reasons", [])
+        ctx.op._committee_member_demand_wiring_status = member_bundle.get("wiring_status", "FAIL_CLOSED")
+        if member_bundle.get("failure_reasons"):
+            raise ValueError(
+                "committee member demand wiring failed: "
+                + ", ".join(member_bundle["failure_reasons"])
+            )
             
         self.k = len(proposer_specs)
         logger.info(f"--- [COMMITTEE MODE ACTIVE] k={self.k} ---")
