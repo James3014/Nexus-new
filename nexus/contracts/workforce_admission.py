@@ -244,3 +244,104 @@ class WorkforceAdmissionDecision:
             "route_authority": self.route_authority,
             "freshness_evidence": self.freshness_evidence,
         }
+
+
+@dataclass(frozen=True)
+class WorkforceDemand:
+    demand_id: str
+    execution_channel: str
+    requested_role: str
+    minimum_autonomy: str
+    context_class: str
+    mutation_intent: bool
+    schema: str = "nexus.workforce_demand.v1"
+    external_verification_required: bool = True
+    route_authority: str = "CapabilityPlanner"
+    reasons: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.reasons, (list, set)):
+            object.__setattr__(self, "reasons", tuple(self.reasons))
+
+        if self.schema != "nexus.workforce_demand.v1":
+            raise ValueError(f"Invalid schema for WorkforceDemand: {self.schema}")
+
+        if self.route_authority != "CapabilityPlanner":
+            raise ValueError(f"route_authority must be CapabilityPlanner, got: {self.route_authority}")
+
+        if self.execution_channel not in ("local", "online"):
+            raise ValueError(f"Unsupported execution_channel: {self.execution_channel}. Must be 'local' or 'online'.")
+
+        if not is_valid_autonomy_level(self.minimum_autonomy):
+            raise ValueError(f"Invalid minimum_autonomy level: {self.minimum_autonomy}")
+
+        for field_name in ("demand_id", "execution_channel", "requested_role", "minimum_autonomy", "context_class", "route_authority"):
+            val = getattr(self, field_name)
+            if val is None or not str(val).strip():
+                raise ValueError(f"Field {field_name} must be a non-empty string, got: {val!r}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "demand_id": self.demand_id,
+            "execution_channel": self.execution_channel,
+            "requested_role": self.requested_role,
+            "minimum_autonomy": self.minimum_autonomy,
+            "context_class": self.context_class,
+            "mutation_intent": self.mutation_intent,
+            "external_verification_required": self.external_verification_required,
+            "route_authority": self.route_authority,
+            "reasons": list(self.reasons),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WorkforceDemand:
+        return cls(
+            schema=data.get("schema", "nexus.workforce_demand.v1"),
+            demand_id=data["demand_id"],
+            execution_channel=data["execution_channel"],
+            requested_role=data["requested_role"],
+            minimum_autonomy=data["minimum_autonomy"],
+            context_class=data["context_class"],
+            mutation_intent=bool(data["mutation_intent"]),
+            external_verification_required=bool(data.get("external_verification_required", True)),
+            route_authority=data.get("route_authority", "CapabilityPlanner"),
+            reasons=tuple(data.get("reasons", ())),
+        )
+
+
+@dataclass(frozen=True)
+class WorkforceDemands:
+    schema: str = "nexus.workforce_demands.v1"
+    route_authority: str = "CapabilityPlanner"
+    demands: tuple[WorkforceDemand, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.demands, (list, set)):
+            object.__setattr__(self, "demands", tuple(self.demands))
+
+        if self.schema != "nexus.workforce_demands.v1":
+            raise ValueError(f"Invalid schema for WorkforceDemands: {self.schema}")
+
+        if self.route_authority != "CapabilityPlanner":
+            raise ValueError(f"route_authority must be CapabilityPlanner, got: {self.route_authority}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "route_authority": self.route_authority,
+            "demands": [d.to_dict() if hasattr(d, "to_dict") else d for d in self.demands],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WorkforceDemands:
+        raw_demands = data.get("demands", [])
+        demands = tuple(
+            WorkforceDemand.from_dict(d) if isinstance(d, dict) else d
+            for d in raw_demands
+        )
+        return cls(
+            schema=data.get("schema", "nexus.workforce_demands.v1"),
+            route_authority=data.get("route_authority", "CapabilityPlanner"),
+            demands=demands,
+        )

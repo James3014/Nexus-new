@@ -3354,3 +3354,163 @@ def test_replan_authorization_rejects_malformed_request_hash():
             max_attempts=2,
         )
 
+
+def test_workforce_demand_online_ordinary():
+    plan = CapabilityPlanner().plan(
+        task_desc="Implement simple bugfix in string utility module",
+        task_type="bug",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]
+    assert demands["schema"] == "nexus.workforce_demands.v1"
+    assert demands["route_authority"] == "CapabilityPlanner"
+    assert len(demands["demands"]) == 1
+
+    d = demands["demands"][0]
+    assert d["schema"] == "nexus.workforce_demand.v1"
+    assert d["demand_id"] == "demand_online"
+    assert d["execution_channel"] == "online"
+    assert d["requested_role"] == "fast_bounded_implementation"
+    assert d["minimum_autonomy"] == "L2"
+    assert d["context_class"] == "nexus_bounded"
+    assert d["mutation_intent"] is True
+    assert d["external_verification_required"] is True
+    assert d["route_authority"] == "CapabilityPlanner"
+
+
+def test_workforce_demand_online_complex_closure():
+    plan = CapabilityPlanner().plan(
+        task_desc="Perform self-hosted lifecycle runtime-closure for cross-module integration",
+        task_type="runtime-closure",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]
+    assert len(demands["demands"]) == 1
+
+    d = demands["demands"][0]
+    assert d["demand_id"] == "demand_online"
+    assert d["execution_channel"] == "online"
+    assert d["requested_role"] == "main_engineering"
+    assert d["minimum_autonomy"] == "L3_HISTORICAL"
+    assert d["context_class"] == "nexus_full"
+    assert d["external_verification_required"] is True
+
+
+def test_workforce_demand_local_read_only():
+    plan = CapabilityPlanner().plan(
+        task_desc="Research prior lessons and document system architecture",
+        task_type="research",
+        route={
+            "workforce_admission_enabled": True,
+            "local_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]
+    assert len(demands["demands"]) == 1
+
+    d = demands["demands"][0]
+    assert d["demand_id"] == "demand_local"
+    assert d["execution_channel"] == "local"
+    assert d["requested_role"] == "compact_diagnosis"
+    assert d["minimum_autonomy"] == "L0.5"
+    assert d["context_class"] == "nexus_bounded"
+    assert d["mutation_intent"] is False
+    assert d["external_verification_required"] is True
+
+
+def test_workforce_demand_local_mutation():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix memory leak in buffer pool",
+        task_type="bugfix",
+        route={
+            "workforce_admission_enabled": True,
+            "local_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]
+    assert len(demands["demands"]) == 1
+
+    d = demands["demands"][0]
+    assert d["demand_id"] == "demand_local"
+    assert d["execution_channel"] == "local"
+    assert d["requested_role"] == "bounded_code_candidate"
+    assert d["minimum_autonomy"] == "L1"
+    assert d["context_class"] == "nexus_bounded"
+    assert d["mutation_intent"] is True
+    assert d["external_verification_required"] is True
+
+
+def test_workforce_demand_hybrid_stable_order():
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor database layer with local candidate and online implementation",
+        task_type="refactor",
+        route={
+            "workforce_admission_enabled": True,
+            "local_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    demands = plan["signal_snapshot"]["workforce_demands"]["demands"]
+    assert len(demands) == 2
+    # Stable order: local then online
+    assert demands[0]["execution_channel"] == "local"
+    assert demands[0]["requested_role"] == "bounded_code_candidate"
+    assert demands[1]["execution_channel"] == "online"
+    assert demands[1]["requested_role"] == "fast_bounded_implementation"
+
+
+def test_workforce_demand_no_identity_fields():
+    plan = CapabilityPlanner().plan(
+        task_desc="Check demands snapshot for identity leakage",
+        task_type="feature",
+        route={
+            "workforce_admission_enabled": True,
+            "local_enabled": True,
+            "online_enabled": True,
+        },
+    ).to_dict()
+
+    forbidden_fields = {"worker_id", "provider", "model", "availability", "state", "admission", "admission_decision"}
+    snapshot = plan["signal_snapshot"]["workforce_demands"]
+
+    assert not (set(snapshot.keys()) & forbidden_fields)
+    for d in snapshot["demands"]:
+        assert not (set(d.keys()) & forbidden_fields)
+
+
+def test_workforce_demand_disabled_flag_preserves_current_snapshot():
+    route_with_flags = {
+        "local_enabled": True,
+        "online_enabled": True,
+    }
+
+    plan_disabled = CapabilityPlanner().plan(
+        task_desc="Fix bug without workforce admission enabled",
+        task_type="bug",
+        route={
+            "workforce_admission_enabled": False,
+            **route_with_flags,
+        },
+    ).to_dict()
+
+    assert "workforce_demands" not in plan_disabled["signal_snapshot"]
+
+    plan_default = CapabilityPlanner().plan(
+        task_desc="Fix bug without workforce admission enabled",
+        task_type="bug",
+        route=route_with_flags,
+    ).to_dict()
+
+    assert "workforce_demands" not in plan_default["signal_snapshot"]
+    assert plan_disabled["signal_snapshot"] == plan_default["signal_snapshot"]
