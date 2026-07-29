@@ -623,6 +623,7 @@ class BattlesuitGateway:
                     runtime_online_invoker = build_registered_online_invoker(
                         binding.provider,
                         command=command,
+                        model_name=request.online_model_name,
                         timeout_sec=(
                             float(route.get("timeout_sec", 120.0))
                             if isinstance(route, Mapping)
@@ -759,18 +760,24 @@ class BattlesuitGateway:
         content: str,
         sys_msg: str,
         provider: str,
+        model_name: str,
         timeout_sec: int,
         gateway_telemetry: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
-        """Invoke a registered print-mode Online CLI (grok/agy/codex) with bound authorization."""
+        """Invoke a registered print-mode Online CLI with bound authorization."""
         from nexus.services.unified_runtime import build_registered_online_invoker
 
-        invoker = build_registered_online_invoker(provider, timeout_sec=float(timeout_sec))
+        invoker = build_registered_online_invoker(
+            provider,
+            model_name=model_name,
+            timeout_sec=float(timeout_sec),
+        )
         prompt = f"{sys_msg}\n\n{content}" if sys_msg else content
         context = {
             "task_id": str(os.getenv("NEXUS_TASK_ID") or "gateway-print"),
             "online_prompt": prompt,
             "online_payload": "",
+            "online_model_name": model_name,
             "online_execution_decision": (
                 self._online_execution_decision.to_dict()
                 if hasattr(self._online_execution_decision, "to_dict")
@@ -928,6 +935,18 @@ class BattlesuitGateway:
                 admitted_provider=admitted_provider,
                 admitted_model=admitted_model,
             )
+        from nexus.services.unified_runtime import (
+            REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS,
+        )
+
+        if actual_provider in REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS:
+            return self._gateway_authority_failure(
+                "gateway_invocation_authority_model_binding_unsupported",
+                supplied_authority=authority,
+                model_name=model_name,
+                admitted_provider=admitted_provider,
+                admitted_model=admitted_model,
+            )
         if actual_provider not in {"ollama", "gemini", "grok", "agy", "codex", "openai", "opencode"}:
             return self._gateway_authority_failure(
                 "gateway_invocation_authority_provider_unsupported",
@@ -1057,6 +1076,7 @@ class BattlesuitGateway:
                 content=content,
                 sys_msg=sys_msg,
                 provider=provider_key,
+                model_name=model_name,
                 timeout_sec=dynamic_timeout,
                 gateway_telemetry=gateway_telemetry,
             )
@@ -1071,6 +1091,7 @@ class BattlesuitGateway:
                 content=content,
                 sys_msg=sys_msg,
                 provider="agy",
+                model_name=model_name,
                 timeout_sec=dynamic_timeout,
                 gateway_telemetry=gateway_telemetry,
             )

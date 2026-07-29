@@ -385,7 +385,7 @@ def test_exact_gemini_authority_blocks_agy_substitution(monkeypatch):
     assert registered_calls == []
 
 
-@pytest.mark.parametrize("provider", ["codex", "grok", "agy", "openai"])
+@pytest.mark.parametrize("provider", ["codex", "opencode"])
 def test_exact_registered_provider_authority_routes_only_that_provider(provider):
     gateway = BattlesuitGateway(project_root=".")
     gateway.oauth_provider = provider
@@ -411,3 +411,29 @@ def test_exact_registered_provider_authority_routes_only_that_provider(provider)
     assert data["status"] == "APPROVED"
     assert raw == "registered-raw"
     assert observed and observed[0]["provider"] == provider
+
+
+@pytest.mark.parametrize("provider", ["agy", "grok", "openai"])
+def test_authority_registered_provider_without_model_binding_makes_zero_physical_calls(provider):
+    gateway = BattlesuitGateway(project_root=".")
+    gateway.oauth_provider = provider
+    _bind_valid_online_decision(gateway, provider=provider)
+    model = "provider-model"
+
+    with patch.object(gateway, "_ask_via_registered_print_cli") as registered, patch(
+        "nexus.services.gateway.resolve_binary"
+    ) as resolve_binary, patch("nexus.services.gateway._run_cli_with_hard_timeout") as run:
+        data, raw = gateway.ask_structured(
+            "Return provider result",
+            "{}",
+            model_name=model,
+            gateway_invocation_authority=_gateway_authority(provider=provider, model=model),
+        )
+
+    assert data["error"] == "gateway_invocation_authority_model_binding_unsupported"
+    assert data["invoked"] is False
+    assert data["provider_call_count"] == 0
+    assert raw == data["error"]
+    registered.assert_not_called()
+    resolve_binary.assert_not_called()
+    run.assert_not_called()
