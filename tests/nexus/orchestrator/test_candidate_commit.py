@@ -1,5 +1,6 @@
 from dataclasses import asdict
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -91,3 +92,43 @@ def test_candidate_commit_requires_independent_commit_authority(tmp_path):
 
     with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+
+def test_candidate_commit_forces_muse_run_codex_loop_zero_and_restores_outer_environment(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    hooks_dir = tmp_path / "custom_hooks_1"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\n",
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    monkeypatch.setenv("MUSE_RUN_CODEX_LOOP", "1")
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert os.environ.get("MUSE_RUN_CODEX_LOOP") == "1"
+
+
+def test_candidate_commit_restores_unset_muse_run_codex_loop_environment(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    hooks_dir = tmp_path / "custom_hooks_2"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\n",
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    monkeypatch.delenv("MUSE_RUN_CODEX_LOOP", raising=False)
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert "MUSE_RUN_CODEX_LOOP" not in os.environ
