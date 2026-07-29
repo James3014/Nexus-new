@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from nexus.services.local_heal.output_understanding import CanonicalPatchCandidate
 
@@ -18,6 +18,277 @@ class CommitteeCandidateProducer(Protocol):
     """
     def __call__(self, request: CommitteeRoutedToolRequest) -> list[dict[str, Any]]:
         ...
+
+
+COMMITTEE_MEMBER_DEMAND_SCHEMA = "nexus.committee_member_demand.v1"
+COMMITTEE_MEMBER_DEMANDS_SCHEMA = "nexus.committee_member_demands.v1"
+COMMITTEE_ROUTE_AUTHORITY = "CapabilityPlanner"
+
+
+@dataclass(frozen=True)
+class CommitteeMemberDemand:
+    """A planner-selected committee member projected into workforce demand.
+
+    This is only a projection of existing Planner output.  It does not select
+    a topology, admit a worker, or invoke a provider; those remain downstream
+    lifecycle stages.
+    """
+
+    member_id: str
+    parent_demand_id: str
+    phase: str
+    role: str
+    provider: str
+    model: str
+    required_or_optional: str
+    minimum_autonomy: str
+    context_class: str
+    mutation_intent: bool
+    external_verification_required: bool
+    route_authority: str = COMMITTEE_ROUTE_AUTHORITY
+    schema: str = COMMITTEE_MEMBER_DEMAND_SCHEMA
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "member_id": self.member_id,
+            "parent_demand_id": self.parent_demand_id,
+            "phase": self.phase,
+            "role": self.role,
+            "provider": self.provider,
+            "model": self.model,
+            "required_or_optional": self.required_or_optional,
+            "minimum_autonomy": self.minimum_autonomy,
+            "context_class": self.context_class,
+            "mutation_intent": self.mutation_intent,
+            "external_verification_required": self.external_verification_required,
+            "route_authority": self.route_authority,
+        }
+
+
+_MEMBER_DEFAULTS: dict[str, dict[str, Any]] = {
+    "proposal": {"role": "candidate_proposer", "autonomy": "L1", "context": "nexus_bounded", "mutation": True, "verify": True},
+    "judge": {"role": "candidate_judge", "autonomy": "L0.5", "context": "nexus_bounded", "mutation": False, "verify": True},
+    "diagnosis": {"role": "compact_diagnosis", "autonomy": "L0.5", "context": "nexus_bounded", "mutation": False, "verify": False},
+    "audit": {"role": "independent_review", "autonomy": "L0.5", "context": "nexus_bounded", "mutation": False, "verify": True},
+    "advisor": {"role": "bounded_advisor", "autonomy": "L0.5", "context": "nexus_bounded", "mutation": False, "verify": False},
+    "delegated_retry": {"role": "candidate_retry", "autonomy": "L1", "context": "nexus_bounded", "mutation": True, "verify": True},
+}
+
+
+def _member_model(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("model") or value.get("model_name") or "").strip()
+    return str(value or "").strip()
+
+
+def _member_spec(value: Any, *, phase: str, index: int) -> tuple[dict[str, Any] | None, str | None]:
+    defaults = _MEMBER_DEFAULTS[phase]
+    if isinstance(value, Mapping):
+        model = _member_model(value)
+        if not model:
+            return None, f"{phase}[{index}]:missing_model"
+        role = str(value.get("role") or defaults["role"]).strip()
+        provider = str(value.get("provider") or "ollama").strip()
+        if not role:
+            return None, f"{phase}[{index}]:missing_role"
+        if not provider:
+            return None, f"{phase}[{index}]:missing_provider"
+        return {
+            "model": model,
+            "role": role,
+            "provider": provider,
+            "required_or_optional": str(
+                value.get("required_or_optional")
+                or ("required" if phase in {"proposal", "judge", "diagnosis", "audit"} else "optional")
+            ),
+            "minimum_autonomy": str(value.get("minimum_autonomy") or defaults["autonomy"]),
+            "context_class": str(value.get("context_class") or defaults["context"]),
+            "mutation_intent": bool(value.get("mutation_intent", defaults["mutation"])),
+            "external_verification_required": bool(value.get("external_verification_required", defaults["verify"])),
+        }, None
+    model = _member_model(value)
+    if not model:
+        return None, f"{phase}[{index}]:missing_model"
+    return {
+        "model": model,
+        "role": defaults["role"],
+        "provider": "ollama",
+        "required_or_optional": "required" if phase in {"proposal", "judge", "diagnosis", "audit"} else "optional",
+        "minimum_autonomy": defaults["autonomy"],
+        "context_class": defaults["context"],
+        "mutation_intent": defaults["mutation"],
+        "external_verification_required": defaults["verify"],
+    }, None
+
+
+def validate_committee_member_demands(bundle: Mapping[str, Any]) -> list[str]:
+    """Validate a projected bundle without performing admission or invocation."""
+    failures: list[str] = []
+    if bundle.get("schema") != COMMITTEE_MEMBER_DEMANDS_SCHEMA:
+        failures.append("invalid_committee_member_demands_schema")
+    if bundle.get("route_authority") != COMMITTEE_ROUTE_AUTHORITY:
+        failures.append("committee_member_route_authority_mismatch")
+    parent = str(bundle.get("parent_demand_id") or "").strip()
+    if not parent:
+        failures.append("missing_parent_demand_id")
+    seen: set[str] = set()
+    required = ("member_id", "parent_demand_id", "phase", "role", "provider", "model", "required_or_optional", "minimum_autonomy", "context_class", "route_authority")
+    for index, raw in enumerate(bundle.get("demands") or ()):
+        if not isinstance(raw, Mapping):
+            failures.append(f"member[{index}]:malformed")
+            continue
+        for key in required:
+            if not str(raw.get(key) or "").strip():
+                failures.append(f"member[{index}]:missing_{key}")
+        member_id = str(raw.get("member_id") or "")
+        if member_id in seen:
+            failures.append(f"member[{index}]:duplicate_member_id")
+        seen.add(member_id)
+        if str(raw.get("parent_demand_id") or "") != parent:
+            failures.append(f"member[{index}]:parent_demand_id_mismatch")
+        if raw.get("route_authority") != COMMITTEE_ROUTE_AUTHORITY:
+            failures.append(f"member[{index}]:route_authority_mismatch")
+    if not bundle.get("demands"):
+        failures.append("no_committee_member_demands")
+    return failures
+
+
+def build_committee_member_demands(
+    signal_snapshot: Mapping[str, Any] | None = None,
+    *,
+    parent_demand_id: str = "",
+    proposer_specs: Sequence[Any] | None = None,
+    judge_model: Any = "",
+    diagnosis_models: Sequence[Any] | None = None,
+    audit_models: Sequence[Any] | None = None,
+    advisor_model: Any = "",
+    delegated_retry_candidate_models: Sequence[Any] | None = None,
+    delegated_member_specs: Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """Project existing Planner committee selections into independent demands.
+
+    Missing optional groups produce no demand.  A present malformed group is
+    rejected; no environment lookup or replacement model is performed.
+    """
+    source = signal_snapshot if isinstance(signal_snapshot, Mapping) else {}
+    parent = str(parent_demand_id or source.get("parent_demand_id") or source.get("demand_id") or "").strip()
+    raw_groups: list[tuple[str, Sequence[Any] | None, bool]] = [
+        ("proposal", proposer_specs if proposer_specs is not None else source.get("proposer_specs"), True),
+        ("diagnosis", diagnosis_models if diagnosis_models is not None else source.get("diagnosis_models"), False),
+        ("audit", audit_models if audit_models is not None else source.get("audit_models"), False),
+        ("delegated_retry", delegated_retry_candidate_models if delegated_retry_candidate_models is not None else source.get("delegated_retry_candidate_models"), False),
+    ]
+    demands: list[dict[str, Any]] = []
+    failures: list[str] = []
+    if not parent:
+        failures.append("missing_parent_demand_id")
+
+    for phase, values, required in raw_groups:
+        if values is None or values == []:
+            if required:
+                failures.append(f"missing_{phase}_specs")
+            continue
+        if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+            failures.append(f"{phase}:malformed_collection")
+            continue
+        if phase in {"proposal", "diagnosis", "audit"} and len(values) < 2:
+            failures.append(f"{phase}:requires_at_least_two_members")
+            continue
+        for index, value in enumerate(values):
+            spec, error = _member_spec(value, phase=phase, index=index)
+            if error:
+                failures.append(error)
+                continue
+            assert spec is not None
+            member_id = f"{parent}:{phase}:{index}"
+            demands.append(CommitteeMemberDemand(
+                member_id=member_id,
+                parent_demand_id=parent,
+                phase=phase,
+                role=spec["role"],
+                provider=spec["provider"],
+                model=spec["model"],
+                required_or_optional=spec["required_or_optional"],
+                minimum_autonomy=spec["minimum_autonomy"],
+                context_class=spec["context_class"],
+                mutation_intent=spec["mutation_intent"],
+                external_verification_required=spec["external_verification_required"],
+            ).to_dict())
+
+    judge = _member_model(judge_model or source.get("judge_model"))
+    if not judge:
+        failures.append("missing_judge_model")
+    else:
+        spec, error = _member_spec({"model": judge, "role": "judge"}, phase="judge", index=0)
+        if error:
+            failures.append(error)
+        else:
+            assert spec is not None
+            demands.append(CommitteeMemberDemand(
+                member_id=f"{parent}:judge:0", parent_demand_id=parent, phase="judge",
+                role=spec["role"], provider=spec["provider"], model=spec["model"],
+                required_or_optional="required", minimum_autonomy=spec["minimum_autonomy"],
+                context_class=spec["context_class"], mutation_intent=False,
+                external_verification_required=True,
+            ).to_dict())
+
+    advisor = _member_model(advisor_model or source.get("advisor_model"))
+    if advisor:
+        spec, error = _member_spec({"model": advisor, "role": "advisor"}, phase="advisor", index=0)
+        if error:
+            failures.append(error)
+        else:
+            assert spec is not None
+            demands.append(CommitteeMemberDemand(
+                member_id=f"{parent}:advisor:0", parent_demand_id=parent, phase="advisor",
+                role=spec["role"], provider=spec["provider"], model=spec["model"],
+                required_or_optional="optional", minimum_autonomy=spec["minimum_autonomy"],
+                context_class=spec["context_class"], mutation_intent=False,
+                external_verification_required=False,
+            ).to_dict())
+
+    if delegated_member_specs is None and "delegated_member_specs" in source:
+        delegated_member_specs = source.get("delegated_member_specs")
+    if delegated_member_specs is not None:
+        if isinstance(delegated_member_specs, (str, bytes)) or not isinstance(delegated_member_specs, Sequence):
+            failures.append("delegated_member_specs:malformed_collection")
+        else:
+            for index, value in enumerate(delegated_member_specs):
+                if not isinstance(value, Mapping):
+                    failures.append(f"delegated_member_specs[{index}]:malformed")
+                    continue
+                phase = str(value.get("phase") or "delegated_retry").strip() or "delegated_retry"
+                if phase not in _MEMBER_DEFAULTS:
+                    failures.append(f"delegated_member_specs[{index}]:unsupported_phase")
+                    continue
+                spec, error = _member_spec(value, phase=phase, index=index)
+                if error:
+                    failures.append(f"delegated_member_specs[{index}]:{error.split(':', 1)[-1]}")
+                    continue
+                assert spec is not None
+                demands.append(CommitteeMemberDemand(
+                    member_id=str(value.get("member_id") or f"{parent}:{phase}:{index}"),
+                    parent_demand_id=parent, phase=phase, role=spec["role"],
+                    provider=spec["provider"], model=spec["model"],
+                    required_or_optional=spec["required_or_optional"],
+                    minimum_autonomy=spec["minimum_autonomy"], context_class=spec["context_class"],
+                    mutation_intent=spec["mutation_intent"],
+                    external_verification_required=spec["external_verification_required"],
+                ).to_dict())
+
+    bundle = {
+        "schema": COMMITTEE_MEMBER_DEMANDS_SCHEMA,
+        "parent_demand_id": parent,
+        "route_authority": COMMITTEE_ROUTE_AUTHORITY,
+        "demands": demands,
+        "failure_reasons": failures,
+        "wiring_status": "FAIL_CLOSED" if failures else "WIRED",
+    }
+    failures.extend(validate_committee_member_demands(bundle))
+    bundle["failure_reasons"] = sorted(set(failures))
+    bundle["wiring_status"] = "FAIL_CLOSED" if bundle["failure_reasons"] else "WIRED"
+    return bundle
 
 
 @dataclass
@@ -35,6 +306,12 @@ class CommitteeRoutedToolRequest:
     evidence_refs: tuple[str, ...] = ()
     proposer_specs: list[dict[str, str]] = field(default_factory=list)
     judge_model: str = ""
+    diagnosis_models: list[str] = field(default_factory=list)
+    audit_models: list[str] = field(default_factory=list)
+    advisor_model: str = ""
+    delegated_retry_candidate_models: list[str] = field(default_factory=list)
+    delegated_member_specs: list[dict[str, Any]] = field(default_factory=list)
+    parent_demand_id: str = ""
     max_candidates: int = 3
     mutation_allowed: bool = True
     verifier_allowed: bool = True
@@ -59,6 +336,8 @@ class CommitteeRoutedToolResult:
     winner_found: bool = False
     solved_by_committee: bool = False
     failure_reasons: list[str] = field(default_factory=list)
+    committee_member_demands: list[dict[str, Any]] = field(default_factory=list)
+    committee_member_demand_failures: list[str] = field(default_factory=list)
     receipt_fragment: dict[str, Any] = field(default_factory=dict)
 
 
@@ -98,6 +377,11 @@ def build_committee_receipt_fragment(result: CommitteeRoutedToolResult) -> dict:
         "p4_selected_candidate_hash_matches_applied": result.receipt_fragment.get("p4_selected_candidate_hash_matches_applied", False),
         "p4_committee_claim_gate_passed": result.receipt_fragment.get("p4_committee_claim_gate_passed", False),
         "p4_failure_reasons": result.failure_reasons,
+        "committee_member_demands": result.committee_member_demands,
+        "committee_member_demand_failures": result.committee_member_demand_failures,
+        "committee_member_demand_wiring_status": (
+            "FAIL_CLOSED" if result.committee_member_demand_failures else "WIRED"
+        ),
         "p4_fail_closed": result.receipt_fragment.get("p4_fail_closed", bool(result.failure_reasons)),
     }
 
@@ -280,6 +564,33 @@ def evaluate_and_execute(
             receipt_fragment=gate,
         )
 
+    demand_bundle = build_committee_member_demands(
+        parent_demand_id=request.parent_demand_id or request.task_id,
+        proposer_specs=request.proposer_specs,
+        judge_model=request.judge_model,
+        diagnosis_models=request.diagnosis_models,
+        audit_models=request.audit_models,
+        advisor_model=request.advisor_model,
+        delegated_retry_candidate_models=request.delegated_retry_candidate_models,
+        delegated_member_specs=request.delegated_member_specs,
+    )
+    if demand_bundle["failure_reasons"]:
+        return CommitteeRoutedToolResult(
+            invoked=False,
+            invocation_allowed=False,
+            blocked_reason="committee_member_demand_wiring_failed",
+            failure_reasons=list(demand_bundle["failure_reasons"]),
+            committee_member_demands=list(demand_bundle["demands"]),
+            committee_member_demand_failures=list(demand_bundle["failure_reasons"]),
+            receipt_fragment={
+                **gate,
+                "committee_member_demands": demand_bundle["demands"],
+                "committee_member_demand_failures": demand_bundle["failure_reasons"],
+                "committee_member_demand_wiring_status": "FAIL_CLOSED",
+                "p4_fail_closed": True,
+            },
+        )
+
     # Gate allows — must have a candidate producer
     producer_present = candidate_producer is not None
     producer_name = type(candidate_producer).__name__ if candidate_producer else ""
@@ -292,8 +603,11 @@ def evaluate_and_execute(
             candidate_producer_name="",
             candidate_producer_invoked=False,
             failure_reasons=["missing_committee_candidate_producer"],
+            committee_member_demands=list(demand_bundle["demands"]),
             receipt_fragment={
                 **gate,
+                "committee_member_demands": demand_bundle["demands"],
+                "committee_member_demand_wiring_status": "WIRED",
                 "p4_candidate_producer_present": False,
                 "p4_candidate_producer_invoked": False,
                 "p4_fail_closed": True,
@@ -317,8 +631,11 @@ def evaluate_and_execute(
             candidate_producer_invoked=False,
             candidate_producer_error=producer_error,
             failure_reasons=[f"candidate_producer_error: {e}"],
+            committee_member_demands=list(demand_bundle["demands"]),
             receipt_fragment={
                 **gate,
+                "committee_member_demands": demand_bundle["demands"],
+                "committee_member_demand_wiring_status": "WIRED",
                 "p4_candidate_producer_present": True,
                 "p4_candidate_producer_invoked": False,
                 "p4_candidate_producer_error": producer_error,
@@ -333,6 +650,7 @@ def evaluate_and_execute(
 
     if not valid_candidates:
         result = _build_zero_winner_result(gate, raw_candidates, rejections)
+        result.committee_member_demands = list(demand_bundle["demands"])
         result.raw_candidate_count = len(raw_candidates)
         result.candidate_producer_present = True
         result.candidate_producer_name = producer_name
@@ -341,6 +659,8 @@ def evaluate_and_execute(
         result.receipt_fragment["p4_candidate_producer_name"] = producer_name
         result.receipt_fragment["p4_candidate_producer_invoked"] = True
         result.receipt_fragment["p4_raw_candidate_count"] = len(raw_candidates)
+        result.receipt_fragment["committee_member_demands"] = demand_bundle["demands"]
+        result.receipt_fragment["committee_member_demand_wiring_status"] = "WIRED"
         return result
 
     # P5-I7 / P7-A: Diversity-aware selection (env-guarded, P7 supersedes P5)
@@ -529,8 +849,11 @@ def evaluate_and_execute(
         winner_found=True,
         solved_by_committee=solved,
         failure_reasons=[],
+        committee_member_demands=list(demand_bundle["demands"]),
         receipt_fragment={
             **gate,
+            "committee_member_demands": demand_bundle["demands"],
+            "committee_member_demand_wiring_status": "WIRED",
             "p4_candidate_producer_present": True,
             "p4_candidate_producer_name": producer_name,
             "p4_candidate_producer_invoked": True,
