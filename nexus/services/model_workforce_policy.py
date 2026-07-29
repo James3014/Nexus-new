@@ -76,7 +76,7 @@ def get_freshness_evidence(last_verified_str: str) -> dict[str, Any]:
 class WorkforcePolicyLoader:
     """Fail-closed loader and admission evaluator for the model workforce policy."""
 
-    DEFAULT_POLICY_PATH = Path("nexus/config/model_workforce.yaml")
+    DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[2] / "nexus/config/model_workforce.yaml"
 
     def __init__(self, policy_path: str | Path | None = None) -> None:
         if policy_path is None:
@@ -264,50 +264,57 @@ class WorkforcePolicyLoader:
         block_reasons: list[str] = []
         escalate_reasons: list[str] = []
 
+        # 0. Request schema check
+        if request.schema != "nexus.workforce_admission_request.v1":
+            block_reasons.append(
+                f"Invalid request schema: expected 'nexus.workforce_admission_request.v1', got '{request.schema}'"
+            )
+
         # 1. Route authorization check
         if not request.route_authorized:
             block_reasons.append("Route authorization required (route_authorized is False)")
 
         # 2. Worker resolution & identity check
         worker: WorkforceWorker | None = None
-        if request.requested_worker_id:
-            worker = snapshot.workers.get(request.requested_worker_id)
-            if not worker:
-                block_reasons.append(f"Unknown worker ID: '{request.requested_worker_id}'")
-            else:
-                if request.provider and request.provider != worker.provider:
+        if request.schema == "nexus.workforce_admission_request.v1":
+            if request.requested_worker_id:
+                worker = snapshot.workers.get(request.requested_worker_id)
+                if not worker:
+                    block_reasons.append(f"Unknown worker ID: '{request.requested_worker_id}'")
+                else:
+                    if request.provider and request.provider != worker.provider:
+                        block_reasons.append(
+                            f"Mismatched provider: requested '{request.provider}', worker has '{worker.provider}'"
+                        )
+                    if request.model and request.model != worker.model:
+                        block_reasons.append(
+                            f"Mismatched model: requested '{request.model}', worker has '{worker.model}'"
+                        )
+            elif request.provider and request.model:
+                matches = [
+                    w for w in snapshot.workers.values()
+                    if w.provider == request.provider and w.model == request.model
+                ]
+                if len(matches) == 0:
                     block_reasons.append(
-                        f"Mismatched provider: requested '{request.provider}', worker has '{worker.provider}'"
+                        f"Unknown worker for provider '{request.provider}' and model '{request.model}'"
                     )
-                if request.model and request.model != worker.model:
+                elif len(matches) > 1:
                     block_reasons.append(
-                        f"Mismatched model: requested '{request.model}', worker has '{worker.model}'"
+                        f"Ambiguous worker match for provider '{request.provider}' and model '{request.model}'"
                     )
-        elif request.provider and request.model:
-            matches = [
-                w for w in snapshot.workers.values()
-                if w.provider == request.provider and w.model == request.model
-            ]
-            if len(matches) == 0:
-                block_reasons.append(
-                    f"Unknown worker for provider '{request.provider}' and model '{request.model}'"
-                )
-            elif len(matches) > 1:
-                block_reasons.append(
-                    f"Ambiguous worker match for provider '{request.provider}' and model '{request.model}'"
-                )
+                else:
+                    worker = matches[0]
+            elif request.model:
+                matches = [w for w in snapshot.workers.values() if w.model == request.model]
+                if len(matches) == 0:
+                    block_reasons.append(f"Unknown worker for model '{request.model}'")
+                elif len(matches) > 1:
+                    block_reasons.append(f"Ambiguous worker match for model '{request.model}'")
+                else:
+                    worker = matches[0]
             else:
-                worker = matches[0]
-        elif request.model:
-            matches = [w for w in snapshot.workers.values() if w.model == request.model]
-            if len(matches) == 0:
-                block_reasons.append(f"Unknown worker for model '{request.model}'")
-            elif len(matches) > 1:
-                block_reasons.append(f"Ambiguous worker match for model '{request.model}'")
-            else:
-                worker = matches[0]
-        else:
-            block_reasons.append("Missing worker identity (requested_worker_id, provider, model are all empty)")
+                block_reasons.append("Missing worker identity (requested_worker_id, provider, model are all empty)")
 
         # 3. Request completeness checks
         if not request.role:

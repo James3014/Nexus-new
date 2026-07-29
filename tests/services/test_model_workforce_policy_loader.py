@@ -304,3 +304,27 @@ def test_experiment_only_requires_explicit_authorization() -> None:
     )
     dec_auth = loader.admit(req_auth)
     assert dec_auth.decision == AdmissionDecision.ALLOW
+
+
+def test_loader_default_policy_path_resolves_outside_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    loader = WorkforcePolicyLoader()
+    snapshot = loader.load()
+    assert snapshot.schema == "nexus.model_workforce.v1"
+
+
+def test_admission_blocks_invalid_request_schema_without_resolving_worker() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    req = WorkforceAdmissionRequest(
+        schema="nexus.invalid_request.v1",
+        requested_worker_id="agy_flash",
+        role="fast_bounded_implementation",
+        autonomy="L2",
+        context="nexus_bounded",
+        route_authorized=True,
+        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+    )
+    dec = loader.admit(req)
+    assert dec.decision == AdmissionDecision.BLOCK
+    assert dec.resolved_worker_id is None
+    assert any("Invalid request schema" in r for r in dec.decision_reasons)
