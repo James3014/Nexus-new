@@ -153,7 +153,8 @@ class SelfHostedTaskService:
         replacement = self._read_state(superseded_by)
         if (
             replacement is None
-            or replacement.get("task_id", superseded_by) == task_id
+            or superseded_by == task_id
+            or replacement.get("task_id") != superseded_by
             or replacement.get("status") != "INTEGRATED"
             or replacement.get("promotion_status") != "INTEGRATED"
             or not str(replacement.get("integration_result_sha") or "").strip()

@@ -1599,6 +1599,57 @@ def test_close_retained_dirty_salvage_requires_integrated_replacement(tmp_path):
     assert service._read_state(request["task_id"])["status"] == "RETAINED_FOR_REVIEW"
 
 
+def test_close_retained_dirty_salvage_rejects_mismatched_replacement_identity(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _real_request(tmp_path, task_id="retained-salvage-identity-gated")
+    contract = service.build_contract(request)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "dirty.txt").write_text("must remain untouched\n", encoding="utf-8")
+    replacement_id = "integrated-replacement-requested"
+    service._write_state(replacement_id, {
+        "task_id": "different-integrated-task",
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "integration_result_sha": "i" * 40,
+    })
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "attempt_id": "attempt-salvage-identity-gated",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    controller = Path(request["controller_repo_root"])
+    refs_before = _git(controller, "show-ref")
+    worktrees_before = _git(controller, "worktree", "list", "--porcelain")
+
+    with pytest.raises(RuntimeError, match="superseded_by must name"):
+        service.close_retained_without_candidate(
+            request["task_id"], superseded_by=replacement_id
+        )
+
+    assert target.exists()
+    assert (target / "dirty.txt").read_text(encoding="utf-8") == "must remain untouched\n"
+    assert _git(controller, "show-ref") == refs_before
+    assert _git(
+        controller,
+        "for-each-ref",
+        "--format=%(refname)",
+        "refs/nexus-salvage/worktree/",
+    ) == ""
+    assert _git(controller, "worktree", "list", "--porcelain") == worktrees_before
+    assert service._read_state(request["task_id"])["status"] == "RETAINED_FOR_REVIEW"
+
+
 def test_close_retained_dirty_salvage_protects_ref_and_never_becomes_candidate(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     request = _real_request(tmp_path, task_id="retained-salvage-success")
