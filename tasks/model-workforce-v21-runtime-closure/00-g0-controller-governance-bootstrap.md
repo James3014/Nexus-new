@@ -52,8 +52,8 @@ git diff --check
 git diff --name-status --diff-filter=D
 git diff --cached --name-status --diff-filter=D
 git diff --cached --stat
-grep -n "Task Card Authority" AGENTS.md
-grep -n "Commit and Candidate Policy" AGENTS.md
+grep -nF "Task Card Authority" AGENTS.md
+grep -nF "Commit and Candidate Policy" AGENTS.md
 ```
 
 Also verify the AGENTS change contains only the exact rules from the two source commits and the Target remains isolated from the clean Controller.
