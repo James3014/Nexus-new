@@ -239,13 +239,20 @@ workers:
     provider: codex
     model: gpt-5.6-luna
     state: PROVEN_MAINCHAIN
-    availability: BLOCKED_CLIENT_UPGRADE
+    availability: AVAILABLE
+    autonomy: L3_HISTORICAL
     capability_grade: L3_HISTORICAL
-    current_assignment: none_until_client_upgrade_and_live_recheck
+    current_assignment: available_for_governed_mainchain_assignment
     roles: [main_engineering, milestone_closure, integration]
     benchmark_ref: codex_luna
-    requires: [codex_cli_upgrade, governed_adapter, independent_verification, receipt]
+    requires: [governed_adapter, independent_verification, receipt]
     forbidden_claims: [product_authority, protected_main_merge, remote_push]
+    runtime_verification:
+      date: '2026-07-29'
+      cli_version: '0.146.0'
+      model: gpt-5.6-luna
+      mode: read_only_smoke
+      stdout: OK
   agy_flash:
     provider: agy
     model: gemini-3.6-flash-high

@@ -51,7 +51,7 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 
 | Worker | Current role | Ceiling | Preferred context | Current status |
 |---|---|---:|---|---|
-| Codex Luna — `gpt-5.6-luna` | Main engineering, milestone closure, integration | Historical L3 | Governed mainchain | **Blocked:** installed Codex CLI is too old; no assignment until upgrade and live recheck |
+| Codex Luna — `gpt-5.6-luna` | Main engineering, milestone closure, integration | Historical L3 | Governed mainchain | Available; Codex CLI 0.146.0 with `gpt-5.6-luna` returned exactly `OK` in a read-only smoke on 2026-07-29 |
 | Agy Flash — `gemini-3.6-flash-high` | Fast bounded implementation and focused verification | L2 | **Nexus-bounded** | Available; benchmark 10/11 → 11/11 → 10/11 |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead |
@@ -87,7 +87,6 @@ These workers require explicit bounded scope, deterministic parsing, focused tes
 
 | Model | Blocker |
 |---|---|
-| Codex `gpt-5.6-luna` | Current Codex CLI requires upgrade |
 | Direct Gemini CLI `gemini-3.6-flash` | Client rejected as unsupported; use Agy instead |
 | MiMo CLI `xiaomi/mimo-v2.5` | HTTP 402 insufficient account balance |
 | `ornith:9b` | Ollama HTTP 500 on all arms |
@@ -126,7 +125,7 @@ Nexus must route in this order:
 4. Use Qwen3 8B only as a bounded shadow candidate or counterexample searcher.
 5. Use Agy for fast bounded online implementation.
 6. Use Grok for independent review, hidden defects, or evidence pressure testing.
-7. Use Codex for complex milestone closure only after its CLI is upgraded and the live path is revalidated.
+7. Use Codex for complex milestone closure when the governed adapter, independent verification, and receipt controls are present.
 8. Use OpenCode candidates when subscription-free remote execution is useful and high fixed context overhead is acceptable.
 
 No Local model is approved as a default Full-context worker. Full context is not assumed to be better: several models regressed, leaked thinking traces, changed schema, or lost the answer envelope.
