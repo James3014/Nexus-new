@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,19 @@ class _Loader:
 
 
 def _request(route: dict[str, object], *, local: bool = False, online: bool = True) -> UnifiedRuntimeRequest:
+    route = dict(route)
+    online_model_name = None
+    if route.get("workforce_admission_enabled") is True and online:
+        bindings = route.get("workforce_bindings")
+        online_binding = bindings.get("online") if isinstance(bindings, dict) else None
+        if isinstance(online_binding, dict):
+            route.setdefault("provider", online_binding.get("provider"))
+            route.setdefault(
+                "online_transport_binding",
+                {"provider": online_binding.get("provider")},
+            )
+            route.setdefault("online_invoker_provider", online_binding.get("provider"))
+            online_model_name = str(online_binding.get("model") or "")
     return UnifiedRuntimeRequest(
         task_id="workforce-admission-runtime-test",
         workspace_revision="rev-workforce-admission",
@@ -99,6 +113,7 @@ def _request(route: dict[str, object], *, local: bool = False, online: bool = Tr
         route=route,
         local_enabled=local,
         online_enabled=online,
+        online_model_name=online_model_name,
         local_request={"task_id": "workforce-admission-runtime-test"} if local else None,
     )
 
@@ -112,6 +127,10 @@ def _online(context: dict[str, object]) -> dict[str, object]:
         "provider_call_count": 1,
         "evidence_refs": ["online:workforce-admission:test"],
     }
+
+
+_online.provider = "codex"
+_online.online_invoker_provider = "codex"
 
 
 def _verifier(context: dict[str, object]) -> dict[str, object]:
@@ -533,6 +552,251 @@ def test_first_admission_stamps_json_safe_lineage_into_shared_context_and_receip
     assert receipt["context_trace"]["workforce_admission_lineage"] == lineage
 
 
+def _online_authority_route() -> dict[str, object]:
+    return {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"online": _bindings()["online"]},
+    }
+
+
+def _run_online_authority_case(
+    route: dict[str, object],
+    *,
+    invoker=_online,
+    model_name: str | None = None,
+) -> tuple[dict[str, object], int]:
+    planner = _Planner(
+        _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL"))
+    )
+    request = _request(route)
+    if model_name is not None:
+        request = replace(request, online_model_name=model_name)
+    calls = 0
+
+    def counted(context):
+        nonlocal calls
+        calls += 1
+        return invoker(context)
+
+    receipt = UnifiedRuntime(planner=planner, workforce_policy_loader=_Loader()).run(
+        request,
+        online_invoker=counted,
+        verifier=_verifier,
+        learning=_learning,
+    )
+    return receipt, calls
+
+
+def test_missing_invocation_authority_fails_online_before_callable() -> None:
+    calls = 0
+
+    def online(_context):
+        nonlocal calls
+        calls += 1
+        return _online(_context)
+
+    request = _request({"workforce_admission_enabled": True})
+    stage = UnifiedRuntime._run_online(
+        request,
+        online,
+        {"task_id": request.task_id, "route": dict(request.route)},
+    )
+
+    assert stage["status"] == "FAILED"
+    assert stage["invoked"] is False
+    assert stage["gate_passed"] is False
+    assert stage["response"]["provider_call_count"] == 0
+    assert stage["reason"] == "workforce_admission_missing"
+    assert calls == 0
+
+
+def test_non_allow_admission_fails_online_before_callable() -> None:
+    route = _online_authority_route()
+    route["workforce_bindings"] = {
+        "online": {
+            "worker_id": "not_an_admitted_worker",
+            "provider": "codex",
+            "model": "gpt-5.6-luna",
+            "controls": [],
+        }
+    }
+    receipt, calls = _run_online_authority_case(route)
+    online = receipt["online"]
+    assert online["status"] == "FAILED"
+    assert online["invoked"] is False
+    assert online["gate_passed"] is False
+    assert online["response"]["provider_call_count"] == 0
+    assert online["reason"] == "workforce_admission_overall_decision_not_allow"
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_reason"),
+    [
+        ({"provider": "grok"}, "online_route_provider_mismatch"),
+        (
+            {"online_transport_binding": {"provider": "grok"}},
+            "online_transport_provider_mismatch",
+        ),
+        ({"online_invoker_provider": "grok"}, "online_invoker_provider_mismatch"),
+    ],
+)
+def test_provider_identity_mismatch_is_zero_call(
+    change: dict[str, object], expected_reason: str
+) -> None:
+    route = _online_authority_route()
+    route.update(change)
+    receipt, calls = _run_online_authority_case(route)
+    assert receipt["online"]["status"] == "FAILED"
+    assert receipt["online"]["reason"] == expected_reason
+    assert receipt["online"]["invoked"] is False
+    assert receipt["online"]["gate_passed"] is False
+    assert receipt["online"]["response"]["provider_call_count"] == 0
+    assert calls == 0
+
+
+def test_model_mismatch_is_zero_call() -> None:
+    receipt, calls = _run_online_authority_case(
+        _online_authority_route(), model_name="different-model"
+    )
+    assert receipt["online"]["reason"] == "online_model_name_mismatch"
+    assert receipt["online"]["response"]["provider_call_count"] == 0
+    assert calls == 0
+
+
+def test_missing_invoker_provider_identity_is_zero_call() -> None:
+    route = _online_authority_route()
+    route["online_invoker_provider"] = None
+
+    def untagged(context):
+        return _online(context)
+
+    receipt, calls = _run_online_authority_case(route, invoker=untagged)
+    assert receipt["online"]["reason"] == "online_invoker_provider_missing"
+    assert receipt["online"]["response"]["provider_call_count"] == 0
+    assert calls == 0
+
+
+def test_admission_hash_mismatch_is_zero_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nexus.services.unified_runtime as unified_runtime_module
+
+    original = unified_runtime_module.evaluate_runtime_workforce_admission
+
+    def tampered(*args, **kwargs):
+        payload = original(*args, **kwargs).to_dict()
+        payload["records"][0]["binding_hash"] = "0" * 64
+        return payload
+
+    monkeypatch.setattr(
+        unified_runtime_module,
+        "evaluate_runtime_workforce_admission",
+        tampered,
+    )
+    receipt, calls = _run_online_authority_case(_online_authority_route())
+    assert receipt["online"]["reason"] == "workforce_admission_record_binding_hash_mismatch"
+    assert receipt["online"]["response"]["provider_call_count"] == 0
+    assert calls == 0
+
+
+def test_admitted_online_authority_is_exact_and_receipt_bound() -> None:
+    receipt, calls = _run_online_authority_case(_online_authority_route())
+    authority = receipt["gateway_invocation_authority"]
+    record = next(
+        item for item in receipt["workforce_admission"]["records"]
+        if item["demand"]["execution_channel"] == "online"
+    )
+    assert authority["schema"] == "nexus.gateway_invocation_authority.v1"
+    assert authority["status"] == "ALLOW"
+    assert authority["gate_passed"] is True
+    assert authority["resolved_worker_id"] == "codex_luna"
+    assert authority["resolved_provider"] == "codex"
+    assert authority["resolved_model"] == "gpt-5.6-luna"
+    assert authority["policy_hash"] == receipt["workforce_admission"]["policy_identity"]["policy_hash"]
+    assert authority["binding_hash"] == record["binding_hash"]
+    assert authority["aggregate_binding_hash"] == receipt["workforce_admission"]["aggregate_binding_hash"]
+    assert receipt["plan_payload"]["signal_snapshot"]["gateway_invocation_authority"] == authority
+    assert receipt["online"]["context_trace"]["gateway_invocation_authority"] == authority
+    assert receipt["context_trace"]["gateway_invocation_authority"] == authority
+    assert receipt["receipt_base"]["receipt_hash"] == receipt["receipt_hash"]
+    assert calls == 1
+
+
+def test_evidence_seal_failure_preserves_admitted_online_authority_without_invoking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nexus.services.capability_evidence_bundle as evidence_bundle_module
+
+    monkeypatch.setattr(
+        evidence_bundle_module,
+        "verify_capability_evidence_bundle",
+        lambda _bundle: {"ok": False, "blockers": ["forced_seal_failure"]},
+    )
+    planner = _Planner(
+        _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")),
+        selected=["memory"],
+    )
+    loader = _Loader()
+    calls = 0
+    capability_calls = 0
+
+    def counted_memory(context):
+        nonlocal capability_calls
+        capability_calls += 1
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "evidence_refs": ["capability:memory:workforce-admission:test"],
+        }
+
+    def counted_online(context):
+        nonlocal calls
+        calls += 1
+        return _online(context)
+
+    receipt = UnifiedRuntime(planner=planner, workforce_policy_loader=loader).run(
+        _request(_online_authority_route()),
+        online_invoker=counted_online,
+        capability_invokers={"memory": counted_memory},
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    authority = receipt["gateway_invocation_authority"]
+    assert receipt["terminal_status"] == "BLOCKED"
+    assert receipt["online"]["reason"] == "blocked_by_evidence_seal"
+    assert receipt["online"]["invoked"] is False
+    assert receipt["online"]["provider_call_count"] == 0
+    assert receipt["provider_call_count"] == 0
+    assert receipt["online_call_count"] == 0
+    assert receipt["local_call_count"] == 0
+    assert receipt["verifier_call_count"] == 0
+    assert receipt["learning_call_count"] == 0
+    assert capability_calls == 1
+    assert receipt["capability_results"]["memory"]["invoked"] is True
+    assert receipt["capability_call_count"] == 1
+    assert receipt["invocation_counts"] == {
+        "capability": 1,
+        "local": 0,
+        "online": 0,
+        "verifier": 0,
+        "learning": 0,
+    }
+    assert authority["schema"] == "nexus.gateway_invocation_authority.v1"
+    assert authority["status"] == "ALLOW"
+    assert authority["gate_passed"] is True
+    assert receipt["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert receipt["workforce_admission_lineage"] == receipt["plan_payload"]["workforce_admission_lineage"]
+    authority_surfaces = (
+        receipt["planner"]["plan_payload"]["gateway_invocation_authority"],
+        receipt["plan_payload"]["signal_snapshot"]["gateway_invocation_authority"],
+        receipt["online"]["context_trace"]["gateway_invocation_authority"],
+        receipt["context_trace"]["gateway_invocation_authority"],
+    )
+    assert all(surface == authority for surface in authority_surfaces)
+    assert calls == 0
+
+
 def _replan_pair(
     *,
     route: dict[str, object],
@@ -725,10 +989,20 @@ def test_authorized_changed_binding_continues_as_rebound_and_preserves_source_re
     second_path = tmp_path / "attempt-2.json"
     route = {
         "workforce_admission_enabled": True,
-        "workforce_bindings": {"local": _bindings()["local"]},
+        "workforce_bindings": _bindings(),
     }
     loader = _Loader()
-    planner = _Planner(_demands(_demand("local", mutation=False)))
+    planner = _Planner(
+        _demands(
+            _demand("local", mutation=False),
+            _demand(
+                "online",
+                role="main_engineering",
+                autonomy="L3_HISTORICAL",
+                mutation=False,
+            ),
+        )
+    )
     runtime, first = _replan_pair(
         route=route,
         loader=loader,
@@ -752,7 +1026,8 @@ def test_authorized_changed_binding_continues_as_rebound_and_preserves_source_re
                         "focused_tests",
                         "external_verifier",
                     ],
-                }
+                },
+                "online": _bindings()["online"],
             },
         }
     )
