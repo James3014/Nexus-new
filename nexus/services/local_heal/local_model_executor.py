@@ -11,13 +11,19 @@ from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
     OllamaLocalModelProvider,
     InjectedLocalModelProvider,
+    RecordingLocalModelProvider,
+    AuthorityBoundLocalModelProvider,
 )
 from nexus.services.local_heal.local_model_armor_receipt_gate import validate_local_model_armor_metadata
 def _inject_ledger_state(raw_meta: dict[str, Any], provider: Any) -> None:
-    from nexus.services.local_heal.local_model_provider import RecordingLocalModelProvider
-    if isinstance(provider, RecordingLocalModelProvider):
-        raw_meta["llm_call_ledger"] = provider.ledger_summary
-        raw_meta["llm_call_ledger_records"] = [r.to_dict() for r in provider.ledger]
+    summary = getattr(provider, "ledger_summary", None)
+    if isinstance(summary, dict):
+        raw_meta["llm_call_ledger"] = summary
+        ledger = getattr(provider, "ledger", [])
+        raw_meta["llm_call_ledger_records"] = [
+            r.to_dict() if hasattr(r, "to_dict") else dict(r)
+            for r in ledger
+        ] if hasattr(ledger, "__iter__") else []
 from nexus.services.local_heal.local_armor_attempt_receipt import build_local_armor_attempt_receipt
 from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext, CapabilityExecutionResult
 from nexus.services.local_heal.local_assist_receipts import build_local_assist_telemetry_from_executor_meta
@@ -824,10 +830,251 @@ def compute_verifier_failure_evidence(
     }
 
 
+LOCAL_MODEL_INVOCATION_AUTHORITY_SCHEMA = "nexus.local_model_invocation_authority.v1"
+
+
+def _request_local_model_authority(
+    request: LocalModelExecutorRequest,
+) -> Mapping[str, Any] | Any | None:
+    route_context = request.route_context
+    signal_snapshot = (
+        route_context.get("signal_snapshot")
+        if isinstance(route_context, Mapping)
+        else None
+    )
+    if not isinstance(signal_snapshot, Mapping):
+        return None
+    if "local_model_invocation_authority" not in signal_snapshot:
+        return None
+    return signal_snapshot["local_model_invocation_authority"]
+
+
+def _governed_failure_response(
+    request: LocalModelExecutorRequest,
+    *,
+    authority: Any,
+    reason: str,
+    actual_provider: str = "",
+    actual_model: str = "",
+    model_binding_mode: str = "",
+) -> LocalModelExecutorResponse:
+    empty_hash = hashlib.sha256(b"").hexdigest()
+    raw_metadata = {
+        "error": reason,
+        "reason": reason,
+        "local_model_invocation_authority": authority,
+        "actual_provider": actual_provider,
+        "actual_model": actual_model,
+        "model_binding_mode": model_binding_mode,
+        "provider_call_count": 0,
+        "ledger_count": 0,
+    }
+    return LocalModelExecutorResponse(
+        invoked=False,
+        local_model_called=False,
+        candidate_patch="",
+        candidate_hash=empty_hash,
+        reasoning_summary=reason,
+        raw_model_metadata=raw_metadata,
+        provider="none",
+        model_name="",
+        error=reason,
+        timeout=False,
+        evidence_refs=request.evidence_refs,
+    )
+
+
+def _provider_identity(provider: Any, attribute: str) -> str:
+    try:
+        value = getattr(provider, attribute, "")
+    except Exception:
+        return ""
+    return value if isinstance(value, str) else ""
+
+
+def _provider_name_for_metadata(provider: Any) -> str:
+    identity = _provider_identity(provider, "provider_identity")
+    if identity:
+        return identity
+    # Legacy fallback is retained only for the explicit built-in Ollama type.
+    return "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+
+
+def _validate_local_model_authority(
+    request: LocalModelExecutorRequest,
+    authority: Any,
+) -> tuple[str, str, str]:
+    if not isinstance(authority, Mapping):
+        return "local_model_invocation_authority_malformed", "", ""
+    if authority.get("schema") != LOCAL_MODEL_INVOCATION_AUTHORITY_SCHEMA:
+        return "local_model_invocation_authority_schema_mismatch", "", ""
+    if authority.get("status") != "ALLOW":
+        return "local_model_invocation_authority_status_not_allow", "", ""
+    if authority.get("gate_passed") is not True:
+        return "local_model_invocation_authority_gate_not_passed", "", ""
+
+    resolved_provider = authority.get("resolved_provider")
+    resolved_model = authority.get("resolved_model")
+    if not isinstance(resolved_provider, str) or not resolved_provider.strip():
+        return "local_model_invocation_authority_provider_missing", "", ""
+    if not isinstance(resolved_model, str) or not resolved_model.strip():
+        return "local_model_invocation_authority_model_missing", "", ""
+
+    route_context = request.route_context
+    signal_snapshot = route_context.get("signal_snapshot") if isinstance(route_context, Mapping) else None
+    if not isinstance(signal_snapshot, Mapping):
+        return "local_model_invocation_authority_signal_snapshot_missing", "", ""
+    if request.model_name != resolved_model:
+        return "local_model_request_model_mismatch", resolved_provider, resolved_model
+    if (
+        signal_snapshot.get("executor_provider") != resolved_provider
+        or signal_snapshot.get("executor_model") != resolved_model
+    ):
+        return "local_model_signal_identity_mismatch", resolved_provider, resolved_model
+
+    execution_topology = signal_snapshot.get("execution_topology")
+    committee_enabled = (
+        signal_snapshot.get("local_committee_enabled") is True
+        or signal_snapshot.get("use_committee") is True
+    )
+    if execution_topology in {"local_committee_only", "local_cascade"} or committee_enabled:
+        return "local_model_committee_authority_required", resolved_provider, resolved_model
+    return "", resolved_provider, resolved_model
+
+
+def _prepare_governed_provider(
+    request: LocalModelExecutorRequest,
+    *,
+    authority: Any,
+    provider: LocalModelProvider | None,
+) -> tuple[LocalModelProvider | None, AuthorityBoundLocalModelProvider | None, str]:
+    reason, resolved_provider, resolved_model = _validate_local_model_authority(request, authority)
+    if reason:
+        return None, None, reason
+
+    if provider is None:
+        try:
+            provider = build_local_model_provider_from_signal_snapshot(
+                request.route_context,
+                "candidate_generate_fn",
+            )
+        except ValueError as exc:
+            return None, None, str(exc)
+
+    actual_provider = _provider_identity(provider, "provider_identity")
+    if not actual_provider:
+        return None, None, "local_model_provider_identity_missing"
+    if actual_provider != resolved_provider:
+        return None, None, "local_model_provider_identity_mismatch"
+
+    actual_model = _provider_identity(provider, "model_identity")
+    binding_mode = _provider_identity(provider, "model_binding_mode") or "untagged"
+    if binding_mode != "request_bound" and actual_model != resolved_model:
+        reason = (
+            "local_model_provider_model_identity_missing"
+            if not actual_model
+            else "local_model_provider_model_mismatch"
+        )
+        return None, None, reason
+
+    if isinstance(provider, AuthorityBoundLocalModelProvider):
+        guarded = provider
+    else:
+        if not isinstance(provider, RecordingLocalModelProvider):
+            provider = RecordingLocalModelProvider(provider)
+        guarded = AuthorityBoundLocalModelProvider(provider, resolved_model=resolved_model)
+    return guarded, guarded, ""
+
+
+def _stamp_governed_response(
+    request: LocalModelExecutorRequest,
+    response: LocalModelExecutorResponse,
+    *,
+    authority: Any,
+    provider: LocalModelProvider | None,
+    guard: AuthorityBoundLocalModelProvider | None,
+) -> LocalModelExecutorResponse:
+    raw_metadata = response.raw_model_metadata if isinstance(response.raw_model_metadata, dict) else {}
+    actual_provider = _provider_identity(provider, "provider_identity") if provider is not None else ""
+    actual_model = ""
+    binding_mode = _provider_identity(provider, "model_binding_mode") if provider is not None else ""
+    if guard is not None:
+        actual_model = guard.actual_model
+    if not actual_model and provider is not None:
+        actual_model = _provider_identity(provider, "model_identity")
+    if not actual_model and binding_mode == "request_bound":
+        actual_model = str(authority.get("resolved_model") or "") if isinstance(authority, Mapping) else ""
+
+    raw_metadata["local_model_invocation_authority"] = authority
+    raw_metadata["actual_provider"] = actual_provider
+    raw_metadata["actual_model"] = actual_model
+    raw_metadata["model_binding_mode"] = binding_mode
+    if guard is not None:
+        _inject_ledger_state(raw_metadata, guard)
+    ledger_summary = raw_metadata.get("llm_call_ledger")
+    provider_call_count = (
+        int(ledger_summary.get("total_calls", 0))
+        if isinstance(ledger_summary, Mapping)
+        else (guard.ledger_count if guard is not None else 0)
+    )
+    raw_metadata["provider_call_count"] = provider_call_count
+    raw_metadata["ledger_count"] = provider_call_count
+
+    failure_reason = guard.sticky_failure_reason if guard is not None else ""
+    admitted_model = authority.get("resolved_model") if isinstance(authority, Mapping) else ""
+    if (
+        not failure_reason
+        and (response.local_model_called or response.model_name)
+        and response.model_name != admitted_model
+    ):
+        failure_reason = "local_model_response_model_mismatch"
+    if failure_reason:
+        raw_metadata["error"] = failure_reason
+        raw_metadata["reason"] = failure_reason
+        return _governed_failure_response(
+            request,
+            authority=authority,
+            reason=failure_reason,
+            actual_provider=actual_provider,
+            actual_model=actual_model,
+            model_binding_mode=binding_mode,
+        )
+
+    return response
+
+
 class LocalModelExecutor:
     @staticmethod
     def run(request: LocalModelExecutorRequest, *, provider: LocalModelProvider | None = None) -> LocalModelExecutorResponse:
-        resp = LocalModelExecutor._run_impl(request, provider=provider)
+        authority = _request_local_model_authority(request)
+        guard: AuthorityBoundLocalModelProvider | None = None
+        governed_provider = provider
+        if authority is not None:
+            governed_provider, guard, authority_error = _prepare_governed_provider(
+                request,
+                authority=authority,
+                provider=provider,
+            )
+            if authority_error:
+                resp = _governed_failure_response(
+                    request,
+                    authority=authority,
+                    reason=authority_error,
+                    actual_provider=_provider_identity(provider, "provider_identity") if provider is not None else "",
+                    actual_model=_provider_identity(provider, "model_identity") if provider is not None else "",
+                    model_binding_mode=_provider_identity(provider, "model_binding_mode") if provider is not None else "",
+                )
+            else:
+                resp = LocalModelExecutor._run_impl(request, provider=governed_provider)
+            resp = _stamp_governed_response(
+                request,
+                resp,
+                authority=authority,
+                provider=governed_provider,
+                guard=guard,
+            )
+        else:
+            resp = LocalModelExecutor._run_impl(request, provider=provider)
         if resp and hasattr(resp, "raw_model_metadata") and isinstance(resp.raw_model_metadata, dict):
             defaults = {
                 "semantic_retry_client_reused": False,
@@ -992,8 +1239,7 @@ class LocalModelExecutor:
             )
 
         # N30R-V3 Phase 2: Wrap active provider in RecordingLocalModelProvider for authoritative ledger
-        from nexus.services.local_heal.local_model_provider import RecordingLocalModelProvider
-        if not isinstance(provider, RecordingLocalModelProvider):
+        if not isinstance(provider, (RecordingLocalModelProvider, AuthorityBoundLocalModelProvider)):
             provider = RecordingLocalModelProvider(provider)
 
         # 4. Handle Active Memory Retrieval if enabled
@@ -1489,7 +1735,7 @@ class LocalModelExecutor:
                 )
                 hybrid_route = candidate_isolation_to_hybrid_route(isolation_receipt)
 
-            provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+            provider_name = _provider_name_for_metadata(provider)
 
             # Resolve selected model name or fallback to "committee"
             selected_model = ""
@@ -2008,7 +2254,7 @@ class LocalModelExecutor:
             raw_meta["armor_receipt_complete"] = armor_ok
             raw_meta["armor_receipt_missing_fields"] = armor_miss
 
-            provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+            provider_name = _provider_name_for_metadata(provider)
             local_assist_telemetry = build_local_assist_telemetry_from_executor_meta(raw_meta)
             raw_meta["local_assist_telemetry"] = local_assist_telemetry.to_dict()
             # P3-A: Attach route skeleton metadata (shadow-only, no runtime behavior change)
@@ -2855,7 +3101,7 @@ class LocalModelExecutor:
         if execution_topology == "local_cascade":
             signal_snapshot = request.route_context.get("signal_snapshot", {}) if isinstance(request.route_context, dict) else {}
             protocol_mode = signal_snapshot["protocol_mode"]
-            provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+            provider_name = _provider_name_for_metadata(provider)
 
             from nexus.services.local_heal.local_cascade_orchestrator import (
                 run_local_cascade,
@@ -3248,7 +3494,7 @@ class LocalModelExecutor:
             _understanding_meta["error_kind"] = f"OUTPUT_UNDERSTANDING:{_understanding.failure_reason}"
             _understanding_meta["error_message"] = _understanding.failure_reason
 
-        provider_name = "ollama" if isinstance(provider, OllamaLocalModelProvider) else "injected"
+        provider_name = _provider_name_for_metadata(provider)
 
         raw_meta = {
             "output_truncated": prov_resp.output_truncated,

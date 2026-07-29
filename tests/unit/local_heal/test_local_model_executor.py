@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import pytest
 from pathlib import Path
+from dataclasses import replace
 
 from nexus.services.local_heal.local_model_executor import (
     LocalModelExecutor,
@@ -17,6 +18,7 @@ from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
     InjectedLocalModelProvider,
     LocalModelProviderRequest,
+    LocalModelProviderResponse,
 )
 def make_test_request(
     task_id: str,
@@ -7930,3 +7932,161 @@ def test_compute_failure_class_classifies_real_parse_errors() -> None:
             pipeline_failure_reason="",
         )
         assert fc == f"parse_failed:{err}"
+
+
+def _authority_request(*, topology: str = "single_local_model", model: str = "admitted-model", **snapshot_overrides):
+    authority = {
+        "schema": "nexus.local_model_invocation_authority.v1",
+        "status": "ALLOW",
+        "gate_passed": True,
+        "failure_reason": "",
+        "resolved_worker_id": "fixture-worker",
+        "resolved_provider": "fixture",
+        "resolved_model": model,
+        "policy_hash": "policy-hash",
+        "binding_hash": "binding-hash",
+        "aggregate_binding_hash": "aggregate-hash",
+    }
+    snapshot = {
+        "execution_topology": topology,
+        "model_call_allowed": True,
+        "selected_executor": "local_model",
+        "executor_provider": "fixture",
+        "executor_model": model,
+        "protocol_mode": "anchored_edit",
+        "local_model_invocation_authority": authority,
+        **snapshot_overrides,
+    }
+    req = make_test_request(
+        task_id="governed-local",
+        route_context={"signal_snapshot": snapshot},
+    )
+    return replace(req, model_name=model), authority
+
+
+def _tagged_provider(*, model: str = "admitted-model", provider: str = "fixture", fn=None):
+    return InjectedLocalModelProvider(
+        fn or (lambda _: "candidate"),
+        provider_identity=provider,
+        model_identity=model,
+    )
+
+
+def test_governed_executor_accepts_explicit_provider_and_stamps_identity() -> None:
+    req, authority = _authority_request()
+    calls = []
+    provider = _tagged_provider(fn=lambda request: calls.append(request) or "candidate")
+
+    response = LocalModelExecutor.run(req, provider=provider)
+
+    assert response.local_model_called is True
+    assert len(calls) == 1
+    assert calls[0].model_name == "admitted-model"
+    assert response.raw_model_metadata["local_model_invocation_authority"] == authority
+    assert response.raw_model_metadata["actual_provider"] == "fixture"
+    assert response.raw_model_metadata["actual_model"] == "admitted-model"
+    assert response.raw_model_metadata["model_binding_mode"] == "fixed"
+    assert response.raw_model_metadata["provider_call_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("untagged", "local_model_provider_identity_missing"),
+        ("provider", "local_model_provider_identity_mismatch"),
+        ("fixed_model", "local_model_provider_model_mismatch"),
+        ("request_model", "local_model_request_model_mismatch"),
+        ("signal", "local_model_signal_identity_mismatch"),
+    ],
+)
+def test_governed_identity_failures_are_zero_call(case: str, expected: str) -> None:
+    req, authority = _authority_request()
+    provider = _tagged_provider()
+    if case == "untagged":
+        provider = InjectedLocalModelProvider(lambda _: "candidate")
+    elif case == "provider":
+        provider = _tagged_provider(provider="other-provider")
+    elif case == "fixed_model":
+        provider = _tagged_provider(model="other-model")
+    elif case == "request_model":
+        req = replace(req, model_name="other-model")
+    elif case == "signal":
+        route = dict(req.route_context)
+        snapshot = dict(route["signal_snapshot"])
+        snapshot["executor_model"] = "other-model"
+        route["signal_snapshot"] = snapshot
+        req = replace(req, route_context=route)
+
+    calls = []
+    if case in {"untagged", "provider", "fixed_model"}:
+        original = provider._generate_fn
+        provider._generate_fn = lambda request: calls.append(request) or original(request)
+
+    response = LocalModelExecutor.run(req, provider=provider)
+
+    assert response.invoked is False
+    assert response.local_model_called is False
+    assert response.candidate_patch == ""
+    assert response.error == expected
+    assert response.raw_model_metadata["local_model_invocation_authority"] == authority
+    assert response.raw_model_metadata["provider_call_count"] == 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("topology", ["local_committee_only", "local_cascade"])
+def test_governed_committee_topologies_fail_before_provider_call(topology: str) -> None:
+    req, authority = _authority_request(topology=topology)
+    calls = []
+    provider = _tagged_provider(fn=lambda request: calls.append(request) or "candidate")
+
+    response = LocalModelExecutor.run(req, provider=provider)
+
+    assert response.error == "local_model_committee_authority_required"
+    assert response.invoked is False
+    assert response.local_model_called is False
+    assert response.candidate_patch == ""
+    assert response.raw_model_metadata["local_model_invocation_authority"] == authority
+    assert response.raw_model_metadata["provider_call_count"] == 0
+    assert calls == []
+
+
+def test_governed_committee_signal_flag_fails_closed() -> None:
+    req, authority = _authority_request(use_committee=True)
+    calls = []
+    provider = _tagged_provider(fn=lambda request: calls.append(request) or "candidate")
+
+    response = LocalModelExecutor.run(req, provider=provider)
+
+    assert response.error == "local_model_committee_authority_required"
+    assert response.raw_model_metadata["local_model_invocation_authority"] == authority
+    assert response.raw_model_metadata["provider_call_count"] == 0
+    assert calls == []
+
+
+def test_governed_reported_model_mismatch_is_sticky_and_fail_closed() -> None:
+    req, authority = _authority_request()
+    calls = 0
+
+    class WrongModelProvider:
+        provider_identity = "fixture"
+        model_identity = "admitted-model"
+        model_binding_mode = "fixed"
+
+        def generate(self, request):
+            nonlocal calls
+            calls += 1
+            return LocalModelProviderResponse(
+                provider_invoked=True,
+                model_called=True,
+                model_name="wrong-model",
+                output_text="candidate",
+            )
+
+    response = LocalModelExecutor.run(req, provider=WrongModelProvider())
+
+    assert calls == 1
+    assert response.invoked is False
+    assert response.local_model_called is False
+    assert response.candidate_patch == ""
+    assert response.error == "local_model_provider_reported_model_mismatch"
+    assert response.raw_model_metadata["local_model_invocation_authority"] == authority
