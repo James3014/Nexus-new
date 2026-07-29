@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -155,6 +155,78 @@ def _learning(context: dict[str, object]) -> dict[str, object]:
     }
 
 
+@dataclass(frozen=True)
+class _DataclassLocalRequest:
+    task_id: str
+    planner_snapshot: dict[str, object]
+
+    def to_dict(self) -> dict[str, object]:
+        return {"task_id": self.task_id, "planner_snapshot": self.planner_snapshot}
+
+
+class _CapturingLocal:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.seen_request: object | None = None
+
+    def handle(self, request: object) -> dict[str, object]:
+        self.calls += 1
+        self.seen_request = request
+        return {
+            "task_id": "workforce-admission-runtime-test",
+            "local_model_invoked": True,
+            "invoked": True,
+            "output_delivered": True,
+            "action": "candidate",
+            "physical_callable": "LocalModelExecutor.run",
+            "evidence_refs": ["local:workforce-admission:test"],
+            "verifier_summary": {
+                "verifier_status": "pass",
+                "verifier_reached": True,
+                "exit_code": 0,
+            },
+            "candidate_summary": {
+                "isolation_status": "isolated",
+                "selected_candidate_hash": "abc123",
+                "selected_candidate_hash_matches_applied": True,
+            },
+            "outcome_contributed": True,
+        }
+
+
+def _local_case(
+    *,
+    binding: dict[str, object] | None = None,
+    planner_snapshot: dict[str, object] | None = None,
+    local_request: object | None = None,
+    demands: dict[str, object] | None = None,
+) -> tuple[dict[str, object], _CapturingLocal]:
+    route = {
+        "workforce_admission_enabled": True,
+        "workforce_bindings": {"local": binding or _bindings()["local"]},
+    }
+    planner = _Planner(demands or _demands(_demand("local", mutation=False)), selected=["local_model_executor"])
+    local = _CapturingLocal()
+    request = _request(route, local=True, online=False)
+    request = replace(
+        request,
+        local_request=(
+            local_request
+            if local_request is not None
+            else {
+                "task_id": request.task_id,
+                "planner_snapshot": planner_snapshot or {},
+            }
+        ),
+    )
+    receipt = UnifiedRuntime(
+        planner=planner,
+        local_service=local,
+        workforce_policy_loader=_Loader(),
+    ).run(request, verifier=_verifier, learning=_learning)
+    return receipt, local
+
+
 def _bindings() -> dict[str, object]:
     return {
         "local": {
@@ -170,6 +242,247 @@ def _bindings() -> dict[str, object]:
             "controls": ["receipt", "independent_verification", "governed_adapter"],
         },
     }
+
+
+def test_local_authority_is_exactly_propagated_and_binds_mapping_request_identity() -> None:
+    receipt, local = _local_case(
+        planner_snapshot={
+            "executor_provider": "attacker-provider",
+            "executor_model": "qwen2.5-coder:7b",
+            "execution_topology": "legacy-topology",
+            "protocol_mode": "legacy-protocol",
+            "model_call_allowed": True,
+            "legacy_context": {"forged": True},
+            "workforce_admission": {"overall_decision": "BLOCK"},
+            "workforce_admission_lineage": {"status": "FORGED"},
+            "planner_decision_id": "forged-planner-decision",
+            "route_truth_source": "forged-request",
+            "policy_identity": {"policy_hash": "forged-policy"},
+            "policy_hash": "forged-policy",
+            "binding_hash": "forged-binding",
+            "aggregate_binding_hash": "forged-aggregate",
+            "selected_capabilities": ["forged-capability"],
+            "evidence_refs": ["forged-evidence"],
+            "task_id": "forged-task",
+            "workspace_revision": "forged-workspace",
+        }
+    )
+
+    authority = receipt["local_model_invocation_authority"]
+    assert authority["schema"] == "nexus.local_model_invocation_authority.v1"
+    assert authority["status"] == "ALLOW"
+    assert authority["gate_passed"] is True
+    assert authority["resolved_provider"] == "ollama"
+    assert authority["resolved_model"] == "qwen2.5-coder:7b-instruct"
+    assert receipt["plan_payload"]["local_model_invocation_authority"] == authority
+    assert receipt["plan_payload"]["signal_snapshot"]["local_model_invocation_authority"] == authority
+    assert receipt["local"]["context_trace"]["local_model_invocation_authority"] == authority
+    assert receipt["context_trace"]["local_model_invocation_authority"] == authority
+    seen = local.seen_request
+    assert isinstance(seen, dict)
+    snapshot = seen["planner_snapshot"]
+    assert snapshot["executor_provider"] == authority["resolved_provider"]
+    assert snapshot["executor_model"] == authority["resolved_model"]
+    assert snapshot["execution_topology"] == "legacy-topology"
+    assert snapshot["protocol_mode"] == "legacy-protocol"
+    assert snapshot["model_call_allowed"] is True
+    planner_snapshot = receipt["plan_payload"]["signal_snapshot"]
+    for key in (
+        "workforce_admission",
+        "workforce_admission_lineage",
+        "planner_decision_id",
+        "selected_capabilities",
+    ):
+        assert snapshot[key] == planner_snapshot[key]
+    assert "route_truth_source" not in snapshot
+    assert "evidence_refs" not in snapshot
+    for key in (
+        "legacy_context",
+        "policy_identity",
+        "policy_hash",
+        "binding_hash",
+        "aggregate_binding_hash",
+        "task_id",
+        "workspace_revision",
+    ):
+        assert key not in snapshot
+    assert json.dumps(
+        snapshot["local_model_invocation_authority"],
+        sort_keys=True,
+        separators=(",", ":"),
+    ) == json.dumps(authority, sort_keys=True, separators=(",", ":"))
+    assert local.calls == 1
+    json.dumps(authority)
+
+
+def test_local_authority_binds_dataclass_request_and_preserves_admitted_qwen_tag() -> None:
+    binding = {
+        "worker_id": "local_qwen3_8b",
+        "provider": "ollama",
+        "model": "qwen3:8b",
+        "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
+    }
+    request = _DataclassLocalRequest(
+        task_id="workforce-admission-runtime-test",
+        planner_snapshot={
+            "executor_provider": "wrong",
+            "executor_model": "qwen2.5:7b",
+            "execution_topology": "legacy-topology",
+            "protocol_mode": "legacy-protocol",
+            "model_call_allowed": False,
+            "workforce_admission": {"overall_decision": "BLOCK"},
+            "workforce_admission_lineage": {"status": "FORGED"},
+            "planner_decision_id": "forged-planner-decision",
+            "route_truth_source": "forged-request",
+            "policy_identity": {"policy_hash": "forged-policy"},
+            "binding_hash": "forged-binding",
+            "aggregate_binding_hash": "forged-aggregate",
+            "selected_capabilities": ["forged-capability"],
+            "evidence_refs": ["forged-evidence"],
+        },
+    )
+    receipt, local = _local_case(binding=binding, local_request=request)
+
+    authority = receipt["local_model_invocation_authority"]
+    assert authority["resolved_model"] == "qwen3:8b"
+    assert isinstance(local.seen_request, _DataclassLocalRequest)
+    snapshot = local.seen_request.planner_snapshot
+    assert snapshot["executor_provider"] == "ollama"
+    assert snapshot["executor_model"] == "qwen3:8b"
+    assert snapshot["execution_topology"] == "legacy-topology"
+    assert snapshot["protocol_mode"] == "legacy-protocol"
+    assert snapshot["model_call_allowed"] is False
+    planner_snapshot = receipt["plan_payload"]["signal_snapshot"]
+    for key in (
+        "workforce_admission",
+        "workforce_admission_lineage",
+        "planner_decision_id",
+        "selected_capabilities",
+    ):
+        assert snapshot[key] == planner_snapshot[key]
+    assert "route_truth_source" not in snapshot
+    assert "evidence_refs" not in snapshot
+    for key in ("policy_identity", "binding_hash", "aggregate_binding_hash", "evidence_refs"):
+        assert key not in snapshot
+    authority = receipt["local_model_invocation_authority"]
+    assert json.dumps(
+        snapshot["local_model_invocation_authority"],
+        sort_keys=True,
+        separators=(",", ":"),
+    ) == json.dumps(authority, sort_keys=True, separators=(",", ":"))
+    assert local.calls == 1
+
+
+def test_conflicting_local_request_identity_cannot_override_admitted_identity() -> None:
+    receipt, local = _local_case(
+        planner_snapshot={
+            "executor_provider": "evil-provider",
+            "executor_model": "evil-model",
+        }
+    )
+
+    assert receipt["local_model_invocation_authority"]["gate_passed"] is True
+    assert local.seen_request["planner_snapshot"]["executor_provider"] == "ollama"
+    assert local.seen_request["planner_snapshot"]["executor_model"] == "qwen2.5-coder:7b-instruct"
+    assert local.calls == 1
+
+
+@pytest.mark.parametrize("tamper", ["missing", "malformed", "binding", "aggregate", "policy"])
+def test_local_authority_failures_are_zero_call_and_identical_across_receipt_surfaces(
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+) -> None:
+    import nexus.services.unified_runtime as unified_runtime_module
+
+    original = unified_runtime_module.evaluate_runtime_workforce_admission
+
+    def tampered(*args, **kwargs):
+        payload = original(*args, **kwargs).to_dict()
+        if tamper == "missing":
+            payload["records"] = []
+        elif tamper == "malformed":
+            payload["records"][0]["schema"] = "wrong.schema"
+        elif tamper == "binding":
+            payload["records"][0]["binding_hash"] = "0" * 64
+        elif tamper == "aggregate":
+            payload["aggregate_binding_hash"] = "0" * 64
+        else:
+            payload["policy_identity"]["policy_hash"] = "0" * 64
+        return payload
+
+    monkeypatch.setattr(
+        unified_runtime_module,
+        "evaluate_runtime_workforce_admission",
+        tampered,
+    )
+    receipt, local = _local_case()
+
+    authority = receipt["local_model_invocation_authority"]
+    assert authority["gate_passed"] is False
+    assert receipt["local"]["invoked"] is False
+    assert receipt["local"]["local_model_call_count"] == 0
+    assert receipt["local"]["model_call_count"] == 0
+    assert receipt["local"]["provider_call_count"] == 0
+    assert receipt["local"]["response"]["provider_call_count"] == 0
+    assert local.calls == 0
+    surfaces = (
+        receipt["local_model_invocation_authority"],
+        receipt["plan_payload"]["local_model_invocation_authority"],
+        receipt["plan_payload"]["signal_snapshot"]["local_model_invocation_authority"],
+        receipt["local"]["context_trace"]["local_model_invocation_authority"],
+        receipt["context_trace"]["local_model_invocation_authority"],
+    )
+    assert all(surface == authority for surface in surfaces)
+
+
+def test_ambiguous_local_records_are_zero_call() -> None:
+    receipt, local = _local_case(
+        demands=_demands(
+            _demand("local", demand_id="local_one", mutation=False),
+            _demand("local", demand_id="local_two", mutation=False),
+        )
+    )
+
+    assert receipt["local_model_invocation_authority"]["gate_passed"] is False
+    assert receipt["local_model_invocation_authority"]["failure_reason"] == (
+        "workforce_admission_local_record_ambiguous"
+    )
+    assert receipt["local"]["invoked"] is False
+    assert local.calls == 0
+
+
+def test_admission_disabled_preserves_legacy_overlay_and_7b_normalization() -> None:
+    planner = _Planner(selected=["local_model_executor"])
+    local = _CapturingLocal()
+    request = UnifiedRuntimeRequest(
+        task_id="workforce-admission-runtime-test",
+        workspace_revision="rev-workforce-admission",
+        task_statement="legacy local overlay",
+        task_type="bugfix",
+        route={"recommended_flow": "direct"},
+        local_enabled=True,
+        online_enabled=False,
+        local_request={
+            "task_id": "workforce-admission-runtime-test",
+            "planner_snapshot": {
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b",
+                "execution_topology": "legacy-topology",
+                "protocol_mode": "legacy-protocol",
+            },
+        },
+    )
+    receipt = UnifiedRuntime(planner=planner, local_service=local).run(
+        request,
+        verifier=_verifier,
+        learning=_learning,
+    )
+
+    assert "local_model_invocation_authority" not in receipt
+    assert local.seen_request["planner_snapshot"]["executor_provider"] == "ollama"
+    assert local.seen_request["planner_snapshot"]["executor_model"] == "qwen2.5-coder:7b-instruct"
+    assert local.seen_request["planner_snapshot"]["execution_topology"] == "legacy-topology"
+    assert local.seen_request["planner_snapshot"]["protocol_mode"] == "legacy-protocol"
 
 
 @pytest.mark.parametrize("enabled_flag", [None, False])
