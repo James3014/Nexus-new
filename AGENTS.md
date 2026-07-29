@@ -28,6 +28,33 @@
 - **Task-card enforcement**: If a task requests a new artifact, its allowed path and filename must appear in the task's Allowed files. Otherwise return evidence in the final response only.
 - **Legacy authority**: Persistent documents created before the admission policy, or documents lacking artifact_authority metadata, are evidence-only by default. They must not be treated as current authority unless a current manifest, ADR, runbook, code consumer, or task specification explicitly promotes them. Claims in a report do not override physical code, tests, runtime receipts, or newer authoritative contracts.
 
+## 🗂️ Task Card Authority and Discovery
+- **Canonical execution authority**: Approved, cross-session Task Cards MUST be Git-tracked under `tasks/<campaign-id>/`. Do not use chat history, `.nexus/`, `docs/plans/`, or `docs/reports/` as the executable task specification.
+- **Campaign index**: Every active campaign MUST have `tasks/<campaign-id>/INDEX.md`. The index declares `artifact_authority: current`, owner, status, source specification, ordered cards, dependencies, current frontier, completed/blocked/superseded cards, and `AUTO_CHAIN`.
+- **Card naming**: Use `tasks/<campaign-id>/<NN>-<task-id>.md`. The card's `task_id` MUST exactly match the Nexus lifecycle task ID.
+- **Required card contract**: Each active card MUST define objective, authority and status, inputs, dependencies, allowed files, forbidden scope, verification commands, evidence required, exit criteria, residual debt handling, and block classification.
+- **Discovery order**: Before implementation, agents MUST read the root `AGENTS.md`, locate the relevant campaign `INDEX.md`, read only the current-frontier card, then verify the lifecycle `task_id`, `task_card_path`, and `task_card_hash` before editing code.
+- **Runtime state is not specification authority**: `.nexus/multi_agent/tasks/` and other `.nexus` lifecycle stores may record task ID, card path/hash, Target, Candidate, status, verification, integration, and receipts. They MUST NOT replace or silently rewrite the Git-tracked Task Card.
+- **Design and evidence are non-executable by default**: `docs/plans/` is design input and `docs/reports/` is evidence/history. Neither authorizes execution unless an active Task Card explicitly cites and bounds it.
+- **Legacy root cards**: Existing root-level files under `tasks/` are evidence-only unless an active campaign `INDEX.md` explicitly promotes them.
+- **No implicit chaining**: `AUTO_CHAIN=false` is the default. A successor card may start only when the campaign index explicitly names it and its dependency/exit gates are satisfied. Completion, failure, or BLOCK of one card never self-authorizes another card.
+
+## ⛔ Task Block Semantics
+- **RECOVERABLE_BLOCK**: A temporary external or environmental condition prevents progress without invalidating the Task Card. Preserve state and evidence, name the exact unblock condition, and resume the same card after recovery. Do not create or start a replacement card automatically.
+- **HARD_BLOCK**: Authority, safety, architecture, evidence integrity, irreversible-risk, or specification conflict prevents valid continuation. Stop mutation, preserve evidence, state the decision required, and require explicit owner/spec-authority resolution before resuming or superseding.
+- **Blocked means no promotion**: Neither block class permits Candidate promotion, integration, cleanup, production-readiness claims, public claims, or downstream task activation.
+- **Supersession is explicit**: Replacing a blocked card requires an explicit `superseded_by` link in the campaign index and lifecycle state. The replacement card must have its own path, task ID, hash, authority, scope, and gates.
+
+## 📦 Commit and Candidate Policy
+- **Implementation tasks require a scoped commit**: Unless the active Task Card explicitly declares `read_only: true`, `audit_only: true`, or `commit_forbidden: true`, a valid implementation task MUST end with a Git commit containing only that card's authorized changes.
+- **Task Card authority fields**: Implementation cards MUST declare `commit_required`, `candidate_required`, `worker_may_commit`, `worker_may_approve`, `worker_may_integrate`, and `worker_may_push`. Defaults are `commit_required: true`, `candidate_required: true`, `worker_may_commit: true`, and all three downstream authorities `false`.
+- **No commit from mixed dirty source checkout**: When unrelated tracked or untracked changes are present, implementation MUST occur in a clean isolated Target. Never stage, commit, reset, stash, clean, overwrite, or absorb unrelated source-checkout changes.
+- **Required pre-commit gates**: Before committing, verify allowed-file scope, run the Task Card's exact verification commands, run `git diff --check`, inspect tracked deletions, run GitNexus detect-changes, and review the complete staged diff.
+- **Worker responsibility**: The implementing Worker creates the scoped implementation commit and reports its exact SHA. Leaving verified implementation changes uncommitted and claiming completion is invalid.
+- **Candidate formation**: Under governed lifecycle execution, the scoped commit becomes a Candidate only after the card's required verification succeeds and the Candidate record is bound to the exact commit and task-card hash.
+- **Separation of authority**: A Worker MUST NOT approve, integrate, merge, push, or clean up its own Candidate unless the active Task Card explicitly grants that exact authority. Commit authority does not imply approval, integration, push, cleanup, or production-claim authority.
+- **Commit failure is a block**: If a required scoped commit cannot be formed safely, the task is not complete. Return `RECOVERABLE_BLOCK` or `HARD_BLOCK` with the exact physical reason and preservation state.
+
 ## 🛡️ Agent Capability Boundaries
 - **allowed_paths**: Project root, scripts/ops/, nexus_wiki_vault/, docs/
 - **forbidden_paths**: .obsidian/, benchmarks/, logs/, nexus_swarm/, packages/
@@ -137,5 +164,4 @@ This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 rela
 
 ### 2. Strict Proof-Backed Gates (Anti-Hallucination)
 - **Adapter Validation**: Receipt adapters must not blindly trust `claim_verified=True`. They must validate `verifier_artifact` (or `verifier_status`) and `source_hash`. If proof attributes are missing, the gate must fail closed (`gate_passed=False`) and record the failure reason.
-
 
