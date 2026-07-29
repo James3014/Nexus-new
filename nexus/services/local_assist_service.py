@@ -408,6 +408,8 @@ class LocalAssistResponse:
     # Physical callable identity: advisor → Provider.generate; candidate → Executor.run.
     physical_callable: str = ""
     executor_invoked: bool = False
+    provider_call_count: int = 0
+    model_call_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -557,6 +559,8 @@ class LocalAssistService:
                 claim_boundary=claim_boundary,
                 physical_callable="",
                 executor_invoked=False,
+                provider_call_count=0,
+                model_call_count=0,
             )
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text(json.dumps(response.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -971,6 +975,8 @@ class LocalAssistService:
             claim_boundary=claim_boundary,
             physical_callable=physical_callable,
             executor_invoked=executor_invoked,
+            provider_call_count=provider_call_count,
+            model_call_count=provider_call_count if local_model_invoked else 0,
         )
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(response.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")

@@ -979,6 +979,82 @@ def _repair_loop_result_from_local_stage(
     }
 
 
+def _formal_local_runtime_lineage(payload: Mapping[str, Any]) -> dict[str, Any]:
+    action = str(payload.get("action") or "").strip()
+    candidate = payload.get("candidate_summary") if isinstance(payload.get("candidate_summary"), Mapping) else {}
+    verifier = payload.get("verifier_summary") if isinstance(payload.get("verifier_summary"), Mapping) else {}
+    claim_boundary = payload.get("claim_boundary") if isinstance(payload.get("claim_boundary"), Mapping) else {}
+    receipt_path = str(payload.get("receipt_path") or "")
+    physical_callable = str(payload.get("physical_callable") or "")
+    executor_invoked = payload.get("executor_invoked") is True
+    local_model_invoked = bool(payload.get("local_model_invoked", payload.get("invoked", False)))
+    output_delivered = payload.get("output_delivered") is True
+    provider_call_count = int(payload.get("provider_call_count") or 0)
+    model_call_count = int(payload.get("model_call_count") or (provider_call_count if local_model_invoked else 0))
+    candidate_isolated = (
+        str(candidate.get("isolation_status") or "") == "isolated"
+        and bool(candidate.get("selected_candidate_hash"))
+        and candidate.get("selected_candidate_hash_matches_applied") is True
+    )
+    verifier_status = str(verifier.get("verifier_status") or "").strip().lower()
+    verifier_passed = (
+        action != "verified-subtask"
+        or (
+            verifier.get("verifier_reached") is True
+            and verifier_status in {"pass", "passed", "ok"}
+            and int(verifier.get("exit_code") or 0) == 0
+        )
+    )
+    blockers: list[str] = []
+    fallback_reason = str(payload.get("fallback_reason") or "").strip()
+    if fallback_reason and fallback_reason not in {"candidate_not_delivered", "provider_not_invoked"}:
+        blockers.append(fallback_reason)
+    if payload.get("schema") != "nexus.local_assist.response.v1":
+        blockers.append("local_assist_response_schema_missing")
+    if action not in {"candidate", "verified-subtask"}:
+        blockers.append("local_action_not_executor_bound")
+    if physical_callable != "LocalModelExecutor.run":
+        blockers.append("local_physical_callable_not_executor")
+    if not executor_invoked:
+        blockers.append("local_executor_not_invoked")
+    if not local_model_invoked:
+        blockers.append("local_model_not_invoked")
+    if not output_delivered:
+        blockers.append("local_output_not_delivered")
+    if not candidate_isolated:
+        blockers.append("candidate_not_isolated")
+    if not verifier_passed:
+        blockers.append("verifier_not_passed")
+    if not receipt_path:
+        blockers.append("local_receipt_path_missing")
+    if claim_boundary and claim_boundary.get("local_model_executor_invoked") is not True:
+        blockers.append("claim_boundary_executor_not_invoked")
+
+    gate_passed = not blockers
+    return {
+        "schema": "nexus.formal_local_runtime_lineage.v1",
+        "entrypoint": "UnifiedRuntime._run_local",
+        "service": "LocalAssistService.handle",
+        "executor": "LocalModelExecutor.run",
+        "status": "ALLOW" if gate_passed else "BLOCKED",
+        "gate_passed": gate_passed,
+        "failure_reason": blockers[0] if blockers else "",
+        "blockers": blockers,
+        "action": action,
+        "physical_callable": physical_callable,
+        "executor_invoked": executor_invoked,
+        "local_model_invoked": local_model_invoked,
+        "output_delivered": output_delivered,
+        "provider_call_count": provider_call_count,
+        "model_call_count": model_call_count,
+        "candidate_isolation_status": str(candidate.get("isolation_status") or ""),
+        "selected_candidate_hash": str(candidate.get("selected_candidate_hash") or ""),
+        "verifier_reached": bool(verifier.get("verifier_reached")),
+        "verifier_status": verifier_status,
+        "receipt_path": receipt_path,
+    }
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -3928,6 +4004,10 @@ class UnifiedRuntime:
             context_trace["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
             context_trace["local_model_invocation_authority"] = local_model_invocation_authority
+        if isinstance(local_stage.get("formal_local_runtime_lineage"), Mapping):
+            context_trace["formal_local_runtime_lineage"] = dict(
+                local_stage["formal_local_runtime_lineage"]
+            )
         receipt = {
             "schema": RECEIPT_SCHEMA,
             "task_id": request.task_id,
@@ -4243,6 +4323,7 @@ class UnifiedRuntime:
                     shared_snapshot[key] = value
             shared_snapshot["executor_provider"] = str(local_authority["resolved_provider"])
             shared_snapshot["executor_model"] = str(local_authority["resolved_model"])
+            shared_snapshot["route_truth_source"] = "CapabilityPlanner"
             shared_snapshot["local_model_invocation_authority"] = dict(local_authority)
         else:
             for key in (
@@ -4302,6 +4383,38 @@ class UnifiedRuntime:
                 **local_authority_stage_fields,
             )
         payload = _mapping(response)
+        formal_lineage = _formal_local_runtime_lineage(payload) if workforce_admission_enabled else {}
+        if formal_lineage and formal_lineage.get("gate_passed") is not True:
+            lineage_fields = {
+                "formal_local_runtime_lineage": formal_lineage,
+                "context_trace": {
+                    **dict(local_authority_stage_fields.get("context_trace") or {}),
+                    "formal_local_runtime_lineage": formal_lineage,
+                },
+            }
+            if local_authority is not None:
+                lineage_fields["local_model_invocation_authority"] = dict(local_authority)
+            return _stage(
+                "local",
+                status="FAILED",
+                invoked=False,
+                evidence_present=True,
+                gate_passed=False,
+                evidence_refs=[f"local:{request.task_id}:formal_runtime:{formal_lineage['failure_reason']}"],
+                reason=str(formal_lineage["failure_reason"]),
+                response=payload,
+                provider_call_count=int(payload.get("provider_call_count") or 0),
+                model_call_count=int(payload.get("model_call_count") or 0),
+                **lineage_fields,
+            )
+        if formal_lineage:
+            local_authority_stage_fields = {
+                **local_authority_stage_fields,
+                "context_trace": {
+                    **dict(local_authority_stage_fields.get("context_trace") or {}),
+                    "formal_local_runtime_lineage": formal_lineage,
+                },
+            }
         response_task_id = str(payload.get("task_id", "") or "")
         task_identity_valid = not response_task_id or response_task_id == request.task_id
         invoked = bool(payload.get("local_model_invoked", payload.get("invoked", False)))
@@ -4388,12 +4501,15 @@ class UnifiedRuntime:
             task_id=request.task_id,
             response_task_id=response_task_id,
             task_identity_shared=task_identity_valid,
+            provider_call_count=int(payload.get("provider_call_count") or 0),
+            model_call_count=int(payload.get("model_call_count") or 0),
             reason=(
                 "local_task_id_mismatch"
                 if not task_identity_valid
                 else str(payload.get("fallback_reason") or "")
             ),
             response=payload,
+            formal_local_runtime_lineage=formal_lineage,
             **local_authority_stage_fields,
             **stage_bits,
         )

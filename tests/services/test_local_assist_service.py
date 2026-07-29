@@ -6,12 +6,18 @@ import sys
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path[:1]:
+    sys.path.insert(0, str(ROOT))
+
 from nexus.services.local_assist_service import (
     LocalAssistRequest,
     LocalAssistService,
 )
 from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 from nexus.services.local_heal.local_model_executor import LocalModelExecutorResponse
+from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
 
 
 def _snapshot() -> dict[str, object]:
@@ -47,6 +53,36 @@ def _request(tmp_path: Path, action: str = "advisor") -> LocalAssistRequest:
     )
 
 
+def _isolated_apply(tmp_path: Path):
+    def apply(apply_request):
+        return IsolatedApplyReceipt(
+            task_id=apply_request.task_id,
+            workspace_path=str(tmp_path / "isolated"),
+            target_file=apply_request.target_file,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash=apply_request.selected_candidate_hash,
+            applied_patch_hash=apply_request.selected_candidate_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+        )
+
+    return apply
+
+
+def _isolated_verifier(verifier_request):
+    return IsolatedVerifierReceipt(
+        task_id=verifier_request.task_id,
+        verifier_status="pass",
+        exit_code=0,
+        stdout_tail="verified",
+        stderr_tail="",
+        verifier_error="",
+        verifier_allowed=True,
+    )
+
+
 def test_request_rejects_missing_planner_snapshot(tmp_path: Path) -> None:
     request = _request(tmp_path)
     invalid = request.__class__(**{**request.__dict__, "planner_snapshot": {}})
@@ -59,7 +95,10 @@ def test_advisor_records_invocation_and_delivery(tmp_path: Path) -> None:
     request = _request(tmp_path)
     provider = InjectedLocalModelProvider(lambda _: "diagnosis: target is the bounded localization point")
 
-    response = LocalAssistService(provider=provider).handle(request)
+    response = LocalAssistService(
+        provider=provider,
+        apply_runner=_isolated_apply(tmp_path),
+    ).handle(request)
 
     assert response.status == "SUCCEEDED"
     assert response.local_model_invoked is True
@@ -81,7 +120,11 @@ def test_candidate_isolated_without_formal_workspace_mutation(tmp_path: Path) ->
         lambda _: "--- a/target.py\n+++ b/target.py\n@@ -1,1 +1,1 @@\n def target():\n-    return 1\n+    return 2\n"
     )
 
-    response = LocalAssistService(provider=provider).handle(request)
+    response = LocalAssistService(
+        provider=provider,
+        apply_runner=_isolated_apply(tmp_path),
+        verifier_runner=_isolated_verifier,
+    ).handle(request)
 
     assert response.status == "SUCCEEDED"
     assert response.candidate_summary["candidate_count"] == 1
@@ -99,7 +142,11 @@ def test_verified_subtask_requires_and_records_deterministic_verifier(tmp_path: 
         lambda _: "--- a/target.py\n+++ b/target.py\n@@ -1,1 +1,1 @@\n def target():\n-    return 1\n+    return 2\n"
     )
 
-    response = LocalAssistService(provider=provider).handle(request)
+    response = LocalAssistService(
+        provider=provider,
+        apply_runner=_isolated_apply(tmp_path),
+        verifier_runner=_isolated_verifier,
+    ).handle(request)
 
     assert response.verifier_summary["verifier_reached"] is True
     assert response.verifier_summary["verifier_status"] == "pass"
