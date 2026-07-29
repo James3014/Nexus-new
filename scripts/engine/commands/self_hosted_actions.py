@@ -98,6 +98,23 @@ def run_self_hosted_list_actionable(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_cleanup(
+    task_id: str,
+    apply: bool = False,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    if not task_id or not str(task_id).strip():
+        raise NexusCliActionError("task_id is required", exit_code=1)
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.cleanup_tasks(task_id=task_id, dry_run=not apply)
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_approve(
     task_id: str,
     candidate_commit_sha: str,

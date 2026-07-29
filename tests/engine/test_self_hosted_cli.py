@@ -11,7 +11,9 @@ import pytest
 from click.testing import CliRunner
 
 from scripts.engine.nexus_cli import nexus
-from scripts.engine.commands.self_hosted_actions import set_test_runner
+import scripts.engine.commands.self_hosted_actions as self_hosted_actions
+from scripts.engine.commands.exception_translation import NexusCliActionError
+from scripts.engine.commands.self_hosted_actions import run_self_hosted_cleanup, set_test_runner
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
@@ -556,3 +558,105 @@ def test_self_hosted_close_without_candidate_cmd(tmp_path: Path):
     assert out_data["status"] == "SUPERSEDED"
     assert out_data["superseded_by"] == "ref-evidence-999"
     assert out_data["promotion_status"] == "NOT_CREATED"
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_run_self_hosted_cleanup_forwards_exact_task_and_dry_run(apply: bool):
+    calls = []
+    expected = {"schema": "cleanup-result", "dry_run": not apply}
+
+    class FakeService:
+        def cleanup_tasks(self, **kwargs):
+            calls.append(kwargs)
+            return expected
+
+    result = run_self_hosted_cleanup(
+        task_id="exact-cleanup-task-001",
+        apply=apply,
+        state_dir="/tmp/unused-state",
+        service=FakeService(),
+    )
+
+    assert result is expected
+    assert calls == [{"task_id": "exact-cleanup-task-001", "dry_run": not apply}]
+
+
+def test_run_self_hosted_cleanup_rejects_blank_task_id():
+    with pytest.raises(NexusCliActionError, match="task_id is required"):
+        run_self_hosted_cleanup(" ", service=object())
+
+
+def test_self_hosted_cleanup_cli_registered_json_and_apply(monkeypatch):
+    calls = []
+    expected = {"schema": "cleanup-result", "decisions": []}
+
+    class FakeService:
+        def cleanup_tasks(self, **kwargs):
+            calls.append(kwargs)
+            return {**expected, "dry_run": kwargs["dry_run"]}
+
+    service = FakeService()
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: service)
+    runner = CliRunner()
+
+    dry_run = runner.invoke(nexus, ["nexus", "self-hosted", "cleanup", "--task-id", "cleanup-cli-001"])
+    assert dry_run.exit_code == 0, dry_run.output
+    assert json.loads(dry_run.output) == {**expected, "dry_run": True}
+
+    applied = runner.invoke(nexus, ["nexus", "self-hosted", "cleanup", "--task-id", "cleanup-cli-001", "--apply"])
+    assert applied.exit_code == 0, applied.output
+    assert json.loads(applied.output) == {**expected, "dry_run": False}
+    assert calls == [
+        {"task_id": "cleanup-cli-001", "dry_run": True},
+        {"task_id": "cleanup-cli-001", "dry_run": False},
+    ]
+
+
+def test_self_hosted_cleanup_requires_one_task_id():
+    result = CliRunner().invoke(nexus, ["nexus", "self-hosted", "cleanup"])
+
+    assert result.exit_code != 0
+    assert "Missing option '--task-id'" in result.output
+
+
+def test_self_hosted_cleanup_translates_service_error(monkeypatch):
+    class BrokenService:
+        def cleanup_tasks(self, **kwargs):
+            raise RuntimeError("cleanup blocked by governed contract")
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: BrokenService())
+    result = CliRunner().invoke(
+        nexus,
+        ["nexus", "self-hosted", "cleanup", "--task-id", "cleanup-error-001"],
+    )
+
+    assert result.exit_code == 1
+    assert "cleanup blocked by governed contract" in result.output
+
+
+def test_self_hosted_cleanup_subprocess_json_and_explicit_apply(tmp_path: Path):
+    state_dir = str(tmp_path / "state")
+    task_id = "cleanup-subprocess-001"
+    service = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    service._write_state(task_id, {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "target_worktree": str(tmp_path / "targets" / task_id),
+        "worker_pid": None,
+    })
+
+    command = [
+        sys.executable, "-m", "scripts.engine.nexus_cli", "nexus", "self-hosted", "cleanup",
+        "--task-id", task_id, "--state-dir", state_dir,
+    ]
+    dry_run = subprocess.run(command, capture_output=True, text=True)
+    assert dry_run.returncode == 0, dry_run.stderr
+    assert json.loads(dry_run.stdout)["dry_run"] is True
+
+    applied = subprocess.run(command + ["--apply"], capture_output=True, text=True)
+    assert applied.returncode == 0, applied.stderr
+    applied_data = json.loads(applied.stdout)
+    assert applied_data["dry_run"] is False
+    assert applied_data["decisions"][0]["task_id"] == task_id
