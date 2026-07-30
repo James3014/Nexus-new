@@ -113,14 +113,16 @@ class AgyAccountPoolManager:
         if mgr_p:
             p = Path(mgr_p).expanduser()
             if p.name == "agy-cli-manager" and p.parent.name == "bin":
-                return str(p.resolve().parent.parent)
+                runtime_dir = p.parent.parent / "runtime"
+                return str(runtime_dir.resolve()) if runtime_dir.exists() else str(runtime_dir)
             elif p.exists():
-                return str(p.resolve().parent)
+                runtime_dir = p.parent / "runtime"
+                return str(runtime_dir.resolve()) if runtime_dir.exists() else str(runtime_dir)
 
-        installed_root = Path("/Users/jameschen/.nexus/agy-account-pool")
+        installed_root = Path("/Users/jameschen/.nexus/agy-account-pool/runtime")
         if installed_root.exists():
             return str(installed_root.resolve())
-        return str(Path.home() / ".nexus/agy-account-pool")
+        return str(Path.home() / ".nexus/agy-account-pool/runtime")
 
     def _call_manager_cli(self, args: list[str]) -> dict:
         mgr = self._manager_path or self.resolve_manager_path()

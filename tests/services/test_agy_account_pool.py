@@ -143,7 +143,7 @@ def test_manager_root_derivation(tmp_path, monkeypatch):
     mgr_bin.chmod(0o755)
 
     root = AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin))
-    assert root == str((tmp_path / "pool_root").resolve())
+    assert root == str((tmp_path / "pool_root" / "runtime").resolve())
 
     monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(tmp_path / "override_root"))
     assert AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin)) == str((tmp_path / "override_root").resolve())
@@ -227,12 +227,23 @@ def test_physical_manager_smoke():
 
     manager = AgyAccountPoolManager(use_real_manager=True, manager_path=str(manager_path))
 
-    assert manager.resolve_manager_path() is not None
+    assert manager.resolve_manager_path() == str(manager_path.resolve())
+    assert manager._manager_root == str(Path("/Users/jameschen/.nexus/agy-account-pool/runtime").resolve())
 
     status_res = manager._call_manager_cli(["status", "--json"])
-    assert "active" in status_res
-    assert "live_dir" in status_res
+    assert status_res.get("active") is not None
+    assert status_res.get("live_dir") is not None
+    assert len(status_res.get("accounts", {})) == 12
 
-    active_res = manager._call_manager_cli(["ensure-active", "--json"])
-    assert "active" in active_res
-    assert "switch_mode" in active_res
+    active_acc = manager.ensure_active()
+    assert active_acc.alias == status_res.get("active")
+    assert len(active_acc.alias_hash) == 12
+
+    sanitized_evidence = {
+        "active": active_acc.alias,
+        "alias_hash": active_acc.alias_hash,
+        "account_count": len(status_res.get("accounts", {})),
+        "root": status_res.get("root"),
+    }
+    assert sanitized_evidence["account_count"] == 12
+    assert sanitized_evidence["active"] is not None
