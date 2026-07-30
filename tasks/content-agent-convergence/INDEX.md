@@ -10,11 +10,11 @@
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `content-agent-convergence-p0-freeze-r4` | `00-p0-content-architecture-freeze.md` | CANDIDATE_READY | none |
+| 0 | `content-agent-convergence-p0-freeze-r4` | `00-p0-content-architecture-freeze.md` | INTEGRATED | none |
 
 ## Current frontier
 
-`content-agent-convergence-p0-freeze-r4` is the current governed Candidate frontier. Next pending frontier will be P2 Plan G0-G2.
+P2 Plan G0-G2 is the next pending frontier. P0 Immediate Freeze is INTEGRATED.
 
 ## Completed and Integrated cards
 

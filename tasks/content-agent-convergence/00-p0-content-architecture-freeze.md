@@ -3,7 +3,7 @@
 **task_id:** `content-agent-convergence-p0-freeze-r4`
 **artifact_authority:** current
 **owner:** James Chen
-**status:** CANDIDATE_READY
+**status:** INTEGRATED
 **read_only:** false
 **audit_only:** false
 **commit_forbidden:** false
