@@ -17,8 +17,12 @@ from nexus.orchestrator.worktree_manager import WorktreeManager
 def temp_git_repo(tmp_path):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True)
-    subprocess.run(["git", "commit", "--allow-empty", "-m", "Initial commit"], cwd=repo_dir, check=True)
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True, env=env)
+    subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "Initial commit"],
+        cwd=repo_dir, check=True, env=env,
+    )
     return repo_dir
 
 def test_worktree_create_and_cleanup(temp_git_repo):
@@ -610,8 +614,9 @@ def test_restore_task_branch_happy_path(sh2_repo):
     contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
 
     # 2: restore the task branch to initial_head
-    restored = manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
-    assert restored == contract.target_base_revision
+    restored = manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert restored["decision"] == "RESTORED"
+    assert restored["restored_to"] == lease.initial_head
 
     # 2b: branch now points to initial_head
     branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
@@ -637,14 +642,26 @@ def test_restore_task_branch_happy_path(sh2_repo):
     assert _git(sh2_repo["controller"], "rev-parse", branch_ref) == contract.target_base_revision
 
 
-def test_restore_rejects_branch_not_at_salvage(sh2_repo):
-    """Safety check 2: branch differs from salvage_commit → fail-closed."""
+def test_restore_rejects_branch_not_at_salvage_or_initial_head(sh2_repo):
+    """Safety check 2: branch differs from both salvage_commit AND initial_head → fail-closed."""
     contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
-    # Move branch elsewhere
+    # Move branch to a third SHA (not salvage_commit, not initial_head)
     branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
-    _git(sh2_repo["controller"], "update-ref", branch_ref, contract.target_base_revision)
+    unrelated = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", branch_ref, unrelated)
     with pytest.raises(RuntimeError, match="Safety check 2 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+
+
+def test_restore_already_restored_when_branch_at_initial_head(sh2_repo):
+    """After cleanup + prior restore, branch at initial_head → ALREADY_RESTORED."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    # Simulate branch already at initial_head (as restore_task_branch would leave it)
+    branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+    _git(sh2_repo["controller"], "update-ref", branch_ref, lease.initial_head)
+    result = manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert result["decision"] == "ALREADY_RESTORED"
+    assert result["restored_to"] == lease.initial_head
 
 
 def test_restore_rejects_missing_salvage_ref(sh2_repo):
@@ -653,7 +670,7 @@ def test_restore_rejects_missing_salvage_ref(sh2_repo):
     # Delete salvage ref
     _git(sh2_repo["controller"], "update-ref", "-d", salvage_ref)
     with pytest.raises(RuntimeError, match="Safety check 3 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_rejects_wrong_salvage_ref(sh2_repo):
@@ -662,7 +679,7 @@ def test_restore_rejects_wrong_salvage_ref(sh2_repo):
     # Point salvage ref elsewhere
     _git(sh2_repo["controller"], "update-ref", salvage_ref, contract.target_base_revision)
     with pytest.raises(RuntimeError, match="Safety check 3 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_rejects_multi_parent_salvage(sh2_repo):
@@ -685,7 +702,7 @@ def test_restore_rejects_multi_parent_salvage(sh2_repo):
     # Also update branch to point to the merge commit
     _git(controller, "update-ref", branch_ref, merge_sha)
     with pytest.raises(RuntimeError, match="Safety check 4 failed"):
-        manager.restore_task_branch_for_retry(contract, merge_sha, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, merge_sha, salvage_ref)
 
 
 def test_restore_rejects_wrong_parent(sh2_repo):
@@ -707,7 +724,7 @@ def test_restore_rejects_wrong_parent(sh2_repo):
     _git(controller, "update-ref", branch_ref, wrong_salvage)
     _git(controller, "update-ref", salvage_ref, wrong_salvage)
     with pytest.raises(RuntimeError, match="Safety check 5 failed"):
-        manager.restore_task_branch_for_retry(contract, wrong_salvage, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, wrong_salvage, salvage_ref)
 
 
 def test_restore_rejects_active_candidate(sh2_repo):
@@ -717,7 +734,7 @@ def test_restore_rejects_active_candidate(sh2_repo):
     _git(sh2_repo["controller"], "update-ref",
          f"refs/nexus-candidates/{contract.task_id}/candidate-1", salvage_commit)
     with pytest.raises(RuntimeError, match="Safety check 7 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_rejects_active_candidate_legacy(sh2_repo):
@@ -726,7 +743,7 @@ def test_restore_rejects_active_candidate_legacy(sh2_repo):
     _git(sh2_repo["controller"], "update-ref",
          f"refs/nexus-candidates/{contract.task_id}", salvage_commit)
     with pytest.raises(RuntimeError, match="Safety check 7 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_rejects_active_candidate_commit(sh2_repo):
@@ -735,7 +752,7 @@ def test_restore_rejects_active_candidate_commit(sh2_repo):
     _git(sh2_repo["controller"], "update-ref",
          f"refs/nexus-candidate-commits/{contract.task_id}/{salvage_commit}", salvage_commit)
     with pytest.raises(RuntimeError, match="Safety check 7 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_rejects_registered_target(sh2_repo):
@@ -752,16 +769,17 @@ def test_restore_rejects_registered_target(sh2_repo):
     _git(sh2_repo["controller"], "update-ref", salvage_ref, salvage_commit)
     # Do NOT cleanup — target is still registered
     with pytest.raises(RuntimeError, match="Safety check 6 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_rejects_concurrent_branch_modification(sh2_repo):
-    """Branch modified before restore → fail-closed (caught by check 2 or 8)."""
+    """Branch moved to a third SHA before restore → fail-closed (caught by check 2 or 8)."""
     contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
     branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
-    _git(sh2_repo["controller"], "update-ref", branch_ref, contract.target_base_revision)
+    unrelated = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", branch_ref, unrelated)
     with pytest.raises(RuntimeError, match="Safety check [28] failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
 
 
 def test_restore_fails_on_second_call(sh2_repo):
@@ -771,11 +789,17 @@ def test_restore_fails_on_second_call(sh2_repo):
     """
     contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
     # First call succeeds
-    restored = manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
-    assert restored == contract.target_base_revision
-    # Second call fails because branch no longer points to salvage_commit
-    with pytest.raises(RuntimeError, match="Safety check 2 failed"):
-        manager.restore_task_branch_for_retry(contract, salvage_commit, salvage_ref)
+    restored = manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert restored["decision"] == "RESTORED"
+    assert restored["restored_to"] == lease.initial_head
+    # Second call: branch already at initial_head → ALREADY_RESTORED
+    already = manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert already["decision"] == "ALREADY_RESTORED"
+    assert already["restored_to"] == lease.initial_head
+    # No ref or branch mutation on second call
+    branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+    assert _git(sh2_repo["controller"], "rev-parse", branch_ref) == lease.initial_head
+    assert _git(sh2_repo["controller"], "rev-parse", salvage_ref) == salvage_commit
 
 
 def test_existing_salvage_retry_test_unchanged(sh2_repo):
@@ -818,6 +842,148 @@ def test_existing_salvage_retry_test_unchanged(sh2_repo):
     assert retried.initial_head == refreshed_sha
     assert _git(sh2_repo["controller"],
                 "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
+# ---------------------------------------------------------------------------
+# LC2: restore_task_branch_for_retry — idempotent ALREADY_RESTORED
+# ---------------------------------------------------------------------------
+
+def test_restore_returns_already_restored_on_second_call(sh2_repo):
+    """LC2 test 2: second restore returns ALREADY_RESTORED, no error."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    first = manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert first["decision"] == "RESTORED"
+    second = manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert second["decision"] == "ALREADY_RESTORED"
+
+
+def test_restore_already_restored_no_ref_or_branch_mutation(sh2_repo):
+    """LC2 test 3: ALREADY_RESTORED does not touch ref or branch."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+    branch_before = _git(sh2_repo["controller"], "rev-parse", branch_ref)
+    salvage_before = _git(sh2_repo["controller"], "rev-parse", salvage_ref)
+    manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    assert _git(sh2_repo["controller"], "rev-parse", branch_ref) == branch_before
+    assert _git(sh2_repo["controller"], "rev-parse", salvage_ref) == salvage_before
+
+
+def test_restore_fails_on_third_sha(sh2_repo):
+    """LC2 test 4: branch at third SHA → fail closed."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+    _git(sh2_repo["controller"], "update-ref", branch_ref, contract.target_base_revision)
+    # Create a third unrelated commit
+    (sh2_repo["controller"] / "third.txt").write_text("third\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "third.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "third commit")
+    third_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", branch_ref, third_sha)
+    with pytest.raises(RuntimeError, match="Safety check 2 failed"):
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+
+
+def test_restore_already_restored_fails_with_wrong_salvage_ref(sh2_repo):
+    """LC2 test 5: branch at initial_head but salvage ref missing → fail closed."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    # Delete salvage ref
+    _git(sh2_repo["controller"], "update-ref", "-d", salvage_ref)
+    with pytest.raises(RuntimeError, match="Safety check 3 failed"):
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+
+
+def test_restore_rejects_wrong_salvage_parent(sh2_repo):
+    """LC2 test 6: salvage parent ≠ lease.initial_head → fail closed."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    controller = sh2_repo["controller"]
+    # Create a new commit that is not the original base
+    (controller / "extra.txt").write_text("extra\n", encoding="utf-8")
+    _git(controller, "add", "extra.txt")
+    _git(controller, "commit", "-m", "extra commit")
+    extra_sha = _git(controller, "rev-parse", "HEAD")
+    # Create a salvage commit from wrong parent
+    branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+    _git(controller, "checkout", branch_ref)
+    _git(controller, "reset", "--soft", extra_sha)
+    _git(controller, "commit", "-m", "salvage from wrong parent")
+    wrong_salvage = _git(controller, "rev-parse", "HEAD")
+    _git(controller, "update-ref", branch_ref, wrong_salvage)
+    _git(controller, "update-ref", salvage_ref, wrong_salvage)
+    with pytest.raises(RuntimeError, match="Safety check 5 failed"):
+        manager.restore_task_branch_for_retry(contract, lease, wrong_salvage, salvage_ref)
+
+
+def test_restore_rejects_registered_target(sh2_repo):
+    """LC2 test 7: Target still registered → fail closed."""
+    contract = _contract(sh2_repo, task_id="reg-target-lc2")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("salvaged\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "salvage commit")
+    salvage_commit = _git(target, "rev-parse", "HEAD")
+    salvage_ref = f"refs/nexus-salvage/worktree/{contract.task_id}-attempt-1"
+    _git(sh2_repo["controller"], "update-ref", salvage_ref, salvage_commit)
+    # Do NOT cleanup — target is still registered
+    with pytest.raises(RuntimeError, match="Safety check 6 failed"):
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+
+
+def test_restore_rejects_candidate_binding(sh2_repo):
+    """LC2 test 8: candidate binding exists → fail closed."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    _git(sh2_repo["controller"], "update-ref",
+         f"refs/nexus-candidates/{contract.task_id}/c1", salvage_commit)
+    with pytest.raises(RuntimeError, match="Safety check 7 failed"):
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+
+
+def test_restore_cas_uses_salvage_commit_as_old_value(sh2_repo):
+    """LC2 test 9: CAS uses salvage_commit as old-value guard."""
+    contract, manager, lease, salvage_commit, salvage_ref = _setup_salvage_scenario(sh2_repo)
+    branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+    # Tamper branch to a third SHA (not salvage_commit, not initial_head)
+    unrelated = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", branch_ref, unrelated)
+    with pytest.raises(RuntimeError, match="Safety check 2 failed"):
+        manager.restore_task_branch_for_retry(contract, lease, salvage_commit, salvage_ref)
+    # Branch is NOT at initial_head — tamper survived
+    assert _git(sh2_repo["controller"], "rev-parse", branch_ref) != lease.initial_head
+
+
+def test_restore_rejects_refreshed_contract_with_stale_lease(sh2_repo):
+    """LC2 test 10: refreshed contract cannot use stale lease → identity mismatch."""
+    original = _contract(sh2_repo)
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("salvaged\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "salvage")
+    salvage_commit = _git(target, "rev-parse", "HEAD")
+    salvage_ref = f"refs/nexus-salvage/worktree/{original.task_id}-attempt-1"
+    _git(sh2_repo["controller"], "update-ref", salvage_ref, salvage_commit)
+    assert manager.cleanup_terminal_target(
+        original, lease,
+        salvage_commit=salvage_commit,
+        salvage_ref=salvage_ref,
+    ).decision == "REMOVED"
+
+    # Refresh contract to a different revision
+    (sh2_repo["controller"] / "new.txt").write_text("new\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "new.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "new base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = original.model_copy(update={
+        "controller_revision": refreshed_sha,
+        "target_base_revision": refreshed_sha,
+    })
+    # Restore rejects the stale lease (identity mismatch)
+    with pytest.raises(RuntimeError, match="contract and lease identity mismatch"):
+        manager.restore_task_branch_for_retry(refreshed, lease, salvage_commit, salvage_ref)
 
 
 # integrity-seal: 1776512137

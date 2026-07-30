@@ -535,30 +535,49 @@ class WorktreeManager:
     def restore_task_branch_for_retry(
         self,
         contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
         salvage_commit: str,
         salvage_ref: str,
-    ) -> str:
+    ) -> dict[str, str | bool]:
         """
-        Restore the task branch to target_base_revision after durable salvage.
+        Restore the task branch to lease.initial_head after durable salvage.
+
+        Idempotent: returns ALREADY_RESTORED when branch is already at
+        lease.initial_head with valid salvage evidence.
 
         Safety check fail-closed conditions (ALL must hold):
           1. Branch follows the nexus/task/<task_id> naming convention.
-          2. Branch currently points exactly to salvage_commit.
+          2. Branch currently points to salvage_commit OR lease.initial_head.
           3. salvage_ref resolves to salvage_commit.
           4. salvage_commit has exactly 1 parent.
-          5. The single parent equals contract.target_base_revision (initial_head).
+          5. The single parent equals lease.initial_head.
           6. Target is no longer a registered worktree.
           7. No active candidate/promotion binding exists.
           8. Branch update uses compare-and-swap (git update-ref with old-value).
 
-        Returns the restored branch SHA.
+        Returns:
+            {
+                "decision": "RESTORED" | "ALREADY_RESTORED",
+                "branch_ref": ...,
+                "restored_to": lease.initial_head,
+                "salvage_commit": ...,
+                "salvage_ref": ...,
+            }
         Raises RuntimeError with diagnostics on any violation (fail-closed).
         """
+        self.validate_lease_identity(contract, lease)
         controller = Path(contract.controller_repo_root).resolve()
         task_id = contract.task_id
         target_branch = f"nexus/task/{task_id}"
         branch_ref = f"refs/heads/{target_branch}"
-        initial_head = contract.target_base_revision
+        initial_head = lease.initial_head
+
+        result_base: dict[str, str | bool] = {
+            "branch_ref": branch_ref,
+            "restored_to": initial_head,
+            "salvage_commit": salvage_commit,
+            "salvage_ref": salvage_ref,
+        }
 
         # Check 1: Branch is a known task branch
         if not target_branch.startswith("nexus/task/"):
@@ -567,7 +586,7 @@ class WorktreeManager:
                 f"does not follow nexus/task/<task_id> convention"
             )
 
-        # Check 2: Branch currently points to salvage_commit
+        # Check 2: Branch currently points to salvage_commit or initial_head
         try:
             current_branch_sha = self._run_git(
                 ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller
@@ -577,10 +596,14 @@ class WorktreeManager:
                 f"Safety check 2 failed: cannot resolve task branch "
                 f"'{branch_ref}': {e}"
             )
-        if current_branch_sha != salvage_commit:
+
+        already_restored = current_branch_sha == initial_head
+
+        if not already_restored and current_branch_sha != salvage_commit:
             raise RuntimeError(
                 f"Safety check 2 failed: task branch '{branch_ref}' points to "
-                f"{current_branch_sha}, expected salvage commit {salvage_commit}"
+                f"{current_branch_sha}, expected salvage commit {salvage_commit} "
+                f"or initial_head {initial_head}"
             )
 
         # Check 3: Salvage ref resolves to salvage_commit
@@ -625,7 +648,7 @@ class WorktreeManager:
         if actual_parent != initial_head:
             raise RuntimeError(
                 f"Safety check 5 failed: salvage commit parent {actual_parent} "
-                f"does not match target_base_revision (initial_head) {initial_head}"
+                f"does not match lease.initial_head {initial_head}"
             )
 
         # Check 6: Target is no longer a registered worktree
@@ -669,6 +692,18 @@ class WorktreeManager:
                 f"for task {task_id}: {'; '.join(violations)}"
             )
 
+        # Idempotent: if branch is already at initial_head, return ALREADY_RESTORED
+        if already_restored:
+            verified = self._run_git(
+                ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller
+            )
+            if verified != initial_head:
+                raise RuntimeError(
+                    f"Post-ALREADY_RESTORED verification failed: branch "
+                    f"'{branch_ref}' resolved to {verified}, expected {initial_head}"
+                )
+            return {**result_base, "decision": "ALREADY_RESTORED"}
+
         # Check 8: Atomic compare-and-swap branch update
         try:
             self._run_git(
@@ -691,7 +726,7 @@ class WorktreeManager:
                 f"resolved to {verified}, expected {initial_head}"
             )
 
-        return verified
+        return {**result_base, "decision": "RESTORED"}
 
     @staticmethod
     def _cleanup_receipt(contract, lease, decision, blocker, performed, eligible):

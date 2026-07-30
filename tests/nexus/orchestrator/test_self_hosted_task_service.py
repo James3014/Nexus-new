@@ -2019,3 +2019,310 @@ def test_cleanup_retained_dry_run_does_not_mutate_state(tmp_path, monkeypatch):
     assert target.exists(), "dry-run must not remove Target"
     assert state_after.get("salvage_commit_sha") is None, "dry-run must not create salvage"
     assert state_after.get("salvage_ref") is None, "dry-run must not record salvage ref"
+
+
+# ---------- LC2: terminal failure restore wiring tests ----------
+
+
+class _FailingRunner:
+    """Runner that raises to trigger the terminal-failure exception handler."""
+
+    def __init__(self, exc: Exception = None):
+        self._exc = exc or RuntimeError("deliberate terminal failure")
+
+    def __call__(self, contract, request, update):
+        raise self._exc
+
+
+def _setup_lc2_task(tmp_path, service, task_id):
+    """Create a real task with lease for LC2 testing."""
+    request = _real_request(tmp_path, task_id=task_id)
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    attempt_id = "att-" + task_id
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "LEASED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+    return contract, lease, attempt_id
+
+
+def test_run_owned_task_terminal_failure_calls_restore(tmp_path, monkeypatch):
+    """Happy path: salvage + cleanup REMOVED → restore called with RESTORED."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-restore"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    restore_called = {"n": 0}
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            if kw.get("salvage_commit"):
+                return SimpleNamespace(decision="REMOVED", blocker=None, performed=True, eligible=True)
+            return SimpleNamespace(decision="BLOCKED_BY_UNSAVED_CHANGES", blocker="dirty", performed=False, eligible=True)
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            return {"salvage_commit_sha": "c" * 40, "salvage_ref": "refs/nexus-salvages/lc2-restore"}
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            restore_called["n"] += 1
+            assert salvage_commit == "c" * 40
+            return {"decision": "RESTORED", "restored_to": "b" * 40}
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    # Directly invoke _run_owned_task (bypasses submit_task lease creation)
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    assert restore_called["n"] == 1
+    assert state["task_branch_restore_decision"] == "RESTORED"
+    assert state["task_branch_restored_to"] == "b" * 40
+    assert state["task_branch_restore_performed"] is True
+    assert state["task_branch_restore_verified"] is True
+    assert state["salvage_commit_sha"] == "c" * 40
+    assert state["salvage_ref"] == "refs/nexus-salvages/lc2-restore"
+
+
+def test_run_owned_task_terminal_failure_already_restored(tmp_path, monkeypatch):
+    """Second failure: restore sees ALREADY_RESTORED → state recorded, no mutation."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-already-restored"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    restore_calls = {"n": 0}
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            if kw.get("salvage_commit"):
+                return SimpleNamespace(decision="REMOVED", blocker=None, performed=True, eligible=True)
+            return SimpleNamespace(decision="BLOCKED_BY_UNSAVED_CHANGES", blocker="dirty", performed=False, eligible=True)
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            return {"salvage_commit_sha": "c" * 40, "salvage_ref": "refs/nexus-salvages/lc2-already-restored"}
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            restore_calls["n"] += 1
+            return {"decision": "ALREADY_RESTORED", "restored_to": "b" * 40}
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    assert restore_calls["n"] == 1
+    assert state["task_branch_restore_decision"] == "ALREADY_RESTORED"
+    assert state["salvage_commit_sha"] == "c" * 40
+
+
+def test_run_owned_task_terminal_failure_restored_with_state_writeback(tmp_path, monkeypatch):
+    """Verify all six state fields are written after RESTORED."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-writeback"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            if kw.get("salvage_commit"):
+                return SimpleNamespace(decision="REMOVED", blocker=None, performed=True, eligible=True)
+            return SimpleNamespace(decision="BLOCKED_BY_UNSAVED_CHANGES", blocker="dirty", performed=False, eligible=True)
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            return {"salvage_commit_sha": "c" * 40, "salvage_ref": "refs/nexus-salvages/lc2-wb"}
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            return {"decision": "RESTORED", "restored_to": "b" * 40}
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    for key in ("task_branch_restore_decision", "task_branch_restored_to",
+                 "task_branch_restore_performed", "task_branch_restore_verified",
+                 "salvage_commit_sha", "salvage_ref"):
+        assert key in state and state[key] is not None, f"missing or None: {key}"
+    assert state["task_branch_restore_performed"] is True
+    assert state["task_branch_restore_verified"] is True
+
+
+def test_run_owned_task_terminal_failure_restore_failure(tmp_path, monkeypatch):
+    """restore_task_branch_for_retry raises → RESTORE_BLOCKED, RETAINED_FOR_REVIEW."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-restore-fail"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            if kw.get("salvage_commit"):
+                return SimpleNamespace(decision="REMOVED", blocker=None, performed=True, eligible=True)
+            return SimpleNamespace(decision="BLOCKED_BY_UNSAVED_CHANGES", blocker="dirty", performed=False, eligible=True)
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            return {"salvage_commit_sha": "c" * 40, "salvage_ref": "refs/nexus-salvages/lc2-rf"}
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            raise RuntimeError("restore validation failed: bad parent")
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    assert state["task_branch_restore_decision"] == "RESTORE_BLOCKED"
+    assert state["task_branch_restore_performed"] is False
+    assert state["task_branch_restore_verified"] is False
+    assert state["terminal_status"] == "RETAINED_FOR_REVIEW"
+
+
+def test_run_owned_task_terminal_failure_salvage_failure(tmp_path, monkeypatch):
+    """create_salvage_snapshot raises → CLEANUP_BLOCKED, no restore called."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-salvage-fail"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    restore_called = {"n": 0}
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            return SimpleNamespace(decision="BLOCKED_BY_UNSAVED_CHANGES", blocker="dirty", performed=False, eligible=True)
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            raise RuntimeError("git snapshot failed: permission denied")
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            restore_called["n"] += 1
+            return {"decision": "RESTORED", "restored_to": "b" * 40}
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    assert state["cleanup_decision"] == "CLEANUP_BLOCKED"
+    assert "permission denied" in state["cleanup_blocker"]
+    assert restore_called["n"] == 0
+    assert state.get("task_branch_restore_decision") is None
+
+
+def test_run_owned_task_terminal_failure_cleanup_blocked(tmp_path, monkeypatch):
+    """cleanup_terminal_target raises → CLEANUP_BLOCKED, no restore."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-cleanup-blocked"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    restore_called = {"n": 0}
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            raise RuntimeError("cleanup failed: git lock held")
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            return {"salvage_commit_sha": "c" * 40, "salvage_ref": "refs/nexus-salvages/lc2-cb"}
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            restore_called["n"] += 1
+            return {"decision": "RESTORED", "restored_to": "b" * 40}
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    assert state["cleanup_decision"] == "CLEANUP_BLOCKED"
+    assert "git lock" in state["cleanup_blocker"]
+    assert restore_called["n"] == 0
+
+
+def test_run_owned_task_terminal_failure_no_lease(tmp_path, monkeypatch):
+    """No lease in state → no cleanup, no restore, FINAL_BLOCK."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="lc2-no-lease")
+    task_id = request["task_id"]
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "SUBMITTED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "attempt_id": "att-no-lease",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+        # no lease
+    })
+
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, "att-no-lease")
+
+    state = service._read_state(task_id)
+    assert state["status"] == "FINAL_BLOCK"
+    assert state["terminal_status"] == "FINAL_BLOCK"
+    assert state.get("cleanup_decision") == "ALREADY_REMOVED"
+    assert state.get("task_branch_restore_decision") is None
+
+
+def test_run_owned_task_terminal_failure_restore_already_restored_with_state(tmp_path, monkeypatch):
+    """ALREADY_RESTORED with salvage metadata written by a prior run → state fields consistent."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "lc2-ar-state"
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Simulate prior run already wrote salvage metadata
+    service._write_state(task_id, {
+        **service._read_state(task_id),
+        "salvage_commit_sha": "c" * 40,
+        "salvage_ref": "refs/nexus-salvages/lc2-ar-state",
+        "task_branch_restored_to": "b" * 40,
+        "task_branch_restore_decision": "RESTORED",
+    })
+
+    class SpyManager:
+        def __init__(self, root_dir):
+            pass
+
+        def cleanup_terminal_target(self, contract, lease, **kw):
+            if kw.get("salvage_commit"):
+                return SimpleNamespace(decision="REMOVED", blocker=None, performed=True, eligible=True)
+            return SimpleNamespace(decision="BLOCKED_BY_UNSAVED_CHANGES", blocker="dirty", performed=False, eligible=True)
+
+        def create_salvage_snapshot(self, contract, lease, attempt_id):
+            return {"salvage_commit_sha": "c" * 40, "salvage_ref": "refs/nexus-salvages/lc2-ar-state"}
+
+        def restore_task_branch_for_retry(self, contract, lease, salvage_commit, salvage_ref):
+            return {"decision": "ALREADY_RESTORED", "restored_to": "b" * 40}
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", SpyManager)
+    service._custom_runner = _FailingRunner()
+    service._run_owned_task(task_id, attempt_id)
+
+    state = service._read_state(task_id)
+    assert state["task_branch_restore_decision"] == "ALREADY_RESTORED"
+    assert state["salvage_commit_sha"] == "c" * 40
+    assert state["salvage_ref"] == "refs/nexus-salvages/lc2-ar-state"
+    assert state["task_branch_restored_to"] == "b" * 40

@@ -1151,6 +1151,24 @@ class SelfHostedTaskService:
                                     "cleanup_performed_at": _utc_now() if cleanup.performed else None,
                                     **salvage,
                                 })
+                                if cleanup.decision in {"REMOVED", "ALREADY_REMOVED"} and salvage_commit and salvage_ref:
+                                    try:
+                                        restore_result = manager.restore_task_branch_for_retry(
+                                            contract, lease, salvage_commit, salvage_ref,
+                                        )
+                                        cleanup_values.update({
+                                            "task_branch_restore_decision": restore_result["decision"],
+                                            "task_branch_restored_to": restore_result["restored_to"],
+                                            "task_branch_restore_performed": True,
+                                            "task_branch_restore_verified": True,
+                                        })
+                                    except Exception as restore_exc:
+                                        cleanup_values.update({
+                                            "task_branch_restore_decision": "RESTORE_BLOCKED",
+                                            "task_branch_restore_performed": False,
+                                            "task_branch_restore_verified": False,
+                                            "terminal_status": "RETAINED_FOR_REVIEW",
+                                        })
                             except Exception as salvage_exc:
                                 cleanup_values.update({
                                     "cleanup_decision": "CLEANUP_BLOCKED",
