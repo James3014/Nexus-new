@@ -97,6 +97,9 @@ class FakeService:
     def cancel_task(self, task_id):
         return {"task_id": task_id, "status": "CANCELLED"}
 
+    def recover_verified_uncommitted_candidate(self, task_id):
+        return {"task_id": task_id, "status": "PENDING_HUMAN_APPROVAL", "recovery_performed": True}
+
 
 def test_tools_list_exposes_governed_self_hosted_surface():
     server = NexusSelfHostedMCPServer(service=FakeService())
@@ -130,6 +133,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_close_retained_without_candidate",
         "nexus_self_hosted_close_without_candidate",
         "nexus_self_hosted_cancel_task",
+        "nexus_self_hosted_recover_verified_uncommitted_candidate",
     } <= names
     specs = {item["name"]: item for item in response["result"]["tools"]}
     submit_properties = specs["nexus_self_hosted_submit_task"]["inputSchema"]["properties"]
@@ -306,6 +310,26 @@ def test_close_without_candidate_mcp_tool_call():
     assert payload["status"] == "SUPERSEDED"
     assert payload["superseded_by"] == "evidence-456"
 
+
+
+def test_recover_verified_uncommitted_candidate_mcp_dispatch():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_recover_verified_uncommitted_candidate",
+                "arguments": {"task_id": "recover-mcp-001"},
+            },
+        }
+    )
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["task_id"] == "recover-mcp-001"
+    assert payload["status"] == "PENDING_HUMAN_APPROVAL"
+    assert payload["recovery_performed"] is True
 
 
 def test_unknown_tool_is_jsonrpc_error():

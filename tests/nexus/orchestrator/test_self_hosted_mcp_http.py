@@ -179,6 +179,32 @@ def test_verify_expected_checkout_requires_launch_from_repo_root(tmp_path):
         verify_expected_checkout(repo_root, cwd=tmp_path)
 
 
+def test_http_mcp_recover_verified_uncommitted_candidate():
+    mcp = RecordingMCP()
+    handler_cls = handler_for(mcp_server=mcp)
+    status, headers, payload = exercise_handler(
+        handler_cls,
+        "POST",
+        "/mcp",
+        {
+            "jsonrpc": "2.0",
+            "id": 88,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_recover_verified_uncommitted_candidate",
+                "arguments": {"task_id": "recover-http-001"},
+            },
+        },
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert status == 200
+    assert headers["Content-Type"] == "application/json"
+    body = json.loads(payload)
+    assert body["jsonrpc"] == "2.0"
+    assert body["id"] == 88
+    assert mcp.requests[-1]["params"]["name"] == "nexus_self_hosted_recover_verified_uncommitted_candidate"
+
+
 def test_ops_entrypoint_handles_keyboard_interrupt_without_traceback(monkeypatch, capsys):
     from scripts.ops import nexus_self_hosted_mcp_http as entrypoint
 
