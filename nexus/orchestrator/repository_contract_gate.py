@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -105,6 +106,15 @@ class RepositoryContractGate:
             )
         )
 
+        freeze_findings, freeze_blocking = self._freeze_findings(
+            target=target,
+            contract=contract,
+            candidate_paths=candidate_paths,
+            deleted_files=list(current.deleted_files),
+        )
+        findings.extend(freeze_findings)
+        blocking_reasons.extend(freeze_blocking)
+
         for path in candidate_paths:
             if path in base_inputs and self._is_policy_path(path):
                 reason = f"repository_contract_self_modification:{path}"
@@ -133,6 +143,129 @@ class RepositoryContractGate:
             findings=tuple(sorted(findings, key=self._finding_sort_key)),
             blocking_reasons=tuple(sorted(blocking_reasons)),
         )
+
+    def _freeze_findings(
+        self,
+        target: Path,
+        contract: SelfHostedTaskContract,
+        candidate_paths: list[str],
+        deleted_files: list[str],
+    ) -> tuple[list[RepositoryContractFinding], list[str]]:
+        findings: list[RepositoryContractFinding] = []
+        blocking_reasons: list[str] = []
+        deleted_set = set(deleted_files)
+
+        for path in candidate_paths:
+            if path in deleted_set:
+                continue
+
+            file_path = target / path
+            is_new = not self._base_path_exists(target, contract.target_base_revision, path)
+
+            # (1), (2), (3) Markdown Freeze Checks
+            if path.lower().endswith(".md") and is_new:
+                if path.startswith("tasks/"):
+                    if path not in contract.allowed_files:
+                        reason = f"new_persistent_markdown_frozen:{path}"
+                        blocking_reasons.append(reason)
+                        findings.append(
+                            RepositoryContractFinding(
+                                kind="new_persistent_markdown_frozen",
+                                severity="blocking",
+                                path=path,
+                                message="newly created markdown file under tasks/ is not in contract.allowed_files",
+                                evidence={
+                                    "target_base_revision": contract.target_base_revision,
+                                },
+                            )
+                        )
+                else:
+                    reason = f"new_persistent_markdown_frozen:{path}"
+                    blocking_reasons.append(reason)
+                    findings.append(
+                        RepositoryContractFinding(
+                            kind="new_persistent_markdown_frozen",
+                            severity="blocking",
+                            path=path,
+                            message="newly created persistent markdown file outside tasks/ is frozen",
+                            evidence={
+                                "target_base_revision": contract.target_base_revision,
+                            },
+                        )
+                    )
+
+            # Production Python Checks
+            if path.endswith(".py") and (path.startswith("nexus/") or path.startswith("scripts/")):
+                stem = Path(path).stem.lower()
+
+                # (4) Newly created production Python module whose basename denotes agent, router, or wrapper
+                if is_new and any(k in stem for k in ("agent", "router", "wrapper")):
+                    reason = f"new_component_module_frozen:{path}"
+                    blocking_reasons.append(reason)
+                    findings.append(
+                        RepositoryContractFinding(
+                            kind="new_component_module_frozen",
+                            severity="blocking",
+                            path=path,
+                            message="newly created production python module denoting agent, router, or wrapper is frozen",
+                            evidence={
+                                "stem": Path(path).stem,
+                                "target_base_revision": contract.target_base_revision,
+                            },
+                        )
+                    )
+
+                # (5) & (6) AST class checks for class names ending with Agent, Router, or Wrapper
+                if file_path.exists():
+                    try:
+                        cand_code = file_path.read_text(encoding="utf-8")
+                        tree_cand = ast.parse(cand_code, filename=path)
+                        cand_classes = {
+                            node.name
+                            for node in ast.walk(tree_cand)
+                            if isinstance(node, ast.ClassDef)
+                            and node.name.endswith(("Agent", "Router", "Wrapper"))
+                        }
+                    except (SyntaxError, UnicodeDecodeError):
+                        cand_classes = set()
+
+                    if cand_classes:
+                        base_classes: set[str] = set()
+                        if not is_new:
+                            try:
+                                base_code = self.worktree_manager._run_git(
+                                    ["show", f"{contract.target_base_revision}:{path}"],
+                                    cwd=target,
+                                )
+                                tree_base = ast.parse(base_code, filename=path)
+                                base_classes = {
+                                    node.name
+                                    for node in ast.walk(tree_base)
+                                    if isinstance(node, ast.ClassDef)
+                                    and node.name.endswith(("Agent", "Router", "Wrapper"))
+                                }
+                            except (RuntimeError, SyntaxError):
+                                base_classes = set()
+
+                        new_classes = sorted(cand_classes - base_classes)
+                        for class_name in new_classes:
+                            reason = f"new_component_class_frozen:{path}:{class_name}"
+                            blocking_reasons.append(reason)
+                            findings.append(
+                                RepositoryContractFinding(
+                                    kind="new_component_class_frozen",
+                                    severity="blocking",
+                                    path=path,
+                                    message=f"new class '{class_name}' ending with Agent, Router, or Wrapper is frozen",
+                                    evidence={
+                                        "class_name": class_name,
+                                        "target_base_revision": contract.target_base_revision,
+                                    },
+                                )
+                            )
+
+        return findings, blocking_reasons
+
 
     def _policy_input_hashes(self, target: Path, base_revision: str) -> dict[str, str]:
         paths: set[str] = set()
