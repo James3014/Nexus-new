@@ -1084,7 +1084,7 @@ class SelfHostedTaskService:
                     attempt_id=attempt_id,
                 )
             else:
-                result = self.runner(contract, state["request"], update)
+                result = self._custom_runner(contract, state["request"], update)
             current = self._read_state(task_id) or {}
             if current.get("status") not in TERMINAL_STATUSES:
                 final_status = "PENDING_HUMAN_APPROVAL" if result.get("promotion_status") == "PENDING_HUMAN_APPROVAL" else "CANDIDATE_COMMITTED"
@@ -1124,7 +1124,8 @@ class SelfHostedTaskService:
                     try:
                         contract = self.build_contract(current["request"])
                         lease = self._lease_from_state(current)
-                        cleanup = WorktreeManager(root_dir=contract.target_worktree_root).cleanup_terminal_target(contract, lease)
+                        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+                        cleanup = manager.cleanup_terminal_target(contract, lease)
                         cleanup_values.update({
                             "cleanup_decision": cleanup.decision,
                             "cleanup_blocker": cleanup.blocker,
@@ -1134,6 +1135,29 @@ class SelfHostedTaskService:
                         cleanup_values["cleanup_eligible"] = cleanup.eligible
                         if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
                             cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
+                            try:
+                                salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
+                                salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
+                                salvage_ref = str(salvage.get("salvage_ref", "") or "")
+                                cleanup = manager.cleanup_terminal_target(
+                                    contract, lease,
+                                    salvage_commit=salvage_commit,
+                                    salvage_ref=salvage_ref,
+                                )
+                                cleanup_values.update({
+                                    "cleanup_decision": cleanup.decision,
+                                    "cleanup_blocker": cleanup.blocker,
+                                    "cleanup_performed": cleanup.performed,
+                                    "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                                    **salvage,
+                                })
+                            except Exception as salvage_exc:
+                                cleanup_values.update({
+                                    "cleanup_decision": "CLEANUP_BLOCKED",
+                                    "cleanup_blocker": str(salvage_exc),
+                                    "cleanup_performed": False,
+                                    "cleanup_eligible": False,
+                                })
                     except Exception as cleanup_exc:
                         cleanup_values.update({
                             "cleanup_decision": "CLEANUP_BLOCKED",

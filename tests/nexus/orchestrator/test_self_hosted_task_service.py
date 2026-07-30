@@ -40,7 +40,10 @@ def _request(tmp_path: Path, **overrides):
 
 
 def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    env = os.environ.copy()
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True, env=env).stdout.strip()
 
 
 def _real_request(tmp_path: Path, task_id: str = "real-reconcile"):
@@ -1896,9 +1899,9 @@ def test_cleanup_retained_clean_changed_head_salvages_head_and_removes(tmp_path)
     manager = WorktreeManager(root_dir=contract.target_worktree_root)
     lease = manager.create_lease(contract)
     target = Path(lease.target_worktree)
-    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
-                     "commit", "--allow-empty", "-m", "drift"],
-                    cwd=target, check=True, capture_output=True)
+    _git(target, "config", "user.name", "Test")
+    _git(target, "config", "user.email", "test@example.com")
+    _git(target, "commit", "--allow-empty", "-m", "drift")
     assert _git(target, "rev-parse", "HEAD") != lease.initial_head
     service._write_state(contract.task_id, {
         "task_id": contract.task_id,
