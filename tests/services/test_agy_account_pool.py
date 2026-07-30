@@ -71,8 +71,9 @@ def test_get_account_pool_manager_global(monkeypatch):
 def test_real_manager_cli_integration(tmp_path):
     manager_script = tmp_path / "mock-agy-cli-manager"
     manager_root = tmp_path / "mgr_root"
-    runtime_dir = manager_root / "runtime"
-    runtime_dir.mkdir(parents=True)
+    live_home = manager_root / "live-home"
+    live_dir = live_home / ".gemini"
+    live_dir.mkdir(parents=True)
 
     state_file = manager_root / "mock_state.txt"
     script_content = f"""#!/usr/bin/env python3
@@ -86,7 +87,7 @@ if "rotate-after-failure" in sys.argv:
 elif "ensure-active" in sys.argv:
     print(json.dumps({{"active": curr, "switched_to": None, "reason": "ok"}}))
 elif "status" in sys.argv:
-    print(json.dumps({{"active": curr, "runtime_dir": "{runtime_dir}", "root": "{manager_root}"}}))
+    print(json.dumps({{"active": curr, "live_dir": "{live_dir}", "runtime_dir": "{manager_root / 'runtime'}", "root": "{manager_root}"}}))
 else:
     print(json.dumps({{}}))
 """
@@ -101,7 +102,7 @@ else:
 
     acc = manager.ensure_active()
     assert acc.alias == "mock_acc_1"
-    assert acc.home_dir == str(runtime_dir.resolve())
+    assert acc.home_dir == str(live_home.resolve())
     assert len(acc.alias_hash) == 12
 
     rotated = manager.rotate_account(reason="quota_test")
@@ -135,9 +136,92 @@ else:
         manager.ensure_active()
 
 
+def test_manager_root_derivation(tmp_path, monkeypatch):
+    mgr_bin = tmp_path / "pool_root" / "bin" / "agy-cli-manager"
+    mgr_bin.parent.mkdir(parents=True)
+    mgr_bin.write_text("#!/bin/sh\nexit 0")
+    mgr_bin.chmod(0o755)
+
+    root = AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin))
+    assert root == str((tmp_path / "pool_root").resolve())
+
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(tmp_path / "override_root"))
+    assert AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin)) == str((tmp_path / "override_root").resolve())
+
+
+def test_live_dir_parent_home(tmp_path):
+    from nexus.services.agy_account_pool import AgyAccountPoolManagerError
+
+    manager_script = tmp_path / "mock-agy-cli-manager"
+    manager_root = tmp_path / "mgr_root"
+    account_home = manager_root / "acc_home"
+    live_dir = account_home / ".gemini"
+    live_dir.mkdir(parents=True)
+
+    script_content = f"""#!/usr/bin/env python3
+import json, sys
+if "ensure-active" in sys.argv:
+    print(json.dumps({{"active": "acc1", "switched_to": None}}))
+elif "status" in sys.argv:
+    print(json.dumps({{"active": "acc1", "live_dir": "{live_dir}"}}))
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+    acc = manager.ensure_active()
+    assert acc.home_dir == str(account_home.resolve())
+
+    # Invalid live_dir (non-existent)
+    bad_script = tmp_path / "mock-bad-live"
+    bad_script.write_text(f"""#!/usr/bin/env python3
+import json, sys
+if "ensure-active" in sys.argv:
+    print(json.dumps({{"active": "acc1"}}))
+else:
+    print(json.dumps({{"active": "acc1", "live_dir": "{tmp_path / "nonexistent" / ".gemini"}"}}))
+""")
+    bad_script.chmod(0o755)
+    mgr_bad = AgyAccountPoolManager(manager_path=str(bad_script), use_real_manager=True)
+    with pytest.raises(AgyAccountPoolManagerError, match="live_dir"):
+        mgr_bad.ensure_active()
+
+
+def test_malformed_json_and_manager_failure_redaction(tmp_path):
+    from nexus.services.agy_account_pool import AgyAccountPoolManagerError
+
+    manager_script = tmp_path / "mock-secret-leak-manager"
+    secret_text = "secret_email=user@example.com_token_12345"
+    script_content = f"""#!/usr/bin/env python3
+import sys
+sys.stderr.write("ERROR: {secret_text}\\n")
+sys.exit(1)
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        use_real_manager=True,
+    )
+
+    with pytest.raises(AgyAccountPoolManagerError) as exc_info:
+        manager._call_manager_cli(["ensure-active"])
+
+    err_msg = str(exc_info.value)
+    assert secret_text not in err_msg
+    assert "user@example.com" not in err_msg
+    assert "token_12345" not in err_msg
+    assert "exit code 1" in err_msg
+
+
 def test_physical_manager_smoke():
     from pathlib import Path
-    manager_path = Path.home() / ".nexus/agy-account-pool/bin/agy-cli-manager"
+    manager_path = Path("/Users/jameschen/.nexus/agy-account-pool/bin/agy-cli-manager")
     if not manager_path.exists():
         pytest.skip("Real manager binary not found at default location")
 
@@ -147,8 +231,7 @@ def test_physical_manager_smoke():
 
     status_res = manager._call_manager_cli(["status", "--json"])
     assert "active" in status_res
-    assert "runtime_dir" in status_res
-    assert "root" in status_res
+    assert "live_dir" in status_res
 
     active_res = manager._call_manager_cli(["ensure-active", "--json"])
     assert "active" in active_res

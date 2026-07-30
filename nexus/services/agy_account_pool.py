@@ -69,8 +69,11 @@ class AgyAccountPoolManager:
             resolved_mgr = self.resolve_manager_path(manager_path)
             self._use_real_manager = bool(resolved_mgr and Path(resolved_mgr).is_file() and not accounts)
 
-        if self._use_real_manager and not self._manager_path:
-            self._manager_path = self.resolve_manager_path(manager_path)
+        if self._use_real_manager:
+            if not self._manager_path:
+                self._manager_path = self.resolve_manager_path(manager_path)
+            if not self._manager_root:
+                self._manager_root = self.resolve_manager_root(manager_root, self._manager_path)
 
     @staticmethod
     def resolve_manager_path(override_path: Optional[str] = None) -> Optional[str]:
@@ -81,74 +84,106 @@ class AgyAccountPoolManager:
         if env_path:
             p = Path(env_path).expanduser()
             return str(p.resolve()) if p.exists() else str(p)
-        default_path = Path.home() / ".nexus/agy-account-pool/bin/agy-cli-manager"
-        if default_path.exists():
-            return str(default_path.resolve())
-        return str(default_path)
+
+        installed_path = Path("/Users/jameschen/.nexus/agy-account-pool/bin/agy-cli-manager")
+        if installed_path.exists():
+            return str(installed_path.resolve())
+
+        home = Path.home()
+        home_str = str(home)
+        if "live-home" not in home_str and "agy-account-pool" not in home_str:
+            default_path = home / ".nexus/agy-account-pool/bin/agy-cli-manager"
+            if default_path.exists():
+                return str(default_path.resolve())
+            return str(default_path)
+
+        return str(installed_path)
 
     @staticmethod
-    def resolve_manager_root(override_root: Optional[str] = None) -> str:
+    def resolve_manager_root(override_root: Optional[str] = None, manager_path: Optional[str] = None) -> str:
         if override_root:
-            return str(Path(override_root).expanduser().resolve())
+            p = Path(override_root).expanduser()
+            return str(p.resolve()) if p.exists() else str(p)
         env_root = os.getenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", "").strip()
         if env_root:
-            return str(Path(env_root).expanduser().resolve())
-        default_root = Path.home() / ".nexus/agy-account-pool"
-        return str(default_root.resolve())
+            p = Path(env_root).expanduser()
+            return str(p.resolve()) if p.exists() else str(p)
+
+        mgr_p = manager_path or AgyAccountPoolManager.resolve_manager_path()
+        if mgr_p:
+            p = Path(mgr_p).expanduser()
+            if p.name == "agy-cli-manager" and p.parent.name == "bin":
+                return str(p.resolve().parent.parent)
+            elif p.exists():
+                return str(p.resolve().parent)
+
+        installed_root = Path("/Users/jameschen/.nexus/agy-account-pool")
+        if installed_root.exists():
+            return str(installed_root.resolve())
+        return str(Path.home() / ".nexus/agy-account-pool")
 
     def _call_manager_cli(self, args: list[str]) -> dict:
         mgr = self._manager_path or self.resolve_manager_path()
         if not mgr or not Path(mgr).is_file():
-            raise AgyAccountPoolManagerError(f"AGY account pool manager binary not found: {mgr}")
-        root = self._manager_root or self.resolve_manager_root()
+            raise AgyAccountPoolManagerError("AGY account pool manager binary not found")
+        root = self._manager_root or self.resolve_manager_root(manager_path=mgr)
         import subprocess
         cmd = [mgr, "--root", root] + args
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=30.0)
         except Exception as exc:
-            raise AgyAccountPoolManagerError(f"Failed to execute agy-cli-manager: {exc}") from exc
+            raise AgyAccountPoolManagerError("Failed to execute agy-cli-manager") from exc
 
         if res.returncode != 0:
             raise AgyAccountPoolManagerError(
-                f"agy-cli-manager exited with code {res.returncode}: {res.stderr.strip()}"
+                f"agy-cli-manager failed with exit code {res.returncode}"
             )
         try:
             import json
             return json.loads(res.stdout)
         except json.JSONDecodeError as exc:
             raise AgyAccountPoolManagerError(
-                f"Invalid JSON returned by agy-cli-manager: {res.stdout[:200]}"
+                "Invalid JSON returned by agy-cli-manager"
             ) from exc
 
     def _sync_real_active_account(self) -> AgyAccount:
         data = self._call_manager_cli(["ensure-active", "--json"])
-        status = self._call_manager_cli(["status", "--json"])
-        active_name = data.get("active") or status.get("active")
+        active_name = data.get("active") or data.get("switched_to")
         if not active_name:
             raise AgyAccountPoolExhaustedError("AGY_ACCOUNT_POOL_EXHAUSTED: No active AGY account available")
 
-        runtime_dir = status.get("runtime_dir")
-        if not runtime_dir:
-            runtime_dir = str(Path(status.get("root", self.resolve_manager_root())) / "runtime")
+        status = self._call_manager_cli(["status", "--json"])
+        if not active_name:
+            active_name = status.get("active")
+        if not active_name:
+            raise AgyAccountPoolExhaustedError("AGY_ACCOUNT_POOL_EXHAUSTED: No active AGY account available")
 
-        home_path = Path(runtime_dir)
-        if not home_path.is_dir():
-            raise AgyAccountPoolManagerError(f"Active account runtime HOME does not exist: {runtime_dir}")
+        live_dir_str = status.get("live_dir")
+        if not live_dir_str:
+            raise AgyAccountPoolManagerError("Active account live_dir is missing from manager status")
 
-        acc = AgyAccount(alias=active_name, home_dir=str(home_path.resolve()))
+        live_dir_path = Path(live_dir_str)
+        if not live_dir_path.is_absolute() or not live_dir_path.is_dir():
+            raise AgyAccountPoolManagerError("Active account live_dir is not an absolute existing directory")
+
+        account_home = live_dir_path.parent.resolve()
+        if not account_home.is_dir():
+            raise AgyAccountPoolManagerError("Active account HOME does not exist")
+
+        acc = AgyAccount(alias=active_name, home_dir=str(account_home))
         self._accounts = [acc]
         self._active_index = 0
         return acc
 
     @property
     def active_account(self) -> Optional[AgyAccount]:
+        if 0 <= self._active_index < len(self._accounts):
+            return self._accounts[self._active_index]
         if self._use_real_manager:
             try:
                 return self.ensure_active()
             except AgyAccountPoolError:
                 return None
-        if 0 <= self._active_index < len(self._accounts):
-            return self._accounts[self._active_index]
         return None
 
     @property
