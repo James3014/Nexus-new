@@ -49,6 +49,34 @@ class CandidateCommitter:
         ).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
 
+    @staticmethod
+    def _resolve_git_home() -> str:
+        env_git_home = os.environ.get("NEXUS_GIT_HOME")
+        if env_git_home is not None and env_git_home.strip() != "":
+            raw_path = env_git_home.strip()
+            path = Path(raw_path).resolve()
+            if path.is_dir() and path.is_absolute():
+                return str(path)
+            raise RuntimeError(
+                f"Explicit NEXUS_GIT_HOME is invalid or does not exist: '{raw_path}'"
+            )
+
+        try:
+            import pwd
+
+            uid = os.getuid()
+            pw_dir = pwd.getpwuid(uid).pw_dir
+            if pw_dir and pw_dir.strip() != "":
+                path = Path(pw_dir.strip()).resolve()
+                if path.is_dir() and path.is_absolute():
+                    return str(path)
+        except Exception:
+            pass
+
+        raise RuntimeError(
+            "Failed to resolve safe Git HOME: NEXUS_GIT_HOME is unset/empty and POSIX OS-account home resolution failed"
+        )
+
     def create_candidate_commit(
         self,
         contract: SelfHostedTaskContract,
@@ -85,6 +113,7 @@ class CandidateCommitter:
             raise RuntimeError("staged candidate paths differ from verified paths")
         commit_env = os.environ.copy()
         commit_env["MUSE_RUN_CODEX_LOOP"] = "0"
+        commit_env["HOME"] = self._resolve_git_home()
         self.worktree_manager._run_git(
             [
                 "-c",
