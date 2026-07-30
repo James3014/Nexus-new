@@ -2,7 +2,11 @@
 
 **artifact_authority:** current
 **owner:** James Chen
-**status:** PENDING
+**status:** SUPERSEDED
+**superseded_by:** `self-hosted-lifecycle-core-hardening`
+**superseding_candidate:** `c369288c485c7238412f35a25d7caa76713679bf`
+**superseding_integration:** `a99c71d8c0628e1d383adaf3a905cad2c6b1b7f4`
+**verification:** 48 focused Git isolation tests passed on `1d33f5319d3a39df7567f76d99b4bbbcdadc7d69`
 **task_id:** `candidate-commit-git-home-isolation-recovery`
 **AUTO_CHAIN:** false
 **depends_on:** `candidate-commit-git-home-isolation` retained attempt is inspect-only evidence
@@ -15,6 +19,7 @@
 
 ## Objective
 
+Task 01以更完整的Lifecycle hardening實作了00d要求，包括Git HOME、Git config與canonical hooks隔離。不得再建立重複Candidate。
 Reimplement the Git-only HOME isolation contract from 00c in a fresh Target and produce a governed Candidate. The retained 00c staged diff SHA is recovery evidence only; do not copy from the legacy dirty checkout or mutate the Controller during worker execution.
 
 ## Allowed files
