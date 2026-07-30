@@ -358,6 +358,47 @@ class WorktreeManager:
             raise RuntimeError("candidate ref tree verification failed")
         return candidate_ref
 
+    @staticmethod
+    def salvage_ref_for(task_id: str, attempt_id: str) -> str:
+        return f"refs/nexus-salvage/worktree/{task_id}-{attempt_id}"
+
+    def protect_salvage_head(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        attempt_id: str,
+    ) -> dict[str, str | bool]:
+        """Protect an already-committed non-candidate Target HEAD for cleanup."""
+        self.validate_lease_identity(contract, lease)
+        target = Path(lease.target_worktree).resolve()
+        controller = Path(contract.controller_repo_root).resolve()
+        if target == controller:
+            raise RuntimeError("Target is controller")
+        if self._worktree_entry(controller, target) is None:
+            raise RuntimeError("salvage requires a registered Target worktree")
+        if self.process_checker(target):
+            raise RuntimeError("active process uses Target")
+        if self._status_bytes(target):
+            raise RuntimeError("dirty Target requires a salvage snapshot commit")
+        salvage_commit = self._run_git(["rev-parse", "HEAD"], cwd=target)
+        salvage_ref = self.salvage_ref_for(contract.task_id, attempt_id)
+        try:
+            existing = self._run_git(["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller)
+        except RuntimeError:
+            existing = None
+        if existing is not None and existing != salvage_commit:
+            raise RuntimeError(f"salvage ref already exists with different commit: {salvage_ref}")
+        if existing is None:
+            self._run_git(["update-ref", salvage_ref, salvage_commit, ""], cwd=controller)
+        if self._run_git(["rev-parse", salvage_ref], cwd=controller) != salvage_commit:
+            raise RuntimeError("salvage durable ref verification failed")
+        return {
+            "salvage_commit_sha": salvage_commit,
+            "salvage_ref": salvage_ref,
+            "salvage_only": True,
+            "promotion_eligible": False,
+        }
+
     def create_salvage_snapshot(
         self,
         contract: SelfHostedTaskContract,
@@ -377,7 +418,7 @@ class WorktreeManager:
         if not self._status_bytes(target):
             raise RuntimeError("Target has no dirty state to salvage")
 
-        salvage_ref = f"refs/nexus-salvage/worktree/{contract.task_id}-{attempt_id}"
+        salvage_ref = self.salvage_ref_for(contract.task_id, attempt_id)
         try:
             existing = self._run_git(
                 ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
