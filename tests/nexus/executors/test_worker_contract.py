@@ -250,6 +250,15 @@ def test_ollama_adapter_applies_only_a_validated_unified_diff(tmp_path, monkeypa
     assert (target / "file.txt").read_text() == "after\n"
 
 
+def test_opencode_args_match_current_cli_without_removed_auto_flag():
+    from nexus.executors.worker_registry import _opencode_args
+
+    argv = _opencode_args("test prompt", "opencode/mimo-v2.5-free")
+
+    assert argv == ("run", "--model", "opencode/mimo-v2.5-free", "test prompt")
+    assert "--auto" not in argv
+
+
 def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

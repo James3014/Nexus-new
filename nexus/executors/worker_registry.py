@@ -614,7 +614,7 @@ def _gemini_args(prompt: str, model: str) -> tuple[str, ...]:
 
 
 def _opencode_args(prompt: str, model: str) -> tuple[str, ...]:
-    return ("run", "--auto", "--model", model, prompt)
+    return ("run", "--model", model, prompt)
 
 
 def _mimo_args(prompt: str, model: str) -> tuple[str, ...]:
