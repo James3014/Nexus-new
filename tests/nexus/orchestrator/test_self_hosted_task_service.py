@@ -664,15 +664,25 @@ def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
         "promotion_status": "APPROVED", "contract": {"target_worktree_root": str(tmp_path / "targets")},
     })
 
+    from nexus.orchestrator.governed_integration import IntegrationReceipt
+
     class SuccessfulIntegration:
         def __init__(self, integration_root):
             pass
         def integrate_task_state(self, state, integration_branch):
             calls.append(integration_branch)
-            return SimpleNamespace(
+            return IntegrationReceipt(
+                schema="nexus.integration_receipt/v1",
+                task_id="integration-once",
                 integration_branch=integration_branch,
+                source_branch="nexus/task/integration-once",
+                candidate_commit_sha="c" * 40,
                 integration_base_sha="b" * 40,
                 integration_commit_sha="c" * 40,
+                verifier_passed=True,
+                merge_performed=True,
+                push_performed=False,
+                worktree_removed=True,
             )
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", SuccessfulIntegration)
@@ -680,7 +690,7 @@ def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
     second = service.integrate_approved("integration-once")
 
     assert first == second
-    assert calls == ["nexus/integration"]
+    assert calls == ["nexus/integration/main"]
     assert first["integration_base_sha"] == "b" * 40
     assert first["push_performed"] is False
 

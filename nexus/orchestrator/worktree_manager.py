@@ -72,6 +72,38 @@ class TargetCleanupReceipt:
     eligible: bool
 
 
+def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
+    override = os.getenv("NEXUS_CANONICAL_GIT_HOOKS_DIR", "").strip()
+    if override:
+        hooks_dir = Path(override).expanduser().resolve()
+    else:
+        root = (base_path.resolve() if base_path else Path.cwd().resolve())
+        if "nexus-worktrees" in root.parts:
+            idx = root.parts.index("nexus-worktrees")
+            hooks_root = Path(*root.parts[:idx + 1]) / "runtime-targets"
+        else:
+            hooks_root = root / "nexus-worktrees" / "runtime-targets"
+        hooks_dir = hooks_root / ".nexus_git_hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        hooks_dir.chmod(0o700)
+    except Exception as exc:
+        raise RuntimeError(f"failed to set permissions 0700 on canonical git hooks dir: {exc}") from exc
+
+    if not hooks_dir.is_dir():
+        raise RuntimeError(f"canonical git hooks path is not a directory: {hooks_dir}")
+
+    st = hooks_dir.stat()
+    current_uid = os.getuid()
+    mode = st.st_mode & 0o777
+    if mode != 0o700:
+        raise RuntimeError(f"canonical git hooks dir permissions must be 0700, got {oct(mode)}: {hooks_dir}")
+    if st.st_uid != current_uid:
+        raise RuntimeError(f"canonical git hooks dir owner {st.st_uid} does not match current process uid {current_uid}: {hooks_dir}")
+
+    return hooks_dir
+
+
 class WorktreeManager:
     def __init__(
         self,
@@ -93,11 +125,9 @@ class WorktreeManager:
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
-        if env is None and any(cmd in args for cmd in ("commit", "merge", "rebase")):
-            if not any("core.hooksPath" in a for a in args):
-                empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
-                empty_hooks.mkdir(parents=True, exist_ok=True)
-                git_args = ["-c", f"core.hooksPath={empty_hooks}", *args]
+        if not any("core.hooksPath" in a for a in args):
+            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir)
+            git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             ["git", *git_args],
             capture_output=True,
@@ -121,11 +151,9 @@ class WorktreeManager:
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
-        if any(cmd in args for cmd in ("commit", "merge", "rebase")):
-            if not any("core.hooksPath" in a for a in args):
-                empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
-                empty_hooks.mkdir(parents=True, exist_ok=True)
-                git_args = ["-c", f"core.hooksPath={empty_hooks}", *args]
+        if not any("core.hooksPath" in a for a in args):
+            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir)
+            git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             ["git", *git_args],
             capture_output=True,
@@ -324,6 +352,10 @@ class WorktreeManager:
         self._run_git(["update-ref", candidate_ref, candidate_commit], cwd=contract.controller_repo_root)
         if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
             raise RuntimeError("candidate durable ref verification failed")
+        expected_tree = self._run_git(["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=contract.controller_repo_root)
+        ref_tree = self._run_git(["rev-parse", f"{candidate_ref}^{{tree}}"], cwd=contract.controller_repo_root)
+        if ref_tree != expected_tree:
+            raise RuntimeError("candidate ref tree verification failed")
         return candidate_ref
 
     def create_salvage_snapshot(

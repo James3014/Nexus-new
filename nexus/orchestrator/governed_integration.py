@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
+from nexus.orchestrator.worktree_manager import get_canonical_git_hooks_dir
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "production"})
@@ -41,9 +42,8 @@ class ControlledIntegrationManager:
         git_env = os.environ.copy()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-        empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
-        empty_hooks.mkdir(parents=True, exist_ok=True)
-        git_cmd = ["git", "-c", f"core.hooksPath={empty_hooks}", *args]
+        hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
+        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             git_cmd,
             cwd=cwd,

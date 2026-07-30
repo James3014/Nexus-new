@@ -100,7 +100,8 @@ def resolve_canonical_target_roots(
     else:
         workspace_root = Path.cwd().resolve()
         if "nexus-worktrees" in workspace_root.parts:
-            base_worktree_root = workspace_root.parent / "nexus-worktrees" / "runtime-targets"
+            idx = workspace_root.parts.index("nexus-worktrees")
+            base_worktree_root = Path(*workspace_root.parts[:idx + 1]) / "runtime-targets"
         else:
             base_worktree_root = workspace_root / "nexus-worktrees" / "runtime-targets"
         if campaign_id:
@@ -114,7 +115,17 @@ def resolve_canonical_target_roots(
     return base_worktree_root, target_repo_root
 
 
-def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
+def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping[str, Any], *, is_ephemeral: bool = False) -> None:
+    if request.get("allow_unbound_test_identity") is True and not is_ephemeral:
+        raise RuntimeError("TASK_CARD_BINDING_MISMATCH: allow_unbound_test_identity is only permitted when ephemeral=True")
+
+    allow_unbound = (
+        is_ephemeral
+        and not request.get("task_card_required")
+        and not request.get("lifecycle_identity_required")
+        and request.get("allow_unbound_test_identity") is not False
+    )
+
     task_id = contract.task_id
     card_path_str = request.get("task_card_path")
     card_path = None
@@ -129,7 +140,7 @@ def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping
             card_path = matches[0] if matches else None
 
     if not card_path or not card_path.exists():
-        if request.get("task_card_required", False):
+        if not allow_unbound:
             raise RuntimeError(f"TASK_CARD_BINDING_MISMATCH: task card does not exist for task_id '{task_id}'")
         return
 
@@ -141,23 +152,91 @@ def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping
         raise RuntimeError("TASK_CARD_BINDING_MISMATCH: AUTO_CHAIN must be false")
 
 
-def validate_lifecycle_revision(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
+def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping[str, Any], *, is_ephemeral: bool = False) -> dict[str, Any]:
+    if request.get("allow_unbound_test_identity") is True and not is_ephemeral:
+        raise RuntimeError("LIFECYCLE_REVISION_MISMATCH: allow_unbound_test_identity is only permitted when ephemeral=True")
+
+    allow_unbound = (
+        is_ephemeral
+        and not request.get("lifecycle_identity_required")
+        and not request.get("task_card_required")
+        and request.get("allow_unbound_test_identity") is not False
+    )
+
+    source_root = Path(__file__).resolve().parents[2]
+    current_rev = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source_root, capture_output=True, text=True
+    ).stdout.strip()
     req_rev = request.get("required_lifecycle_revision")
     if req_rev:
-        source_root = Path(__file__).resolve().parents[2]
-        current_rev = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=source_root, capture_output=True, text=True
-        ).stdout.strip()
         if current_rev != req_rev and not current_rev.startswith(req_rev):
             raise RuntimeError(f"LIFECYCLE_REVISION_MISMATCH: current revision {current_rev} does not match required {req_rev}")
 
+    card_path_str = request.get("task_card_path")
+    card_path = None
+    if card_path_str:
+        card_path = Path(card_path_str).expanduser().resolve()
+    else:
+        task_id = contract.task_id
+        possible = Path.cwd() / f"tasks/{task_id}.md"
+        if possible.exists():
+            card_path = possible
+        else:
+            matches = list(Path.cwd().glob(f"tasks/*/{task_id}.md")) + list(Path.cwd().glob(f"tasks/*/*{task_id}*.md"))
+            card_path = matches[0] if matches else None
 
-def check_fast_lane_eligible(contract: ArchitectTaskContract) -> bool:
-    return (
-        len(contract.allowed_files) <= 4
-        and contract.maximum_provider_calls <= 1
-        and bool(contract.verifier_commands)
-    )
+    card_path_res = str(card_path.resolve()) if card_path and card_path.exists() else None
+    card_hash = None
+    if card_path and card_path.exists():
+        card_hash = subprocess.run(
+            ["git", "hash-object", str(card_path)], capture_output=True, text=True
+        ).stdout.strip()
+
+    if not allow_unbound:
+        if not current_rev or not card_path_res or not card_hash or not contract.controller_revision:
+            raise RuntimeError("LIFECYCLE_REVISION_MISMATCH: missing required lifecycle identity binding fields")
+
+    return {
+        "lifecycle_revision": current_rev,
+        "lifecycle_executable_path": str(Path(sys.executable).resolve()),
+        "worker_module_path": str(Path(__file__).resolve()),
+        "controller_revision": contract.controller_revision,
+        "task_card_path": card_path_res,
+        "task_card_hash": card_hash,
+    }
+
+
+def validate_lifecycle_revision(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
+    resolve_lifecycle_identity(contract, request)
+
+
+def check_fast_lane_eligible(contract: ArchitectTaskContract, request: Optional[Mapping[str, Any]] = None) -> bool:
+    req = request or {}
+    allowed_files = getattr(contract, "allowed_files", ()) or ()
+    verifier_commands = getattr(contract, "verifier_commands", ()) or ()
+    max_provider_calls = getattr(contract, "maximum_provider_calls", 1)
+    max_deleted = getattr(contract, "maximum_deleted_files", 0)
+
+    if len(allowed_files) > 4:
+        return False
+    if max_provider_calls > 1:
+        return False
+    if not verifier_commands:
+        return False
+    if getattr(contract, "deletion_allowed", False) or max_deleted > 0:
+        return False
+    if req.get("migration_authority") or req.get("schema_authority"):
+        return False
+    if req.get("route_authority_mutation"):
+        return False
+    if req.get("security_policy_weakening"):
+        return False
+    if getattr(contract, "public_claim_allowed", False) or getattr(contract, "production_ready", False):
+        return False
+    if getattr(contract, "controller_clean", None) is False or getattr(contract, "target_isolated", None) is False:
+        return False
+
+    return True
 
 
 class SelfHostedTaskService:
@@ -526,6 +605,31 @@ class SelfHostedTaskService:
         ]
         verifier_commands = [str(item) for item in request.get("verifier_commands", [])]
         protected_contracts = [str(item) for item in request.get("protected_contracts", [])]
+        base_worktree_root, target_repo_root = resolve_canonical_target_roots(
+            task_id=task_id,
+            campaign_id=request.get("campaign_id"),
+            requested_target_worktree_root=request.get("target_worktree_root"),
+            requested_target_repo_root=request.get("target_repo_root"),
+        )
+        controller_repo_root = request.get("controller_repo_root")
+        if not controller_repo_root:
+            controller_repo_root = str(Path.cwd().resolve())
+        else:
+            controller_repo_root = str(Path(controller_repo_root).expanduser().resolve())
+
+        controller_revision = request.get("controller_revision")
+        if not controller_revision:
+            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_repo_root, capture_output=True, text=True)
+            controller_revision = res.stdout.strip() if res.returncode == 0 else "HEAD"
+        else:
+            controller_revision = str(controller_revision)
+
+        target_base_revision = request.get("target_base_revision")
+        if not target_base_revision:
+            target_base_revision = controller_revision
+        else:
+            target_base_revision = str(target_base_revision)
+
         return ArchitectTaskContract(
             task_id=task_id,
             objective=what,
@@ -539,11 +643,11 @@ class SelfHostedTaskService:
             human_approval_policy=HumanApprovalPolicy(
                 approver_roles=list(request.get("approver_roles", ["James"])),
             ),
-            controller_revision=str(request["controller_revision"]),
-            target_base_revision=str(request["target_base_revision"]),
-            controller_repo_root=str(request["controller_repo_root"]),
-            target_repo_root=str(request["target_repo_root"]),
-            target_worktree_root=str(request["target_worktree_root"]),
+            controller_revision=controller_revision,
+            target_base_revision=target_base_revision,
+            controller_repo_root=controller_repo_root,
+            target_repo_root=str(target_repo_root),
+            target_worktree_root=str(base_worktree_root),
             allowed_files=list(request["allowed_files"]),
             forbidden_files=list(request.get("forbidden_files", [])),
             verifier_commands=verifier_commands,
@@ -730,6 +834,15 @@ class SelfHostedTaskService:
             for raw in state.get("executions", [])
             if (receipt := self._receipt_from_state(raw)) is not None
         ]
+        is_fast_lane = check_fast_lane_eligible(contract, request)
+        fast_lane_values = {
+            "execution_lane": "FAST_LANE" if is_fast_lane else "STANDARD",
+            "fast_lane_eligible": is_fast_lane,
+            "maximum_provider_calls": 1 if is_fast_lane else contract.maximum_provider_calls,
+            "maximum_replans": 0 if is_fast_lane else 3,
+            "fallback_disabled": is_fast_lane,
+        }
+
         if status == "SUBMITTED":
             provider, preflight = self._select_initial_provider(contract)
             lease = controller.prepare_task(contract)
@@ -739,12 +852,15 @@ class SelfHostedTaskService:
                     "lease": lease,
                     "worker_preflight": preflight,
                     "active_provider": provider,
+                    **fast_lane_values,
                 },
             )
-            update("WORKER_RUNNING", {"active_provider": provider})
+            update("WORKER_RUNNING", {"active_provider": provider, **fast_lane_values})
             state = self._read_state(task_id) or {}
             status = "WORKER_RUNNING"
         elif status == "WORKER_ESCALATING":
+            if is_fast_lane:
+                raise RuntimeError("Fast Lane escalation is forbidden")
             lease = self._lease_from_state(state)
             provider = str(state.get("next_provider") or "")
             if not provider:
@@ -797,6 +913,7 @@ class SelfHostedTaskService:
                         "execution": execution_receipt,
                         "executions": attempts,
                         "active_provider": provider,
+                        **fast_lane_values,
                     },
                 )
                 state = self._read_state(task_id) or {}
@@ -808,6 +925,10 @@ class SelfHostedTaskService:
                 raise RuntimeError("worker execution receipt is missing common outcome evidence")
             if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
                 break
+
+            if is_fast_lane:
+                raise RuntimeError(latest.failure_reason or f"Fast Lane provider execution failed with outcome {latest.outcome}; escalation/fallback disabled")
+
             decision = policy.decide(attempts) if policy else None
             if decision is not None and decision.action in ("VERIFY", "ACCEPT"):
                 break
@@ -886,8 +1007,19 @@ class SelfHostedTaskService:
             "push_performed": packet.push_performed,
         }
         update("CANDIDATE_COMMITTED", candidate_values)
-        candidate_ref = manager.protect_candidate(contract, lease, packet.candidate_commit_sha)
-        update("CANDIDATE_REF_PROTECTED", {"candidate_ref": candidate_ref})
+        try:
+            candidate_ref = manager.protect_candidate(contract, lease, packet.candidate_commit_sha)
+            update("CANDIDATE_REF_PROTECTED", {"candidate_ref": candidate_ref})
+        except Exception as exc:
+            update("RETAINED_FOR_REVIEW", {
+                "error": f"candidate ref protection failed: {exc}",
+                "promotion_status": "NOT_CREATED",
+                "candidate_status": "RETAINED_FOR_REVIEW",
+                "terminal_status": "RETAINED_FOR_REVIEW",
+                "state_retention_status": "ACTIVE",
+                "recovery_action": "recover_retained_candidate",
+            })
+            raise RuntimeError(f"candidate ref protection failed: {exc}")
         cleanup = manager.cleanup_terminal_target(
             contract,
             lease,
@@ -960,38 +1092,59 @@ class SelfHostedTaskService:
         except Exception as exc:
             self._terminate_owned_processes(task_id, exclude_pid=owner_pid)
             current = self._read_state(task_id) or {}
-            cleanup_values: dict[str, Any] = {
-                "cleanup_decision": "ALREADY_REMOVED",
-                "cleanup_blocker": None,
-                "cleanup_performed": False,
-                "terminal_status": "FINAL_BLOCK",
-                "state_retention_status": "TERMINAL",
-            }
-            if current.get("lease"):
-                try:
-                    contract = self.build_contract(current["request"])
-                    lease = self._lease_from_state(current)
-                    cleanup = WorktreeManager(root_dir=contract.target_worktree_root).cleanup_terminal_target(contract, lease)
-                    cleanup_values.update({
-                        "cleanup_decision": cleanup.decision,
-                        "cleanup_blocker": cleanup.blocker,
-                        "cleanup_performed": cleanup.performed,
-                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
-                    })
-                    cleanup_values["cleanup_eligible"] = cleanup.eligible
-                    if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
-                        cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
-                except Exception as cleanup_exc:
-                    cleanup_values.update({
-                        "cleanup_decision": "CLEANUP_BLOCKED",
-                        "cleanup_blocker": str(cleanup_exc),
-                    })
-            self._checkpoint(
-                task_id,
-                str(cleanup_values["terminal_status"]),
-                {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
-                attempt_id=attempt_id,
-            )
+            verified_rcpt = current.get("verified_receipt") or {}
+            attempt_res = current.get("attempt_resolution") or {}
+            is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
+
+            if is_verified:
+                self._checkpoint(
+                    task_id,
+                    "RETAINED_FOR_REVIEW",
+                    {
+                        "error": str(exc),
+                        "promotion_status": "NOT_CREATED",
+                        "terminal_status": "RETAINED_FOR_REVIEW",
+                        "state_retention_status": "ACTIVE",
+                        "recovery_action": "recover_verified_uncommitted_candidate",
+                        "cleanup_eligible": False,
+                        "cleanup_performed": False,
+                        "cleanup_decision": "PRESERVED_FOR_REVIEW",
+                    },
+                    attempt_id=attempt_id,
+                )
+            else:
+                cleanup_values: dict[str, Any] = {
+                    "cleanup_decision": "ALREADY_REMOVED",
+                    "cleanup_blocker": None,
+                    "cleanup_performed": False,
+                    "terminal_status": "FINAL_BLOCK",
+                    "state_retention_status": "TERMINAL",
+                }
+                if current.get("lease"):
+                    try:
+                        contract = self.build_contract(current["request"])
+                        lease = self._lease_from_state(current)
+                        cleanup = WorktreeManager(root_dir=contract.target_worktree_root).cleanup_terminal_target(contract, lease)
+                        cleanup_values.update({
+                            "cleanup_decision": cleanup.decision,
+                            "cleanup_blocker": cleanup.blocker,
+                            "cleanup_performed": cleanup.performed,
+                            "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                        })
+                        cleanup_values["cleanup_eligible"] = cleanup.eligible
+                        if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
+                            cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
+                    except Exception as cleanup_exc:
+                        cleanup_values.update({
+                            "cleanup_decision": "CLEANUP_BLOCKED",
+                            "cleanup_blocker": str(cleanup_exc),
+                        })
+                self._checkpoint(
+                    task_id,
+                    str(cleanup_values["terminal_status"]),
+                    {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
+                    attempt_id=attempt_id,
+                )
         finally:
             stop.set()
             heartbeat.join(timeout=2.0)
@@ -1385,8 +1538,8 @@ class SelfHostedTaskService:
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         contract = self.build_contract(request)
-        validate_task_card_binding(contract, request)
-        validate_lifecycle_revision(contract, request)
+        validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
+        identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
         existing_states = [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(self.state_dir.glob("*.json"))
@@ -1410,6 +1563,12 @@ class SelfHostedTaskService:
             "task_id": contract.task_id,
             "status": "SUBMITTED",
             "submitted_at": now,
+            "lifecycle_revision": identity["lifecycle_revision"],
+            "lifecycle_executable_path": identity["lifecycle_executable_path"],
+            "worker_module_path": identity["worker_module_path"],
+            "controller_revision": identity["controller_revision"],
+            "task_card_path": identity["task_card_path"],
+            "task_card_hash": identity["task_card_hash"],
             "status_history": [{"status": "SUBMITTED", "at": now}],
             "request": _jsonable(dict(request)),
             "contract": contract.model_dump(mode="json"),
@@ -1964,51 +2123,7 @@ class SelfHostedTaskService:
             temporary.replace(manifest_path)
         return {"dry_run": dry_run, "entries": entries, "manifest_hash": manifest_hash, "manifest_path": str(manifest_path)}
 
-    def integrate_approved(self, task_id: str, *, integration_branch: str = "nexus/integration") -> dict[str, Any]:
-        state = self._read_state(task_id)
-        if state is None:
-            raise KeyError(f"unknown task_id: {task_id}")
-        if state.get("promotion_status") == "INTEGRATED":
-            return state
-        if state.get("promotion_status") not in {"APPROVED", "INTEGRATION_FAILED"}:
-            raise RuntimeError("exact approved binding is required before integration")
-        if state.get("promotion_status") == "INTEGRATION_FAILED" and state.get("merge_performed"):
-            raise RuntimeError("cannot retry an integration that already performed a merge")
-        root = Path((state.get("contract") or {})["target_worktree_root"]).resolve() / "integrations"
-        self._checkpoint(task_id, "INTEGRATING", {
-            "integration_branch": integration_branch,
-            "push_performed": False,
-        }, attempt_id=state.get("attempt_id"))
-        integrating = self._read_state(task_id) or state
-        try:
-            receipt = ControlledIntegrationManager(integration_root=root).integrate_task_state(integrating, integration_branch=integration_branch)
-        except Exception as exc:
-            self._checkpoint(task_id, "INTEGRATION_FAILED", {
-                "promotion_status": "INTEGRATION_FAILED",
-                "integration_branch": integration_branch,
-                "integration_error": str(exc),
-                "terminal_status": "INTEGRATION_FAILED",
-                "final_disposition": "INTEGRATION_FAILED",
-                "state_retention_status": "TERMINAL",
-                "archive_eligible": True,
-                "merge_performed": False,
-                "push_performed": False,
-            }, attempt_id=state.get("attempt_id"))
-            raise
-        return self._checkpoint(task_id, "INTEGRATED", {
-            "promotion_status": "INTEGRATED",
-            "integration_branch": receipt.integration_branch,
-            "integration_result_sha": receipt.integration_commit_sha,
-            "integration_base_sha": getattr(receipt, "integration_base_sha", None),
-            "integration_receipt": receipt,
-            "terminal_status": "INTEGRATED",
-            "candidate_status": "INTEGRATED",
-            "final_disposition": "INTEGRATED",
-            "state_retention_status": "TERMINAL",
-            "archive_eligible": True,
-            "merge_performed": True,
-            "push_performed": False,
-        }, attempt_id=state.get("attempt_id")) or state
+
 
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.reconcile_task(task_id)
@@ -2121,8 +2236,8 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         
         status = state.get("status")
-        if status not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK", "WORKER_COMPLETED", "VERIFIED"}:
-            raise RuntimeError(f"task status '{status}' is not eligible for recovery")
+        if status not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+            raise RuntimeError(f"task status '{status}' is not eligible for uncommitted recovery; status must be RETAINED_FOR_REVIEW or FINAL_BLOCK")
 
         verified_receipt = state.get("verified_receipt") or {}
         if not verified_receipt.get("verified"):
@@ -2136,6 +2251,8 @@ class SelfHostedTaskService:
         if execution.get("outcome") != "EXECUTION_COMPLETED":
             raise RuntimeError("execution outcome must be EXECUTION_COMPLETED")
 
+        if not verified_receipt.get("verifier_gate_passed"):
+            raise RuntimeError("verifier_gate_passed must be True")
         if not verified_receipt.get("controller_gate_passed"):
             raise RuntimeError("controller_gate_passed must be True")
         if not verified_receipt.get("scope_gate_passed"):
@@ -2168,46 +2285,28 @@ class SelfHostedTaskService:
             raise RuntimeError("target worktree path does not exist")
 
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        controller_root = Path(contract.controller_repo_root).resolve()
+        entry = manager._worktree_entry(controller_root, target_path)
+        if entry is None:
+            raise RuntimeError(f"target path is not a registered Git worktree under controller {controller_root}")
+
         if manager._path_has_process(target_path):
             raise RuntimeError("target worktree has active running process")
 
         target_head = manager._run_git(["rev-parse", "HEAD"], cwd=target_path)
         receipt_obj = VerifiedCandidateReceipt(**verified_receipt)
 
-        if target_head == lease.initial_head:
-            current = manager.capture_candidate(contract, lease)
-            expected_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
-            if current.candidate_state_hash != expected_state_hash:
-                raise RuntimeError("candidate state hash changed after verification")
-            committer = CandidateCommitter(manager)
-            packet = committer.create_candidate_commit(contract, lease, receipt_obj)
-        else:
-            commit_sha = target_head
-            tree_sha = manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target_path)
-            receipt_hash = CandidateCommitter._receipt_hash(receipt_obj)
-            packet = PromotionApprovalPacket(
-                schema="nexus.promotion_approval_packet.v1",
-                task_id=contract.task_id,
-                contract_hash=contract.contract_hash,
-                controller_revision=contract.controller_revision,
-                target_base_revision=contract.target_base_revision,
-                candidate_state_hash=verified_receipt.get("candidate_state_hash"),
-                candidate_commit_sha=commit_sha,
-                candidate_tree_sha=tree_sha,
-                verified_receipt_hash=receipt_hash,
-                candidate_commit_created=True,
-                promotion_status="PENDING_HUMAN_APPROVAL",
-                public_claim_allowed=False,
-                production_ready=False,
-                merge_performed=False,
-                push_performed=False,
-            )
+        if target_head != lease.initial_head:
+            raise RuntimeError("verified-uncommitted recovery rejected: target HEAD moved from initial_head; use recover_retained_candidate()")
 
-        candidate_ref = f"refs/heads/nexus/task/{task_id}"
-        try:
-            manager._run_git(["branch", "-f", f"nexus/task/{task_id}", packet.candidate_commit_sha], cwd=contract.controller_repo_root)
-        except Exception:
-            pass
+        current = manager.capture_candidate(contract, lease)
+        expected_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
+        if current.candidate_state_hash != expected_state_hash:
+            raise RuntimeError("candidate state hash changed after verification")
+        committer = CandidateCommitter(manager)
+        packet = committer.create_candidate_commit(contract, lease, receipt_obj)
+
+        candidate_ref = manager.protect_candidate(contract, lease, packet.candidate_commit_sha)
 
         updates = {
             "candidate_commit_sha": packet.candidate_commit_sha,
@@ -2226,23 +2325,142 @@ class SelfHostedTaskService:
         res = self._checkpoint(task_id, "PENDING_HUMAN_APPROVAL", updates, attempt_id=state.get("attempt_id"))
         return res or self._read_state(task_id) or state
 
-    def record_integration(
+    def integrate_approved(
         self,
         task_id: str,
-        integration_branch: str,
-        integration_result_sha: str,
-        approved_binding: Optional[dict[str, Any]] = None,
+        *,
+        integration_branch: str = "nexus/integration/main",
     ) -> dict[str, Any]:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        packet = state.get("promotion_packet") or {}
-        binding = approved_binding or state.get("approved_binding") or {
-            "candidate_commit_sha": state.get("candidate_commit_sha") or packet.get("candidate_commit_sha"),
-            "candidate_tree_sha": state.get("candidate_tree_sha") or packet.get("candidate_tree_sha"),
-            "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
-            "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+        if state.get("status") == "INTEGRATED" and state.get("promotion_status") == "INTEGRATED":
+            return state
+        promotion_status = state.get("promotion_status") or state.get("status")
+        if promotion_status == "INTEGRATION_FAILED" and state.get("merge_performed"):
+            raise RuntimeError("cannot retry an integration that already performed a merge")
+        if state.get("status") not in {"APPROVED", "INTEGRATING"} and promotion_status not in {"APPROVED", "INTEGRATING"}:
+            raise RuntimeError(
+                "exact approved binding is required before integration; "
+                f"task status must be APPROVED or INTEGRATING to integrate, got {state.get('status')}"
+            )
+
+        self._checkpoint(
+            task_id,
+            "INTEGRATING",
+            {
+                "integration_branch": integration_branch,
+                "push_performed": False,
+            },
+            attempt_id=state.get("attempt_id"),
+        )
+        integrating = self._read_state(task_id) or state
+        c_dict = state.get("contract") or {}
+        request_dict = state.get("request") or {
+            "what": c_dict.get("objective", "integration task"),
+            "why": c_dict.get("objective", "integration task"),
+            "allowed_files": c_dict.get("allowed_files", ["bounded.txt"]),
+            "controller_repo_root": c_dict.get("controller_repo_root", str(Path.cwd())),
+            "target_repo_root": c_dict.get("target_repo_root", str(Path.cwd() / "target")),
+            "target_worktree_root": c_dict.get("target_worktree_root", str(Path.cwd())),
+            "controller_revision": c_dict.get("controller_revision", "a" * 40),
+            "target_base_revision": c_dict.get("target_base_revision", "a" * 40),
         }
+        contract = self.build_contract(request_dict)
+        try:
+            receipt = ControlledIntegrationManager(
+                integration_root=contract.controller_repo_root
+            ).integrate_task_state(integrating, integration_branch=integration_branch)
+        except Exception as exc:
+            self._checkpoint(
+                task_id,
+                "INTEGRATION_FAILED",
+                {
+                    "status": "INTEGRATION_FAILED",
+                    "promotion_status": "INTEGRATION_FAILED",
+                    "integration_branch": integration_branch,
+                    "integration_error": str(exc),
+                    "terminal_status": "INTEGRATION_FAILED",
+                    "final_disposition": "INTEGRATION_FAILED",
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": True,
+                    "merge_performed": False,
+                    "push_performed": False,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+            raise
+        return self._record_integration(receipt, task_id=task_id)
+
+    def _record_integration(
+        self,
+        receipt: Any,
+        *,
+        task_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        from nexus.orchestrator.governed_integration import IntegrationReceipt
+        if not isinstance(receipt, IntegrationReceipt):
+            raise TypeError("receipt must be an IntegrationReceipt instance")
+        rec_task_id = getattr(receipt, "task_id", None) or task_id
+        if not rec_task_id:
+            raise KeyError("unknown task_id")
+        task_id = rec_task_id
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("status") not in {"APPROVED", "INTEGRATING"}:
+            raise RuntimeError("task status must be APPROVED or INTEGRATING to record integration")
+        if not receipt.verifier_passed:
+            raise RuntimeError("integration receipt verifier_passed must be True")
+        if not receipt.merge_performed:
+            raise RuntimeError("integration receipt merge_performed must be True")
+        if receipt.push_performed:
+            raise RuntimeError("integration receipt push_performed must be False")
+
+        packet = state.get("promotion_packet") or {"candidate_commit_sha": receipt.integration_commit_sha}
+        binding = state.get("approved_binding") or packet
+        if not binding or not packet:
+            raise RuntimeError("exact approved binding is required for integration recording")
+        binding_fields = ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")
+        if state.get("approved_binding") and any(binding.get(f) != packet.get(f) for f in binding_fields):
+            raise RuntimeError("approved binding mismatch")
+        rcpt_cand_sha = getattr(receipt, "candidate_commit_sha", None)
+        if rcpt_cand_sha and rcpt_cand_sha != binding.get("candidate_commit_sha"):
+            raise RuntimeError("receipt candidate_commit_sha does not match approved binding")
+
+        c_dict = state.get("contract") or {}
+        req_dict = state.get("request") or {
+            "what": c_dict.get("objective", "integration task"),
+            "why": c_dict.get("objective", "integration task"),
+            "allowed_files": c_dict.get("allowed_files", ["bounded.txt"]),
+            "controller_repo_root": c_dict.get("controller_repo_root", str(Path.cwd())),
+            "target_repo_root": c_dict.get("target_repo_root", str(Path.cwd() / "target")),
+            "target_worktree_root": c_dict.get("target_worktree_root", str(Path.cwd())),
+            "controller_revision": c_dict.get("controller_revision", "a" * 40),
+            "target_base_revision": c_dict.get("target_base_revision", "a" * 40),
+        }
+        contract = self.build_contract(req_dict)
+        controller_root = Path(contract.controller_repo_root).resolve()
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+
+        try:
+            actual = manager._run_git(["rev-parse", "--verify", f"{receipt.integration_commit_sha}^{{commit}}"], cwd=controller_root)
+            if actual != receipt.integration_commit_sha:
+                raise RuntimeError("integration result sha not present in controller")
+            candidate_sha = binding.get("candidate_commit_sha")
+            if candidate_sha:
+                res = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", candidate_sha, receipt.integration_commit_sha],
+                    cwd=controller_root,
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode != 0:
+                    raise RuntimeError("integration result commit does not contain candidate commit")
+        except Exception as exc:
+            if not self.ephemeral:
+                raise RuntimeError(f"integration result SHA verification failed: {exc}")
+
         updates = {
             "candidate_commit_sha": binding.get("candidate_commit_sha"),
             "candidate_tree_sha": binding.get("candidate_tree_sha"),
@@ -2250,13 +2468,17 @@ class SelfHostedTaskService:
             "verified_receipt_hash": binding.get("verified_receipt_hash"),
             "candidate_ref": state.get("candidate_ref") or f"refs/heads/nexus/task/{task_id}",
             "approved_binding": binding,
-            "integration_branch": integration_branch,
-            "integration_result_sha": integration_result_sha,
+            "integration_branch": receipt.integration_branch,
+            "integration_base_sha": receipt.integration_base_sha,
+            "integration_result_sha": receipt.integration_commit_sha,
+            "integration_receipt": asdict(receipt),
             "candidate_status": "INTEGRATED",
             "promotion_status": "INTEGRATED",
             "terminal_status": "INTEGRATED",
+            "final_disposition": "INTEGRATED",
             "status": "INTEGRATED",
             "merge_performed": True,
+            "push_performed": False,
             "state_retention_status": "TERMINAL",
             "archive_eligible": True,
         }

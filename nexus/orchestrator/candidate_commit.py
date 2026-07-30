@@ -10,7 +10,7 @@ from pathlib import Path
 
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager, get_canonical_git_hooks_dir
 
 
 @dataclass(frozen=True)
@@ -116,8 +116,7 @@ class CandidateCommitter:
         commit_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         commit_env["MUSE_RUN_CODEX_LOOP"] = "0"
         commit_env["HOME"] = self._resolve_git_home()
-        empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
-        empty_hooks.mkdir(parents=True, exist_ok=True)
+        hooks_dir = get_canonical_git_hooks_dir(target)
         self.worktree_manager._run_git(
             [
                 "-c",
@@ -125,7 +124,7 @@ class CandidateCommitter:
                 "-c",
                 f"user.email={self.AUTHOR_EMAIL}",
                 "-c",
-                f"core.hooksPath={empty_hooks}",
+                f"core.hooksPath={hooks_dir}",
                 "commit",
                 "-m",
                 f"candidate({contract.task_id}): governed worker result",
