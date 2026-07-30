@@ -4,7 +4,7 @@
 - task_id: `self-hosted-lifecycle-recovery-surfaces`
 - campaign_id: `self-hosted-lifecycle-repair`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -94,8 +94,16 @@ git diff --cached --stat
 ```
 
 ## Physical evidence
-- Scoped candidate commit SHA
-- MCP & CLI test suite verification evidence
+- starting_head: `fcd8d933514ec41de41b6dc9b3471a8596fca118`
+- candidate_commit: `2455f80a2df998eb7608c8d1d076e70dd76fe069`
+- candidate_tree: `1e6d624bb128304023e998c681a5bd359755344f`
+- integration_commit: `c78b7138d2008fb71cc18f31becef069bc03354c`
+- integration_branch: `nexus/integration/main`
+- post_integration_recovery_surface_tests: `65 passed`
+- post_integration_core_non_regression: `62 passed`
+- provider_calls_during_recovery: `0`
+- maximum_recovery_status: `PENDING_HUMAN_APPROVAL`
+- tracked_deletions: `0`
 
 ## Independent review
 Required human review by James Chen prior to integration.
@@ -109,4 +117,4 @@ Required human review by James Chen prior to integration.
 - HARD_BLOCK: Bypass of approval authority or scope creep outside allowed 7 files.
 
 ## Maximum claim
-SELF_HOSTED_RECOVERY_SURFACES_CANDIDATE_READY
+SELF_HOSTED_RECOVERY_SURFACES_INTEGRATED
