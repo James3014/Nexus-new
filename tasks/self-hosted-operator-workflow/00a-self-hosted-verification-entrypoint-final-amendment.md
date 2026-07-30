@@ -4,7 +4,7 @@
 - task_id: `self-hosted-verification-entrypoint-final-amendment`
 - campaign_id: `self-hosted-operator-workflow`
 - artifact_authority: current
-- status: READY
+- status: RECOVERABLE_BLOCK
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -80,5 +80,10 @@ Close the two remaining fail-open defects in the rejected Candidate `a2d8e764464
 - Provider quota/transport unavailable: `RECOVERABLE_BLOCK`, preserve the same card and Target.
 - Scope, authority, or architecture conflict: `HARD_BLOCK`, stop mutation.
 
+## Execution disposition
+- Codex provider execution used physical model `gpt-5.5`, exited 1 after 650833 ms, and formed no Candidate.
+- The two-file working result is preserved only as non-candidate salvage `29b9b0d40eb29e0ea590d4cbf05118c7ba3ae43d`.
+- Clean recovery is delegated to `self-hosted-verification-entrypoint-opencode-recovery`; this card grants no promotion authority.
+
 ## Maximum claim
-SELF_HOSTED_VERIFICATION_ENTRYPOINT_FINAL_AMENDMENT_CANDIDATE_READY
+SELF_HOSTED_VERIFICATION_ENTRYPOINT_FINAL_AMENDMENT_RECOVERABLE_BLOCK
