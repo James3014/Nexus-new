@@ -214,6 +214,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_recover_verified_uncommitted,
     run_self_hosted_status,
     run_self_hosted_submit,
+    run_self_hosted_verify,
     run_self_hosted_wait,
 )
 from scripts.engine.commands.registry_actions import (
@@ -3643,6 +3644,22 @@ def self_hosted_recover_verified_uncommitted(
 ) -> None:
     """Recover a verified-uncommitted candidate task."""
     res = run_self_hosted_recover_verified_uncommitted(
+        task_id=task_id,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="verify")
+@click.option("--task-id", required=True, help="Task ID to verify.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_verify(
+    task_id: str,
+    state_dir: str | None,
+) -> None:
+    """Read-only verification of a self-hosted task."""
+    res = run_self_hosted_verify(
         task_id=task_id,
         state_dir=state_dir,
     )

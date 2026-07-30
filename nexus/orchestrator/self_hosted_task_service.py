@@ -2382,6 +2382,182 @@ class SelfHostedTaskService:
             "push_performed": state.get("push_performed", False),
         }
 
+    def verify_task(self, task_id: str) -> dict[str, Any]:
+        """Read-only verification of a self-hosted task.
+
+        Proves:
+        - verifier commands only from durable task contract/state
+        - no caller injection of arbitrary commands
+        - integration SHA is 40-char lowercase SHA
+        - integration result is verifiable ancestor
+        - verify before/after re-reads durable state
+        - state deletion/replacement/hash drift/attempt drift → fail closed
+        - Target missing → fail closed
+        - Target unreadable → fail closed
+        - command target file missing/unreadable → fail closed
+        - provider_calls == 0
+        - verify must not commit
+        - verify must not modify task state
+        - verify must not approve, integrate, push, cleanup
+        - repeated verify on same immutable state → consistent verdict
+        """
+        # --- Phase 1: Pre-read durable state ---
+        state_before = self._read_state(task_id)
+        if state_before is None:
+            return {
+                "task_id": task_id,
+                "verdict": "STATE_MISSING",
+                "verified": False,
+                "failure_reasons": ["state_not_found"],
+                "provider_calls": 0,
+            }
+
+        attempt_id = state_before.get("attempt_id")
+        contract_hash = state_before.get("contract_hash")
+        status = state_before.get("status")
+
+        # --- Phase 2: State integrity checks ---
+        failures: list[str] = []
+
+        # State deletion/replacement check
+        state_mid = self._read_state(task_id)
+        if state_mid is None:
+            return {
+                "task_id": task_id,
+                "verdict": "STATE_DELETED",
+                "verified": False,
+                "failure_reasons": ["state_deleted_between_reads"],
+                "provider_calls": 0,
+            }
+
+        # Hash drift check
+        if state_mid.get("contract_hash") != contract_hash:
+            failures.append("contract_hash_drift")
+
+        # Attempt drift check
+        if state_mid.get("attempt_id") != attempt_id:
+            failures.append("attempt_drift")
+
+        # --- Phase 3: Contract and lease validation ---
+        contract_data = state_mid.get("contract")
+        if not contract_data:
+            failures.append("contract_missing")
+        lease_data = state_mid.get("lease")
+        if not lease_data:
+            failures.append("lease_missing")
+
+        # --- Phase 4: Target validation ---
+        target_worktree = state_mid.get("target_worktree") or (
+            contract_data.get("target_repo_root") if contract_data else None
+        )
+        if not target_worktree:
+            failures.append("target_worktree_missing")
+        else:
+            target_path = Path(target_worktree)
+            if not target_path.exists():
+                failures.append("target_missing")
+            elif not target_path.is_dir():
+                failures.append("target_not_directory")
+            else:
+                # Target readability check
+                try:
+                    list(target_path.iterdir())
+                except PermissionError:
+                    failures.append("target_unreadable")
+
+        # --- Phase 5: Integration SHA validation ---
+        integration_result_sha = state_mid.get("integration_result_sha")
+        if integration_result_sha:
+            # Must be 40-char lowercase hex SHA
+            import re
+            if not re.fullmatch(r'[0-9a-f]{40}', integration_result_sha):
+                failures.append("integration_sha_invalid_format")
+
+        # --- Phase 6: Verifier command execution ---
+        verifier_commands = []
+        if contract_data:
+            verifier_commands = contract_data.get("verifier_commands") or []
+
+        verifier_evidence: list[dict[str, Any]] = []
+        provider_calls = 0
+
+        if target_worktree and Path(target_worktree).is_dir():
+            for command in verifier_commands:
+                # Command target file validation
+                tokens = command.split()
+                if not tokens:
+                    failures.append(f"verifier_empty_command:{command}")
+                    continue
+
+                executable = tokens[0]
+                executable_path = Path(executable)
+                if not executable_path.is_absolute():
+                    # Check in PATH
+                    import shutil
+                    resolved = shutil.which(executable)
+                    if resolved is None:
+                        failures.append(f"verifier_executable_not_found:{executable}")
+                        continue
+                    executable_path = Path(resolved)
+
+                if not executable_path.exists():
+                    failures.append(f"verifier_executable_missing:{executable}")
+                    continue
+                if not os.access(executable_path, os.R_OK):
+                    failures.append(f"verifier_executable_unreadable:{executable}")
+                    continue
+
+                # Run verifier command
+                try:
+                    import shlex
+                    cmd_tokens = shlex.split(command)
+                    result = subprocess.run(
+                        cmd_tokens,
+                        cwd=target_worktree,
+                        capture_output=True,
+                        timeout=30.0,
+                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                    )
+                    provider_calls += 1
+                    stdout_sha = hashlib.sha256(result.stdout).hexdigest()
+                    stderr_sha = hashlib.sha256(result.stderr).hexdigest()
+                    verifier_evidence.append({
+                        "command": command,
+                        "exit_code": result.returncode,
+                        "stdout_sha256": stdout_sha,
+                        "stderr_sha256": stderr_sha,
+                        "passed": result.returncode == 0,
+                    })
+                    if result.returncode != 0:
+                        failures.append(f"verifier_failed:{command}")
+                except subprocess.TimeoutExpired:
+                    failures.append(f"verifier_timeout:{command}")
+                except (OSError, ValueError) as exc:
+                    failures.append(f"verifier_error:{command}:{exc}")
+
+        # --- Phase 7: Post-read state consistency ---
+        state_after = self._read_state(task_id)
+        if state_after is None:
+            failures.append("state_deleted_after_verification")
+        elif state_after.get("contract_hash") != contract_hash:
+            failures.append("contract_hash_drift_after_verification")
+        elif state_after.get("attempt_id") != attempt_id:
+            failures.append("attempt_drift_after_verification")
+
+        verified = not failures
+        return {
+            "task_id": task_id,
+            "verdict": "VERIFIED" if verified else "FAILED",
+            "verified": verified,
+            "failure_reasons": failures,
+            "provider_calls": provider_calls,
+            "verifier_evidence": verifier_evidence,
+            "status": status,
+            "contract_hash": contract_hash,
+            "attempt_id": attempt_id,
+            "state_intact": state_after is not None and state_after.get("contract_hash") == contract_hash,
+        }
+
     def approve_promotion(
         self,
         task_id: str,

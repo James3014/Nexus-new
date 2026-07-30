@@ -48,13 +48,16 @@ def _git(cwd: Path, *args: str) -> str:
 
 def _real_request(tmp_path: Path, task_id: str = "real-reconcile"):
     controller = tmp_path / "controller"
-    controller.mkdir()
-    _git(controller, "init", "-b", "main")
-    _git(controller, "config", "user.name", "Lifecycle Test")
-    _git(controller, "config", "user.email", "lifecycle@example.test")
-    (controller / "README").write_text("base\n")
-    _git(controller, "add", "README")
-    _git(controller, "commit", "-m", "base")
+    controller.mkdir(exist_ok=True)
+    # Check if git repo already initialized
+    git_dir = controller / ".git"
+    if not git_dir.exists():
+        _git(controller, "init", "-b", "main")
+        _git(controller, "config", "user.name", "Lifecycle Test")
+        _git(controller, "config", "user.email", "lifecycle@example.test")
+        (controller / "README").write_text("base\n")
+        _git(controller, "add", "README")
+        _git(controller, "commit", "-m", "base")
     head = _git(controller, "rev-parse", "HEAD")
     target_root = tmp_path / "targets"
     return _request(
@@ -2511,3 +2514,178 @@ def test_lc3_real_timeout_salvage_retry_canary(tmp_path):
     state_2 = service._read_state("lc3-canary")
     assert state_2.get("merge_performed") is not True
     assert state_2.get("push_performed") is not True
+
+
+# ---------- W0: Read-only verification entrypoint tests ----------
+
+
+def test_verify_task_returns_state_missing_for_unknown_task(tmp_path):
+    """W0: verify_task returns STATE_MISSING for non-existent task."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    result = service.verify_task("nonexistent")
+    assert result["verdict"] == "STATE_MISSING"
+    assert result["verified"] is False
+    assert "state_not_found" in result["failure_reasons"]
+    assert result["provider_calls"] == 0
+
+
+def test_verify_task_passes_for_valid_task(tmp_path):
+    """W0: verify_task passes for a valid task with clean state."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-valid")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Add a simple verifier command
+    contract_data = service._read_state(task_id).get("contract", {})
+    contract_data["verifier_commands"] = ["echo pass"]
+    service._write_state(task_id, {
+        **service._read_state(task_id),
+        "contract": contract_data,
+    })
+
+    result = service.verify_task(task_id)
+    assert result["verdict"] == "VERIFIED"
+    assert result["verified"] is True
+    assert result["provider_calls"] == 1
+    assert result["failure_reasons"] == []
+    assert result["state_intact"] is True
+
+
+def test_verify_task_detects_state_hash_drift(tmp_path):
+    """W0: verify_task detects contract hash drift between reads."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-drift")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Tamper with state between reads
+    original_read = service._read_state
+    call_count = {"n": 0}
+    def tampering_read(task_id):
+        state = original_read(task_id)
+        call_count["n"] += 1
+        if call_count["n"] == 2 and state:
+            # Second read: tamper with contract_hash
+            state = {**state, "contract_hash": "tampered"}
+        return state
+    service._read_state = tampering_read
+
+    result = service.verify_task(task_id)
+    assert result["verified"] is False
+    assert "contract_hash_drift" in result["failure_reasons"]
+
+
+def test_verify_task_detects_attempt_drift(tmp_path):
+    """W0: verify_task detects attempt ID drift between reads."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-attempt-drift")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Tamper with attempt_id between reads
+    original_read = service._read_state
+    call_count = {"n": 0}
+    def tampering_read(task_id):
+        state = original_read(task_id)
+        call_count["n"] += 1
+        if call_count["n"] == 2 and state:
+            state = {**state, "attempt_id": "tampered_attempt"}
+        return state
+    service._read_state = tampering_read
+
+    result = service.verify_task(task_id)
+    assert result["verified"] is False
+    assert "attempt_drift" in result["failure_reasons"]
+
+
+def test_verify_task_detects_state_deletion(tmp_path):
+    """W0: verify_task detects state deletion between reads."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-deleted")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Delete state between reads
+    original_read = service._read_state
+    call_count = {"n": 0}
+    def deleting_read(task_id):
+        state = original_read(task_id)
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            return None
+        return state
+    service._read_state = deleting_read
+
+    result = service.verify_task(task_id)
+    assert result["verified"] is False
+    assert "state_deleted_between_reads" in result["failure_reasons"]
+
+
+def test_verify_task_no_state_mutation(tmp_path):
+    """W0: verify_task does not modify task state."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-no-mutate")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    state_before = service._read_state(task_id)
+    result = service.verify_task(task_id)
+    state_after = service._read_state(task_id)
+
+    # State must be identical
+    assert state_before == state_after, "verify_task must not mutate state"
+    assert result["verified"] is True
+
+
+def test_verify_task_repeated_calls_consistent(tmp_path):
+    """W0: repeated verify calls on same state produce consistent verdict."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-consistent")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    result_1 = service.verify_task(task_id)
+    result_2 = service.verify_task(task_id)
+
+    assert result_1["verdict"] == result_2["verdict"]
+    assert result_1["verified"] == result_2["verified"]
+    assert result_1["failure_reasons"] == result_2["failure_reasons"]
+    assert result_1["provider_calls"] == result_2["provider_calls"]
+
+
+def test_verify_task_no_commit_no_push_no_cleanup(tmp_path):
+    """W0: verify_task must not commit, push, approve, integrate, or cleanup."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-no-ops")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Record git state before
+    controller = Path(contract.controller_repo_root)
+    commits_before = _git(controller, "rev-parse", "HEAD")
+
+    result = service.verify_task(task_id)
+
+    # Git state must be unchanged
+    commits_after = _git(controller, "rev-parse", "HEAD")
+    assert commits_before == commits_after, "verify must not commit"
+    assert result["verified"] is True
+
+
+def test_verify_task_fails_on_missing_target(tmp_path):
+    """W0: verify_task fails when target worktree is missing."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="verify-no-target")
+    task_id = request["task_id"]
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
+
+    # Remove target worktree
+    import shutil
+    target_path = Path(lease.target_worktree)
+    if target_path.exists():
+        shutil.rmtree(target_path)
+
+    result = service.verify_task(task_id)
+    assert result["verified"] is False
+    assert "target_missing" in result["failure_reasons"]
