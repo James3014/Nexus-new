@@ -261,6 +261,17 @@ class NexusSelfHostedMCPServer:
                 "description": "Cancel a non-running task and apply its governed terminal Target cleanup.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
             },
+            {
+                "name": "nexus_self_hosted_recover_verified_uncommitted_candidate",
+                "description": "Recover a verified-uncommitted candidate task without re-running model providers.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id"],
+                    "properties": {
+                        "task_id": {"type": "string"}
+                    }
+                },
+            },
         ]
 
     @staticmethod
@@ -397,6 +408,8 @@ class NexusSelfHostedMCPServer:
             )
         if name == "nexus_self_hosted_cancel_task":
             return self.service.cancel_task(task_id)
+        if name == "nexus_self_hosted_recover_verified_uncommitted_candidate":
+            return self.service.recover_verified_uncommitted_candidate(task_id)
         raise ValueError(f"unknown tool: {name}")
 
     def handle(self, request: Mapping[str, Any]) -> Optional[dict[str, Any]]:

@@ -211,6 +211,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_dispose,
     run_self_hosted_integrate,
     run_self_hosted_list_actionable,
+    run_self_hosted_recover_verified_uncommitted,
     run_self_hosted_status,
     run_self_hosted_submit,
     run_self_hosted_wait,
@@ -3626,6 +3627,22 @@ def self_hosted_cancel(
 ) -> None:
     """Cancel a non-running self-hosted task and run terminal cleanup."""
     res = run_self_hosted_cancel(
+        task_id=task_id,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="recover-verified-uncommitted")
+@click.option("--task-id", required=True, help="Task ID to recover.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_recover_verified_uncommitted(
+    task_id: str,
+    state_dir: str | None,
+) -> None:
+    """Recover a verified-uncommitted candidate task."""
+    res = run_self_hosted_recover_verified_uncommitted(
         task_id=task_id,
         state_dir=state_dir,
     )

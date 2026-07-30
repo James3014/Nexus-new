@@ -660,3 +660,91 @@ def test_self_hosted_cleanup_subprocess_json_and_explicit_apply(tmp_path: Path):
     applied_data = json.loads(applied.stdout)
     assert applied_data["dry_run"] is False
     assert applied_data["decisions"][0]["task_id"] == task_id
+
+
+def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    state_dir = str(tmp_path / "state")
+    svc = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    task_id = "recover-cli-001"
+    req = _valid_request(tmp_path, task_id=task_id, allowed_files=["README"], target_repo_root=str(tmp_path / "targets" / task_id), target_worktree_root=str(tmp_path / "targets"))
+    contract = svc.build_contract(req)
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+
+    wm = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = wm.create_lease(contract)
+    (Path(lease.target_worktree) / "README").write_text("modified content for recovery\n")
+    current = wm.capture_candidate(contract, lease)
+
+    receipt = VerifiedCandidateReceipt(
+        schema="nexus.verified_candidate_receipt/v1",
+        task_id=task_id,
+        contract_hash=contract.contract_hash,
+        lease_id=lease.lease_id,
+        candidate_state_hash=current.candidate_state_hash,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        verified=True,
+        candidate_commit_allowed=True,
+        public_claim_allowed=False,
+        production_ready=False,
+        failure_reasons=[],
+        verifier_evidence=(),
+        candidate_commit_created=False,
+        merge_performed=False,
+    )
+    svc._write_state(contract.task_id, {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": contract.task_id,
+        "attempt_id": "a" * 32,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "candidate_state_hash": current.candidate_state_hash,
+        "verified_receipt": receipt.__dict__,
+        "lease": lease.__dict__,
+        "contract": contract.model_dump(mode="json"),
+        "request": req,
+        "execution": {"outcome": "EXECUTION_COMPLETED"},
+        "attempt_resolution": {"verdict": "PROVEN"},
+    })
+
+    runner = CliRunner()
+    result = runner.invoke(
+        nexus,
+        [
+            "self-hosted", "recover-verified-uncommitted",
+            "--task-id", contract.task_id,
+            "--state-dir", state_dir,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["status"] == "PENDING_HUMAN_APPROVAL"
+    assert data["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_self_hosted_recover_verified_uncommitted_fail_closed_non_verified(tmp_path: Path):
+    state_dir = str(tmp_path / "state")
+    svc = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    for status in ["SUBMITTED", "WORKER_RUNNING", "PENDING_HUMAN_APPROVAL", "APPROVED", "INTEGRATED"]:
+        task_id = f"non-verified-{status.lower()}"
+        svc._write_state(task_id, {
+            "task_id": task_id,
+            "status": status,
+            "promotion_status": status,
+        })
+        runner = CliRunner()
+        result = runner.invoke(
+            nexus,
+            [
+                "self-hosted", "recover-verified-uncommitted",
+                "--task-id", task_id,
+                "--state-dir", state_dir,
+            ],
+        )
+        assert result.exit_code == 1
+        assert "status must be RETAINED_FOR_REVIEW or FINAL_BLOCK" in result.output

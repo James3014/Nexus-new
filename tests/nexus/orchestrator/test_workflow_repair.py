@@ -815,3 +815,105 @@ def test_integration_failure_records_failed_without_merge(tmp_path, monkeypatch)
     assert st["promotion_status"] == "INTEGRATION_FAILED"
     assert st["merge_performed"] is False
     assert st["push_performed"] is False
+
+
+def test_recovery_surface_unknown_task_fails_closed(tmp_path):
+    from scripts.engine.commands.self_hosted_actions import run_self_hosted_recover_verified_uncommitted, NexusCliActionError
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    with pytest.raises(NexusCliActionError, match="unknown task_id"):
+        run_self_hosted_recover_verified_uncommitted("unknown-task-999", state_dir=state_dir)
+
+    assert len(list(state_dir.glob("*.json"))) == 0
+
+
+def test_recovery_surface_zero_model_calls_and_maximum_returned_status(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    from scripts.engine.commands.self_hosted_actions import run_self_hosted_recover_verified_uncommitted
+    from nexus.orchestrator.worktree_manager import WorktreeManager
+    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+
+    env = os.environ.copy()
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=controller, check=True, env=env)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=controller, check=True, env=env)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=controller, check=True, env=env)
+    (controller / "bounded.txt").write_text("initial\n")
+    subprocess.run(["git", "add", "bounded.txt"], cwd=controller, check=True, env=env)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=controller, check=True, env=env)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=controller, text=True, env=env).strip()
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "recovery-surface-zero-calls"
+    req = {
+        "task_id": task_id,
+        "what": "Recovery surface test",
+        "why": "Verify zero provider calls",
+        "allowed_files": ["bounded.txt"],
+        "verifier_commands": ["python3 -c 'print(\"pass\")'"],
+        "controller_repo_root": str(controller),
+        "target_repo_root": str(tmp_path / "targets" / task_id),
+        "target_worktree_root": str(tmp_path / "targets"),
+        "controller_revision": head,
+        "target_base_revision": head,
+        "allow_unbound_test_identity": True,
+    }
+    contract = service.build_contract(req)
+    wm = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = wm.create_lease(contract)
+    (Path(lease.target_worktree) / "bounded.txt").write_text("modified\n")
+    current = wm.capture_candidate(contract, lease)
+
+    receipt = VerifiedCandidateReceipt(
+        schema="nexus.verified_candidate_receipt/v1",
+        task_id=task_id,
+        contract_hash=contract.contract_hash,
+        lease_id=lease.lease_id,
+        candidate_state_hash=current.candidate_state_hash,
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        verified=True,
+        candidate_commit_allowed=True,
+        public_claim_allowed=False,
+        production_ready=False,
+        failure_reasons=[],
+        verifier_evidence=(),
+        candidate_commit_created=False,
+        merge_performed=False,
+    )
+    service._write_state(task_id, {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": task_id,
+        "attempt_id": "a" * 32,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "candidate_state_hash": current.candidate_state_hash,
+        "verified_receipt": receipt.__dict__,
+        "lease": lease.__dict__,
+        "contract": contract.model_dump(mode="json"),
+        "request": req,
+        "execution": {"outcome": "EXECUTION_COMPLETED"},
+        "attempt_resolution": {"verdict": "PROVEN"},
+    })
+
+    provider_invoke_calls = 0
+    def failing_invoke(*args, **kwargs):
+        nonlocal provider_invoke_calls
+        provider_invoke_calls += 1
+        raise RuntimeError("Provider invoke should NOT be called during recovery")
+
+    monkeypatch.setattr(service.worker_registry, "invoke", failing_invoke)
+
+    res = run_self_hosted_recover_verified_uncommitted(contract.task_id, service=service)
+
+    assert provider_invoke_calls == 0
+    assert res["status"] in {"RETAINED_FOR_REVIEW", "PENDING_HUMAN_APPROVAL"}
+    assert res["status"] not in {"APPROVED", "INTEGRATING", "INTEGRATED"}
