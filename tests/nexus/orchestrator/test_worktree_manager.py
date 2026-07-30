@@ -548,7 +548,7 @@ def test_run_git_passes_custom_env_to_subprocess(temp_git_repo):
     _git(temp_git_repo, "config", "core.hooksPath", str(hooks_dir))
 
     manager._run_git(
-        ["commit", "--allow-empty", "-m", "env test"],
+        ["-c", f"core.hooksPath={hooks_dir}", "commit", "--allow-empty", "-m", "env test"],
         cwd=temp_git_repo,
         env={**os.environ, "CUSTOM_WORKTREE_ENV": "isolated_value"},
     )
