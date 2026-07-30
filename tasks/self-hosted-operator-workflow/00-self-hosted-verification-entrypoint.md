@@ -4,7 +4,7 @@
 - task_id: `self-hosted-verification-entrypoint`
 - campaign_id: `self-hosted-operator-workflow`
 - artifact_authority: current
-- status: READY
+- status: NEEDS_AMENDMENT
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -49,5 +49,9 @@ Total allowed files: 7 (Strict limit <= 10).
 ## Implementation constraints
 - Must preserve authority boundaries (read-only, no state mutation, zero provider calls).
 
+## Review disposition
+- Candidate `a2d8e764464a2a0bf3b1fac21f612cc9998a9354` is not approved for integration.
+- Remaining fail-open findings are delegated to `self-hosted-verification-entrypoint-final-amendment`.
+
 ## Maximum claim
-SELF_HOSTED_VERIFICATION_ENTRYPOINT_CANDIDATE_READY
+SELF_HOSTED_VERIFICATION_ENTRYPOINT_NEEDS_AMENDMENT
