@@ -112,14 +112,20 @@ class CandidateCommitter:
         if staged_after != paths:
             raise RuntimeError("staged candidate paths differ from verified paths")
         commit_env = os.environ.copy()
+        commit_env["GIT_CONFIG_NOSYSTEM"] = "1"
+        commit_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         commit_env["MUSE_RUN_CODEX_LOOP"] = "0"
         commit_env["HOME"] = self._resolve_git_home()
+        empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
+        empty_hooks.mkdir(parents=True, exist_ok=True)
         self.worktree_manager._run_git(
             [
                 "-c",
                 f"user.name={self.AUTHOR_NAME}",
                 "-c",
                 f"user.email={self.AUTHOR_EMAIL}",
+                "-c",
+                f"core.hooksPath={empty_hooks}",
                 "commit",
                 "-m",
                 f"candidate({contract.task_id}): governed worker result",

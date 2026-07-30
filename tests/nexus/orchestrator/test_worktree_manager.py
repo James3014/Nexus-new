@@ -17,7 +17,7 @@ from nexus.orchestrator.worktree_manager import WorktreeManager
 def temp_git_repo(tmp_path):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
-    subprocess.run(["git", "init"], cwd=repo_dir, check=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True)
     subprocess.run(["git", "commit", "--allow-empty", "-m", "Initial commit"], cwd=repo_dir, check=True)
     return repo_dir
 

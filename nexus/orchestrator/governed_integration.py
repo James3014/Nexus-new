@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -37,11 +38,18 @@ class ControlledIntegrationManager:
 
     @staticmethod
     def _git(args: Sequence[str], cwd: str | Path) -> str:
+        git_env = os.environ.copy()
+        git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+        git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
+        empty_hooks.mkdir(parents=True, exist_ok=True)
+        git_cmd = ["git", "-c", f"core.hooksPath={empty_hooks}", *args]
         result = subprocess.run(
-            ["git", *args],
+            git_cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
+            env=git_env,
         )
         if result.returncode != 0:
             raise RuntimeError(

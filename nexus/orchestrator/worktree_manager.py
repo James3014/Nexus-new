@@ -89,12 +89,21 @@ class WorktreeManager:
         cwd: Optional[str | Path] = None,
         env: Optional[dict[str, str]] = None,
     ) -> str:
+        git_env = os.environ.copy() if env is None else env.copy()
+        git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+        git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        git_args = list(args)
+        if env is None and any(cmd in args for cmd in ("commit", "merge", "rebase")):
+            if not any("core.hooksPath" in a for a in args):
+                empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
+                empty_hooks.mkdir(parents=True, exist_ok=True)
+                git_args = ["-c", f"core.hooksPath={empty_hooks}", *args]
         result = subprocess.run(
-            ["git", *args],
+            ["git", *git_args],
             capture_output=True,
             text=True,
             cwd=cwd,
-            env=env,
+            env=git_env,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -108,10 +117,20 @@ class WorktreeManager:
         args: list[str],
         cwd: Optional[str | Path] = None,
     ) -> bytes:
+        git_env = os.environ.copy()
+        git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+        git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        git_args = list(args)
+        if any(cmd in args for cmd in ("commit", "merge", "rebase")):
+            if not any("core.hooksPath" in a for a in args):
+                empty_hooks = Path("/private/tmp/nexus-empty-git-hooks")
+                empty_hooks.mkdir(parents=True, exist_ok=True)
+                git_args = ["-c", f"core.hooksPath={empty_hooks}", *args]
         result = subprocess.run(
-            ["git", *args],
+            ["git", *git_args],
             capture_output=True,
             cwd=cwd,
+            env=git_env,
         )
         if result.returncode != 0:
             stderr = result.stderr.decode("utf-8", errors="replace").strip()

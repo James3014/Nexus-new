@@ -28,8 +28,8 @@ from nexus.executors.worker_contract import (
     resolve_attempt,
 )
 from nexus.executors.worker_registry import WorkerRegistry
-from nexus.orchestrator.candidate_commit import CandidateCommitter
-from nexus.orchestrator.candidate_verifier import CandidateVerifier
+from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
+from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.task_contract import (
@@ -86,6 +86,78 @@ def _parse_time(value: Optional[str]) -> Optional[float]:
         return datetime.fromisoformat(value).timestamp()
     except ValueError:
         return None
+def resolve_canonical_target_roots(
+    task_id: str,
+    campaign_id: Optional[str] = None,
+    requested_target_worktree_root: Optional[str] = None,
+    requested_target_repo_root: Optional[str] = None,
+) -> tuple[Path, Path]:
+    override = os.getenv("NEXUS_TARGET_ROOT_OVERRIDE", "").strip()
+    if override:
+        base_worktree_root = Path(override).expanduser().resolve()
+    elif requested_target_worktree_root and "/private/tmp" not in requested_target_worktree_root and "/tmp" not in requested_target_worktree_root:
+        base_worktree_root = Path(requested_target_worktree_root).expanduser().resolve()
+    else:
+        workspace_root = Path.cwd().resolve()
+        if "nexus-worktrees" in workspace_root.parts:
+            base_worktree_root = workspace_root.parent / "nexus-worktrees" / "runtime-targets"
+        else:
+            base_worktree_root = workspace_root / "nexus-worktrees" / "runtime-targets"
+        if campaign_id:
+            base_worktree_root = base_worktree_root / campaign_id
+
+    if requested_target_repo_root and "/private/tmp" not in requested_target_repo_root and "/tmp" not in requested_target_repo_root:
+        target_repo_root = Path(requested_target_repo_root).expanduser().resolve()
+    else:
+        target_repo_root = base_worktree_root / task_id
+
+    return base_worktree_root, target_repo_root
+
+
+def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
+    task_id = contract.task_id
+    card_path_str = request.get("task_card_path")
+    card_path = None
+    if card_path_str:
+        card_path = Path(card_path_str).expanduser().resolve()
+    else:
+        possible = Path.cwd() / f"tasks/{task_id}.md"
+        if possible.exists():
+            card_path = possible
+        else:
+            matches = list(Path.cwd().glob(f"tasks/*/{task_id}.md")) + list(Path.cwd().glob(f"tasks/*/*{task_id}*.md"))
+            card_path = matches[0] if matches else None
+
+    if not card_path or not card_path.exists():
+        if request.get("task_card_required", False):
+            raise RuntimeError(f"TASK_CARD_BINDING_MISMATCH: task card does not exist for task_id '{task_id}'")
+        return
+
+    content = card_path.read_text(encoding="utf-8")
+    if f"task_id: `{task_id}`" not in content and f"task_id: {task_id}" not in content and f"`{task_id}`" not in content and f"task_id: '{task_id}'" not in content:
+        raise RuntimeError(f"TASK_CARD_BINDING_MISMATCH: task card task_id does not match lifecycle task_id '{task_id}'")
+
+    if "AUTO_CHAIN: true" in content or "AUTO_CHAIN=true" in content:
+        raise RuntimeError("TASK_CARD_BINDING_MISMATCH: AUTO_CHAIN must be false")
+
+
+def validate_lifecycle_revision(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
+    req_rev = request.get("required_lifecycle_revision")
+    if req_rev:
+        source_root = Path(__file__).resolve().parents[2]
+        current_rev = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=source_root, capture_output=True, text=True
+        ).stdout.strip()
+        if current_rev != req_rev and not current_rev.startswith(req_rev):
+            raise RuntimeError(f"LIFECYCLE_REVISION_MISMATCH: current revision {current_rev} does not match required {req_rev}")
+
+
+def check_fast_lane_eligible(contract: ArchitectTaskContract) -> bool:
+    return (
+        len(contract.allowed_files) <= 4
+        and contract.maximum_provider_calls <= 1
+        and bool(contract.verifier_commands)
+    )
 
 
 class SelfHostedTaskService:
@@ -1313,6 +1385,8 @@ class SelfHostedTaskService:
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         contract = self.build_contract(request)
+        validate_task_card_binding(contract, request)
+        validate_lifecycle_revision(contract, request)
         existing_states = [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(self.state_dir.glob("*.json"))
@@ -2040,3 +2114,151 @@ class SelfHostedTaskService:
             "merge_performed": False,
             "push_performed": False,
         }, attempt_id=state.get("attempt_id")) or state
+
+    def recover_verified_uncommitted_candidate(self, task_id: str) -> dict[str, Any]:
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        
+        status = state.get("status")
+        if status not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK", "WORKER_COMPLETED", "VERIFIED"}:
+            raise RuntimeError(f"task status '{status}' is not eligible for recovery")
+
+        verified_receipt = state.get("verified_receipt") or {}
+        if not verified_receipt.get("verified"):
+            raise RuntimeError("candidate must be verified before recovery")
+
+        attempt_res = state.get("attempt_resolution") or {}
+        if attempt_res.get("verdict") != "PROVEN":
+            raise RuntimeError("attempt_resolution verdict must be PROVEN")
+
+        execution = state.get("execution") or {}
+        if execution.get("outcome") != "EXECUTION_COMPLETED":
+            raise RuntimeError("execution outcome must be EXECUTION_COMPLETED")
+
+        if not verified_receipt.get("controller_gate_passed"):
+            raise RuntimeError("controller_gate_passed must be True")
+        if not verified_receipt.get("scope_gate_passed"):
+            raise RuntimeError("scope_gate_passed must be True")
+        if not verified_receipt.get("deletion_gate_passed"):
+            raise RuntimeError("deletion_gate_passed must be True")
+        if not verified_receipt.get("protected_contract_gate_passed"):
+            raise RuntimeError("protected_contract_gate_passed must be True")
+
+        contract_dict = state.get("contract") or {}
+        lease_dict = state.get("lease") or {}
+        contract_fields = set(ArchitectTaskContract.model_fields.keys()) if hasattr(ArchitectTaskContract, "model_fields") else set()
+        lease_fields = set(TargetWorktreeLease.model_fields.keys()) if hasattr(TargetWorktreeLease, "model_fields") else set()
+
+        clean_lease = {k: v for k, v in lease_dict.items() if k in lease_fields} if lease_fields else lease_dict
+
+        if isinstance(contract_dict, dict):
+            c_dict = contract_dict.copy()
+            if not c_dict.get("what"):
+                c_dict["what"] = c_dict.get("objective", "Recover candidate")
+            if not c_dict.get("why"):
+                c_dict["why"] = c_dict.get("objective", "Recover candidate")
+            contract = self.build_contract(c_dict)
+        else:
+            contract = contract_dict
+        lease = TargetWorktreeLease(**clean_lease) if isinstance(lease_dict, dict) else lease_dict
+
+        target_path = Path(lease.target_worktree).resolve()
+        if not target_path.exists():
+            raise RuntimeError("target worktree path does not exist")
+
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        if manager._path_has_process(target_path):
+            raise RuntimeError("target worktree has active running process")
+
+        target_head = manager._run_git(["rev-parse", "HEAD"], cwd=target_path)
+        receipt_obj = VerifiedCandidateReceipt(**verified_receipt)
+
+        if target_head == lease.initial_head:
+            current = manager.capture_candidate(contract, lease)
+            expected_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
+            if current.candidate_state_hash != expected_state_hash:
+                raise RuntimeError("candidate state hash changed after verification")
+            committer = CandidateCommitter(manager)
+            packet = committer.create_candidate_commit(contract, lease, receipt_obj)
+        else:
+            commit_sha = target_head
+            tree_sha = manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target_path)
+            receipt_hash = CandidateCommitter._receipt_hash(receipt_obj)
+            packet = PromotionApprovalPacket(
+                schema="nexus.promotion_approval_packet.v1",
+                task_id=contract.task_id,
+                contract_hash=contract.contract_hash,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                candidate_state_hash=verified_receipt.get("candidate_state_hash"),
+                candidate_commit_sha=commit_sha,
+                candidate_tree_sha=tree_sha,
+                verified_receipt_hash=receipt_hash,
+                candidate_commit_created=True,
+                promotion_status="PENDING_HUMAN_APPROVAL",
+                public_claim_allowed=False,
+                production_ready=False,
+                merge_performed=False,
+                push_performed=False,
+            )
+
+        candidate_ref = f"refs/heads/nexus/task/{task_id}"
+        try:
+            manager._run_git(["branch", "-f", f"nexus/task/{task_id}", packet.candidate_commit_sha], cwd=contract.controller_repo_root)
+        except Exception:
+            pass
+
+        updates = {
+            "candidate_commit_sha": packet.candidate_commit_sha,
+            "candidate_tree_sha": packet.candidate_tree_sha,
+            "candidate_ref": candidate_ref,
+            "candidate_state_hash": packet.candidate_state_hash,
+            "verified_receipt_hash": packet.verified_receipt_hash,
+            "promotion_packet": asdict(packet),
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "candidate_status": "COMMITTED",
+            "status": "PENDING_HUMAN_APPROVAL",
+            "error": None,
+            "cleanup_decision": "PROTECTED_BY_CANDIDATE_REF",
+            "cleanup_eligible": False,
+        }
+        res = self._checkpoint(task_id, "PENDING_HUMAN_APPROVAL", updates, attempt_id=state.get("attempt_id"))
+        return res or self._read_state(task_id) or state
+
+    def record_integration(
+        self,
+        task_id: str,
+        integration_branch: str,
+        integration_result_sha: str,
+        approved_binding: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        packet = state.get("promotion_packet") or {}
+        binding = approved_binding or state.get("approved_binding") or {
+            "candidate_commit_sha": state.get("candidate_commit_sha") or packet.get("candidate_commit_sha"),
+            "candidate_tree_sha": state.get("candidate_tree_sha") or packet.get("candidate_tree_sha"),
+            "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
+            "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+        }
+        updates = {
+            "candidate_commit_sha": binding.get("candidate_commit_sha"),
+            "candidate_tree_sha": binding.get("candidate_tree_sha"),
+            "candidate_state_hash": binding.get("candidate_state_hash"),
+            "verified_receipt_hash": binding.get("verified_receipt_hash"),
+            "candidate_ref": state.get("candidate_ref") or f"refs/heads/nexus/task/{task_id}",
+            "approved_binding": binding,
+            "integration_branch": integration_branch,
+            "integration_result_sha": integration_result_sha,
+            "candidate_status": "INTEGRATED",
+            "promotion_status": "INTEGRATED",
+            "terminal_status": "INTEGRATED",
+            "status": "INTEGRATED",
+            "merge_performed": True,
+            "state_retention_status": "TERMINAL",
+            "archive_eligible": True,
+        }
+        res = self._checkpoint(task_id, "INTEGRATED", updates, attempt_id=state.get("attempt_id"))
+        return res or self._read_state(task_id) or state
