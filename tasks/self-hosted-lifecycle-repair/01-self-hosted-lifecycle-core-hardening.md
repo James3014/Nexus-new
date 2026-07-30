@@ -4,7 +4,7 @@
 - task_id: `self-hosted-lifecycle-core-hardening`
 - campaign_id: `self-hosted-lifecycle-repair`
 - artifact_authority: current
-- status: BLOCKED
+- status: READY
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -36,6 +36,7 @@
 ## Source and start state
 - Starting branch: `nexus/integration/main` after Task 00 integration
 - Target worktree: Isolated workspace target root
+- Required dependency evidence: Task 00 integration commit must be an ancestor of the Task 01 starting HEAD.
 
 ## Authority map
 - Selection authority: Model Workforce policy / existing CapabilityPlanner constraints

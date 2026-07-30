@@ -15,13 +15,12 @@ Self-hosted Lifecycle 核心硬化與 recovery 能力收斂專案。修復範圍
 3. [02-self-hosted-lifecycle-recovery-surfaces.md](02-self-hosted-lifecycle-recovery-surfaces.md) - `self-hosted-lifecycle-recovery-surfaces`
 
 ## Current Frontier
-`self-hosted-lifecycle-repair-authority-bootstrap`
+`self-hosted-lifecycle-core-hardening`
 
 ## Completed Cards
-None
+- `self-hosted-lifecycle-repair-authority-bootstrap`: status=INTEGRATED, candidate_commit=628290120d709cab6865e04c6c3d09c23c853138, integration_commit=007b536be121573622b55e2b5e65b3cf7e1506b9
 
 ## Blocked Cards
-- `self-hosted-lifecycle-core-hardening`: Task 01 blocked by Task 00 integration
 - `self-hosted-lifecycle-recovery-surfaces`: Task 02 blocked by Task 01 integration
 
 ## Superseded Cards

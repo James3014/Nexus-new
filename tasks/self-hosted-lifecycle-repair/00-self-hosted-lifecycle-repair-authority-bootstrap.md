@@ -4,7 +4,7 @@
 - task_id: `self-hosted-lifecycle-repair-authority-bootstrap`
 - campaign_id: `self-hosted-lifecycle-repair`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: INTEGRATED
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -92,8 +92,10 @@ git status --short
 ```
 
 ## Physical evidence
-- Amended candidate commit SHA (`candidate_commit_sha`)
-- Candidate tree SHA (`candidate_tree_sha`)
+- candidate_commit: 628290120d709cab6865e04c6c3d09c23c853138
+- candidate_tree: 625bb6465a064e67f1901c7adbb73c161efeced9
+- integration_commit: 007b536be121573622b55e2b5e65b3cf7e1506b9
+- integration_branch: nexus/integration/main
 - Protected candidate ref (`refs/heads/nexus/task/self-hosted-lifecycle-repair-authority-bootstrap`)
 - Changed files list (exactly 4 files)
 - Tracked deletion count (0)
