@@ -4,7 +4,7 @@
 - task_id: `self-hosted-lifecycle-recovery-surfaces`
 - campaign_id: `self-hosted-lifecycle-repair`
 - artifact_authority: current
-- status: BLOCKED
+- status: READY
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -30,6 +30,11 @@
 ## Source and start state
 - Starting branch: `nexus/integration/main` after Task 01 integration
 - Target worktree: Isolated workspace target root
+- Task 01 integration commit: `a99c71d8c0628e1d383adaf3a905cad2c6b1b7f4`
+- Dependency gate: Task 01 integration commit is an ancestor of Task 02 starting HEAD.
+- Task 02 has not started.
+- No Target has been created.
+- AUTO_CHAIN=false.
 
 ## Authority map
 - Selection authority: Model Workforce policy / existing CapabilityPlanner constraints

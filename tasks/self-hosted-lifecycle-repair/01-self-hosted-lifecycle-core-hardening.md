@@ -4,7 +4,7 @@
 - task_id: `self-hosted-lifecycle-core-hardening`
 - campaign_id: `self-hosted-lifecycle-repair`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -120,9 +120,15 @@ git diff --cached --stat
 ```
 
 ## Physical evidence
-- Scoped candidate commit SHA
-- Test suite pass receipt (all collected tests pass, 0 failed, 0 unexpected skipped)
-- Verified target preservation state
+- starting_head: `756d62a5d6748e32eac321b8b64ff91846cc27a2`
+- candidate_commit: `c369288c485c7238412f35a25d7caa76713679bf`
+- candidate_tree: `d3b867980074fc969069739c270b8ef6dad03345`
+- integration_commit: `a99c71d8c0628e1d383adaf3a905cad2c6b1b7f4`
+- integration_branch: `nexus/integration/main`
+- post_integration_orchestrator_tests: `235 passed`
+- post_integration_mcp_http_cli_tests: `40 passed`
+- git_environment: `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`
+- bare_pytest_observation: `PREEXISTING_ENVIRONMENTAL_CONTAMINATION caused by user global core.hooksPath; not treated as Task 01 regression`
 
 ## Independent review
 Required human review by James Chen prior to integration.
@@ -131,11 +137,11 @@ Required human review by James Chen prior to integration.
 - All 10 defect items fixed and verified by explicit unit tests.
 - Preflight checks verified.
 - Candidate commit formed under isolated environment.
-- Status set to `CANDIDATE_READY`.
+- Status set to `INTEGRATED`.
 
 ## RECOVERABLE_BLOCK / HARD_BLOCK
 - RECOVERABLE_BLOCK: Test fixture failure or transient filesystem lock.
 - HARD_BLOCK: Modification outside allowed 9 files or scope creep into GitHub Actions / P2.
 
 ## Maximum claim
-SELF_HOSTED_CORE_HARDENING_CANDIDATE_READY
+SELF_HOSTED_CORE_HARDENING_INTEGRATED
