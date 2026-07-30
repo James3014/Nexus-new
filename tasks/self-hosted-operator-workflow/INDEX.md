@@ -15,21 +15,20 @@ AUTO_CHAIN: false
 4. [00b-self-hosted-verification-entrypoint-opencode-recovery.md](00b-self-hosted-verification-entrypoint-opencode-recovery.md) - `self-hosted-verification-entrypoint-opencode-recovery`
 
 ## Current Frontier
-`self-hosted-retained-target-auto-closeout`
+`self-hosted-verification-entrypoint-opencode-recovery`
 
 ## Completed Cards
-None
+- `self-hosted-retained-target-auto-closeout`: INTEGRATED at `17cf433ef218ea709d2e06ac1d3fcd2e85b90144`; retained Targets can now be salvaged/protected and released without promotion
 
 ## Ready Cards
-- `self-hosted-retained-target-auto-closeout`: READY; close the retained-target salvage/cleanup lifecycle gap before resuming implementation work
-- `self-hosted-verification-entrypoint-opencode-recovery`: READY_AFTER_00C; clean seven-file reconstruction using the rejected Candidate and Codex salvage as read-only evidence
+- `self-hosted-verification-entrypoint-opencode-recovery`: READY; clean seven-file reconstruction using the rejected Candidate and Codex salvage as read-only evidence
 
 ## Blocked Cards
 - `self-hosted-verification-entrypoint`: NEEDS_AMENDMENT; physical Candidate `a2d8e764464a2a0bf3b1fac21f612cc9998a9354` is not approved for integration
 - `self-hosted-verification-entrypoint-final-amendment`: RECOVERABLE_BLOCK; Codex exited 1 after 650833 ms and produced only non-candidate salvage `29b9b0d40eb29e0ea590d4cbf05118c7ba3ae43d`
 
 ## Superseded Cards
-None
+- `self-hosted-terminal-auto-closeout`: unexecuted OpenCode draft; historical evidence only, superseded by integrated `self-hosted-retained-target-auto-closeout`
 
 ## Task Dependencies
 - `self-hosted-verification-entrypoint`: None (bootstrap)
