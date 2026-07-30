@@ -48,6 +48,32 @@ def build_isolated_env(
     return env
 
 
+def _is_populated_runtime(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    state_json = path / "state.json"
+    if state_json.exists() and state_json.is_file():
+        try:
+            import json
+            data = json.loads(state_json.read_text(encoding="utf-8"))
+            accounts = data.get("accounts")
+            if isinstance(accounts, dict) and len(accounts) > 0:
+                return True
+            if isinstance(accounts, list) and len(accounts) > 0:
+                return True
+        except Exception:
+            pass
+    accounts_dir = path / "accounts"
+    if accounts_dir.exists() and accounts_dir.is_dir():
+        try:
+            subdirs = [x for x in accounts_dir.iterdir() if x.is_dir()]
+            if len(subdirs) > 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 class AgyAccountPoolManager:
     """Manages rotation, active account state, and isolated HOME environments for AGY workers."""
 
@@ -109,20 +135,43 @@ class AgyAccountPoolManager:
             p = Path(env_root).expanduser()
             return str(p.resolve()) if p.exists() else str(p)
 
+        derived_from_mgr: Optional[Path] = None
         mgr_p = manager_path or AgyAccountPoolManager.resolve_manager_path()
         if mgr_p:
             p = Path(mgr_p).expanduser()
             if p.name == "agy-cli-manager" and p.parent.name == "bin":
-                runtime_dir = p.parent.parent / "runtime"
-                return str(runtime_dir.resolve()) if runtime_dir.exists() else str(runtime_dir)
+                base = p.parent.parent
+                if base.name.startswith("manager-venv") or base.name in ("venv", ".venv"):
+                    base = base.parent
+                derived_from_mgr = base / "runtime"
             elif p.exists():
-                runtime_dir = p.parent / "runtime"
-                return str(runtime_dir.resolve()) if runtime_dir.exists() else str(runtime_dir)
+                base = p.parent
+                if base.name.startswith("manager-venv") or base.name in ("venv", ".venv"):
+                    base = base.parent
+                derived_from_mgr = base / "runtime"
+
+        if derived_from_mgr:
+            if _is_populated_runtime(derived_from_mgr) or manager_path is not None:
+                return str(derived_from_mgr.resolve()) if derived_from_mgr.exists() else str(derived_from_mgr)
+
+        candidates = [
+            Path("/Users/jameschen/.nexus/agy-account-pool/runtime"),
+            Path.home() / ".nexus/agy-account-pool/runtime",
+        ]
+
+        for cand in candidates:
+            if _is_populated_runtime(cand):
+                return str(cand.resolve())
+
+        for cand in candidates:
+            if cand.exists():
+                return str(cand.resolve())
+
+        if derived_from_mgr:
+            return str(derived_from_mgr.resolve()) if derived_from_mgr.exists() else str(derived_from_mgr)
 
         installed_root = Path("/Users/jameschen/.nexus/agy-account-pool/runtime")
-        if installed_root.exists():
-            return str(installed_root.resolve())
-        return str(Path.home() / ".nexus/agy-account-pool/runtime")
+        return str(installed_root.resolve()) if installed_root.exists() else str(installed_root)
 
     def _call_manager_cli(self, args: list[str]) -> dict:
         mgr = self._manager_path or self.resolve_manager_path()

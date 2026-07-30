@@ -248,3 +248,21 @@ def test_physical_manager_smoke():
     }
     assert sanitized_evidence["account_count"] == 12
     assert sanitized_evidence["active"] is not None
+
+
+def test_resolve_manager_root_prefers_populated_canonical_root_over_empty_venv_sibling(tmp_path):
+    pool_dir = tmp_path / "agy-account-pool"
+    venv_bin = pool_dir / "manager-venv-py313" / "bin" / "agy-cli-manager"
+    venv_bin.parent.mkdir(parents=True)
+    venv_bin.write_text("#!/bin/sh\nexit 0")
+
+    empty_runtime = pool_dir / "manager-venv-py313" / "runtime"
+    empty_runtime.mkdir(parents=True)
+    (empty_runtime / "state.json").write_text('{"active": null, "accounts": {}}')
+
+    populated_runtime = pool_dir / "runtime"
+    populated_runtime.mkdir(parents=True)
+    (populated_runtime / "state.json").write_text('{"active": "acc1", "accounts": {"acc1": {"enabled": true}}}')
+
+    root = AgyAccountPoolManager.resolve_manager_root(manager_path=str(venv_bin))
+    assert root == str(populated_runtime.resolve())
