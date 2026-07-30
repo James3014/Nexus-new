@@ -1650,7 +1650,9 @@ def test_close_retained_dirty_salvage_rejects_mismatched_replacement_identity(tm
     assert service._read_state(request["task_id"])["status"] == "RETAINED_FOR_REVIEW"
 
 
-def test_close_retained_dirty_salvage_protects_ref_and_never_becomes_candidate(tmp_path):
+def test_close_retained_dirty_salvage_protects_ref_and_never_becomes_candidate(tmp_path, monkeypatch):
+    for env_var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(env_var, raising=False)
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     request = _real_request(tmp_path, task_id="retained-salvage-success")
     contract = service.build_contract(request)

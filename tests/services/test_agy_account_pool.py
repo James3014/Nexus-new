@@ -66,3 +66,90 @@ def test_get_account_pool_manager_global(monkeypatch):
 
     assert manager.ensure_active().alias == "u1"
     set_global_account_pool_manager(None)
+
+
+def test_real_manager_cli_integration(tmp_path):
+    manager_script = tmp_path / "mock-agy-cli-manager"
+    manager_root = tmp_path / "mgr_root"
+    runtime_dir = manager_root / "runtime"
+    runtime_dir.mkdir(parents=True)
+
+    state_file = manager_root / "mock_state.txt"
+    script_content = f"""#!/usr/bin/env python3
+import json, sys, pathlib
+sf = pathlib.Path("{state_file}")
+curr = sf.read_text().strip() if sf.exists() else "mock_acc_1"
+if "rotate-after-failure" in sys.argv:
+    curr = "mock_acc_2"
+    sf.write_text(curr)
+    print(json.dumps({{"active": "mock_acc_2", "switched_to": "mock_acc_2", "outcome": "rotated"}}))
+elif "ensure-active" in sys.argv:
+    print(json.dumps({{"active": curr, "switched_to": None, "reason": "ok"}}))
+elif "status" in sys.argv:
+    print(json.dumps({{"active": curr, "runtime_dir": "{runtime_dir}", "root": "{manager_root}"}}))
+else:
+    print(json.dumps({{}}))
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    acc = manager.ensure_active()
+    assert acc.alias == "mock_acc_1"
+    assert acc.home_dir == str(runtime_dir.resolve())
+    assert len(acc.alias_hash) == 12
+
+    rotated = manager.rotate_account(reason="quota_test")
+    assert rotated.alias == "mock_acc_2"
+
+
+def test_real_manager_exhausted_raises_typed_error(tmp_path):
+    from nexus.services.agy_account_pool import AgyAccountPoolExhaustedError
+
+    manager_script = tmp_path / "mock-agy-cli-manager-empty"
+    manager_root = tmp_path / "mgr_root_empty"
+    manager_root.mkdir(parents=True)
+
+    script_content = """#!/usr/bin/env python3
+import json, sys
+if "ensure-active" in sys.argv or "status" in sys.argv:
+    print(json.dumps({"active": None, "reason": "no_active_account"}))
+else:
+    print(json.dumps({"active": None, "outcome": "no_active_account"}))
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    with pytest.raises(AgyAccountPoolExhaustedError, match="AGY_ACCOUNT_POOL_EXHAUSTED"):
+        manager.ensure_active()
+
+
+def test_physical_manager_smoke():
+    from pathlib import Path
+    manager_path = Path.home() / ".nexus/agy-account-pool/bin/agy-cli-manager"
+    if not manager_path.exists():
+        pytest.skip("Real manager binary not found at default location")
+
+    manager = AgyAccountPoolManager(use_real_manager=True, manager_path=str(manager_path))
+
+    assert manager.resolve_manager_path() is not None
+
+    status_res = manager._call_manager_cli(["status", "--json"])
+    assert "active" in status_res
+    assert "runtime_dir" in status_res
+    assert "root" in status_res
+
+    active_res = manager._call_manager_cli(["ensure-active", "--json"])
+    assert "active" in active_res
+    assert "switch_mode" in active_res
