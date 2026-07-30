@@ -2011,15 +2011,156 @@ class SelfHostedTaskService:
                 decisions.append({"task_id": item, "cleanup_decision": "ALREADY_REMOVED", "cleanup_blocker": "task state not found", "cleanup_performed": False})
                 continue
             if state.get("status") == "RETAINED_FOR_REVIEW":
-                decision = {
-                    "task_id": item, "status": state.get("status"),
-                    "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
-                    "cleanup_blocker": state.get("cleanup_blocker") or "RETAINED_FOR_REVIEW",
-                    "cleanup_performed": False, "cleanup_eligible": False,
-                }
+                worker_pid = state.get("worker_pid")
+                child_pgid = state.get("worker_child_pgid")
+                if ((worker_pid and self._pid_alive(int(worker_pid))) or
+                        (child_pgid and self._pid_alive(int(child_pgid)))):
+                    decisions.append({
+                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "cleanup_decision": "BLOCKED_BY_PROCESS",
+                        "cleanup_blocker": "active process uses Target",
+                        "cleanup_performed": False, "cleanup_eligible": False,
+                    })
+                    continue
+                if not state.get("lease") or not state.get("request"):
+                    decisions.append({
+                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+                        "cleanup_blocker": "retained task lacks lease or request authority",
+                        "cleanup_performed": False, "cleanup_eligible": False,
+                    })
+                    continue
+                contract = self.build_contract(state["request"])
+                lease = TargetWorktreeLease(**state["lease"])
+                manager = WorktreeManager(root_dir=contract.target_worktree_root)
+                target = Path(lease.target_worktree).resolve()
+                controller = Path(contract.controller_repo_root).resolve()
+                attempt_id = str(state.get("attempt_id") or "")
+                if not attempt_id:
+                    decisions.append({
+                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+                        "cleanup_blocker": "retained task lacks attempt identity",
+                        "cleanup_performed": False, "cleanup_eligible": False,
+                    })
+                    continue
+                if dry_run:
+                    entry = manager._worktree_entry(controller, target)
+                    if not target.exists() and entry is None:
+                        planned = "ALREADY_REMOVED"
+                    elif entry is None:
+                        planned = "BLOCKED_BY_UNSAVED_CHANGES"
+                    elif manager.process_checker(target):
+                        planned = "BLOCKED_BY_PROCESS"
+                    else:
+                        dirty = bool(manager._status_bytes(target))
+                        head = manager._run_git(["rev-parse", "HEAD"], cwd=target)
+                        if dirty:
+                            planned = "WOULD_SALVAGE_AND_REMOVE"
+                        elif head != lease.initial_head:
+                            planned = "WOULD_PROTECT_HEAD_AND_REMOVE"
+                        else:
+                            planned = "WOULD_REMOVE"
+                    decisions.append({
+                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "cleanup_decision": planned,
+                        "cleanup_blocker": None,
+                        "cleanup_performed": False,
+                        "cleanup_eligible": planned not in {
+                            "BLOCKED_BY_PROCESS", "BLOCKED_BY_UNSAVED_CHANGES"
+                        },
+                    })
+                    continue
+
+                salvage_commit = state.get("salvage_commit_sha")
+                salvage_ref = state.get("salvage_ref")
+                salvage: dict[str, Any] = {}
+                try:
+                    entry = manager._worktree_entry(controller, target)
+                    if not target.exists() and entry is None:
+                        cleanup = manager.cleanup_terminal_target(contract, lease)
+                    else:
+                        if entry is None:
+                            raise RuntimeError("retained Target is not a registered worktree")
+                        if manager.process_checker(target):
+                            raise RuntimeError("active process uses Target")
+                        dirty = bool(manager._status_bytes(target))
+                        head = manager._run_git(["rev-parse", "HEAD"], cwd=target)
+                        deterministic_ref = manager.salvage_ref_for(item, attempt_id)
+                        if salvage_commit or salvage_ref:
+                            if (state.get("salvage_only") is not True or
+                                    state.get("promotion_eligible") is not False or
+                                    not salvage_commit or not salvage_ref):
+                                raise RuntimeError("recorded salvage metadata is invalid")
+                            protected = manager._run_git(
+                                ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
+                            )
+                            if protected != salvage_commit or head != salvage_commit:
+                                raise RuntimeError("salvage ref is missing or mismatched")
+                            salvage = {
+                                "salvage_commit_sha": salvage_commit,
+                                "salvage_ref": salvage_ref,
+                                "salvage_only": True,
+                                "promotion_eligible": False,
+                            }
+                        else:
+                            try:
+                                protected = manager._run_git(
+                                    ["rev-parse", f"{deterministic_ref}^{{commit}}"],
+                                    cwd=controller,
+                                )
+                            except RuntimeError:
+                                protected = ""
+                            if protected:
+                                if protected != head:
+                                    raise RuntimeError(
+                                        "salvage ref already exists with different commit"
+                                    )
+                                salvage = {
+                                    "salvage_commit_sha": protected,
+                                    "salvage_ref": deterministic_ref,
+                                    "salvage_only": True,
+                                    "promotion_eligible": False,
+                                }
+                            elif dirty:
+                                salvage = manager.create_salvage_snapshot(
+                                    contract, lease, attempt_id
+                                )
+                            elif head != lease.initial_head:
+                                salvage = manager.protect_salvage_head(
+                                    contract, lease, attempt_id
+                                )
+                        cleanup = manager.cleanup_terminal_target(
+                            contract,
+                            lease,
+                            salvage_commit=salvage.get("salvage_commit_sha"),
+                            salvage_ref=salvage.get("salvage_ref"),
+                        )
+                    decision = {
+                        "task_id": item,
+                        "status": "RETAINED_FOR_REVIEW",
+                        "promotion_status": "NOT_CREATED",
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_blocker": cleanup.blocker,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_eligible": cleanup.eligible,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                        **salvage,
+                    }
+                except Exception as exc:
+                    decision = {
+                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "promotion_status": "NOT_CREATED",
+                        "cleanup_decision": "CLEANUP_BLOCKED",
+                        "cleanup_blocker": str(exc),
+                        "cleanup_performed": False, "cleanup_eligible": False,
+                        **salvage,
+                    }
                 decisions.append(decision)
-                if not dry_run:
-                    self._checkpoint(item, "RETAINED_FOR_REVIEW", decision, attempt_id=state.get("attempt_id"))
+                self._checkpoint(
+                    item, "RETAINED_FOR_REVIEW", decision,
+                    attempt_id=state.get("attempt_id"),
+                )
                 continue
             if state.get("status") not in TERMINAL_STATUSES and state.get("status") not in {"CANDIDATE_COMMITTED", "TARGET_CLEANED", "PENDING_HUMAN_APPROVAL"}:
                 decisions.append({"task_id": item, "status": state.get("status"), "cleanup_decision": "BLOCKED_BY_PROCESS", "cleanup_blocker": "task is active", "cleanup_performed": False})

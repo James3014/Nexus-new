@@ -16,7 +16,7 @@ import pytest
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 
 
 def _request(tmp_path: Path, **overrides):
@@ -1847,3 +1847,172 @@ def test_close_task_without_candidate_fails_closed_other_status(tmp_path):
 
     with pytest.raises(RuntimeError, match="RETAINED_FOR_REVIEW or FINAL_BLOCK"):
         service.close_task_without_candidate(task_id, superseded_by="ref-123")
+
+
+# --- 00c: Self-hosted Retained Target Auto Closeout RED tests ---
+
+def test_cleanup_retained_dirty_target_salvages_and_removes(tmp_path, monkeypatch):
+    """RED: retained dirty Target currently remains registered after cleanup_tasks(..., dry_run=False)."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="retained-dirty-cleanup")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "dirty.txt").write_text("dirty work\n", encoding="utf-8")
+    for env_var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(env_var, raising=False)
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "attempt_id": "att-retained-dirty",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=False)
+    decision = result["decisions"][0]
+    state_after = service._read_state(contract.task_id)
+
+    assert decision["cleanup_decision"] != "BLOCKED_BY_UNSAVED_CHANGES", (
+        "retained dirty Target should not be blocked by unsaved changes when salvage is available"
+    )
+    assert decision["cleanup_performed"] is True
+    assert not target.exists(), "Target worktree should be removed after salvage"
+    assert state_after["status"] == "RETAINED_FOR_REVIEW"
+    assert state_after.get("salvage_commit_sha") is not None
+    assert state_after.get("salvage_ref") is not None
+
+
+def test_cleanup_retained_clean_changed_head_salvages_head_and_removes(tmp_path):
+    """RED: retained clean changed-HEAD Target currently remains registered without a durable binding."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="retained-clean-head-cleanup")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                     "commit", "--allow-empty", "-m", "drift"],
+                    cwd=target, check=True, capture_output=True)
+    assert _git(target, "rev-parse", "HEAD") != lease.initial_head
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "attempt_id": "att-retained-clean-head",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=False)
+    decision = result["decisions"][0]
+
+    assert decision["cleanup_performed"] is True
+    assert not target.exists()
+
+
+def test_cleanup_retained_discover_existing_salvage_ref(tmp_path, monkeypatch):
+    """RED: existing exact salvage ref currently is not discovered when state metadata is absent."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="retained-existing-salvage")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "dirty.txt").write_text("salvage me\n", encoding="utf-8")
+    for env_var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(env_var, raising=False)
+    attempt_id = "att-existing-salvage"
+    snapshot = manager.create_salvage_snapshot(contract, lease, attempt_id)
+    salvage_ref = snapshot["salvage_ref"]
+    salvage_commit = snapshot["salvage_commit_sha"]
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=False)
+    decision = result["decisions"][0]
+    state_after = service._read_state(contract.task_id)
+
+    assert decision["cleanup_performed"] is True
+    assert not target.exists()
+    assert state_after["status"] == "RETAINED_FOR_REVIEW"
+    assert state_after.get("salvage_commit_sha") == salvage_commit
+    assert state_after.get("salvage_ref") == salvage_ref
+
+
+def test_cleanup_retained_active_process_preserves_target(tmp_path, monkeypatch):
+    """RED: active process must not allow Target removal."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="retained-active-process")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "attempt_id": "att-retained-active",
+        "worker_pid": 12345,
+        "worker_child_pgid": None,
+    })
+    monkeypatch.setattr(SelfHostedTaskService, "_pid_alive", staticmethod(lambda pid: True))
+
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=False)
+    decision = result["decisions"][0]
+
+    assert decision["cleanup_performed"] is False
+    assert target.exists()
+
+
+def test_cleanup_retained_dry_run_does_not_mutate_state(tmp_path, monkeypatch):
+    """RED: dry-run currently cannot describe a salvage-and-remove plan because retained tasks are rejected."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="retained-dry-run")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+    for env_var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(env_var, raising=False)
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "attempt_id": "att-retained-dry-run",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=True)
+    decision = result["decisions"][0]
+    state_after = service._read_state(contract.task_id)
+
+    assert decision["cleanup_performed"] is False
+    assert target.exists(), "dry-run must not remove Target"
+    assert state_after.get("salvage_commit_sha") is None, "dry-run must not create salvage"
+    assert state_after.get("salvage_ref") is None, "dry-run must not record salvage ref"
