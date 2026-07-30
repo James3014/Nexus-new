@@ -29,6 +29,7 @@ from nexus.engine.capability_signals import build_capability_constraints, build_
 from nexus.engine.local_assist_recommendation import build_local_assist_recommendation
 from nexus.core.lite_route_oracle import lite_route_safety_blockers
 from nexus.research.isolation_policy import decide_research_isolation
+from nexus.contracts.workforce_admission import WorkforceDemand, WorkforceDemands
 
 PENDING_EXECUTOR_CAPABILITIES: set[str] = set()
 
@@ -1071,6 +1072,14 @@ class CapabilityPlanner:
                 _secondary = os.environ.get("NEXUS_C15_SECONDARY_PROPOSER_MODEL", "deepseek-coder:6.7b-instruct")
                 signal_snapshot["delegated_retry_candidate_models"] = [_primary, _secondary]
 
+        if bool(route.get("workforce_admission_enabled")):
+            signal_snapshot["workforce_demands"] = self._build_workforce_demands(
+                task_desc=task_desc,
+                task_type=task_type,
+                route=route,
+                signals=signals,
+            ).to_dict()
+
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
             planner_mode="dry_run",
@@ -1561,3 +1570,128 @@ class CapabilityPlanner:
             floor.update({"ultra_review", "sandbox", "pregate", "plan_quality_gate", "forecast_gate"})
         floor.update(str(cap) for cap in getattr(signals, "route_oracle_expected_capabilities", ()) or ())
         return floor
+
+    @staticmethod
+    def _build_workforce_demands(
+        *,
+        task_desc: str,
+        task_type: str,
+        route: dict[str, Any],
+        signals: Any,
+    ) -> WorkforceDemands:
+        local_enabled = bool(route.get("local_enabled"))
+        online_enabled = bool(route.get("online_enabled"))
+
+        if "mutation_requested" in route and route["mutation_requested"] is not None:
+            mutation_intent = bool(route["mutation_requested"])
+        else:
+            task_type_clean = str(task_type or "").lower()
+            non_mutating_keywords = ("planning", "docs", "research", "benchmark", "review", "audit")
+            if any(kw in task_type_clean for kw in non_mutating_keywords):
+                mutation_intent = False
+            else:
+                mutation_intent = True
+
+        demands: list[WorkforceDemand] = []
+
+        # Hybrid produces local then online demand in stable order
+        if local_enabled:
+            if mutation_intent:
+                role = "bounded_code_candidate"
+                autonomy = "L1"
+                ctx = "nexus_bounded"
+                reason = "mutating_task_bounded_code_candidate"
+            else:
+                role = "compact_diagnosis"
+                autonomy = "L0.5"
+                ctx = "nexus_bounded"
+                reason = "non_mutating_task_compact_diagnosis"
+
+            demands.append(
+                WorkforceDemand(
+                    demand_id="demand_local",
+                    execution_channel="local",
+                    requested_role=role,
+                    minimum_autonomy=autonomy,
+                    context_class=ctx,
+                    mutation_intent=mutation_intent,
+                    external_verification_required=True,
+                    route_authority="CapabilityPlanner",
+                    reasons=("route_local_enabled", reason),
+                )
+            )
+
+        if online_enabled:
+            task_type_str = str(task_type or "").lower()
+            task_desc_str = str(task_desc or "").lower()
+            route_features = route.get("route_features", {}) if isinstance(route.get("route_features", {}), dict) else {}
+            is_cross_module = (
+                getattr(signals, "cross_module", False)
+                or bool(route.get("is_cross_module_task"))
+                or bool(route_features.get("is_cross_module_task"))
+            )
+
+            complex_keywords = (
+                "architecture",
+                "security",
+                "irreversible",
+                "integration",
+                "runtime-closure",
+                "runtime_closure",
+                "cross-module",
+                "cross_module",
+            )
+
+            is_complex = (
+                any(kw in task_type_str for kw in complex_keywords)
+                or any(kw in task_desc_str for kw in complex_keywords)
+                or is_cross_module
+            )
+
+            is_explicit_type_review_audit = any(kw in task_type_str for kw in ("review", "audit"))
+
+            is_review_audit = (
+                is_explicit_type_review_audit
+                or any(kw in task_desc_str for kw in ("review", "audit"))
+            )
+
+            if is_explicit_type_review_audit:
+                role = "independent_review"
+                autonomy = "L2+"
+                ctx = "nexus_bounded"
+                reason = "review_audit_task_independent_review"
+            elif is_complex:
+                role = "main_engineering"
+                autonomy = "L3_HISTORICAL"
+                ctx = "nexus_full"
+                reason = "complex_high_impact_task_main_engineering"
+            elif is_review_audit:
+                role = "independent_review"
+                autonomy = "L2+"
+                ctx = "nexus_bounded"
+                reason = "review_audit_task_independent_review"
+            else:
+                role = "fast_bounded_implementation"
+                autonomy = "L2"
+                ctx = "nexus_bounded"
+                reason = "ordinary_task_fast_bounded_implementation"
+
+            demands.append(
+                WorkforceDemand(
+                    demand_id="demand_online",
+                    execution_channel="online",
+                    requested_role=role,
+                    minimum_autonomy=autonomy,
+                    context_class=ctx,
+                    mutation_intent=mutation_intent,
+                    external_verification_required=True,
+                    route_authority="CapabilityPlanner",
+                    reasons=("route_online_enabled", reason),
+                )
+            )
+
+        return WorkforceDemands(
+            schema="nexus.workforce_demands.v1",
+            route_authority="CapabilityPlanner",
+            demands=tuple(demands),
+        )

@@ -1,6 +1,9 @@
 from dataclasses import asdict
 import json
+import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -50,6 +53,9 @@ def _scenario(tmp_path: Path):
     manager = WorktreeManager(str(target_root))
     controller = SelfHostedDevelopmentController(manager)
     lease = controller.prepare_task(contract)
+    empty_hooks = tmp_path / "default_scenario_hooks"
+    empty_hooks.mkdir(exist_ok=True)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(empty_hooks))
     Path(lease.target_worktree, "bounded.txt").write_text("candidate\n", encoding="utf-8")
     candidate = controller.collect_candidate(contract, lease)
     verified = CandidateVerifier(manager).verify(contract, lease, candidate)
@@ -90,4 +96,164 @@ def test_candidate_commit_requires_independent_commit_authority(tmp_path):
     object.__setattr__(verified, "public_claim_allowed", True)
 
     with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+
+def test_candidate_commit_forces_muse_run_codex_loop_zero_via_subprocess_env_and_preserves_outer_env(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    hooks_dir = tmp_path / "custom_hooks_1"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\n",
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    monkeypatch.setenv("MUSE_RUN_CODEX_LOOP", "1")
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert os.environ.get("MUSE_RUN_CODEX_LOOP") == "1"
+
+
+def test_candidate_commit_subprocess_env_preserves_absent_outer_variable(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    hooks_dir = tmp_path / "custom_hooks_2"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\n",
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    monkeypatch.delenv("MUSE_RUN_CODEX_LOOP", raising=False)
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert "MUSE_RUN_CODEX_LOOP" not in os.environ
+
+
+def test_candidate_commit_does_not_mutate_global_env_concurrent_sentinel_thread(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    hooks_dir = tmp_path / "custom_hooks_sentinel"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\nsleep 0.05\n",
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    monkeypatch.setenv("MUSE_RUN_CODEX_LOOP", "1")
+
+    observed_values = []
+    stop_event = threading.Event()
+
+    def sentinel():
+        while not stop_event.is_set():
+            observed_values.append(os.environ.get("MUSE_RUN_CODEX_LOOP"))
+            time.sleep(0.0005)
+
+    sentinel_thread = threading.Thread(target=sentinel, daemon=True)
+    sentinel_thread.start()
+
+    try:
+        packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+    finally:
+        stop_event.set()
+        sentinel_thread.join(timeout=2.0)
+
+    assert packet.candidate_commit_created is True
+    assert os.environ.get("MUSE_RUN_CODEX_LOOP") == "1"
+    assert len(observed_values) > 0
+    assert all(val == "1" for val in observed_values)
+
+
+def test_candidate_commit_uses_nexus_git_home_when_set(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    custom_git_home = tmp_path / "custom_git_home"
+    custom_git_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("NEXUS_GIT_HOME", str(custom_git_home))
+
+    hooks_dir = tmp_path / "custom_hooks_git_home"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        f'#!/bin/sh\nif [ "$HOME" != "{custom_git_home.resolve()}" ]; then\n  echo "HOOK FAIL: HOME=$HOME" >&2\n  exit 1\nfi\n',
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert os.environ.get("NEXUS_GIT_HOME") == str(custom_git_home)
+
+
+def test_candidate_commit_uses_posix_os_account_home_independent_of_outer_home(tmp_path, monkeypatch):
+    import pwd
+
+    contract, lease, verified, manager = _scenario(tmp_path)
+    monkeypatch.delenv("NEXUS_GIT_HOME", raising=False)
+    fake_outer_home = tmp_path / "fake_agy_credential_home"
+    fake_outer_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(fake_outer_home))
+
+    expected_os_home = str(Path(pwd.getpwuid(os.getuid()).pw_dir).resolve())
+
+    hooks_dir = tmp_path / "custom_hooks_posix_home"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_text(
+        f'#!/bin/sh\nif [ "$HOME" != "{expected_os_home}" ]; then\n  echo "HOOK FAIL: HOME=$HOME expected {expected_os_home}" >&2\n  exit 1\nfi\n',
+        encoding="utf-8",
+    )
+    pre_commit.chmod(0o755)
+    _git(Path(lease.target_worktree), "config", "core.hooksPath", str(hooks_dir))
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert os.environ.get("HOME") == str(fake_outer_home)
+
+
+def test_candidate_commit_fails_closed_on_invalid_explicit_nexus_git_home(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    invalid_path = tmp_path / "does_not_exist_git_home"
+    monkeypatch.setenv("NEXUS_GIT_HOME", str(invalid_path))
+
+    with pytest.raises(RuntimeError, match="Explicit NEXUS_GIT_HOME is invalid or does not exist"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+
+def test_candidate_commit_preserves_outer_home_and_muse_env(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    fake_home = tmp_path / "fake_outer_home"
+    fake_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("MUSE_RUN_CODEX_LOOP", "1")
+
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert os.environ.get("HOME") == str(fake_home)
+    assert os.environ.get("MUSE_RUN_CODEX_LOOP") == "1"
+
+
+def test_candidate_commit_fails_closed_when_git_home_unresolvable(tmp_path, monkeypatch):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    monkeypatch.delenv("NEXUS_GIT_HOME", raising=False)
+    def _fail_resolve():
+        raise RuntimeError("Failed to resolve safe Git HOME: NEXUS_GIT_HOME is unset/empty and POSIX OS-account home resolution failed")
+    monkeypatch.setattr(CandidateCommitter, "_resolve_git_home", staticmethod(_fail_resolve))
+
+    with pytest.raises(RuntimeError, match="Failed to resolve safe Git HOME"):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)

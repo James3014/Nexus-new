@@ -235,6 +235,12 @@ def test_p4_e2e_receipt_full_success():
         assert result.selected_candidate_verifier_status == "pass"
         assert result.receipt_fragment.get("p4_selected_candidate_hash_matches_applied") is True
         assert result.receipt_fragment.get("p4_committee_claim_gate_passed") is True
+        assert result.receipt_fragment.get("committee_member_demand_wiring_status") == "WIRED"
+        assert len(result.receipt_fragment.get("committee_member_demands", [])) == 3
+        assert all(
+            item["route_authority"] == "CapabilityPlanner"
+            for item in result.receipt_fragment["committee_member_demands"]
+        )
         assert result.solved_by_committee is True
         assert result.receipt_fragment.get("p4_fail_closed") is not True
 
@@ -248,6 +254,22 @@ def test_p4_e2e_malformed_only_fail_closed():
     result = evaluate_and_execute(request, candidate_producer=producer)
     assert result.winner_found is False
     assert result.solved_by_committee is False
+
+
+def test_t3c2_missing_member_binding_zero_provider_calls():
+    request = _e2e_request(committee_admission_enabled=True)
+    calls = []
+
+    def producer(req):
+        calls.append(req.task_id)
+        return [_valid_candidate(model="qwen")]
+
+    result = evaluate_and_execute(request, candidate_producer=producer)
+    assert result.invocation_allowed is False
+    assert result.blocked_reason == "committee_member_aggregate_admission_failed"
+    assert result.committee_member_admission["overall_decision"] == "BLOCK"
+    assert result.committee_member_admission["zero_call_required"] is True
+    assert calls == []
     assert result.receipt_fragment.get("p4_fail_closed") is True
 
 

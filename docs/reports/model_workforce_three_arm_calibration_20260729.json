@@ -1,0 +1,60 @@
+{
+  "schema": "nexus.model_workforce_three_arm.summary.v1",
+  "date": "2026-07-29",
+  "task_id": "u3a-composite-v1",
+  "claim_ceiling": "PROVISIONAL_CALIBRATION_ONLY",
+  "role_definitions_final": false,
+  "public_claim_allowed": false,
+  "model_count": 25,
+  "arm_count": 75,
+  "cohorts": {"required": 14, "discovery": 11},
+  "status_counts": {
+    "PROVISIONAL_PASS": 13,
+    "CONDITIONAL": 1,
+    "UNQUALIFIED": 5,
+    "BLOCKED_PROVIDER": 4,
+    "THREE_ARM_INCOMPLETE": 1,
+    "ISOLATION_CONTRACT_VIOLATION": 1
+  },
+  "promotion_requires": [
+    "second_repetition",
+    "role_specific_suite",
+    "physical_patch_verifier",
+    "sealed_receipt",
+    "owner_approval_for_authority_change"
+  ],
+  "results": [
+    {"model_id":"codex_luna","cohort":"required","scores":[0,0,0],"status":"BLOCKED_PROVIDER","role":"NO_ACTIVE_ROLE","blocker":"provider_client_upgrade_required"},
+    {"model_id":"agy_flash","cohort":"required","scores":[10,11,10],"status":"PROVISIONAL_PASS","role":"PATCH_CANDIDATE_GENERATOR","owner_role_ceiling":"L2"},
+    {"model_id":"grok_45","cohort":"required","scores":[11,11,11],"status":"PROVISIONAL_PASS","role":"BOUNDED_ENGINEERING_CANDIDATE","owner_role_ceiling":"L2+"},
+    {"model_id":"gemini_36_flash","cohort":"required","scores":[0,0,0],"status":"BLOCKED_PROVIDER","role":"NO_ACTIVE_ROLE","blocker":"provider_client_unsupported"},
+    {"model_id":"opencode_mimo_free","cohort":"required","scores":[11,11,11],"status":"PROVISIONAL_PASS","role":"BOUNDED_ENGINEERING_CANDIDATE","authority_change_allowed":false},
+    {"model_id":"opencode_ling_free","cohort":"required","scores":[11,11,11],"status":"PROVISIONAL_PASS","role":"BOUNDED_ENGINEERING_CANDIDATE","current_authority_ceiling":"L1","proposed_v2_role_ceiling":"L0","proposal_owner_approved":false,"authority_change_allowed":false},
+    {"model_id":"local_advisor_3b","cohort":"required","scores":[9,11,10],"status":"PROVISIONAL_PASS","role":"FIXED_SCHEMA_ASSISTANT","owner_role_ceiling":"L0.5"},
+    {"model_id":"local_qwen7b","cohort":"required","scores":[10,10,10],"status":"PROVISIONAL_PASS","role":"BOUNDED_CODE_CANDIDATE","owner_role_ceiling":"L1"},
+    {"model_id":"local_deepseek67b","cohort":"required","scores":[8,9,0],"status":"UNQUALIFIED","role":"NO_DEFAULT_ASSIGNMENT","blocker":"full_context_envelope_failure"},
+    {"model_id":"local_ornith9b","cohort":"required","scores":[0,0,0],"status":"BLOCKED_PROVIDER","role":"NO_ACTIVE_ROLE","blocker":"ollama_http_error_500"},
+    {"model_id":"local_qwythos9b","cohort":"required","scores":[10,10,10],"status":"PROVISIONAL_PASS","role":"BOUNDED_REVIEW_CANDIDATE","blocker":"historical_primary_refusal_and_empty_patch_risk"},
+    {"model_id":"local_qwen35_9b","cohort":"required","scores":[10,0,0],"status":"UNQUALIFIED","role":"NO_DEFAULT_ASSIGNMENT","blocker":"unstable_thinking_control_in_custom_template"},
+    {"model_id":"local_qwen14b","cohort":"required","scores":[10,10,10],"status":"PROVISIONAL_PASS","role":"EXPLICIT_EXPERIMENT_ONLY","blocker":"local_resource_risk"},
+    {"model_id":"mimo_cli","cohort":"required","scores":[0,0,0],"status":"BLOCKED_PROVIDER","role":"NO_ACTIVE_ROLE","blocker":"provider_balance_blocked"},
+    {"model_id":"opencode_big_pickle","cohort":"discovery","scores":[11,11,0],"status":"UNQUALIFIED","role":"NO_DEFAULT_ASSIGNMENT","blocker":"full_context_envelope_failure"},
+    {"model_id":"opencode_deepseek_v4_flash","cohort":"discovery","scores":[11,11,11],"status":"PROVISIONAL_PASS","role":"BOUNDED_ENGINEERING_CANDIDATE","current_authority_ceiling":"L1","proposed_v2_role_ceiling":"L1.5","proposal_owner_approved":false,"authority_change_allowed":false},
+    {"model_id":"opencode_laguna","cohort":"discovery","scores":[11,11,11],"status":"ISOLATION_CONTRACT_VIOLATION","role":"EXPERIMENT_ONLY","blocker":"isolated_directory_mutation"},
+    {"model_id":"opencode_nemotron","cohort":"discovery","scores":[11,11,0],"status":"THREE_ARM_INCOMPLETE","role":"EXPERIMENT_ONLY","blocker":"full_arm_provider_subprocess_failed"},
+    {"model_id":"opencode_north_mini_code","cohort":"discovery","scores":[10,11,0],"status":"UNQUALIFIED","role":"NO_DEFAULT_ASSIGNMENT","blocker":"full_context_envelope_failure"},
+    {"model_id":"local_qwen15b","cohort":"discovery","scores":[9,9,9],"status":"CONDITIONAL","role":"READ_ONLY_SCHEMA_EXECUTOR","owner_role_ceiling":"L0.5"},
+    {"model_id":"local_qwen3_8b","cohort":"discovery","scores":[11,11,10],"status":"PROVISIONAL_PASS","role":"PATCH_CANDIDATE_GENERATOR","blocker":"full_context_exact_field_drift"},
+    {"model_id":"local_qwythos_v2_9b","cohort":"discovery","scores":[10,0,10],"status":"UNQUALIFIED","role":"NO_DEFAULT_ASSIGNMENT","blocker":"unstable_thinking_control_in_custom_template"},
+    {"model_id":"local_deepseek_coder_v2_lite","cohort":"discovery","scores":[9,10,10],"status":"PROVISIONAL_PASS","role":"BOUNDED_REVIEW_CANDIDATE"},
+    {"model_id":"local_deepseek14b","cohort":"discovery","scores":[11,11,11],"status":"PROVISIONAL_PASS","role":"EXPLICIT_EXPERIMENT_ONLY","blocker":"307_second_total_resource_cost"},
+    {"model_id":"local_gemma12b","cohort":"discovery","scores":[10,10,10],"status":"PROVISIONAL_PASS","role":"EXPLICIT_EXPERIMENT_ONLY","blocker":"213_second_total_and_8_to_9gb_rss"}
+  ],
+  "verification": {
+    "provider_regression_tests": "52 passed",
+    "gitnexus_impact": {"symbol":"OllamaLocalModelProvider.generate","impacted_count":39,"risk":"MEDIUM"},
+    "raw_receipt_root": "/tmp/nexus-model-bench",
+    "matrix": "nexus/config/model_three_arm_matrix.yaml",
+    "harness": "scripts/bench/experimental/model_workforce_three_arm.py"
+  }
+}

@@ -99,9 +99,31 @@ class WorkspaceManager:
                 swarm_path = broker.acquire(timeout_sec=5.0)
                 if swarm_path:
                     print(f"🐝 [Swarm-Reuse] Leasing existing sandbox: {swarm_path.name}")
-                    # 切換到目標分支
-                    subprocess.run(["git", "checkout", "main"], cwd=swarm_path, capture_output=True)
-                    subprocess.run(["git", "checkout", "-b", branch_name], cwd=swarm_path, check=True, capture_output=True)
+                    if not broker.is_independently_registered_worktree(swarm_path):
+                        broker.release(swarm_path)
+                        raise WorkspacePermissionError(
+                            f"Swarm sandbox is not an independently registered worktree: {swarm_path}"
+                        )
+
+                    base_head = subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=self.project_root,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    ).stdout.strip()
+                    subprocess.run(
+                        ["git", "checkout", "--detach", base_head],
+                        cwd=swarm_path,
+                        check=True,
+                        capture_output=True,
+                    )
+                    subprocess.run(
+                        ["git", "checkout", "-b", branch_name],
+                        cwd=swarm_path,
+                        check=True,
+                        capture_output=True,
+                    )
                     
                     # 標記此 workspace 為 swarm 類型以便 cleanup 處理
                     (swarm_path / ".swarm_lease").write_text(branch_name, encoding="utf-8")
@@ -150,6 +172,11 @@ class WorkspaceManager:
                 )
                 print("✅ [Injection] CONTEXT_SYNC.md generated in sandbox.")
 
+    def _is_independently_registered_worktree(self, path: Path) -> bool:
+        from nexus.research.swarm_broker import SwarmBroker
+
+        return SwarmBroker(self.project_root).is_independently_registered_worktree(path)
+
     def _auto_gc(self):
         """🧹 Automatic Garbage Collection for stale sandboxes (>24h)."""
         import time
@@ -157,6 +184,12 @@ class WorkspaceManager:
         for folder in self.workspace_base.glob("*"):
             if folder.is_dir():
                 if now - folder.stat().st_mtime > 86400:
+                    if not self._is_independently_registered_worktree(folder):
+                        logger.warning(
+                            "⚠️ [Auto-GC] Refused to prune unregistered workspace: %s",
+                            folder,
+                        )
+                        continue
                     try:
                         logger.info(f"🧹 [Auto-GC] Pruning stale workspace: {folder.name}")
                         subprocess.run(["git", "worktree", "remove", "--force", str(folder)], cwd=self.project_root, capture_output=True)
@@ -261,6 +294,12 @@ class WorkspaceManager:
                 if lease_file.read_text(encoding="utf-8").strip() == branch_name:
                     from nexus.research.swarm_broker import SwarmBroker
                     broker = SwarmBroker(self.project_root)
+                    if not broker.is_independently_registered_worktree(swarm_dir):
+                        logger.warning(
+                            "⚠️ [Cleanup] Refused to release unregistered swarm placeholder: %s",
+                            swarm_dir,
+                        )
+                        return
                     lease_file.unlink()
                     broker.release(swarm_dir)
                     print(f"🧹 [Cleanup] Swarm sandbox {swarm_dir.name} released.")

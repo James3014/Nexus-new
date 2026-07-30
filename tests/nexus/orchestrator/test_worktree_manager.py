@@ -375,6 +375,48 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == candidate
 
 
+def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_repo):
+    original = _contract(sh2_repo)
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("salvaged\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "salvage snapshot")
+    salvage = _git(target, "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", f"refs/nexus-salvage/worktree/{original.task_id}-attempt-1", salvage)
+    assert manager.cleanup_terminal_target(
+        original,
+        lease,
+        candidate_commit=salvage,
+        candidate_ref=f"refs/nexus-salvage/worktree/{original.task_id}-attempt-1",
+    ).decision == "REMOVED"
+    _git(
+        sh2_repo["controller"],
+        "update-ref",
+        f"refs/heads/nexus/task/{original.task_id}",
+        original.target_base_revision,
+    )
+
+    (sh2_repo["controller"] / "controller.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "controller.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = _contract(sh2_repo)
+    refreshed = refreshed.model_copy(
+        update={
+            "controller_revision": refreshed_sha,
+            "target_base_revision": refreshed_sha,
+        }
+    )
+
+    retried = manager.create_lease(refreshed)
+
+    assert retried.target_detached is True
+    assert retried.initial_head == refreshed_sha
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
 def test_dirty_unique_target_is_retained_for_review(sh2_repo):
     contract, manager, lease, target = _prepare_candidate(sh2_repo)
     (target / "src" / "allowed.txt").write_text("unique\n", encoding="utf-8")
@@ -384,6 +426,38 @@ def test_dirty_unique_target_is_retained_for_review(sh2_repo):
     assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
     assert receipt.blocker == "dirty target has no durable snapshot"
     assert target.exists()
+
+
+def test_empty_unregistered_target_is_removed(sh2_repo):
+    contract = _contract(sh2_repo, task_id="empty-unregistered")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(target))
+    target.mkdir()
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+
+
+def test_nonempty_unregistered_target_remains_blocked(sh2_repo):
+    contract = _contract(sh2_repo, task_id="nonempty-unregistered")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(target))
+    target.mkdir()
+    (target / "retained.txt").write_text("must remain\n", encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert receipt.blocker == "unregistered Target is not an empty directory"
+    assert target.exists()
+    assert (target / "retained.txt").exists()
 
 
 def test_active_process_blocks_terminal_cleanup(sh2_repo):
@@ -458,4 +532,33 @@ def test_five_clean_attempts_do_not_grow_worktrees(sh2_repo):
         assert manager.cleanup_terminal_target(contract, lease).decision == "REMOVED"
 
     assert len(manager._registered_worktrees(sh2_repo["controller"])) == baseline
+
+
+def test_run_git_passes_custom_env_to_subprocess(temp_git_repo):
+    worktree_root = temp_git_repo / ".nexus" / "worktrees"
+    manager = WorktreeManager(root_dir=str(worktree_root))
+    hooks_dir = temp_git_repo / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    post_commit = hooks_dir / "post-commit"
+    post_commit.write_text(
+        "#!/bin/sh\necho \"HOOK_ENV=$CUSTOM_WORKTREE_ENV\" > hook_out.txt\n",
+        encoding="utf-8",
+    )
+    post_commit.chmod(0o755)
+    _git(temp_git_repo, "config", "core.hooksPath", str(hooks_dir))
+
+    manager._run_git(
+        ["commit", "--allow-empty", "-m", "env test"],
+        cwd=temp_git_repo,
+        env={**os.environ, "CUSTOM_WORKTREE_ENV": "isolated_value"},
+    )
+
+    assert (temp_git_repo / "hook_out.txt").read_text(encoding="utf-8").strip() == "HOOK_ENV=isolated_value"
+
+
+def test_run_git_without_env_uses_default_process_environment(temp_git_repo):
+    worktree_root = temp_git_repo / ".nexus" / "worktrees"
+    manager = WorktreeManager(root_dir=str(worktree_root))
+    output = manager._run_git(["rev-parse", "HEAD"], cwd=temp_git_repo)
+    assert len(output) == 40
 # integrity-seal: 1776512137

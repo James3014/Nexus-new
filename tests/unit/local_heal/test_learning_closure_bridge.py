@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.learning_closure_bridge import (
     LearningClosureBridge,
     write_candidate_learning_closures,
+    write_learning_closure,
 )
 
 
-def test_write_candidate_learning_closures_writes_all_models() -> None:
+def test_write_candidate_learning_closures_writes_all_models(monkeypatch) -> None:
+    monkeypatch.delenv("NEXUS_LOCAL_HEAL_LEARNING_WRITEBACK", raising=False)
     with tempfile.TemporaryDirectory() as tmp_dir:
         path = Path(tmp_dir) / "learning_closure.jsonl"
         bridge = LearningClosureBridge(path=path, enable_findings=False)
@@ -95,3 +98,61 @@ def test_write_candidate_learning_closures_writes_all_models() -> None:
         assert primary_line["verifier_result"] == "pass"
         assert primary_line["failure_class"] == "none"
         assert primary_line["future_weight_delta"] == 1.0
+
+
+def _candidate(candidate_id: str = "candidate-1") -> CandidateEnvelope:
+    return CandidateEnvelope(
+        candidate_id=candidate_id,
+        task_id="task-1",
+        source="local",
+        model="qwen-7b",
+        role="primary_proposer",
+        patch_protocol="anchored_edit",
+        target_file="app.py",
+        target_symbol="run",
+        source_anchor_hash="hash-1",
+        candidate_patch_hash="hash-2",
+        evidence_refs=("ref-1",),
+        candidate_patch="print('hello')",
+    )
+
+
+def test_learning_writeback_is_default_on(monkeypatch) -> None:
+    monkeypatch.delenv("NEXUS_LOCAL_HEAL_LEARNING_WRITEBACK", raising=False)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        path = Path(tmp_dir) / "learning_closure.jsonl"
+        bridge = LearningClosureBridge(path=path, enable_findings=False)
+
+        lesson = bridge.write_lesson(SimpleNamespace(task_id="task-1", failure_reason="parser"))
+
+        assert lesson["classification"] == "parser_fail"
+        assert path.exists()
+
+
+def test_learning_writeback_disabled_is_stable_and_does_not_write(monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_LOCAL_HEAL_LEARNING_WRITEBACK", "off")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        path = Path(tmp_dir) / "learning_closure.jsonl"
+        bridge = LearningClosureBridge(path=path, enable_findings=False)
+        ctx = SimpleNamespace(task_id="task-1", instance_id="task-1", failure_reason="parser")
+        candidate = _candidate()
+
+        lesson = bridge.write_lesson(ctx)
+        envelope_lesson = bridge.write_envelope_lesson(ctx, candidate, True, "policy", "pass")
+        candidate_lessons = write_candidate_learning_closures(
+            ctx, [candidate], candidate.candidate_id, "policy", "pass", bridge
+        )
+        closure = write_learning_closure(ctx, bridge)
+
+        expected = {
+            "schema": "nexus.local_heal.learning_closure.v1",
+            "writeback_status": "disabled",
+            "writeback_disabled": True,
+            "disabled_by": "NEXUS_LOCAL_HEAL_LEARNING_WRITEBACK",
+            "training_export_allowed": False,
+            "internal_only": True,
+        }
+        for evidence in [lesson, envelope_lesson, candidate_lessons[0], closure]:
+            assert {key: evidence[key] for key in expected} == expected
+        assert not path.exists()
+        assert not hasattr(ctx, "outcome_memory_writeback")

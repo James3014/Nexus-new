@@ -1,4 +1,11 @@
 import json
+import sys
+from pathlib import Path
+
+repo_root = str(Path(__file__).resolve().parents[3])
+if repo_root in sys.path:
+    sys.path.remove(repo_root)
+sys.path.insert(0, repo_root)
 
 from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
@@ -8,6 +15,17 @@ class FakeService:
         return {"task_id": arguments["task_id"], "status": "CANDIDATE_COMMITTED"}
 
     def get_task(self, task_id):
+        if task_id == "integrated":
+            return {
+                "task_id": task_id,
+                "status": "INTEGRATED",
+                "task_action": {
+                    "action_state": "TERMINAL",
+                    "attention_required": False,
+                    "next_action": "none",
+                    "recommended_tool": None,
+                },
+            }
         return {"task_id": task_id, "status": "CANDIDATE_COMMITTED"}
 
     def get_receipt(self, task_id):
@@ -16,7 +34,43 @@ class FakeService:
     def get_promotion_packet(self, task_id):
         return {"task_id": task_id, "promotion_status": "PENDING_HUMAN_APPROVAL"}
 
+    def wait_task(self, task_id, **kwargs):
+        if float(kwargs.get("timeout_seconds", 0)) <= 0.01:
+            return {
+                "task_id": task_id,
+                "status": "WORKER_RUNNING",
+                "wait": {"timed_out": True},
+                "task_action": {
+                    "action_state": "IN_PROGRESS",
+                    "next_action": "wait_for_task",
+                    "recommended_tool": "nexus_self_hosted_wait_task",
+                },
+            }
+        return {
+            "task_id": task_id,
+            "status": "PENDING_HUMAN_APPROVAL",
+            "wait": {"timed_out": False},
+            "task_action": {"action_state": "ACTION_REQUIRED"},
+        }
+
+    def list_actionable_tasks(self):
+        return {
+            "actionable_count": 1,
+            "tasks": [{"task_id": "mcp-task-001", "task_action": {"action_state": "ACTION_REQUIRED"}}],
+        }
+
     def approve_promotion(self, task_id, **kwargs):
+        if kwargs.get("candidate_tree_sha") == "0" * 40:
+            return {
+                "task_id": task_id,
+                "status": "APPROVAL_INVALIDATED",
+                "promotion_status": "APPROVAL_INVALIDATED",
+                "task_action": {
+                    "action_state": "ACTION_REQUIRED",
+                    "next_action": "resubmit_exact_approval_binding",
+                    "recommended_tool": "nexus_self_hosted_approve_promotion",
+                },
+            }
         return {"task_id": task_id, "promotion_status": "APPROVED", "merge_performed": False}
 
     def lifecycle_status(self):
@@ -34,8 +88,11 @@ class FakeService:
     def dispose_candidate(self, task_id, **kwargs):
         return {"task_id": task_id, "status": kwargs["disposition"]}
 
-    def close_retained_without_candidate(self, task_id, *, superseded_by):
+    def close_task_without_candidate(self, task_id, *, superseded_by):
         return {"task_id": task_id, "status": "SUPERSEDED", "superseded_by": superseded_by}
+
+    def close_retained_without_candidate(self, task_id, *, superseded_by):
+        return self.close_task_without_candidate(task_id, superseded_by=superseded_by)
 
     def cancel_task(self, task_id):
         return {"task_id": task_id, "status": "CANCELLED"}
@@ -58,6 +115,8 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_rollback_refactor_campaign",
         "nexus_self_hosted_push_competition",
         "nexus_self_hosted_get_task",
+        "nexus_self_hosted_wait_task",
+        "nexus_self_hosted_list_actionable_tasks",
         "nexus_self_hosted_get_receipt",
         "nexus_self_hosted_get_promotion_packet",
         "nexus_self_hosted_reconcile_tasks",
@@ -68,6 +127,8 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_archive_state",
         "nexus_self_hosted_integrate_approved",
         "nexus_self_hosted_dispose_candidate",
+        "nexus_self_hosted_close_retained_without_candidate",
+        "nexus_self_hosted_close_without_candidate",
         "nexus_self_hosted_cancel_task",
     } <= names
     specs = {item["name"]: item for item in response["result"]["tools"]}
@@ -79,6 +140,108 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     assert "agy" in submit_properties["fallback_worker"]["enum"]
     assert "agy" in compete_properties["workers"]["items"]["enum"]
     assert "agy" in campaign_properties["workers"]["items"]["enum"]
+
+
+def test_wait_and_actionable_tools_call_service_methods():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    waited = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_wait_task",
+                "arguments": {
+                    "task_id": "mcp-task-001",
+                    "timeout_seconds": 0.1,
+                    "poll_interval_seconds": 0.01,
+                },
+            },
+        }
+    )
+    actionable = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {"name": "nexus_self_hosted_list_actionable_tasks", "arguments": {}},
+        }
+    )
+
+    assert waited["result"]["isError"] is False
+    wait_payload = json.loads(waited["result"]["content"][0]["text"])
+    assert wait_payload["wait"]["timed_out"] is False
+    assert wait_payload["task_action"]["action_state"] == "ACTION_REQUIRED"
+    assert actionable["result"]["isError"] is False
+    action_payload = json.loads(actionable["result"]["content"][0]["text"])
+    assert action_payload["actionable_count"] == 1
+
+
+def test_mcp_wait_timeout_returns_in_progress_envelope():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_wait_task",
+                "arguments": {"task_id": "mcp-task-001", "timeout_seconds": 0.01},
+            },
+        }
+    )
+
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert response["result"]["isError"] is False
+    assert payload["wait"]["timed_out"] is True
+    assert payload["task_action"]["action_state"] == "IN_PROGRESS"
+
+
+def test_mcp_exact_approval_mismatch_returns_action_required_envelope():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 23,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_approve_promotion",
+                "arguments": {
+                    "task_id": "mcp-task-001",
+                    "candidate_commit_sha": "c" * 40,
+                    "candidate_tree_sha": "0" * 40,
+                    "candidate_state_hash": "e" * 64,
+                    "verified_receipt_hash": "f" * 64,
+                },
+            },
+        }
+    )
+
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert response["result"]["isError"] is False
+    assert payload["status"] == "APPROVAL_INVALIDATED"
+    assert payload["task_action"]["action_state"] == "ACTION_REQUIRED"
+
+
+def test_mcp_integrated_task_envelope_is_terminal():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 24,
+            "method": "tools/call",
+            "params": {"name": "nexus_self_hosted_get_task", "arguments": {"task_id": "integrated"}},
+        }
+    )
+
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert response["result"]["isError"] is False
+    assert payload["task_action"]["action_state"] == "TERMINAL"
+    assert payload["task_action"]["next_action"] == "none"
 
 
 def test_tools_call_returns_structured_json_result():
@@ -121,6 +284,28 @@ def test_close_retained_without_candidate_mcp_tool_call():
     payload = json.loads(response["result"]["content"][0]["text"])
     assert payload["status"] == "SUPERSEDED"
     assert payload["superseded_by"] == "evidence-123"
+
+
+def test_close_without_candidate_mcp_tool_call():
+    server = NexusSelfHostedMCPServer(service=FakeService())
+
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_close_without_candidate",
+                "arguments": {"task_id": "final-block-task-001", "superseded_by": "evidence-456"},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["status"] == "SUPERSEDED"
+    assert payload["superseded_by"] == "evidence-456"
+
 
 
 def test_unknown_tool_is_jsonrpc_error():

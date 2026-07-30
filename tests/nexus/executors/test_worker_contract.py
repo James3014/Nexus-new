@@ -87,7 +87,7 @@ def test_agy_adapter_requires_executable(monkeypatch):
 
     assert preflight.ready is False
     assert preflight.executable_available is False
-    assert preflight.reason.endswith("executable not found: " + str(Path.home() / ".local/bin/agy"))
+    assert preflight.reason.endswith("executable not found: " + adapter._configured_executable())
 
 
 @pytest.mark.parametrize(
@@ -615,3 +615,506 @@ def test_deterministic_resolver_unknown_candidate_shape_fails_closed():
     assert res.verdict == AttemptResolutionVerdict.FAILED.value
     assert res.candidate_non_empty is False
     assert "candidate diff is empty" in res.failure_reasons
+
+
+def test_agy_pool_disabled_preserves_existing_behavior(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.delenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", raising=False)
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    captured = {}
+
+    def fake_worker(request, on_process_group=None):
+        captured["request"] = request
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"ok",
+            stderr=b"",
+            wall_time_ms=10,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter()
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-disabled"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 1
+    assert receipt.account_alias_hash is None
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_agy_injected_pool_applies_without_env_var(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.delenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", raising=False)
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([AgyAccount(alias="injected", home_dir=str(tmp_path / "h1"))])
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"ok",
+            stderr=b"",
+            wall_time_ms=12,
+            process_group_id=None,
+        ),
+    )
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-injected"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 1
+    assert receipt.account_alias_hash == pool.active_account_alias_hash
+
+
+def test_agy_quota_failure_rotates_then_succeeds(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([
+        AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1")),
+        AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2")),
+    ])
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return CliWorkerResult(
+                status=CliWorkerStatus.COMPLETED,
+                executable_identity=request.executable,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=1,
+                stdout=b"",
+                stderr=b"RESOURCE_EXHAUSTED: Quota exceeded",
+                wall_time_ms=10,
+                process_group_id=None,
+            )
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"success",
+            stderr=b"",
+            wall_time_ms=15,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-quota"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 2
+    assert receipt.wall_time_ms == 25
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_agy_two_rotations_then_success_exactly_three_calls(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([
+        AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1")),
+        AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2")),
+        AgyAccount(alias="acc3", home_dir=str(tmp_path / "h3")),
+    ])
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return CliWorkerResult(
+                status=CliWorkerStatus.COMPLETED,
+                executable_identity=request.executable,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=1,
+                stdout=b"",
+                stderr=b"429 Rate Limit Exceeded",
+                wall_time_ms=5,
+                process_group_id=None,
+            )
+        elif call_count == 2:
+            return CliWorkerResult(
+                status=CliWorkerStatus.COMPLETED,
+                executable_identity=request.executable,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=1,
+                stdout=b"",
+                stderr=b"401 Unauthorized",
+                wall_time_ms=5,
+                process_group_id=None,
+            )
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"ok",
+            stderr=b"",
+            wall_time_ms=5,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-3calls"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 3
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert call_count == 3
+
+
+def test_agy_auth_failure_rotates(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([
+        AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1")),
+        AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2")),
+    ])
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return CliWorkerResult(
+                status=CliWorkerStatus.COMPLETED,
+                executable_identity=request.executable,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=1,
+                stdout=b"",
+                stderr=b"Invalid API Key",
+                wall_time_ms=5,
+                process_group_id=None,
+            )
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"ok",
+            stderr=b"",
+            wall_time_ms=5,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-auth"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 2
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_agy_syntax_failure_does_not_rotate(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([
+        AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1")),
+        AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2")),
+    ])
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"SyntaxError: invalid syntax",
+            wall_time_ms=5,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-syntax"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 1
+    assert call_count == 1
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+
+
+def test_agy_timeout_does_not_rotate(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([
+        AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1")),
+        AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2")),
+    ])
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        return CliWorkerResult(
+            status=CliWorkerStatus.TIMED_OUT,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=None,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=100,
+            process_group_id=None,
+            timed_out=True,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-timeout"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 1
+    assert call_count == 1
+    assert receipt.outcome == WorkerOutcome.INCOMPLETE.value
+    assert receipt.timed_out is True
+
+
+def test_agy_ensure_active_failure_before_first_call_yields_zero_calls(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+
+    class BrokenPool:
+        def ensure_active(self, target_worktree=None):
+            raise RuntimeError("Pool is broken")
+
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"",
+            stderr=b"",
+            wall_time_ms=0,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=BrokenPool())
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-zero-calls"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 0
+    assert call_count == 0
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+
+
+def test_agy_ensure_active_failure_after_one_call_does_not_overcount(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+
+    class FlakyPool:
+        def __init__(self):
+            self.calls = 0
+            self.active_account_alias_hash = "hash123"
+
+        def ensure_active(self, target_worktree=None):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("ensure_active failed on call 2")
+            return self
+
+        def rotate_account(self, reason=None, failed_account_hash=None):
+            pass
+
+        def build_isolated_env(self):
+            return {}
+
+    subprocess_calls = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal subprocess_calls
+        subprocess_calls += 1
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"Quota exceeded",
+            wall_time_ms=10,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=FlakyPool())
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-no-overcount"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 1
+    assert subprocess_calls == 1
+
+
+def test_agy_failed_rotation_stops_and_records_call(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([AgyAccount(alias="only_acc", home_dir=str(tmp_path / "h1"))])
+    call_count = 0
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal call_count
+        call_count += 1
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"Quota exceeded",
+            wall_time_ms=10,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-fail-rotate"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.provider_calls == 1
+    assert call_count == 1
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+
+
+def test_agy_subprocess_api_keys_absent(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setenv("GEMINI_API_KEY", "secret_gemini")
+    monkeypatch.setenv("GOOGLE_API_KEY", "secret_google")
+    monkeypatch.setenv("GOOGLE_GENAI_API_KEY", "secret_genai")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    pool = AgyAccountPoolManager([AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1"))])
+    captured_env = {}
+
+    def fake_worker(request, on_process_group=None):
+        nonlocal captured_env
+        captured_env = dict(request.env or {})
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"ok",
+            stderr=b"",
+            wall_time_ms=5,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    adapter.invoke(
+        type("Contract", (), {"task_id": "task-api-keys"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert "GEMINI_API_KEY" not in captured_env
+    assert "GOOGLE_API_KEY" not in captured_env
+    assert "GOOGLE_GENAI_API_KEY" not in captured_env
+
+
+def test_agy_receipt_contains_alias_hash_only_no_identity(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    acc = AgyAccount(alias="user@example.com_secret_identity", home_dir=str(tmp_path / "h1"))
+    pool = AgyAccountPoolManager([acc])
+    monkeypatch.setattr(
+        "nexus.executors.worker_registry.run_cli_worker",
+        lambda request, on_process_group=None: CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"ok",
+            stderr=b"",
+            wall_time_ms=5,
+            process_group_id=None,
+        ),
+    )
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "task-hash-only"})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert receipt.account_alias_hash == acc.alias_hash
+    assert "user@example.com" not in str(receipt)
+    assert "secret_identity" not in str(receipt)
+
+
+def test_no_unified_runtime_changes():
+    from pathlib import Path
+    unified_runtime_path = Path("nexus/orchestrator/unified_runtime.py")
+    if unified_runtime_path.exists():
+        import subprocess
+        diff = subprocess.run(["git", "diff", "--name-only", str(unified_runtime_path)], capture_output=True, text=True)
+        assert diff.stdout.strip() == "", "nexus/orchestrator/unified_runtime.py must not be modified"

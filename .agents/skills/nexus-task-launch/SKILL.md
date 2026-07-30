@@ -1,119 +1,33 @@
 ---
 name: nexus-task-launch
-description: |
-  Nexus 任務啟動 SOP。將「列計劃 → task → 開分支 → TDD → 階段性提交」的完整儀式封裝為可重用工作流程。
-  觸發詞：「列plan、task」「用tdd方式」「開始」（在 Nexus 改動脈絡中）、「開分支處理」。
-  不適用於：一次性文件修改、純閱讀研究任務。
+description: Governed Nexus self-hosted task launch policy. Use for implementation work that must remain bounded, reviewable, and connector-driven.
 ---
 
-# Nexus 任務啟動 SOP
+# Nexus governed task launch
 
-## 1. Pre-flight（任務前確認）
+Read-only inspection may use the current checkout. Code mutation must use the
+self-hosted lifecycle tools; do not create an unmanaged worktree, manually
+create a branch, or use a direct connector edit/write operation.
 
-```bash
-# 確認當前主線狀態
-cd /Users/jameschen/workspace/nexus
-git status
-git log --oneline -5
-uv run scripts/nexus_cli.py nexus:health
-```
+## Required sequence
 
-必須確認：
-- `git status` 工作樹乾淨（或已 stash）
-- 測試基線 PASS（若有 `pytest` 快速路徑，先跑一次）
+1. Call `nexus_self_hosted_list_actionable_tasks` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted list-actionable` / `python -m scripts.ops.nexus_chatgpt_delivery actionable`) before any mutation. Record the returned task action and the current controller revision.
+2. Call `nexus_self_hosted_submit_task` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted submit` / `python -m scripts.ops.nexus_chatgpt_delivery launch`) with one stable `task_id`, the exact bounded `allowed_files`, the immutable controller revision, and the selected target base. Do not create a `-v2` or `-v3` task ID; retries add only an `attempt_id`.
+3. Call `nexus_self_hosted_wait_task` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted wait`) and follow its action envelope until `ACTION_REQUIRED`, `FINAL_BLOCK`, or `TERMINAL`. A worker may edit only the declared target files and must return a candidate commit plus verifier evidence.
 
----
+When `nexus.bash` plus the repo-owned wrapper (`python -m scripts.ops.nexus_chatgpt_delivery`) or official self-hosted CLI (`python3 -m scripts.engine.nexus_cli self-hosted`) is available, `nexus.bash` must be used for governed lifecycle operations. `REPO_READY_CONNECTOR_BLOCKED` applies only when neither native lifecycle tools nor `nexus.bash` with repo-owned CLI wrappers are available. Never fall back to `open_workspace(mode=worktree)`, direct file mutation through the connector (`edit`/`write`/`nexus.edit`/`nexus.write`), stash/reset/clean of a dirty checkout, or an unmanaged worktree.
 
-## 2. 建立實作計劃（implementation_plan.md）
+## Acceptance handoff
 
-產出內容必須包含：
-- 目標描述（1句話）
-- Open Questions（若有需要 User 決策的項目）
-- Proposed Changes（按檔案分組）
-- Verification Plan（驗收方式）
+The task is not complete when a worker merely reports success. Check the
+candidate commit, tree, state hash, receipt hash, changed-file scope, deletion
+audit, and controller immutability. Preserve candidate and salvage refs. Hand
+the verified candidate to `nexus-merge-gate`; approval and integration remain
+separate human-gated actions.
 
-存至 Antigravity artifact 目錄（system 自動路由）。
+## Forbidden actions
 
----
-
-## 3. 建立 task.md
-
-格式：
-```markdown
-- [ ] P0: <最小可驗證步驟>
-  - [ ] 子任務 A
-  - [ ] 子任務 B
-- [ ] P1: <下一批>
-```
-
-規則：
-- 每個 P 階段獨立可提交
-- 每個子任務 ≤ 3 個檔案改動
-
----
-
-## 4. 開立功能分支
-
-```bash
-# 命名格式：feature/<scope>-<keyword>-<date>
-git checkout -b feature/<scope>-<keyword>-$(date +%Y%m%d)
-```
-
-> [!IMPORTANT]
-> 必須開分支。直接在 main 上作業將觸發 merge conflict 風險。
-
----
-
-## 5. TDD 紅綠重構循環
-
-每個子任務遵循：
-
-```
-RED   → 寫失敗測試（pytest -x 應失敗）
-GREEN → 最小實作讓測試通過
-REFAC → 清理，不新增行為
-```
-
-驗證命令：
-```bash
-uv run pytest <相關測試路徑> -x -q
-```
-
----
-
-## 6. 階段性提交（每個 P 階段完成後）
-
-```bash
-git add -p          # 逐 hunk 確認
-git commit -m "feat(<scope>): <動詞> <主語> — P<N> <描述>"
-```
-
-Conventional Commits 格式：`feat|fix|refactor|docs|test|chore(scope): 描述`
-
----
-
-## 7. 合併前驗證（交棒給 nexus-merge-gate）
-
-完成所有 P 階段後，切換至 `nexus-merge-gate` Skill 執行合併前三連驗證。
-
----
-
-## 觸發條件（Examples）
-
-| 用戶輸入 | 對應步驟 |
-|---------|---------|
-| 「列plan、task改善這問題」 | → 步驟 2+3 |
-| 「記得開分支處理，開始」 | → 步驟 4+5 |
-| 「繼續」（在 task 進行中） | → 步驟 5，更新 task.md |
-| 「同意，合併後全量測試」 | → 步驟 6+7 |
-
----
-
-## 常見錯誤防範（來自 Learning Closure Matrix）
-
-| 錯誤 | 防範規則 |
-|------|---------|
-| 直接在 main 改動 | 步驟 4 強制開分支 |
-| 格式通關但語義未完成 | 步驟 2 要求 Verification Plan |
-| 順手改到無關檔案 | 步驟 3 限制每子任務 ≤3 個檔案 |
-| plan 錨點漂移導致 patch 失敗 | 修改前先 `sed -n '<range>p' docs/plans/<plan>.md` 重新定位 |
+- Do not mutate the main checkout or protected main.
+- Do not delete branches, tags, candidate refs, or salvage refs.
+- Do not publish to a remote or rewrite existing history.
+- Do not create a second Controller.

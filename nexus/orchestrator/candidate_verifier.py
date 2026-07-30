@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, CliWorkerStatus, run_cli_worker
+from nexus.orchestrator.repository_contract_gate import (
+    RepositoryContractFinding,
+    RepositoryContractGate,
+)
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import CandidateDiffReceipt, TargetWorktreeLease, WorktreeManager
 
@@ -50,6 +54,10 @@ class VerifiedCandidateReceipt:
     verifier_evidence: tuple[VerifierEvidence, ...]
     candidate_commit_created: bool
     merge_performed: bool
+    repository_contract_gate_passed: bool = True
+    repository_contract_mode: str = "shadow"
+    repository_contract_policy_revision_hash: str = ""
+    repository_contract_findings: tuple[RepositoryContractFinding, ...] = ()
 
 
 class CandidateVerifier:
@@ -165,13 +173,27 @@ class CandidateVerifier:
         current = self.worktree_manager.capture_candidate(contract, lease)
         if current.candidate_state_hash != candidate.candidate_state_hash:
             raise RuntimeError("candidate state changed before verification")
-        scope_passed = current.allowed_scope_passed
-        deletion_passed = not current.deleted_files
-        controller_passed = current.controller_unchanged
-        protected_passed, protected_failures = self._protected_gate(current, protected_paths or {})
         verifier_passed, verifier_evidence, verifier_failures = self._run_verifiers(
             contract,
             lease.target_worktree,
+        )
+        post_verifier = self.worktree_manager.capture_candidate(contract, lease)
+        verifier_state_failures: list[str] = []
+        if post_verifier.candidate_state_hash != current.candidate_state_hash:
+            verifier_state_failures.append("verifier_mutated_candidate_state")
+
+        scope_passed = post_verifier.allowed_scope_passed
+        deletion_passed = not post_verifier.deleted_files
+        controller_passed = post_verifier.controller_unchanged
+        protected_passed, protected_failures = self._protected_gate(
+            post_verifier,
+            protected_paths or {},
+        )
+        repository_contract = RepositoryContractGate(self.worktree_manager).evaluate(
+            contract=contract,
+            lease=lease,
+            candidate=candidate,
+            current=post_verifier,
         )
         failures: list[str] = []
         if not scope_passed:
@@ -182,13 +204,15 @@ class CandidateVerifier:
             failures.append("controller_gate_failed")
         failures.extend(protected_failures)
         failures.extend(verifier_failures)
+        failures.extend(verifier_state_failures)
+        failures.extend(repository_contract.blocking_reasons)
         verified = not failures
         return VerifiedCandidateReceipt(
             schema="nexus.verified_candidate_receipt.v1",
             task_id=contract.task_id,
             contract_hash=contract.contract_hash,
             lease_id=lease.lease_id,
-            candidate_state_hash=current.candidate_state_hash,
+            candidate_state_hash=post_verifier.candidate_state_hash,
             scope_gate_passed=scope_passed,
             deletion_gate_passed=deletion_passed,
             controller_gate_passed=controller_passed,
@@ -202,4 +226,8 @@ class CandidateVerifier:
             verifier_evidence=verifier_evidence,
             candidate_commit_created=False,
             merge_performed=False,
+            repository_contract_gate_passed=repository_contract.passed,
+            repository_contract_mode=repository_contract.mode,
+            repository_contract_policy_revision_hash=repository_contract.policy_revision_hash,
+            repository_contract_findings=repository_contract.findings,
         )

@@ -1,139 +1,37 @@
 ---
 name: nexus-merge-gate
-description: |
-  Nexus 合併前三連驗證 SOP。封裝「pytest 全量 → acceptance-check → contract-check → merge → push」防護梯，
-  防止假綠燈（NightShift landing 假通過）。
-  觸發詞：「全量測試一下nexus」「都確認沒問題就合併」「先合併再推」「有問題就可以回復」。
-  不適用於：純文件修改、docs-only commit（可跳過 pytest）。
+description: Hash-bound approval, integration, verification, and cleanup for the governed Nexus self-hosted lifecycle.
 ---
 
-# Nexus 合併前三連驗證 SOP
+# Nexus governed merge gate
 
-> **核心問題**：任務級 score 通過 ≠ 全庫合約相容。  
-> 來源：Learning Closure Matrix 2026-04-14「NightShift high-confidence landing」事件。
+This gate is connector-driven and fail-closed. A green test subset is not a
+promotion decision, and a candidate is not integrated until its exact receipt
+binding is approved.
 
----
+## Gate sequence
 
-## Gate 0：確認分支狀態
+1. Call `nexus_self_hosted_list_actionable_tasks` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted list-actionable` / `python -m scripts.ops.nexus_chatgpt_delivery actionable`). Treat `PENDING_HUMAN_APPROVAL` and `APPROVED` as `ACTION_REQUIRED`; never infer that a worker completion is approval.
+2. Verify candidate commit, candidate tree, candidate state hash, verified receipt hash, controller revision, allowed-file scope, and all verifier results. Confirm the controller checkout is unchanged.
+3. With the recorded hashes, call `nexus_self_hosted_approve_promotion` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted approve`). Approval must bind the exact candidate; do not substitute a newer commit or recompute a receipt after approval.
+4. Call `nexus_self_hosted_integrate_approved` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted integrate`) targeting exactly `nexus/integration/self-hosted-lifecycle-closure`. The operation must create a normal merge preserving candidate and integration ancestry. Verify the implementation, live-canary, and docs commits are ancestors afterward.
+5. Run the focused and full repository gates, `git diff --check`, and both
+   staged/unstaged deletion audits. Record the post-integration HEAD, protected
+   main SHA, branch/ref counts, and `push=false`.
+6. Confirm terminal Target cleanup from its receipt. Retain durable candidate
+   and salvage refs and record any `RETAINED_FOR_REVIEW` item as a bounded human
+   action; never silently discard unique modifications.
 
-```bash
-cd /Users/jameschen/workspace/nexus
-git status                        # 確認無意外改動
-git log --oneline origin/main..HEAD   # 確認待合併 commits
-```
+## Safety boundaries
 
-若有未 commit 的改動，先處理或 stash。
+`REPO_READY_CONNECTOR_BLOCKED` is the terminal result only when neither native connector tools nor `nexus.bash` with the repo-owned self-hosted CLI is available. When `nexus.bash` plus the repo-owned wrapper or official self-hosted CLI is available, `nexus.bash` must be used for governed lifecycle operations instead of blocking. Do not use direct worktree delivery, manual branch creation, a protected-main merge, remote publication, history rewrite, or ref/branch/tag deletion as a workaround. Never delete candidate or salvage
+refs. Rollback, if explicitly required, must restore the recorded integration
+SHA without rewriting existing commits.
 
----
+## Evidence required for handoff
 
-## Gate 1：全量 pytest
-
-```bash
-uv run pytest -q --tb=short 2>&1 | tail -20
-```
-
-**阻斷條件**：任何 `FAILED` 或 `ERROR`（環境 Flaky 除外）。
-
-Flaky 例外判定（必須明確說明理由）：
-- Playwright headless Chromium ICU 損毀 → 環境問題，非代碼回歸
-- Docker 未啟動導致的 Connection Error → 記錄但不阻斷
-
-> [!CAUTION]
-> 禁止「因為 Flaky 所以跳過」—— 必須明確分類 Flaky vs 代碼回歸，並回寫到 Learning Closure Matrix。
-
----
-
-## Gate 2：Acceptance Check
-
-```bash
-uv run scripts/nexus_cli.py nexus:acceptance-check 2>&1 | tail -20
-```
-
-**阻斷條件**：`REJECT` 或 `BLOCK` 輸出。
-
-若失敗：查看報告中的具體失敗原因，修復後重跑 Gate 1。
-
----
-
-## Gate 3：Contract Check
-
-```bash
-uv run scripts/nexus_cli.py contract-check 2>&1 | tail -20
-```
-
-**阻斷條件**：任何 contract violation。
-
-重點檢查：
-- `OutcomePayload` schema 相容性
-- `SkillFrontmatter → SkillRegistry → coordinator` 鏈
-- persistence round-trip（寫入後可讀回）
-
----
-
-## Gate 4：合併
-
-```bash
-git checkout main
-git merge --no-ff feature/<branch-name> -m "Merge feature/<branch>: <一句話描述>"
-```
-
-使用 `--no-ff` 保留分支記錄，方便回溯。
-
----
-
-## Gate 5：Push + 驗證
-
-```bash
-git push origin main
-git log --oneline -5      # 確認推送成功
-```
-
----
-
-## Gate 6：清理
-
-```bash
-git branch -d feature/<branch-name>   # 刪除已合併的本地分支
-git branch -r | grep merged           # 確認是否有未清理的遠端分支
-```
-
----
-
-## 快速決策矩陣
-
-| Gate 結果 | 下一步 |
-|-----------|--------|
-| Gate 1 FAIL（代碼回歸） | 回到分支修復，重跑 Gate 1 |
-| Gate 1 FAIL（環境 Flaky） | 記錄原因，繼續 Gate 2 |
-| Gate 2 REJECT | 查閱 acceptance 報告，修復後重跑 Gate 1+2 |
-| Gate 3 VIOLATION | 修復 contract，重跑 Gate 1+2+3 |
-| 全部 PASS | 執行 Gate 4+5+6 |
-
----
-
-## 失敗寫回規則
-
-每次 Gate 失敗後，若發現新模式，必須更新：
-```
-nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md
-```
-
-格式：
-```markdown
-## <YYYY-MM-DD>: <錯誤類型>
-- **Phenomenon**: 
-- **Root Cause**: 
-- **Decision**: 
-- **Prevention**: 
-```
-
----
-
-## 常見錯誤防範（來自 Learning Closure Matrix）
-
-| 事件 | Gate | 防範 |
-|------|------|------|
-| NightShift 高信心 landing 仍有 6 failures | Gate 1 | 全套測試不可跳過 |
-| worktree 環境差距假陰性 | Gate 1 | 分類 Flaky vs 代碼回歸 |
-| legacy alias drift 繞過驗收 | Gate 2 | 保持 CLI alias 最小化，避免 obsolete options |
-| 計劃文字 vs 記憶錨點不符 | Gate 3 | 修改前先 sed 重新定位段落 |
+Return the task action envelope, approved binding, merge commit and parents,
+test commands/results, ancestry checks, cleanup receipt, controller status hash
+before/after, protected-main comparison, `branches deleted = 0`, `refs deleted
+= 0`, and `push = false`. If any binding or verifier is inconsistent, stop that
+item fail-closed and continue only with independently authorized items.

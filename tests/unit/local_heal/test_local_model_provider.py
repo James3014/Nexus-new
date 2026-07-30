@@ -11,6 +11,8 @@ from nexus.services.local_heal.local_model_provider import (
     InertLocalModelProvider,
     InjectedLocalModelProvider,
     OllamaLocalModelProvider,
+    RecordingLocalModelProvider,
+    AuthorityBoundLocalModelProvider,
 )
 
 
@@ -37,6 +39,79 @@ def test_injected_local_model_provider_success() -> None:
     assert resp.output_text == "response: test prompt"
     assert resp.output_truncated is False
     assert resp.model_name == "qwen"
+
+
+def test_provider_identity_contract_is_explicit_and_recording_is_transparent() -> None:
+    model = "qwen2.5-coder:7b"
+    injected = InjectedLocalModelProvider(
+        lambda _: "ok",
+        provider_identity="fixture",
+        model_identity=model,
+    )
+    recording = RecordingLocalModelProvider(injected)
+
+    assert injected.provider_identity == "fixture"
+    assert injected.model_identity == model
+    assert injected.model_binding_mode == "fixed"
+    assert recording.provider_identity == "fixture"
+    assert recording.model_identity == model
+    assert recording.model_binding_mode == "fixed"
+    assert recording.ledger_count == 0
+    assert InertLocalModelProvider().provider_identity == "inert"
+    assert OllamaLocalModelProvider().provider_identity == "ollama"
+    assert OllamaLocalModelProvider().model_binding_mode == "request_bound"
+
+
+def test_ollama_identity_and_request_bound_model_without_live_network() -> None:
+    provider = OllamaLocalModelProvider()
+    req = LocalModelProviderRequest(
+        task_id="identity-ollama",
+        prompt="test",
+        evidence_refs=(),
+        model_name="fixture-model",
+    )
+    mock_response = mock.MagicMock()
+    mock_response.read.return_value = b'{"response": "ok"}'
+    mock_response.__enter__.return_value = mock_response
+
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
+    }, clear=True), mock.patch("urllib.request.urlopen", return_value=mock_response) as call:
+        response = provider.generate(req)
+
+    assert response.model_name == "fixture-model"
+    payload = __import__("json").loads(call.call_args[0][0].data.decode("utf-8"))
+    assert payload["model"] == "fixture-model"
+
+
+def test_authority_bound_provider_blocks_model_mismatch_without_recording_physical_call() -> None:
+    calls = 0
+
+    def generate(request: LocalModelProviderRequest) -> str:
+        nonlocal calls
+        calls += 1
+        return "should not run"
+
+    recording = RecordingLocalModelProvider(
+        InjectedLocalModelProvider(
+            generate,
+            provider_identity="fixture",
+            model_identity="admitted-model",
+        )
+    )
+    guarded = AuthorityBoundLocalModelProvider(recording, resolved_model="admitted-model")
+    blocked = guarded.generate(LocalModelProviderRequest(
+        task_id="guard-1", prompt="x", evidence_refs=(), model_name="wrong-model"
+    ))
+    blocked_again = guarded.generate(LocalModelProviderRequest(
+        task_id="guard-2", prompt="x", evidence_refs=(), model_name="admitted-model"
+    ))
+
+    assert calls == 0
+    assert blocked.model_called is False
+    assert blocked_again.error == "local_model_provider_request_model_mismatch"
+    assert recording.ledger_summary["total_calls"] == 0
 
 
 def test_injected_local_model_provider_truncation() -> None:
@@ -138,6 +213,38 @@ def test_ollama_provider_passes_options_to_api() -> None:
             payload = json.loads(req_obj.data.decode("utf-8"))
             assert "options" in payload
             assert payload["options"] == opts
+            assert "think" not in payload
+
+
+def test_ollama_provider_passes_think_as_top_level_api_field() -> None:
+    with mock.patch.dict(os.environ, {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_NAME": "qwen3:8b",
+    }):
+        provider = OllamaLocalModelProvider()
+        req = LocalModelProviderRequest(
+            task_id="t9",
+            prompt="return json only",
+            evidence_refs=(),
+            options={"temperature": 0.0},
+            think=False,
+        )
+
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = b'{"response": "{}"}'
+        mock_response.__enter__.return_value = mock_response
+
+        with mock.patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+            resp = provider.generate(req)
+            assert resp.model_called is True
+
+            req_obj = mock_urlopen.call_args[0][0]
+            import json
+            payload = json.loads(req_obj.data.decode("utf-8"))
+            assert payload["think"] is False
+            assert payload["options"] == {"temperature": 0.0}
+            assert "think" not in payload["options"]
 
 
 def test_recording_provider_records_success() -> None:

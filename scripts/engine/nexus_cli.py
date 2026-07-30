@@ -203,6 +203,18 @@ from scripts.engine.commands.multi_agent_actions import (
     submit_multi_agent_task,
     verify_multi_agent_task,
 )
+from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_approve,
+    run_self_hosted_cancel,
+    run_self_hosted_close_without_candidate,
+    run_self_hosted_cleanup,
+    run_self_hosted_dispose,
+    run_self_hosted_integrate,
+    run_self_hosted_list_actionable,
+    run_self_hosted_status,
+    run_self_hosted_submit,
+    run_self_hosted_wait,
+)
 from scripts.engine.commands.registry_actions import (
     get_registry_status,
     get_skills_list,
@@ -3366,6 +3378,262 @@ def mission_resume():
     subprocess.run(cmd, check=False)
 
 
+@nexus_group.group(name="self-hosted")
+def self_hosted_group():
+    """🏠 Self-hosted task execution and status governance."""
+    pass
+
+
+nexus.add_command(self_hosted_group, name="self-hosted")
+
+
+@self_hosted_group.command(name="submit")
+@click.option("--request-file", "-f", type=click.Path(exists=True, dir_okay=False), help="Path to JSON file with task request.")
+@click.option("--task-id", help="Explicit task ID.")
+@click.option("--what", help="Task objective (WHAT).")
+@click.option("--why", help="Task justification (WHY).")
+@click.option("--controller-revision", help="Controller Git revision SHA.")
+@click.option("--target-base-revision", help="Target base Git revision SHA.")
+@click.option("--controller-repo-root", help="Controller repository root path.")
+@click.option("--target-repo-root", help="Target repository root path.")
+@click.option("--target-worktree-root", help="Target worktree root path.")
+@click.option("--allowed-files", help="Comma-separated list of allowed file patterns.")
+@click.option("--forbidden-files", help="Comma-separated list of forbidden file patterns.")
+@click.option("--verifier-commands", help="Comma-separated list of verifier commands.")
+@click.option("--protected-contracts", help="Comma-separated list of protected contracts.")
+@click.option("--worker", default=None, help="Worker provider (e.g. codex, auto).")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_submit(
+    request_file: str | None,
+    task_id: str | None,
+    what: str | None,
+    why: str | None,
+    controller_revision: str | None,
+    target_base_revision: str | None,
+    controller_repo_root: str | None,
+    target_repo_root: str | None,
+    target_worktree_root: str | None,
+    allowed_files: str | None,
+    forbidden_files: str | None,
+    verifier_commands: str | None,
+    protected_contracts: str | None,
+    worker: str | None,
+    state_dir: str | None,
+) -> None:
+    """Submit a governed self-hosted task."""
+    request_data: dict[str, Any] = {}
+    if request_file:
+        with open(request_file, "r", encoding="utf-8") as f:
+            request_data = json.load(f)
+
+    if task_id is not None:
+        request_data["task_id"] = task_id
+    if what is not None:
+        request_data["what"] = what
+    if why is not None:
+        request_data["why"] = why
+    if controller_revision is not None:
+        request_data["controller_revision"] = controller_revision
+    if target_base_revision is not None:
+        request_data["target_base_revision"] = target_base_revision
+    if controller_repo_root is not None:
+        request_data["controller_repo_root"] = controller_repo_root
+    if target_repo_root is not None:
+        request_data["target_repo_root"] = target_repo_root
+    if target_worktree_root is not None:
+        request_data["target_worktree_root"] = target_worktree_root
+    if worker is not None:
+        request_data["worker"] = worker
+
+    def _split_csv(val: str | None) -> list[str] | None:
+        if val is None:
+            return None
+        return [s.strip() for s in val.split(",") if s.strip()]
+
+    af = _split_csv(allowed_files)
+    if af is not None:
+        request_data["allowed_files"] = af
+    ff = _split_csv(forbidden_files)
+    if ff is not None:
+        request_data["forbidden_files"] = ff
+    vc = _split_csv(verifier_commands)
+    if vc is not None:
+        request_data["verifier_commands"] = vc
+    pc = _split_csv(protected_contracts)
+    if pc is not None:
+        request_data["protected_contracts"] = pc
+
+    res = run_self_hosted_submit(request_data, state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="status")
+@click.option("--task-id", required=True, help="Task ID to inspect.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_status(task_id: str, state_dir: str | None) -> None:
+    """Read durable status for a self-hosted task."""
+    res = run_self_hosted_status(task_id, state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="wait")
+@click.option("--task-id", required=True, help="Task ID to wait for.")
+@click.option("--timeout", "timeout_seconds", type=float, default=10.0, help="Timeout in seconds.")
+@click.option("--poll-interval", "poll_interval_seconds", type=float, default=0.25, help="Poll interval in seconds.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_wait(
+    task_id: str,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    state_dir: str | None,
+) -> None:
+    """Wait for a self-hosted task until terminal/attention_required or timeout."""
+    res = run_self_hosted_wait(
+        task_id,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="list-actionable")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_list_actionable(state_dir: str | None) -> None:
+    """List self-hosted tasks requiring action."""
+    res = run_self_hosted_list_actionable(state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="cleanup")
+@click.option("--task-id", required=True, help="Exact task ID to clean up.")
+@click.option("--apply", is_flag=True, help="Apply eligible cleanup; default is dry-run.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_cleanup(
+    task_id: str,
+    apply: bool,
+    state_dir: str | None,
+) -> None:
+    """Preview or apply governed cleanup for one self-hosted task."""
+    res = run_self_hosted_cleanup(
+        task_id=task_id,
+        apply=apply,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="approve")
+@click.option("--task-id", required=True, help="Task ID to approve.")
+@click.option("--candidate-commit-sha", required=True, help="Candidate commit SHA.")
+@click.option("--candidate-tree-sha", required=True, help="Candidate tree SHA.")
+@click.option("--candidate-state-hash", required=True, help="Candidate state hash.")
+@click.option("--verified-receipt-hash", required=True, help="Verified receipt hash.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_approve(
+    task_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+    candidate_state_hash: str,
+    verified_receipt_hash: str,
+    state_dir: str | None,
+) -> None:
+    """Approve candidate promotion for a self-hosted task with exact binding."""
+    res = run_self_hosted_approve(
+        task_id=task_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        candidate_state_hash=candidate_state_hash,
+        verified_receipt_hash=verified_receipt_hash,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="integrate")
+@click.option("--task-id", required=True, help="Task ID to integrate.")
+@click.option("--integration-branch", default="nexus/integration", help="Target integration branch name.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_integrate(
+    task_id: str,
+    integration_branch: str,
+    state_dir: str | None,
+) -> None:
+    """Integrate an approved self-hosted candidate task into the integration branch."""
+    res = run_self_hosted_integrate(
+        task_id=task_id,
+        integration_branch=integration_branch,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="dispose")
+@click.option("--task-id", required=True, help="Task ID to dispose.")
+@click.option("--disposition", type=click.Choice(["REJECTED", "SUPERSEDED"], case_sensitive=False), required=True, help="Disposition type (REJECTED or SUPERSEDED).")
+@click.option("--superseded-by", default=None, help="Optional replacing task or evidence ID if SUPERSEDED.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_dispose(
+    task_id: str,
+    disposition: str,
+    superseded_by: str | None,
+    state_dir: str | None,
+) -> None:
+    """Dispose candidate promotion (REJECTED or SUPERSEDED)."""
+    res = run_self_hosted_dispose(
+        task_id=task_id,
+        disposition=disposition.upper(),
+        superseded_by=superseded_by,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="close-without-candidate")
+@click.option("--task-id", required=True, help="Task ID to close without candidate.")
+@click.option("--superseded-by", required=True, help="Replacing task or evidence ID.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_close_without_candidate(
+    task_id: str,
+    superseded_by: str,
+    state_dir: str | None,
+) -> None:
+    """Close a RETAINED_FOR_REVIEW or FINAL_BLOCK task that produced no candidate evidence."""
+    res = run_self_hosted_close_without_candidate(
+        task_id=task_id,
+        superseded_by=superseded_by,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="cancel")
+@click.option("--task-id", required=True, help="Task ID to cancel.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_cancel(
+    task_id: str,
+    state_dir: str | None,
+) -> None:
+    """Cancel a non-running self-hosted task and run terminal cleanup."""
+    res = run_self_hosted_cancel(
+        task_id=task_id,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+
 if __name__ == "__main__":
 
     nexus()
+

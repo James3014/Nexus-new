@@ -96,14 +96,14 @@ class ControlledIntegrationManager:
             if lease.get("target_detached")
             else lease.get("target_branch", "")
         )
-        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED", "INTEGRATING"}:
+        if state.get("status") not in {"CANDIDATE_COMMITTED", "APPROVED", "INTEGRATING", "INTEGRATION_FAILED"}:
             raise RuntimeError("only a terminal candidate task can be integrated")
         approved = state.get("approved_binding") or {}
         binding_fields = (
             "candidate_commit_sha", "candidate_tree_sha",
             "candidate_state_hash", "verified_receipt_hash",
         )
-        if not approved or not packet or state.get("promotion_status") != "APPROVED" or any(
+        if not approved or not packet or state.get("promotion_status") not in {"APPROVED", "INTEGRATION_FAILED"} or any(
             approved.get(field) != packet.get(field) for field in binding_fields
         ):
             raise RuntimeError("exact approved binding is required")
@@ -125,6 +125,8 @@ class ControlledIntegrationManager:
 
         self.integration_root.mkdir(parents=True, exist_ok=True)
         integration_path = self.integration_root / task_id
+        controller_branch = self._git(["branch", "--show-current"], controller_root)
+        reuse_controller_worktree = controller_branch == integration_branch
         if integration_path.exists():
             raise RuntimeError("integration worktree path already exists")
         branch_exists = subprocess.run(
@@ -135,8 +137,11 @@ class ControlledIntegrationManager:
         ).returncode == 0
         if not branch_exists:
             raise RuntimeError("governed integration branch must already exist")
-        add_args = ["worktree", "add", str(integration_path), integration_branch]
-        self._git(add_args, controller_root)
+        if reuse_controller_worktree:
+            integration_path = controller_root
+        else:
+            add_args = ["worktree", "add", str(integration_path), integration_branch]
+            self._git(add_args, controller_root)
         removed = False
         integration_base_sha = self._git(["rev-parse", "HEAD"], integration_path)
         try:
@@ -151,9 +156,11 @@ class ControlledIntegrationManager:
         except Exception:
             subprocess.run(["git", "merge", "--abort"], cwd=integration_path, capture_output=True, text=True)
             subprocess.run(["git", "reset", "--merge", integration_base_sha], cwd=integration_path, capture_output=True, text=True)
-            self._git(["worktree", "remove", str(integration_path)], controller_root)
+            if not reuse_controller_worktree:
+                self._git(["worktree", "remove", str(integration_path)], controller_root)
             raise
-        self._git(["worktree", "remove", str(integration_path)], controller_root)
+        if not reuse_controller_worktree:
+            self._git(["worktree", "remove", str(integration_path)], controller_root)
         removed = True
         return IntegrationReceipt(
             schema="nexus.integration_receipt.v1",

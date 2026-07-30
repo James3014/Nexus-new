@@ -144,6 +144,100 @@ class SelfHostedTaskService:
         candidates.extend(sorted(root.glob(f"{task_id}--attempt-*.json")) if root.exists() else [])
         return [path for path in candidates if path.exists()]
 
+    @staticmethod
+    def _candidate_commit(state: Mapping[str, Any]) -> Optional[str]:
+        packet = state.get("promotion_packet") or {}
+        return state.get("candidate_commit_sha") or packet.get("candidate_commit_sha")
+
+    def _require_integrated_replacement(self, task_id: str, superseded_by: str) -> None:
+        replacement = self._read_state(superseded_by)
+        if (
+            replacement is None
+            or superseded_by == task_id
+            or replacement.get("task_id") != superseded_by
+            or replacement.get("status") != "INTEGRATED"
+            or replacement.get("promotion_status") != "INTEGRATED"
+            or not str(replacement.get("integration_result_sha") or "").strip()
+        ):
+            raise RuntimeError(
+                "superseded_by must name an existing INTEGRATED self-hosted task "
+                "with promotion_status=INTEGRATED and integration_result_sha"
+            )
+
+    @classmethod
+    def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        status = str(state.get("status") or "UNKNOWN")
+        promotion_status = str(state.get("promotion_status") or "")
+        candidate_commit = cls._candidate_commit(state)
+
+        if status == "INTEGRATING":
+            action_state = "IN_PROGRESS"
+            attention_required = False
+            next_action = "wait_for_task"
+            recommended_tool = "nexus_self_hosted_wait_task"
+        elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "inspect_blocker_and_retry_or_dispose"
+            recommended_tool = "nexus_self_hosted_get_receipt"
+        elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
+            action_state = "ACTION_REQUIRED"
+            attention_required = True
+            if promotion_status == "APPROVED" or status == "APPROVED":
+                next_action = "integrate_approved_candidate"
+                recommended_tool = "nexus_self_hosted_integrate_approved"
+            elif promotion_status == "APPROVAL_INVALIDATED" or status == "APPROVAL_INVALIDATED":
+                next_action = "resubmit_exact_approval_binding"
+                recommended_tool = "nexus_self_hosted_approve_promotion"
+            else:
+                next_action = "approve_candidate"
+                recommended_tool = "nexus_self_hosted_approve_promotion"
+        elif status in TERMINAL_STATUSES:
+            action_state = "TERMINAL"
+            attention_required = False
+            next_action = "none"
+            recommended_tool = None
+        else:
+            action_state = "IN_PROGRESS"
+            attention_required = False
+            next_action = "wait_for_task"
+            recommended_tool = "nexus_self_hosted_wait_task"
+
+        packet = state.get("promotion_packet") or {}
+        return {
+            "schema": "nexus.self_hosted_task_action.v1",
+            "task_id": state.get("task_id"),
+            "task_status": status,
+            "promotion_status": promotion_status or None,
+            "action_state": action_state,
+            "attention_required": attention_required,
+            "next_action": next_action,
+            "recommended_tool": recommended_tool,
+            "candidate_commit_sha": candidate_commit,
+            "candidate_ref": state.get("candidate_ref"),
+            "candidate": {
+                "candidate_commit_sha": candidate_commit,
+                "candidate_tree_sha": state.get("candidate_tree_sha") or packet.get("candidate_tree_sha"),
+                "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
+                "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+            },
+            "cleanup_status": {
+                "cleanup_eligible": state.get("cleanup_eligible", False),
+                "cleanup_decision": state.get("cleanup_decision"),
+                "cleanup_blocker": state.get("cleanup_blocker"),
+                "cleanup_performed": state.get("cleanup_performed", False),
+                "cleanup_performed_at": state.get("cleanup_performed_at"),
+                "state_retention_status": state.get("state_retention_status"),
+                "archive_eligible": state.get("archive_eligible", False),
+            },
+        }
+
+    @classmethod
+    def _with_task_action(cls, state: dict[str, Any]) -> dict[str, Any]:
+        state = dict(state)
+        state["task_action"] = cls._task_action_envelope(state)
+        return state
+
     def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
         latest_path: Optional[Path] = None
         latest_state: Optional[dict[str, Any]] = None
@@ -152,7 +246,7 @@ class SelfHostedTaskService:
             state = json.loads(path.read_text(encoding="utf-8"))
             key = (str(state.get("updated_at") or ""), path.stat().st_mtime_ns)
             if latest_state is None or key > latest_key:
-                latest_path, latest_state, latest_key = path, state, key
+                latest_path, latest_state, latest_key = path, self._with_task_action(state), key
         return latest_path, latest_state
 
     def _lock_path(self) -> Path:
@@ -170,6 +264,7 @@ class SelfHostedTaskService:
 
     def _write_state_locked(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
         normalized = _jsonable(state)
+        normalized["task_action"] = self._task_action_envelope(normalized)
         destination = self._state_path(task_id)
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -193,10 +288,10 @@ class SelfHostedTaskService:
         with self._state_lock():
             destination = self._state_path(task_id)
             if destination.exists():
-                return json.loads(destination.read_text(encoding="utf-8")), False
+                return self._with_task_action(json.loads(destination.read_text(encoding="utf-8"))), False
             _, archived = self._latest_archived_state(task_id)
             if archived is not None:
-                return archived, False
+                return self._with_task_action(archived), False
             return self._write_state_locked(task_id, state), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -207,13 +302,13 @@ class SelfHostedTaskService:
         with self._state_lock():
             if not path.exists():
                 return None
-            return json.loads(path.read_text(encoding="utf-8"))
+            return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
 
     def _reactivate_archived_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock():
             path = self._state_path(task_id)
             if path.exists():
-                return json.loads(path.read_text(encoding="utf-8"))
+                return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
             if not self._archive_state_candidates(task_id):
                 raise RuntimeError("archived task receipt disappeared before retry")
             return self._write_state_locked(task_id, state)
@@ -390,6 +485,43 @@ class SelfHostedTaskService:
             human_approval_required=True,
         )
 
+    @staticmethod
+    def _terminal_retry_revision_refresh_allowed(
+        existing: Mapping[str, Any],
+        request: Mapping[str, Any],
+        contract: ArchitectTaskContract,
+    ) -> bool:
+        previous_request = dict(existing.get("request") or {})
+        next_request = _jsonable(dict(request))
+        for field in ("controller_revision", "target_base_revision"):
+            previous_request.pop(field, None)
+            next_request.pop(field, None)
+        if previous_request != next_request:
+            return False
+
+        previous_contract = existing.get("contract") or {}
+        previous_controller = str(previous_contract.get("controller_revision") or "")
+        previous_target = str(previous_contract.get("target_base_revision") or "")
+        revisions = (
+            (previous_controller, contract.controller_revision),
+            (previous_target, contract.target_base_revision),
+        )
+        if not all(old and new for old, new in revisions):
+            return False
+        if all(old == new for old, new in revisions):
+            return False
+
+        controller_root = Path(contract.controller_repo_root).expanduser().resolve()
+        return all(
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", old, new],
+                cwd=controller_root,
+                capture_output=True,
+                text=True,
+            ).returncode == 0
+            for old, new in revisions
+        )
+
     def _contract_from_state(self, state: Mapping[str, Any]) -> ArchitectTaskContract:
         request = state.get("request")
         if isinstance(request, Mapping):
@@ -402,12 +534,16 @@ class SelfHostedTaskService:
     @staticmethod
     def _prompt(contract: ArchitectTaskContract) -> str:
         allowed = ", ".join(contract.allowed_files)
+        verifiers = "\n".join(f"- {command}" for command in contract.verifier_commands)
         return (
             f"WHAT: {contract.goal.what}\n"
             f"WHY: {contract.goal.why}\n"
             f"Allowed files: {allowed}\n"
             "Work only in the isolated Target. Do not edit, delete, stage, commit, merge, push, or reset "
-            "outside the allowed scope. Return a concise summary after making the change."
+            "outside the allowed scope. Run every verifier command below after making the change; if any "
+            "verifier fails, diagnose and repair within the allowed files before returning.\n"
+            f"Required verifier commands:\n{verifiers}\n"
+            "Return a concise summary only after all required verifiers pass."
         )
 
     def _set_child_pgid(self, task_id: str, attempt_id: str, pgid: Optional[int]) -> None:
@@ -1116,6 +1252,65 @@ class SelfHostedTaskService:
     def resume_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.reconcile_task(task_id)
 
+    def wait_task(
+        self,
+        task_id: str,
+        *,
+        timeout_seconds: float = 10.0,
+        poll_interval_seconds: float = 0.25,
+    ) -> Optional[dict[str, Any]]:
+        timeout_seconds = float(timeout_seconds)
+        poll_interval_seconds = float(poll_interval_seconds)
+        if timeout_seconds < 0:
+            raise ValueError("timeout_seconds must be non-negative")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive")
+        if timeout_seconds > 60.0:
+            raise ValueError("timeout_seconds must be <= 60")
+
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            state = self.get_task(task_id)
+            if state is None:
+                return None
+            envelope = state.get("task_action") or self._task_action_envelope(state)
+            if envelope.get("action_state") != "IN_PROGRESS":
+                return {
+                    **state,
+                    "wait": {
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "poll_interval_seconds": poll_interval_seconds,
+                    },
+                }
+            if time.monotonic() >= deadline:
+                envelope = {**envelope, "wait_timed_out": True}
+                return {
+                    **state,
+                    "task_action": envelope,
+                    "wait": {
+                        "timed_out": True,
+                        "timeout_seconds": timeout_seconds,
+                        "poll_interval_seconds": poll_interval_seconds,
+                    },
+                }
+            time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+
+    def list_actionable_tasks(self) -> dict[str, Any]:
+        tasks = []
+        for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
+            state = self.get_task(path.stem)
+            if state is None:
+                continue
+            action = state.get("task_action") or self._task_action_envelope(state)
+            if action.get("attention_required") is True:
+                tasks.append(state)
+        return {
+            "schema": "nexus.self_hosted_actionable_tasks.v1",
+            "actionable_count": len(tasks),
+            "tasks": tasks,
+        }
+
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         contract = self.build_contract(request)
         existing_states = [
@@ -1176,6 +1371,10 @@ class SelfHostedTaskService:
             "candidate_ref": None,
             "candidate_state_hash": None,
             "verified_receipt_hash": None,
+            "salvage_commit_sha": None,
+            "salvage_ref": None,
+            "salvage_only": False,
+            "promotion_eligible": False,
             "approved_binding": None,
             "integration_branch": None,
             "integration_base_sha": None,
@@ -1194,11 +1393,20 @@ class SelfHostedTaskService:
         }
         existing, created = self._create_state(contract.task_id, state)
         if not created:
-            if existing.get("contract_hash") != contract.contract_hash:
+            terminal_retry = existing.get("status") in {
+                "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED",
+                "INTEGRATION_FAILED", "INTEGRATED",
+            }
+            contract_refreshed = existing.get("contract_hash") != contract.contract_hash
+            if contract_refreshed and not (
+                terminal_retry
+                and existing.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                and self._terminal_retry_revision_refresh_allowed(existing, request, contract)
+            ):
                 raise ValueError("task_id already exists with a different contract")
             if existing.get("status") in PENDING_CANDIDATE_STATUSES or existing.get("promotion_status") in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
                 return existing
-            if existing.get("status") in {"FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED", "INTEGRATION_FAILED", "INTEGRATED"}:
+            if terminal_retry:
                 if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
                     raise RuntimeError("terminal retry blocked until previous Target disposition")
                 existing = self._reactivate_archived_state(contract.task_id, existing)
@@ -1216,22 +1424,60 @@ class SelfHostedTaskService:
                             "integration_commit": current.get("integration_result_sha"),
                             "final_disposition": current.get("final_disposition") or current.get("status"),
                         })
+                    if contract_refreshed:
+                        previous_contract = current.get("contract") or {}
+                        current.setdefault("contract_history", []).append({
+                            "attempt_id": current.get("attempt_id"),
+                            "contract_hash": current.get("contract_hash"),
+                            "controller_revision": previous_contract.get("controller_revision"),
+                            "target_base_revision": previous_contract.get("target_base_revision"),
+                            "final_disposition": current.get("final_disposition") or current.get("status"),
+                        })
+                        current.update({
+                            "request": _jsonable(dict(request)),
+                            "contract": contract.model_dump(mode="json"),
+                            "contract_hash": contract.contract_hash,
+                            "controller_worktree": contract.controller_repo_root,
+                            "controller_revision": contract.controller_revision,
+                            "controller_status_sha256": None,
+                            "target_worktree": contract.target_repo_root,
+                            "target_initial_revision": contract.target_base_revision,
+                            "target_branch": f"nexus/task/{contract.task_id}",
+                            "target_created_at": None,
+                            "worker_provider": contract.preferred_provider,
+                        })
                     current["attempt_id"] = attempt_id
                     current.setdefault("attempts", []).append({"attempt_id": attempt_id, "started_at": now})
                     current["status"] = "SUBMITTED"
                     current.setdefault("status_history", []).append({"status": "ATTEMPT_INCREMENTED", "at": now})
+                    current["lease"] = None
                     current["worker_pid"] = None
                     current["worker_pgid"] = None
                     current["worker_child_pgid"] = None
+                    current["worker_started_at"] = None
+                    current["worker_finished_at"] = None
+                    current["worker_preflight"] = None
                     current["heartbeat_at"] = now
                     current["error"] = None
+                    current["active_provider"] = None
+                    current["execution"] = None
+                    current["executions"] = []
+                    current["execution_outcome"] = None
+                    current["attempt_resolution"] = None
+                    current["verification_verdict"] = None
                     current["promotion_status"] = "NOT_CREATED"
                     current["candidate_status"] = None
+                    current["candidate"] = None
                     current["candidate_commit_sha"] = None
                     current["candidate_tree_sha"] = None
                     current["candidate_ref"] = None
                     current["candidate_state_hash"] = None
                     current["verified_receipt_hash"] = None
+                    current["salvage_commit_sha"] = None
+                    current["salvage_ref"] = None
+                    current["salvage_only"] = False
+                    current["promotion_eligible"] = False
+                    current["verified_receipt"] = None
                     current["promotion_packet"] = None
                     current["approved_binding"] = None
                     current["integration_branch"] = None
@@ -1251,9 +1497,9 @@ class SelfHostedTaskService:
                     current["merge_performed"] = False
                     current["push_performed"] = False
                 self._mutate_state(contract.task_id, retry)
-                return self._launch_worker(contract.task_id, attempt_id) or existing
+                return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(existing)
             return self.reconcile_task(contract.task_id) or existing
-        return self._launch_worker(contract.task_id, attempt_id) or state
+        return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(state)
 
     def dispose_candidate(
         self,
@@ -1293,7 +1539,7 @@ class SelfHostedTaskService:
             "archive_eligible": True,
         }, attempt_id=state.get("attempt_id")) or state
 
-    def close_retained_without_candidate(
+    def close_task_without_candidate(
         self,
         task_id: str,
         *,
@@ -1307,8 +1553,8 @@ class SelfHostedTaskService:
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
 
-        if state.get("status") != "RETAINED_FOR_REVIEW":
-            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW status")
+        if state.get("status") not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW or FINAL_BLOCK status")
 
         if state.get("promotion_status") != "NOT_CREATED":
             raise RuntimeError("promotion_status must be NOT_CREATED")
@@ -1316,9 +1562,6 @@ class SelfHostedTaskService:
         packet = state.get("promotion_packet") or {}
         candidate_commit = packet.get("candidate_commit_sha") or state.get("candidate_commit_sha")
         candidate_ref = state.get("candidate_ref")
-        verified_receipt = state.get("verified_receipt") or {}
-        candidate_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
-        verified_receipt_hash = state.get("verified_receipt_hash")
         candidate_dict = state.get("candidate") or {}
         candidate_created = (
             state.get("candidate_commit_created")
@@ -1329,8 +1572,6 @@ class SelfHostedTaskService:
             packet
             or candidate_commit
             or candidate_ref
-            or candidate_state_hash
-            or verified_receipt_hash
             or candidate_created
         ):
             raise RuntimeError("task has candidate evidence present")
@@ -1346,18 +1587,124 @@ class SelfHostedTaskService:
         contract = state.get("contract") or {}
         lease = state.get("lease") or {}
         target_raw = state.get("target_worktree") or lease.get("target_worktree") or contract.get("target_repo_root")
+        cleanup_values: dict[str, Any] = {
+            "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
+            "cleanup_eligible": state.get("cleanup_eligible", True),
+            "cleanup_performed": state.get("cleanup_performed", False),
+            "cleanup_performed_at": state.get("cleanup_performed_at"),
+        }
         if target_raw:
             target_path = Path(str(target_raw)).expanduser().resolve()
-            if target_path.exists():
-                raise RuntimeError(f"recorded Target path exists: {target_path}")
             controller_raw = state.get("controller_worktree") or contract.get("controller_repo_root")
-            if controller_raw:
+            lease_object = TargetWorktreeLease(**dict(lease)) if lease else None
+            if target_path.exists() and (not controller_raw or not lease_object):
+                raise RuntimeError(f"recorded Target path exists: {target_path}")
+            if target_path.exists() and controller_raw and lease_object:
                 controller_path = Path(str(controller_raw)).expanduser().resolve()
-                if controller_path.is_dir():
-                    target_worktree_root = contract.get("target_worktree_root") or str(target_path.parent)
-                    manager = WorktreeManager(root_dir=str(target_worktree_root))
-                    if manager._worktree_entry(controller_path, target_path) is not None:
-                        raise RuntimeError(f"recorded Target path is a registered worktree: {target_path}")
+                if not controller_path.is_dir():
+                    raise RuntimeError(f"recorded Target path exists: {target_path}")
+                manager = WorktreeManager(
+                    root_dir=str(contract.get("target_worktree_root") or target_path.parent)
+                )
+                entry = manager._worktree_entry(controller_path, target_path)
+                if entry is not None:
+                    if state.get("status") != "RETAINED_FOR_REVIEW":
+                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    has_recorded_salvage = bool(
+                        state.get("salvage_commit_sha") and state.get("salvage_ref")
+                    )
+                    if not manager._status_bytes(target_path) and not has_recorded_salvage:
+                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    self._require_integrated_replacement(task_id, superseded_by)
+                    salvage = {
+                        "salvage_commit_sha": state.get("salvage_commit_sha"),
+                        "salvage_ref": state.get("salvage_ref"),
+                        "salvage_only": state.get("salvage_only"),
+                        "promotion_eligible": state.get("promotion_eligible"),
+                    }
+                    try:
+                        if not salvage["salvage_commit_sha"] or not salvage["salvage_ref"]:
+                            salvage = manager.create_salvage_snapshot(
+                                self._contract_from_state(state),
+                                lease_object,
+                                str(state.get("attempt_id") or ""),
+                            )
+                        elif salvage["salvage_only"] is not True or salvage["promotion_eligible"] is not False:
+                            raise RuntimeError("recorded salvage metadata is invalid")
+                        self._checkpoint(
+                            task_id,
+                            "RETAINED_FOR_REVIEW",
+                            {
+                                **salvage,
+                                "promotion_status": "NOT_CREATED",
+                                "superseded_by": superseded_by,
+                                "cleanup_decision": "SALVAGED",
+                                "cleanup_blocker": None,
+                                "cleanup_performed": False,
+                                "cleanup_eligible": False,
+                                "state_retention_status": "TERMINAL",
+                            },
+                            attempt_id=state.get("attempt_id"),
+                        )
+                        cleanup = manager.cleanup_terminal_target(
+                            self._contract_from_state(state),
+                            lease_object,
+                            salvage_commit=str(salvage["salvage_commit_sha"]),
+                            salvage_ref=str(salvage["salvage_ref"]),
+                        )
+                    except Exception as exc:
+                        retained = self._checkpoint(
+                            task_id,
+                            "RETAINED_FOR_REVIEW",
+                            {
+                                **salvage,
+                                "promotion_status": "NOT_CREATED",
+                                "superseded_by": superseded_by,
+                                "cleanup_decision": "CLEANUP_BLOCKED",
+                                "cleanup_blocker": str(exc),
+                                "cleanup_performed": False,
+                                "cleanup_eligible": False,
+                                "state_retention_status": "TERMINAL",
+                            },
+                            attempt_id=state.get("attempt_id"),
+                        ) or state
+                        return retained
+                    if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
+                        return self._checkpoint(
+                            task_id,
+                            "RETAINED_FOR_REVIEW",
+                            {
+                                **salvage,
+                                "promotion_status": "NOT_CREATED",
+                                "superseded_by": superseded_by,
+                                "cleanup_decision": cleanup.decision,
+                                "cleanup_blocker": cleanup.blocker,
+                                "cleanup_performed": cleanup.performed,
+                                "cleanup_eligible": cleanup.eligible,
+                                "state_retention_status": "TERMINAL",
+                            },
+                            attempt_id=state.get("attempt_id"),
+                        ) or state
+                    cleanup_values = {
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_eligible": cleanup.eligible,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                        **salvage,
+                    }
+                else:
+                    cleanup = manager.cleanup_terminal_target(
+                        self._contract_from_state(state),
+                        lease_object,
+                    )
+                    if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
+                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    cleanup_values = {
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_eligible": cleanup.eligible,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                    }
 
         return self._checkpoint(
             task_id,
@@ -1371,11 +1718,27 @@ class SelfHostedTaskService:
                 "archive_eligible": True,
                 "merge_performed": False,
                 "push_performed": False,
-                "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
-                "cleanup_performed": False,
+                **cleanup_values,
             },
             attempt_id=state.get("attempt_id"),
         ) or state
+
+    close_without_candidate = close_task_without_candidate
+
+    def close_retained_without_candidate(
+        self,
+        task_id: str,
+        *,
+        superseded_by: str,
+    ) -> dict[str, Any]:
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+
+        if state.get("status") != "RETAINED_FOR_REVIEW":
+            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW status")
+
+        return self.close_task_without_candidate(task_id, superseded_by=superseded_by)
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
@@ -1533,8 +1896,10 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         if state.get("promotion_status") == "INTEGRATED":
             return state
-        if state.get("promotion_status") != "APPROVED":
+        if state.get("promotion_status") not in {"APPROVED", "INTEGRATION_FAILED"}:
             raise RuntimeError("exact approved binding is required before integration")
+        if state.get("promotion_status") == "INTEGRATION_FAILED" and state.get("merge_performed"):
+            raise RuntimeError("cannot retry an integration that already performed a merge")
         root = Path((state.get("contract") or {})["target_worktree_root"]).resolve() / "integrations"
         self._checkpoint(task_id, "INTEGRATING", {
             "integration_branch": integration_branch,
@@ -1605,12 +1970,17 @@ class SelfHostedTaskService:
             "candidate_ref": state.get("candidate_ref"),
             "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
             "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+            "salvage_commit_sha": state.get("salvage_commit_sha"),
+            "salvage_ref": state.get("salvage_ref"),
+            "salvage_only": state.get("salvage_only", False),
+            "promotion_eligible": state.get("promotion_eligible", False),
             "promotion_status": state.get("promotion_status"),
             "approved_binding": state.get("approved_binding"),
             "integration_branch": state.get("integration_branch"),
             "integration_base_sha": state.get("integration_base_sha"),
             "integration_result_sha": state.get("integration_result_sha"),
             "terminal_status": state.get("terminal_status"),
+            "superseded_by": state.get("superseded_by"),
             "cleanup_eligible": state.get("cleanup_eligible"),
             "cleanup_decision": state.get("cleanup_decision"),
             "cleanup_blocker": state.get("cleanup_blocker"),

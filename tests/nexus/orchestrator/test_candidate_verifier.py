@@ -26,7 +26,19 @@ def scenario(tmp_path):
     _git(controller_root, "config", "user.email", "verifier@example.test")
     _git(controller_root, "config", "user.name", "Verifier")
     (controller_root / "bounded.txt").write_text("base\n", encoding="utf-8")
-    _git(controller_root, "add", "bounded.txt")
+    (controller_root / "AGENTS.md").write_text("agent authority\n", encoding="utf-8")
+    (controller_root / "MUSE_PROTO.md").write_text("proto authority\n", encoding="utf-8")
+    (controller_root / ".github/workflows").mkdir(parents=True)
+    (controller_root / ".github/workflows/pytest.yml").write_text(
+        "name: pytest\n",
+        encoding="utf-8",
+    )
+    (controller_root / "docs/arch").mkdir(parents=True)
+    (controller_root / "docs/arch/module-inventory.generated.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    _git(controller_root, "add", ".")
     _git(controller_root, "commit", "-m", "base")
     target_sha = _git(controller_root, "rev-parse", "HEAD")
     _git(controller_root, "commit", "--allow-empty", "-m", "controller")
@@ -71,6 +83,10 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert receipt.candidate_commit_allowed is True
     assert receipt.public_claim_allowed is False
     assert receipt.production_ready is False
+    assert receipt.repository_contract_gate_passed is True
+    assert receipt.repository_contract_mode == "shadow"
+    assert len(receipt.repository_contract_policy_revision_hash) == 64
+    assert receipt.repository_contract_findings == ()
     assert verifier_evidence.argv == ("-c", 'print("verifier pass")')
     assert verifier_evidence.cwd == str(Path(lease.target_worktree).resolve())
     assert verifier_evidence.executable_identity
@@ -269,6 +285,57 @@ def test_candidate_verifier_fails_closed_for_deleted_file(scenario):
     assert receipt.public_claim_allowed is False
 
 
+def test_candidate_verifier_shadow_repository_findings_do_not_block(scenario):
+    contract, lease, candidate, controller = scenario
+    shadow_contract = contract.model_copy(
+        update={"allowed_files": ["bounded.txt", ".github/workflows/new.yml"]}
+    )
+    target = Path(lease.target_worktree)
+    (target / ".github/workflows/new.yml").write_text("name: new\n", encoding="utf-8")
+    candidate = controller.collect_candidate(shadow_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        shadow_contract,
+        lease,
+        candidate,
+    )
+
+    assert receipt.verified is True
+    assert receipt.candidate_commit_allowed is True
+    assert receipt.repository_contract_gate_passed is True
+    assert [finding.kind for finding in receipt.repository_contract_findings] == [
+        "ci_workflow_authority_drift"
+    ]
+    assert receipt.repository_contract_findings[0].severity == "shadow"
+
+
+def test_candidate_verifier_fails_closed_for_policy_input_self_modification(scenario):
+    contract, lease, candidate, controller = scenario
+    policy_contract = contract.model_copy(
+        update={"allowed_files": ["bounded.txt", "AGENTS.md"]}
+    )
+    Path(lease.target_worktree, "AGENTS.md").write_text(
+        "modified authority\n",
+        encoding="utf-8",
+    )
+    candidate = controller.collect_candidate(policy_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        policy_contract,
+        lease,
+        candidate,
+    )
+
+    assert receipt.verified is False
+    assert receipt.candidate_commit_allowed is False
+    assert receipt.repository_contract_gate_passed is False
+    assert "repository_contract_self_modification:AGENTS.md" in receipt.failure_reasons
+    assert {finding.kind for finding in receipt.repository_contract_findings} >= {
+        "agent_instruction_authority_drift",
+        "policy_self_modification",
+    }
+
+
 def test_candidate_verifier_protects_explicit_contract_paths(scenario):
     contract, lease, candidate, controller = scenario
     protected_hash = hashlib.sha256(Path(lease.target_worktree, "bounded.txt").read_bytes()).hexdigest()
@@ -283,3 +350,24 @@ def test_candidate_verifier_protects_explicit_contract_paths(scenario):
     assert receipt.verified is False
     assert receipt.protected_contract_gate_passed is False
     assert receipt.failure_reasons == ["protected_contract_changed:bounded.txt"]
+
+
+def test_candidate_verifier_fails_closed_when_verifier_mutates_candidate_state(scenario):
+    contract, lease, candidate, controller = scenario
+    mutating_contract = contract.model_copy(
+        update={
+            "verifier_commands": [
+                "python3 -c 'from pathlib import Path; Path(\"side_effect.txt\").write_text(\"mutated\")'"
+            ]
+        }
+    )
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        mutating_contract,
+        lease,
+        candidate,
+    )
+
+    assert receipt.verified is False
+    assert receipt.candidate_commit_allowed is False
+    assert "verifier_mutated_candidate_state" in receipt.failure_reasons

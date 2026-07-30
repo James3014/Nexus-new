@@ -66,6 +66,24 @@ class NexusSelfHostedMCPServer:
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
             },
             {
+                "name": "nexus_self_hosted_wait_task",
+                "description": "Bounded poll until the task reaches ACTION_REQUIRED, FINAL_BLOCK, or TERMINAL.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 10},
+                        "poll_interval_seconds": {"type": "number", "exclusiveMinimum": 0, "default": 0.25},
+                    },
+                },
+            },
+            {
+                "name": "nexus_self_hosted_list_actionable_tasks",
+                "description": "List tasks whose deterministic task-action envelope requires caller attention.",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
                 "name": "nexus_self_hosted_compete_task",
                 "description": "Submit isolated worker candidates in parallel and apply the common verifier.",
                 "inputSchema": {
@@ -227,6 +245,18 @@ class NexusSelfHostedMCPServer:
                 },
             },
             {
+                "name": "nexus_self_hosted_close_without_candidate",
+                "description": "Fail-closed operation to close a RETAINED_FOR_REVIEW or FINAL_BLOCK task that never produced a candidate.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id", "superseded_by"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "superseded_by": {"type": "string"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_self_hosted_cancel_task",
                 "description": "Cancel a non-running task and apply its governed terminal Target cleanup.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
@@ -309,6 +339,14 @@ class NexusSelfHostedMCPServer:
         task_id = str(arguments.get("task_id", ""))
         if name == "nexus_self_hosted_get_task":
             return self.service.get_task(task_id)
+        if name == "nexus_self_hosted_wait_task":
+            return self.service.wait_task(
+                task_id,
+                timeout_seconds=float(arguments.get("timeout_seconds", 10.0)),
+                poll_interval_seconds=float(arguments.get("poll_interval_seconds", 0.25)),
+            )
+        if name == "nexus_self_hosted_list_actionable_tasks":
+            return self.service.list_actionable_tasks()
         if name == "nexus_self_hosted_get_receipt":
             return self.service.get_receipt(task_id)
         if name == "nexus_self_hosted_get_promotion_packet":
@@ -349,6 +387,11 @@ class NexusSelfHostedMCPServer:
             )
         if name == "nexus_self_hosted_close_retained_without_candidate":
             return self.service.close_retained_without_candidate(
+                task_id,
+                superseded_by=str(arguments.get("superseded_by", "")),
+            )
+        if name == "nexus_self_hosted_close_without_candidate":
+            return self.service.close_task_without_candidate(
                 task_id,
                 superseded_by=str(arguments.get("superseded_by", "")),
             )
