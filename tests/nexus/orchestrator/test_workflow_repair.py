@@ -659,6 +659,159 @@ def test_hook_permission_fail_closed(tmp_path, monkeypatch):
         get_canonical_git_hooks_dir()
 
 
+def test_timeout_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeypatch):
+    contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
+    target_path = Path(lease.target_worktree)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    svc = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    (target_path / "bounded.txt").write_text("dirty from timeout\n")
+
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": contract.task_id,
+        "status": "WORKER_RUNNING",
+        "attempt_id": "attempt-1",
+        "request": {
+            "task_id": contract.task_id,
+            "what": contract.objective,
+            "why": "Test auto closeout",
+            "allowed_files": contract.allowed_files,
+            "controller_repo_root": contract.controller_repo_root,
+            "target_repo_root": contract.target_repo_root,
+            "target_worktree_root": contract.target_worktree_root,
+            "controller_revision": contract.controller_revision,
+            "target_base_revision": contract.target_base_revision,
+        },
+        "contract": contract.model_dump(mode="json"),
+        "lease": asdict(lease),
+        "execution": None,
+        "executions": [],
+        "verified_receipt": None,
+        "attempt_resolution": None,
+        "promotion_status": "NOT_CREATED",
+    }
+    svc._write_state(contract.task_id, state)
+
+    def timeout_runner(contract, request, update):
+        raise TimeoutError("worker timed out after 900000 ms")
+
+    svc._custom_runner = timeout_runner
+    svc._run_owned_task(contract.task_id, "attempt-1")
+
+    final_state = svc.get_task(contract.task_id)
+    assert final_state["status"] == "RETAINED_FOR_REVIEW"
+    assert final_state["cleanup_decision"] in ("REMOVED", "ALREADY_REMOVED")
+    assert final_state["cleanup_performed"] is True
+    assert final_state.get("salvage_commit_sha") is not None
+    assert final_state.get("salvage_ref") is not None
+    assert not target_path.exists()
+
+
+def test_failed_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeypatch):
+    contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
+    target_path = Path(lease.target_worktree)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    svc = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    (target_path / "bounded.txt").write_text("dirty from failure\n")
+
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": contract.task_id,
+        "status": "WORKER_RUNNING",
+        "attempt_id": "attempt-1",
+        "request": {
+            "task_id": contract.task_id,
+            "what": contract.objective,
+            "why": "Test auto closeout",
+            "allowed_files": contract.allowed_files,
+            "controller_repo_root": contract.controller_repo_root,
+            "target_repo_root": contract.target_repo_root,
+            "target_worktree_root": contract.target_worktree_root,
+            "controller_revision": contract.controller_revision,
+            "target_base_revision": contract.target_base_revision,
+        },
+        "contract": contract.model_dump(mode="json"),
+        "lease": asdict(lease),
+        "execution": None,
+        "executions": [],
+        "verified_receipt": None,
+        "attempt_resolution": None,
+        "promotion_status": "NOT_CREATED",
+    }
+    svc._write_state(contract.task_id, state)
+
+    def fail_runner(contract, request, update):
+        raise RuntimeError("worker failed with exit code 42")
+
+    svc._custom_runner = fail_runner
+    svc._run_owned_task(contract.task_id, "attempt-1")
+
+    final_state = svc.get_task(contract.task_id)
+    assert final_state["status"] == "RETAINED_FOR_REVIEW"
+    assert final_state["cleanup_decision"] in ("REMOVED", "ALREADY_REMOVED")
+    assert final_state["cleanup_performed"] is True
+    assert final_state.get("salvage_commit_sha") is not None
+    assert not target_path.exists()
+
+
+def test_closeout_salvage_failure_preserves_retained_target_and_error(tmp_path, monkeypatch):
+    contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
+    target_path = Path(lease.target_worktree)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    svc = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    (target_path / "bounded.txt").write_text("dirty content\n")
+
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": contract.task_id,
+        "status": "WORKER_RUNNING",
+        "attempt_id": "attempt-1",
+        "request": {
+            "task_id": contract.task_id,
+            "what": contract.objective,
+            "why": "Test salvage failure",
+            "allowed_files": contract.allowed_files,
+            "controller_repo_root": contract.controller_repo_root,
+            "target_repo_root": contract.target_repo_root,
+            "target_worktree_root": contract.target_worktree_root,
+            "controller_revision": contract.controller_revision,
+            "target_base_revision": contract.target_base_revision,
+        },
+        "contract": contract.model_dump(mode="json"),
+        "lease": asdict(lease),
+        "execution": None,
+        "executions": [],
+        "verified_receipt": None,
+        "attempt_resolution": None,
+        "promotion_status": "NOT_CREATED",
+    }
+    svc._write_state(contract.task_id, state)
+
+    def failing_salvage(*args, **kwargs):
+        raise RuntimeError("salvage snapshot creation failed: index.lock")
+
+    monkeypatch.setattr(WorktreeManager, "create_salvage_snapshot", failing_salvage)
+
+    def timeout_runner(contract, request, update):
+        raise TimeoutError("worker timed out")
+
+    svc._custom_runner = timeout_runner
+    svc._run_owned_task(contract.task_id, "attempt-1")
+
+    final_state = svc.get_task(contract.task_id)
+    assert final_state["status"] == "RETAINED_FOR_REVIEW"
+    assert "worker timed out" in final_state.get("error", "")
+    assert target_path.exists()
+    assert final_state["cleanup_decision"] == "CLEANUP_BLOCKED"
+    assert "salvage snapshot creation failed" in final_state.get("cleanup_blocker", "")
+
+
 def test_self_hosted_task_service_has_single_integrate_approved_definition():
     import ast
     import collections
