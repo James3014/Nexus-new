@@ -67,7 +67,7 @@ class AgyAccountPoolManager:
             self._use_real_manager = use_real_manager
         else:
             resolved_mgr = self.resolve_manager_path(manager_path)
-            self._use_real_manager = bool(resolved_mgr and Path(resolved_mgr).is_file() and not accounts)
+            self._use_real_manager = bool(resolved_mgr and Path(resolved_mgr).is_file() and accounts is None)
 
         if self._use_real_manager:
             if not self._manager_path:

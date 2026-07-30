@@ -55,6 +55,7 @@ def test_account_pool_manager_active_and_rotation():
 
 def test_account_pool_manager_ensure_active_fails_when_empty():
     manager = AgyAccountPoolManager([])
+    assert manager._use_real_manager is False
     with pytest.raises(AgyAccountPoolError, match="No active AGY account"):
         manager.ensure_active()
 
