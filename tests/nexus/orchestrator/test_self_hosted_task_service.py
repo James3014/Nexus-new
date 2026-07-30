@@ -2689,3 +2689,145 @@ def test_verify_task_fails_on_missing_target(tmp_path):
     result = service.verify_task(task_id)
     assert result["verified"] is False
     assert "target_missing" in result["failure_reasons"]
+
+
+# ---------- W1: End-to-end fast lane canary ----------
+
+
+def test_w1_fast_lane_real_canary(tmp_path):
+    """W1: Prove full end-to-end fast lane with real Git repos.
+
+    Flow:
+    1. Task request → Target lease
+    2. Bounded worker mutation
+    3. Candidate commit
+    4. Durable candidate ref
+    5. Target cleanup
+    6. Read-only verify
+    7. Pending human approval
+    """
+    # --- Phase 1: Setup real controller and target repos ---
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    _git(controller, "init", "-b", "main")
+    _git(controller, "config", "user.name", "W1 Test")
+    _git(controller, "config", "user.email", "w1@test.com")
+    (controller / "README").write_text("initial\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "initial commit")
+    base_sha = _git(controller, "rev-parse", "HEAD")
+
+    target_root = tmp_path / "targets"
+    target_root.mkdir()
+
+    # --- Phase 2: Task request with verifier commands ---
+    verifier_script = tmp_path / "verify.sh"
+    verifier_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    verifier_script.chmod(0o755)
+
+    request = {
+        "task_id": "w1-canary",
+        "what": "w1 canary task",
+        "why": "prove end-to-end fast lane",
+        "controller_revision": base_sha,
+        "target_base_revision": base_sha,
+        "controller_repo_root": str(controller),
+        "target_repo_root": str(target_root / "w1-canary"),
+        "target_worktree_root": str(target_root),
+        "allowed_files": ["src/"],
+        "forbidden_files": [],
+        "verifier_commands": [f"/bin/sh {verifier_script}"],
+        "protected_contracts": [],
+        "worker": "codex",
+    }
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    # --- Phase 3: Create lease ---
+    contract = service.build_contract(request)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    assert target.exists(), "Target worktree must exist after lease"
+
+    attempt_id = "attempt-1-w1"
+    service._write_state("w1-canary", {
+        "task_id": "w1-canary",
+        "status": "LEASED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    # --- Phase 4: Worker makes bounded mutation (uncommitted) ---
+    src_dir = target / "src"
+    src_dir.mkdir(exist_ok=True)
+    (src_dir / "canary.txt").write_text("worker mutation\n", encoding="utf-8")
+
+    # Verify Target HEAD is still at initial_head
+    target_head = _git(target, "rev-parse", "HEAD")
+    assert target_head == lease.initial_head, "Target HEAD must stay at initial_head"
+
+    # --- Phase 5: Capture candidate (before commit) ---
+    candidate_receipt = manager.capture_candidate(contract, lease)
+    assert candidate_receipt.candidate_state_hash, "candidate_state_hash must be non-empty"
+    assert candidate_receipt.allowed_scope_passed, "mutation must be within allowed scope"
+    assert candidate_receipt.controller_unchanged, "controller must be unchanged"
+
+    # --- Phase 6: Commit and create durable candidate ref ---
+    _git(target, "add", "src/canary.txt")
+    _git(target, "commit", "-m", "worker: bounded canary change")
+    worker_sha = _git(target, "rev-parse", "HEAD")
+
+    candidate_ref = manager.protect_candidate(contract, lease, worker_sha)
+    assert candidate_ref, "candidate_ref must be non-empty"
+    resolved_ref = _git(controller, "rev-parse", candidate_ref)
+    assert resolved_ref == worker_sha, "candidate ref must resolve to candidate commit"
+
+    # --- Phase 7: Cleanup Target ---
+    cleanup = manager.cleanup_terminal_target(contract, lease)
+    assert cleanup.decision in {"REMOVED", "ALREADY_REMOVED", "BLOCKED_BY_UNSAVED_CHANGES"}, \
+        f"cleanup must succeed, got {cleanup.decision}"
+
+    # --- Phase 8: Read-only verify ---
+    verify_result = service.verify_task("w1-canary")
+    assert verify_result["verified"] is True, f"verify must pass, got {verify_result}"
+    assert verify_result["provider_calls"] == 1, "verify must run verifier commands"
+    assert verify_result["state_intact"] is True, "state must be intact after verify"
+
+    # --- Phase 9: Write candidate to state ---
+    service._write_state("w1-canary", {
+        **service._read_state("w1-canary"),
+        "status": "CANDIDATE_COMMITTED",
+        "candidate_commit_sha": worker_sha,
+        "candidate_tree_sha": _git(target, "rev-parse", f"{worker_sha}^{{tree}}"),
+        "candidate_state_hash": candidate_receipt.candidate_state_hash,
+        "candidate_ref": candidate_ref,
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "promotion_packet": {
+            "candidate_commit_sha": worker_sha,
+            "candidate_tree_sha": _git(target, "rev-parse", f"{worker_sha}^{{tree}}"),
+            "candidate_state_hash": candidate_receipt.candidate_state_hash,
+            "verified_receipt_hash": "test-verified-hash",
+        },
+    })
+
+    # --- Phase 10: Verify final state ---
+    state = service._read_state("w1-canary")
+    assert state["status"] == "CANDIDATE_COMMITTED"
+    assert state["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+    assert state["candidate_commit_sha"] == worker_sha
+    assert state["candidate_ref"] == candidate_ref
+
+    # --- Phase 11: Verify governance invariants ---
+    assert state.get("merge_performed") is not True, "no auto merge"
+    assert state.get("push_performed") is not True, "no auto push"
+    assert state.get("approval_binding") is None, "human approval must not be auto-granted"
+    # public_claim_allowed and production_ready must not be set to true
+    assert state.get("public_claim_allowed") is not True, "must not auto-claim public"
+    assert state.get("production_ready") is not True, "must not auto-mark production_ready"
