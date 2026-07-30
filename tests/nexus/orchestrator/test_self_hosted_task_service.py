@@ -2326,3 +2326,188 @@ def test_run_owned_task_terminal_failure_restore_already_restored_with_state(tmp
     assert state["salvage_commit_sha"] == "c" * 40
     assert state["salvage_ref"] == "refs/nexus-salvages/lc2-ar-state"
     assert state["task_branch_restored_to"] == "b" * 40
+
+
+# ---------- LC3: Real timeout / salvage / retry canary ----------
+
+
+def test_lc3_real_timeout_salvage_retry_canary(tmp_path):
+    """LC3: Prove full lifecycle with real Git repos and worktree operations.
+
+    Flow:
+    1. Task request → Target lease
+    2. Worker timeout/failure with dirty Target
+    3. Salvage commit created, durable salvage ref created
+    4. Target removed
+    5. Task branch restored to lease.initial_head
+    6. Terminal state persisted
+    7. Retry with refreshed integration revision → detached Target created
+    """
+    # --- Phase 1: Setup real controller and target repos ---
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    _git(controller, "init", "-b", "main")
+    _git(controller, "config", "user.name", "LC3 Test")
+    _git(controller, "config", "user.email", "lc3@test.com")
+    (controller / "README").write_text("initial\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "initial commit")
+    base_sha = _git(controller, "rev-parse", "HEAD")
+
+    target_root = tmp_path / "targets"
+    target_root.mkdir()
+
+    request = {
+        "task_id": "lc3-canary",
+        "what": "lc3 canary task",
+        "why": "prove full lifecycle",
+        "controller_revision": base_sha,
+        "target_base_revision": base_sha,
+        "controller_repo_root": str(controller),
+        "target_repo_root": str(target_root / "lc3-canary"),
+        "target_worktree_root": str(target_root),
+        "allowed_files": ["src/"],
+        "forbidden_files": [],
+        "verifier_commands": [],
+        "protected_contracts": [],
+        "worker": "codex",
+    }
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    # --- Phase 2: Create lease (real worktree) ---
+    contract = service.build_contract(request)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    assert target.exists(), "Target worktree must exist after lease"
+    assert target.is_dir()
+
+    attempt_id_1 = "attempt-1-lc3"
+
+    # Write initial state with lease
+    service._write_state("lc3-canary", {
+        "task_id": "lc3-canary",
+        "status": "LEASED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "attempt_id": attempt_id_1,
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    # --- Phase 3: Worker makes dirty changes in Target (uncommitted) ---
+    src_dir = target / "src"
+    src_dir.mkdir(exist_ok=True)
+    (src_dir / "worker.txt").write_text("worker mutation\n", encoding="utf-8")
+    # DO NOT commit — dirty state is what create_salvage_snapshot needs
+
+    # Verify branch still points to initial_head (no commit made)
+    branch_ref = f"refs/heads/nexus/task/lc3-canary"
+    branch_head = _git(controller, "rev-parse", branch_ref)
+    assert branch_head == lease.initial_head, "branch must still be at initial_head"
+
+    # --- Phase 4: Worker timeout/failure → salvage → cleanup → restore ---
+    salvage = manager.create_salvage_snapshot(contract, lease, attempt_id_1)
+    salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
+    salvage_ref = str(salvage.get("salvage_ref", "") or "")
+
+    assert salvage_commit, "salvage_commit must be non-empty"
+    assert salvage_ref, "salvage_ref must be non-empty"
+    # Salvage commit captures dirty state, differs from initial_head
+    assert salvage_commit != lease.initial_head, "salvage commit must differ from initial_head"
+
+    # Salvage ref resolves to salvage commit
+    resolved_salvage = _git(controller, "rev-parse", salvage_ref)
+    assert resolved_salvage == salvage_commit, "salvage ref must resolve to salvage commit"
+
+    # Cleanup target
+    cleanup = manager.cleanup_terminal_target(
+        contract, lease,
+        salvage_commit=salvage_commit,
+        salvage_ref=salvage_ref,
+    )
+    assert cleanup.decision in {"REMOVED", "ALREADY_REMOVED"}, f"cleanup must remove target, got {cleanup.decision}"
+
+    # Target no longer registered
+    registered = manager._registered_worktrees(controller)
+    target_registered = [
+        e for e in registered
+        if "worktree" in e
+        and Path(e["worktree"]).resolve() == target.resolve()
+    ]
+    assert not target_registered, "Target must not be registered after cleanup"
+
+    # Restore task branch
+    restore = manager.restore_task_branch_for_retry(
+        contract, lease, salvage_commit, salvage_ref,
+    )
+    assert restore["decision"] == "RESTORED", f"restore must succeed, got {restore['decision']}"
+    assert restore["restored_to"] == lease.initial_head, "must restore to lease.initial_head"
+
+    # Branch now at initial_head
+    branch_head_after = _git(controller, "rev-parse", branch_ref)
+    assert branch_head_after == lease.initial_head, \
+        f"branch must be at initial_head, got {branch_head_after}"
+
+    # Salvage ref still resolves
+    resolved_salvage_after = _git(controller, "rev-parse", salvage_ref)
+    assert resolved_salvage_after == salvage_commit, "salvage ref must still resolve"
+
+    # --- Phase 5: Write terminal state ---
+    service._write_state("lc3-canary", {
+        **service._read_state("lc3-canary"),
+        "status": "FINAL_BLOCK",
+        "terminal_status": "FINAL_BLOCK",
+        "state_retention_status": "TERMINAL",
+        "cleanup_decision": cleanup.decision,
+        "cleanup_performed": cleanup.performed,
+        "salvage_commit_sha": salvage_commit,
+        "salvage_ref": salvage_ref,
+        "task_branch_restore_decision": restore["decision"],
+        "task_branch_restored_to": restore["restored_to"],
+        "task_branch_restore_performed": True,
+        "task_branch_restore_verified": True,
+        "promotion_eligible": False,
+        "promotion_status": "NOT_CREATED",
+        "error": "worker timeout",
+    })
+
+    state_1 = service._read_state("lc3-canary")
+    assert state_1["attempt_id"] == attempt_id_1
+    assert state_1["promotion_eligible"] is False
+    assert state_1["promotion_status"] == "NOT_CREATED"
+    assert state_1["task_branch_restore_decision"] == "RESTORED"
+
+    # --- Phase 6: Retry with refreshed integration revision ---
+    (controller / "refresh.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(controller, "add", "refresh.txt")
+    _git(controller, "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(controller, "rev-parse", "HEAD")
+
+    request_2 = {
+        **request,
+        "controller_revision": refreshed_sha,
+        "target_base_revision": refreshed_sha,
+    }
+    contract_2 = service.build_contract(request_2)
+
+    # Terminal retry: submit_task should reactivate
+    result_2 = service.submit_task(request_2)
+    attempt_id_2 = result_2.get("attempt_id")
+    assert attempt_id_2 != attempt_id_1, "retry must use new attempt ID"
+    assert result_2["status"] == "SUBMITTED", f"retry status must be SUBMITTED, got {result_2['status']}"
+
+    # Create lease for retry (detached Target)
+    lease_2 = manager.create_lease(contract_2)
+    target_2 = Path(lease_2.target_worktree)
+    assert target_2.exists(), "retry Target must exist"
+    assert lease_2.target_detached is True, "retry Target must be detached"
+
+    # Verify no merge, push, or integration
+    state_2 = service._read_state("lc3-canary")
+    assert state_2.get("merge_performed") is not True
+    assert state_2.get("push_performed") is not True
