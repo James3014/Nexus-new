@@ -532,6 +532,167 @@ class WorktreeManager:
             self._run_git(["worktree", "prune"], cwd=controller)
         return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
 
+    def restore_task_branch_for_retry(
+        self,
+        contract: SelfHostedTaskContract,
+        salvage_commit: str,
+        salvage_ref: str,
+    ) -> str:
+        """
+        Restore the task branch to target_base_revision after durable salvage.
+
+        Safety check fail-closed conditions (ALL must hold):
+          1. Branch follows the nexus/task/<task_id> naming convention.
+          2. Branch currently points exactly to salvage_commit.
+          3. salvage_ref resolves to salvage_commit.
+          4. salvage_commit has exactly 1 parent.
+          5. The single parent equals contract.target_base_revision (initial_head).
+          6. Target is no longer a registered worktree.
+          7. No active candidate/promotion binding exists.
+          8. Branch update uses compare-and-swap (git update-ref with old-value).
+
+        Returns the restored branch SHA.
+        Raises RuntimeError with diagnostics on any violation (fail-closed).
+        """
+        controller = Path(contract.controller_repo_root).resolve()
+        task_id = contract.task_id
+        target_branch = f"nexus/task/{task_id}"
+        branch_ref = f"refs/heads/{target_branch}"
+        initial_head = contract.target_base_revision
+
+        # Check 1: Branch is a known task branch
+        if not target_branch.startswith("nexus/task/"):
+            raise RuntimeError(
+                f"Safety check 1 failed: branch '{target_branch}' "
+                f"does not follow nexus/task/<task_id> convention"
+            )
+
+        # Check 2: Branch currently points to salvage_commit
+        try:
+            current_branch_sha = self._run_git(
+                ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller
+            )
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Safety check 2 failed: cannot resolve task branch "
+                f"'{branch_ref}': {e}"
+            )
+        if current_branch_sha != salvage_commit:
+            raise RuntimeError(
+                f"Safety check 2 failed: task branch '{branch_ref}' points to "
+                f"{current_branch_sha}, expected salvage commit {salvage_commit}"
+            )
+
+        # Check 3: Salvage ref resolves to salvage_commit
+        try:
+            current_salvage_sha = self._run_git(
+                ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
+            )
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Safety check 3 failed: salvage ref '{salvage_ref}' not found: {e}"
+            )
+        if current_salvage_sha != salvage_commit:
+            raise RuntimeError(
+                f"Safety check 3 failed: salvage ref '{salvage_ref}' points to "
+                f"{current_salvage_sha}, expected {salvage_commit}"
+            )
+
+        # Check 4: Salvage commit has exactly 1 parent
+        try:
+            parent_info = self._run_git(
+                ["rev-list", "--parents", "-n", "1", salvage_commit], cwd=controller
+            )
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Safety check 4 failed: cannot inspect parents of "
+                f"{salvage_commit}: {e}"
+            )
+        parts = parent_info.split()
+        if len(parts) == 1:
+            raise RuntimeError(
+                f"Safety check 4 failed: salvage commit {salvage_commit} "
+                f"is a root commit (0 parents), expected exactly 1"
+            )
+        if len(parts) != 2:
+            raise RuntimeError(
+                f"Safety check 4 failed: salvage commit {salvage_commit} "
+                f"has {len(parts) - 1} parent(s), expected exactly 1"
+            )
+
+        # Check 5: Parent equals initial_head
+        actual_parent = parts[1]
+        if actual_parent != initial_head:
+            raise RuntimeError(
+                f"Safety check 5 failed: salvage commit parent {actual_parent} "
+                f"does not match target_base_revision (initial_head) {initial_head}"
+            )
+
+        # Check 6: Target is no longer a registered worktree
+        target_path = Path(contract.target_repo_root).resolve()
+        entry = self._worktree_entry(controller, target_path)
+        if entry is not None:
+            raise RuntimeError(
+                f"Safety check 6 failed: Target '{target_path}' is still "
+                f"a registered worktree; must be cleaned up first"
+            )
+
+        # Check 7: No active candidate/promotion binding
+        candidate_refs = self._run_git(
+            ["for-each-ref", "--format=%(refname)",
+             f"refs/nexus-candidates/{task_id}/"],
+            cwd=controller,
+        ).splitlines()
+        candidate_commit_refs = self._run_git(
+            ["for-each-ref", "--format=%(refname)",
+             f"refs/nexus-candidate-commits/{task_id}/"],
+            cwd=controller,
+        ).splitlines()
+        try:
+            self._run_git(
+                ["rev-parse", f"refs/nexus-candidates/{task_id}^{{commit}}"],
+                cwd=controller,
+            )
+            has_legacy = True
+        except RuntimeError:
+            has_legacy = False
+        if candidate_refs or candidate_commit_refs or has_legacy:
+            violations = []
+            if candidate_refs:
+                violations.append(f"nexus-candidates/{task_id}/ ({len(candidate_refs)} ref(s))")
+            if candidate_commit_refs:
+                violations.append(f"nexus-candidate-commits/{task_id}/ ({len(candidate_commit_refs)} ref(s))")
+            if has_legacy:
+                violations.append(f"nexus-candidates/{task_id} (legacy)")
+            raise RuntimeError(
+                f"Safety check 7 failed: active candidate binding(s) exist "
+                f"for task {task_id}: {'; '.join(violations)}"
+            )
+
+        # Check 8: Atomic compare-and-swap branch update
+        try:
+            self._run_git(
+                ["update-ref", branch_ref, initial_head, salvage_commit],
+                cwd=controller,
+            )
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Safety check 8 failed (CAS): branch '{branch_ref}' was "
+                f"concurrently modified away from {salvage_commit}: {e}"
+            )
+
+        # Post-restoration verification
+        verified = self._run_git(
+            ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller
+        )
+        if verified != initial_head:
+            raise RuntimeError(
+                f"Post-restoration verification failed: branch '{branch_ref}' "
+                f"resolved to {verified}, expected {initial_head}"
+            )
+
+        return verified
+
     @staticmethod
     def _cleanup_receipt(contract, lease, decision, blocker, performed, eligible):
         return TargetCleanupReceipt(
