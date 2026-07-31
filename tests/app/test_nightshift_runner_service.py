@@ -60,6 +60,22 @@ def test_nightshift_finalizes_existing_unified_receipt(tmp_path: Path):
     )
     receipt = UnifiedRuntime().run(
         request,
+        capability_invokers={
+            name: (lambda context, _name=name: {
+                "task_id": context["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "evidence_refs": [f"test:{_name}:{context['task_id']}:fixture"],
+            })
+            for name in (
+                "harness_preflight_sensor",
+                "delivery_gate",
+                "mempalace_gate",
+                "artifact_gate",
+                "claim_gate",
+                "research_route",
+            )
+        },
         online_invoker=lambda _context: {
             "invoked": True,
             "output_delivered": True,

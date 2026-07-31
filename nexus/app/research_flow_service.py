@@ -5,6 +5,7 @@ import time
 import concurrent.futures
 import importlib.util
 import subprocess
+import sys
 import re
 import difflib
 import os
@@ -1009,10 +1010,11 @@ def run_auto_flow(
     target_path = (repo_root / target_file).resolve()
     if not target_path.exists():
         raise click.ClickException(f"Target file not found: {target_file}")
-    pytest_bin = str((repo_root / ".venv" / "bin" / "pytest").resolve())
-    if not Path(pytest_bin).exists():
-        pytest_bin = "pytest"
-    pytest_cmd = [pytest_bin, "-q", "--maxfail=1", test_file]
+    # Run the child verifier with the interpreter that owns this process.
+    # A temporary task repository does not have its own .venv, and resolving
+    # a bare pytest binary can re-enter a different environment (or uv cache)
+    # and hang before the target test starts.
+    pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", test_file]
     original_code = target_path.read_text(encoding="utf-8")
     timing_breakdown_sec["target_io_sec"] = round(time.monotonic() - setup_started_at, 4)
     normalized_success_criteria = (success_criteria or "all_target_tests_pass").strip()
