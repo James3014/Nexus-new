@@ -5,7 +5,7 @@
 - task_id: `authorized-deletion-contract`
 - campaign_id: `lifecycle-hardening-followup`
 - artifact_authority: current
-- status: PLANNED
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `verify-task-target-integrity` integrated
 - read_only: false
@@ -28,7 +28,9 @@ Define an explicit, current-base `authorized_deletions` contract for lifecycle v
 - `nexus/orchestrator/candidate_verifier.py`
 - `nexus/orchestrator/candidate_commit.py`
 - `nexus/orchestrator/self_hosted_task_service.py`
-- `scripts/engine/commands/self_hosted_actions.py`
+- `nexus/orchestrator/self_hosted_mcp.py`
+- `nexus/orchestrator/worktree_manager.py`
+- `scripts/engine/nexus_cli.py`
 - `tests/nexus/orchestrator/test_candidate_verifier.py`
 - `tests/nexus/orchestrator/test_candidate_commit.py`
 - `tests/nexus/orchestrator/test_self_hosted_task_service.py`
@@ -65,6 +67,13 @@ The current lifecycle contract can represent and verify authorized deletions wit
 ## Residual debt
 
 Workspace cleanup apply and P6 canonical-root cutover require separate owner-authorized cards bound to fresh inventory/plan hashes.
+
+## Integrated evidence
+
+- commit: `063bfefd9`
+- verification: candidate/verifier, candidate/commit, self-hosted service, contract, MCP, HTTP, CLI, and ops suites (`198 passed`)
+- boundaries: undeclared deletion, out-of-scope authorization, and authorization hash tampering fail closed; explicit authorized deletion is committed only with matching receipt evidence
+- scope: nine implementation/test files, no tracked deletions
 
 ## Block classification
 

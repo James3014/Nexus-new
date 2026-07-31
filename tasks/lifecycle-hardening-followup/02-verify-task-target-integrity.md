@@ -5,7 +5,7 @@
 - task_id: `verify-task-target-integrity`
 - campaign_id: `lifecycle-hardening-followup`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `startup-report-path-portability` integrated
 - read_only: false
@@ -59,6 +59,13 @@ No verifier-created Target mutation can produce a verified result, existing vali
 ## Residual debt
 
 Authorized-deletion contract remains separate. Cleanup apply cannot infer promotion from this verification card.
+
+## Integrated evidence
+
+- commit: `dd61dc2b7`
+- verification: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider tests/nexus/orchestrator/test_self_hosted_task_service.py` (`89 passed`)
+- RED→GREEN: verifier-created `verifier-artifact.txt` now yields `target_digest_drift_during_verification` and `verified=false`
+- scope: two allowed files, no tracked deletions
 
 ## Block classification
 

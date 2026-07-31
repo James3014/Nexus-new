@@ -18,15 +18,17 @@ Close the two verified lifecycle gaps before applying workspace cleanup: startup
 
 ## Current Frontier
 
-`verify-task-target-integrity`
+`authorized-deletion-contract`
 
 ## Ready Cards
 
-- `verify-task-target-integrity`: ready on clean Target at `41b55bf31`.
+- None; all three implementation cards are integrated with owner review pending.
 
 ## Completed Cards
 
 - `startup-report-path-portability`: INTEGRATED_WITH_OWNER_REVIEW at `41b55bf31`; 8 focused tests passed and live external-state startup returned `ENFORCED`.
+- `verify-task-target-integrity`: INTEGRATED_WITH_OWNER_REVIEW at `dd61dc2b7`; current-base verifier mutation regression and the full self-hosted task-service suite passed (`89 passed`).
+- `authorized-deletion-contract`: INTEGRATED_WITH_OWNER_REVIEW at `063bfefd9`; contract, verifier, commit, MCP, CLI, and self-hosted lifecycle regression suites passed (`198 passed`).
 
 ## Blocked Cards
 
