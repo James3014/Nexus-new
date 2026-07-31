@@ -1,5 +1,7 @@
+import copy
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -2344,7 +2346,7 @@ def test_run_owned_task_terminal_failure_restore_already_restored_with_state(tmp
 
 
 
-def test_lc3_service_path_canary(tmp_path):
+def test_lc3_service_path_canary(tmp_path, monkeypatch):
     """LC3: Formal service-path canary for timeout/salvage/retry.
 
     Flow through formal service path:
@@ -2476,6 +2478,34 @@ def test_lc3_service_path_canary(tmp_path):
     except Exception:
         pass
     assert not target_still_registered, "Target must not be registered after cleanup"
+
+    # --- Phase 7: Revision-forward retry reactivates the task and permits a detached Target ---
+    first_attempt_id = state["attempt_id"]
+    (controller / "refreshed.txt").write_text("refreshed revision\n", encoding="utf-8")
+    _git(controller, "add", "refreshed.txt")
+    _git(controller, "commit", "-m", "refresh integration revision")
+    refreshed_sha = _git(controller, "rev-parse", "HEAD")
+    refreshed_request = {
+        **request,
+        "controller_revision": refreshed_sha,
+        "target_base_revision": refreshed_sha,
+    }
+
+    # Keep the retry at SUBMITTED so the test can inspect the physical lease deterministically.
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda task_id, attempt_id: service._read_state(task_id),
+    )
+    retried = service.submit_task(refreshed_request)
+    assert retried["attempt_id"] != first_attempt_id
+    assert retried["status"] == "SUBMITTED"
+
+    refreshed_contract = service.build_contract(refreshed_request)
+    retry_lease = manager.create_lease(refreshed_contract)
+    assert retry_lease.target_detached is True
+    assert retry_lease.initial_head == refreshed_sha
+    assert Path(retry_lease.target_worktree).exists()
 
 
 # ---------- W0: Read-only verification entrypoint tests ----------
@@ -2658,13 +2688,14 @@ def test_verify_task_fails_on_missing_target(tmp_path):
 
 
 def test_w1_service_path_canary(tmp_path):
-    """W1: Formal service-path canary for happy path via _run_default_resumable.
+    """W1: Formal service-path canary for the owner-controlled happy path.
 
     Flow through formal service path:
-    1. Pre-set state with SUBMITTED + lease
-    2. Mock worker makes bounded mutation, returns EXECUTION_COMPLETED
-    3. _run_default_resumable: capture_candidate -> CandidateVerifier -> commit -> protect -> cleanup
-    4. Final state: PENDING_HUMAN_APPROVAL, cleanup REMOVED
+    1. submit_task creates durable task state
+    2. _run_default_resumable creates the real Target lease
+    3. Mock worker makes bounded mutation and returns EXECUTION_COMPLETED
+    4. CandidateVerifier -> commit -> durable ref -> cleanup
+    5. Final state: PENDING_HUMAN_APPROVAL, cleanup REMOVED
 
     Prohibited: manual commit, manual protect candidate ref, manual _write_state
     to force candidate status, BLOCKED_BY_UNSAVED_CHANGES as success.
@@ -2704,73 +2735,41 @@ def test_w1_service_path_canary(tmp_path):
         "worker": "codex",
     }
 
-    # --- Phase 2: Create real lease ---
+    # --- Phase 2: Configure a deterministic worker and run submit_task inline ---
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     manager = WorktreeManager(root_dir=str(target_root))
-    contract = service.build_contract(request)
-    lease = manager.create_lease(contract)
-    target = Path(lease.target_worktree)
-    assert target.exists(), "Target worktree must exist after real lease"
 
-    # --- Phase 3: Pre-set state with WORKER_RUNNING + lease ---
-    attempt_id = "attempt-1-w1-svc"
-    service._write_state("w1-svc-canary", {
-        "schema": "nexus.self_hosted_task_state.v1",
-        "task_id": "w1-svc-canary",
-        "status": "WORKER_RUNNING",
-        "submitted_at": "2026-01-01T00:00:00Z",
-        "request": request,
-        "contract": contract.model_dump(mode="json"),
-        "contract_hash": contract.contract_hash,
-        "controller_worktree": str(controller),
-        "controller_revision": base_sha,
-        "target_worktree": str(target),
-        "target_branch": f"nexus/task/w1-svc-canary",
-        "attempt_id": attempt_id,
-        "attempts": [{"attempt_id": attempt_id, "started_at": "2026-01-01T00:00:00Z"}],
-        "lease": lease.__dict__,
-        "worker_pid": None,
-        "worker_child_pgid": None,
-        "active_provider": "codex",
-        "promotion_status": "NOT_CREATED",
-        "execution_lane": "FAST_LANE",
-        "fast_lane_eligible": True,
-        "maximum_provider_calls": 1,
-        "maximum_replans": 0,
-        "fallback_disabled": True,
-    })
-
-    # --- Phase 4: Mock worker makes bounded mutation, returns success ---
     from unittest.mock import MagicMock
 
-    mock_receipt = WorkerExecutionReceipt(
-        provider="codex",
-        task_id="w1-svc-canary",
-        target_worktree=str(target),
-        worker_status="completed",
-        outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
-        exit_code=0,
-        executable_identity="mock-codex",
-        argv=("mock-codex",),
-        stdout_sha256="a" * 64,
-        stderr_sha256="b" * 64,
-        wall_time_ms=100,
-        process_group_id=os.getpid(),
-        process_group_killed=False,
-        timed_out=False,
-        provider_calls=1,
-        evidence_complete=True,
-        commit_created=False,
-        merge_performed=False,
-        push_performed=False,
-    )
+    observed_target: dict[str, Path] = {}
 
     def mock_invoke(provider, contract_arg, lease_arg, *, prompt, **kwargs):
-        # Make bounded mutation in the allowed path
-        src = target / "src"
+        target_path = Path(lease_arg.target_worktree)
+        observed_target["path"] = target_path
+        src = target_path / "src"
         src.mkdir(exist_ok=True)
         (src / "canary.txt").write_text("worker bounded mutation\n", encoding="utf-8")
-        return mock_receipt
+        return WorkerExecutionReceipt(
+            provider=provider,
+            task_id=contract_arg.task_id,
+            target_worktree=str(target_path),
+            worker_status="completed",
+            outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+            exit_code=0,
+            executable_identity="mock-codex",
+            argv=("mock-codex",),
+            stdout_sha256="a" * 64,
+            stderr_sha256="b" * 64,
+            wall_time_ms=100,
+            process_group_id=os.getpid(),
+            process_group_killed=False,
+            timed_out=False,
+            provider_calls=1,
+            evidence_complete=True,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+        )
 
     service.worker_registry = MagicMock()
     service.worker_registry.invoke = mock_invoke
@@ -2784,43 +2783,39 @@ def test_w1_service_path_canary(tmp_path):
         reason=None,
     )
 
-    # --- Phase 5: Execute via _run_default_resumable (formal happy path) ---
-    update_log = []
-    def capture_update(status, values):
-        update_log.append((status, values))
-        service._checkpoint("w1-svc-canary", status, values, attempt_id=attempt_id)
+    def launch_inline(task_id, attempt_id):
+        service._run_owned_task(task_id, attempt_id)
+        return service._read_state(task_id)
 
-    result = service._run_default_resumable(
-        contract, request, capture_update,
-        task_id="w1-svc-canary", attempt_id=attempt_id,
-    )
+    service._launch_worker = launch_inline
+    submitted = service.submit_task(request)
 
-    # Write final state (normally done by _run_owned_task after _run_default_resumable returns)
-    final_status = result.get("terminal_status", "PENDING_HUMAN_APPROVAL")
-    service._checkpoint("w1-svc-canary", final_status, result, attempt_id=attempt_id)
-
-    # --- Phase 6: Verify result ---
-    assert result.get("terminal_status") == "PENDING_HUMAN_APPROVAL", \
-        f"must reach PENDING_HUMAN_APPROVAL, got {result.get('terminal_status')}"
-    assert result.get("candidate_status") == "PENDING_HUMAN_APPROVAL"
-    assert result.get("cleanup_decision") == "REMOVED", \
-        f"cleanup must be REMOVED, got {result.get('cleanup_decision')}"
+    # --- Phase 3: Verify final state written by the full submit/owner path ---
+    state = service._read_state("w1-svc-canary")
+    assert submitted["status"] == "PENDING_HUMAN_APPROVAL"
+    lease = TargetWorktreeLease(**state["lease"])
+    target = Path(lease.target_worktree)
+    assert observed_target["path"] == target
+    assert state is not None, "state must exist"
+    assert state.get("terminal_status") == "PENDING_HUMAN_APPROVAL", \
+        f"must reach PENDING_HUMAN_APPROVAL, got {state.get('terminal_status')}"
+    assert state.get("candidate_status") == "PENDING_HUMAN_APPROVAL"
+    assert state.get("cleanup_decision") == "REMOVED", \
+        f"cleanup must be REMOVED, got {state.get('cleanup_decision')}"
 
     # --- Phase 7: Verify candidate commit and ref ---
-    candidate_ref = result.get("candidate_ref")
-    packet = result.get("promotion_packet")
-    candidate_commit = packet.candidate_commit_sha if packet else None
+    candidate_ref = state.get("candidate_ref")
+    packet = state.get("promotion_packet") or {}
+    candidate_commit = packet.get("candidate_commit_sha")
     assert candidate_ref, "candidate_ref must be set"
     assert candidate_commit, "candidate_commit_sha must be set"
 
-    # Candidate ref resolves to candidate commit in controller
     resolved_ref = _git(controller, "rev-parse", candidate_ref)
     assert resolved_ref == candidate_commit, "candidate ref must resolve to candidate commit"
 
     # --- Phase 8: Verify Target removed ---
     assert not target.exists(), "Target worktree must be removed after cleanup"
 
-    # Target not registered
     target_registered = False
     try:
         registered = manager._registered_worktrees(controller)
@@ -2832,18 +2827,31 @@ def test_w1_service_path_canary(tmp_path):
         pass
     assert not target_registered, "Target must not be registered after cleanup"
 
-    # --- Phase 9: Verify verified receipt present ---
-    verified_receipt = result.get("verified_receipt")
-    assert verified_receipt is not None, "verified_receipt must be present"
-    assert getattr(verified_receipt, "verified", False) is True, "receipt must be verified"
-
-    # --- Phase 10: Verify state via _read_state ---
-    state = service._read_state("w1-svc-canary")
-    assert state is not None, "state must exist"
+    # --- Phase 9: Verify durable verified receipt present ---
+    verified_receipt = state.get("verified_receipt") or {}
+    assert verified_receipt.get("verified") is True, "receipt must be verified"
     assert state.get("candidate_commit_sha") == candidate_commit
     assert state.get("candidate_ref") == candidate_ref
-    assert state.get("status") in {"CANDIDATE_COMMITTED", "PENDING_HUMAN_APPROVAL"}
+    assert state.get("status") == "PENDING_HUMAN_APPROVAL"
     assert state.get("promotion_status") == "PENDING_HUMAN_APPROVAL"
+
+    # --- Phase 10: W0 must verify the protected Candidate after Target cleanup ---
+    read_only_verification = service.verify_task("w1-svc-canary")
+    assert read_only_verification["verified"] is True, read_only_verification
+    assert read_only_verification["verdict"] == "VERIFIED"
+    assert read_only_verification["verification_mode"] == "durable_candidate_receipt"
+    assert read_only_verification["provider_calls"] == 0
+    assert read_only_verification["verifier_commands_executed"] == []
+
+    # A recreated path at the old Target location must not switch verification back
+    # to mutable Target mode after durable cleanup.
+    target.mkdir(parents=True)
+    (target / "untrusted.txt").write_text("not authoritative\n", encoding="utf-8")
+    recreated_target_result = service.verify_task("w1-svc-canary")
+    assert recreated_target_result["verified"] is True, recreated_target_result
+    assert recreated_target_result["verification_mode"] == "durable_candidate_receipt"
+    assert recreated_target_result["provider_calls"] == 0
+    shutil.rmtree(target)
 
     # --- Phase 11: Governance invariants ---
     assert state.get("merge_performed") is not True, "no auto merge"
@@ -2853,10 +2861,42 @@ def test_w1_service_path_canary(tmp_path):
     assert state.get("production_ready") is not True, "no auto production ready"
 
     # --- Phase 12: Verify verified receipt details ---
-    vr = verified_receipt
-    assert getattr(vr, "scope_gate_passed", False) is True, "scope gate must pass"
-    assert getattr(vr, "deletion_gate_passed", False) is True, "deletion gate must pass"
-    assert getattr(vr, "controller_gate_passed", False) is True, "controller gate must pass"
-    assert getattr(vr, "verifier_gate_passed", False) is True, "verifier gate must pass"
-    assert getattr(vr, "public_claim_allowed", True) is False, "public claim must not be allowed"
-    assert getattr(vr, "production_ready", True) is False, "must not be production ready"
+    assert verified_receipt.get("scope_gate_passed") is True, "scope gate must pass"
+    assert verified_receipt.get("deletion_gate_passed") is True, "deletion gate must pass"
+    assert verified_receipt.get("controller_gate_passed") is True, "controller gate must pass"
+    assert verified_receipt.get("verifier_gate_passed") is True, "verifier gate must pass"
+    assert verified_receipt.get("public_claim_allowed") is False, "public claim must not be allowed"
+    assert verified_receipt.get("production_ready") is False, "must not be production ready"
+
+    # --- Phase 13: Durable verification must fail closed on ref or receipt tamper ---
+    original_state = service._read_state("w1-svc-canary")
+
+    target.mkdir(parents=True)
+    (target / "recreated.txt").write_text("untrusted replacement\n", encoding="utf-8")
+    missing_binding = copy.deepcopy(original_state)
+    missing_binding["candidate_commit_sha"] = None
+    missing_binding["candidate_tree_sha"] = None
+    missing_binding["candidate_ref"] = None
+    missing_binding["candidate_state_hash"] = None
+    missing_binding["verified_receipt_hash"] = None
+    missing_binding["promotion_packet"] = {}
+    service._write_state("w1-svc-canary", missing_binding)
+    missing_binding_result = service.verify_task("w1-svc-canary")
+    assert missing_binding_result["verified"] is False
+    assert "durable_candidate_binding_missing" in missing_binding_result["failure_reasons"]
+    shutil.rmtree(target)
+
+    tampered_ref = copy.deepcopy(original_state)
+    tampered_ref["candidate_ref"] = "refs/heads/main"
+    service._write_state("w1-svc-canary", tampered_ref)
+    tampered_ref_result = service.verify_task("w1-svc-canary")
+    assert tampered_ref_result["verified"] is False
+    assert "candidate_ref_namespace_invalid" in tampered_ref_result["failure_reasons"]
+
+    tampered_hash = copy.deepcopy(original_state)
+    tampered_hash["promotion_packet"]["verified_receipt_hash"] = "0" * 64
+    tampered_hash["verified_receipt_hash"] = "0" * 64
+    service._write_state("w1-svc-canary", tampered_hash)
+    tampered_hash_result = service.verify_task("w1-svc-canary")
+    assert tampered_hash_result["verified"] is False
+    assert "verified_receipt_hash_mismatch" in tampered_hash_result["failure_reasons"]

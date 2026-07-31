@@ -695,11 +695,14 @@ def test_timeout_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeyp
     svc._run_owned_task(contract.task_id, "attempt-1")
 
     final_state = svc.get_task(contract.task_id)
-    assert final_state["status"] == "RETAINED_FOR_REVIEW"
+    assert final_state["status"] == "FINAL_BLOCK"
+    assert final_state["terminal_status"] == "FINAL_BLOCK"
     assert final_state["cleanup_decision"] in ("REMOVED", "ALREADY_REMOVED")
     assert final_state["cleanup_performed"] is True
     assert final_state.get("salvage_commit_sha") is not None
     assert final_state.get("salvage_ref") is not None
+    assert final_state["task_branch_restore_decision"] in ("RESTORED", "ALREADY_RESTORED")
+    assert final_state["task_branch_restore_verified"] is True
     assert not target_path.exists()
 
 
@@ -745,10 +748,13 @@ def test_failed_dirty_worker_auto_invokes_salvage_and_cleanup(tmp_path, monkeypa
     svc._run_owned_task(contract.task_id, "attempt-1")
 
     final_state = svc.get_task(contract.task_id)
-    assert final_state["status"] == "RETAINED_FOR_REVIEW"
+    assert final_state["status"] == "FINAL_BLOCK"
+    assert final_state["terminal_status"] == "FINAL_BLOCK"
     assert final_state["cleanup_decision"] in ("REMOVED", "ALREADY_REMOVED")
     assert final_state["cleanup_performed"] is True
     assert final_state.get("salvage_commit_sha") is not None
+    assert final_state["task_branch_restore_decision"] in ("RESTORED", "ALREADY_RESTORED")
+    assert final_state["task_branch_restore_verified"] is True
     assert not target_path.exists()
 
 

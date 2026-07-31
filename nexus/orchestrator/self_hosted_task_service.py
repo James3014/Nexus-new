@@ -1161,6 +1161,8 @@ class SelfHostedTaskService:
                                             "task_branch_restored_to": restore_result["restored_to"],
                                             "task_branch_restore_performed": True,
                                             "task_branch_restore_verified": True,
+                                            "terminal_status": "FINAL_BLOCK",
+                                            "state_retention_status": "TERMINAL",
                                         })
                                     except Exception as restore_exc:
                                         cleanup_values.update({
@@ -2456,25 +2458,148 @@ class SelfHostedTaskService:
         if candidate_commit and not promotion_packet.get("candidate_state_hash"):
             failures.append("candidate_state_hash_missing")
 
-        # --- Phase 4: Target validation ---
+        # --- Phase 4: Target or durable post-cleanup Candidate validation ---
         target_worktree = (
             state_mid.get("target_worktree")
             or (lease_data.get("target_worktree") if lease_data else None)
             or (contract_data.get("target_repo_root") if contract_data else None)
         )
+        verification_mode = "target"
+        durable_candidate_mode = False
+        verified_receipt = state_mid.get("verified_receipt") or {}
+        cleanup_decision = state_mid.get("cleanup_decision")
+
         if not target_worktree:
             failures.append("target_worktree_missing")
         else:
             target_path = Path(target_worktree)
-            if not target_path.exists():
-                failures.append("target_missing")
-            elif not target_path.is_dir():
-                failures.append("target_not_directory")
+            if (
+                cleanup_decision in {"REMOVED", "ALREADY_REMOVED"}
+                and candidate_commit
+                and candidate_ref
+                and promotion_packet
+                and verified_receipt
+            ):
+                verification_mode = "durable_candidate_receipt"
+                durable_candidate_mode = True
+                import re
+
+                candidate_tree = state_mid.get("candidate_tree_sha") or promotion_packet.get("candidate_tree_sha")
+                candidate_state_hash = state_mid.get("candidate_state_hash") or promotion_packet.get("candidate_state_hash")
+                verified_receipt_hash = state_mid.get("verified_receipt_hash") or promotion_packet.get("verified_receipt_hash")
+                controller_root = (
+                    state_mid.get("controller_worktree")
+                    or (contract_data.get("controller_repo_root") if contract_data else None)
+                )
+                candidate_ref_pattern = re.compile(
+                    rf"refs/nexus-(?:candidates|candidate-commits)/{re.escape(task_id)}/[0-9a-f]{{40}}"
+                )
+
+                if not re.fullmatch(r"[0-9a-f]{40}", str(candidate_commit)):
+                    failures.append("candidate_commit_invalid_format")
+                if not re.fullmatch(r"[0-9a-f]{40}", str(candidate_tree or "")):
+                    failures.append("candidate_tree_invalid_format")
+                if not re.fullmatch(r"[0-9a-f]{64}", str(candidate_state_hash or "")):
+                    failures.append("candidate_state_hash_invalid_format")
+                if not re.fullmatch(r"[0-9a-f]{64}", str(verified_receipt_hash or "")):
+                    failures.append("verified_receipt_hash_invalid_format")
+                if not candidate_ref_pattern.fullmatch(str(candidate_ref)):
+                    failures.append("candidate_ref_namespace_invalid")
+                if not controller_root or not Path(controller_root).is_dir():
+                    failures.append("controller_repo_unavailable")
+                else:
+                    try:
+                        resolved_ref = subprocess.run(
+                            ["git", "rev-parse", "--verify", str(candidate_ref)],
+                            cwd=controller_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=10.0,
+                        )
+                        if resolved_ref.returncode != 0:
+                            failures.append("candidate_ref_unresolved")
+                        elif resolved_ref.stdout.strip() != candidate_commit:
+                            failures.append("candidate_ref_commit_mismatch")
+
+                        resolved_tree = subprocess.run(
+                            ["git", "rev-parse", "--verify", f"{candidate_ref}^{{tree}}"],
+                            cwd=controller_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=10.0,
+                        )
+                        if resolved_tree.returncode != 0:
+                            failures.append("candidate_ref_tree_unresolved")
+                        elif resolved_tree.stdout.strip() != candidate_tree:
+                            failures.append("candidate_ref_tree_mismatch")
+                    except (subprocess.TimeoutExpired, OSError) as exc:
+                        failures.append(f"candidate_ref_verification_error:{exc}")
+
+                for field, expected in (
+                    ("task_id", task_id),
+                    ("contract_hash", contract_hash),
+                    ("lease_id", lease_data.get("lease_id") if lease_data else None),
+                    ("candidate_state_hash", candidate_state_hash),
+                ):
+                    if verified_receipt.get(field) != expected:
+                        failures.append(f"verified_receipt_{field}_mismatch")
+
+                if not verified_receipt.get("verified"):
+                    failures.append("verified_receipt_not_verified")
+                if not verified_receipt.get("candidate_commit_allowed"):
+                    failures.append("verified_receipt_commit_not_allowed")
+                if verified_receipt.get("public_claim_allowed") is not False:
+                    failures.append("verified_receipt_public_claim_boundary_invalid")
+                if verified_receipt.get("production_ready") is not False:
+                    failures.append("verified_receipt_production_boundary_invalid")
+                if verified_receipt.get("merge_performed") is not False:
+                    failures.append("verified_receipt_merge_boundary_invalid")
+
+                canonical_receipt = json.dumps(
+                    verified_receipt,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                actual_receipt_hash = hashlib.sha256(canonical_receipt).hexdigest()
+                if actual_receipt_hash != verified_receipt_hash:
+                    failures.append("verified_receipt_hash_mismatch")
+
+                for field in (
+                    "task_id",
+                    "contract_hash",
+                    "controller_revision",
+                    "target_base_revision",
+                    "candidate_commit_sha",
+                    "candidate_tree_sha",
+                    "candidate_state_hash",
+                    "verified_receipt_hash",
+                ):
+                    expected = {
+                        "task_id": task_id,
+                        "contract_hash": contract_hash,
+                        "controller_revision": contract_data.get("controller_revision") if contract_data else None,
+                        "target_base_revision": contract_data.get("target_base_revision") if contract_data else None,
+                        "candidate_commit_sha": candidate_commit,
+                        "candidate_tree_sha": candidate_tree,
+                        "candidate_state_hash": candidate_state_hash,
+                        "verified_receipt_hash": verified_receipt_hash,
+                    }[field]
+                    if promotion_packet.get(field) != expected:
+                        failures.append(f"promotion_packet_{field}_mismatch")
+            elif cleanup_decision in {"REMOVED", "ALREADY_REMOVED"}:
+                verification_mode = "durable_candidate_receipt"
+                failures.append("durable_candidate_binding_missing")
+            elif target_path.exists():
+                if not target_path.is_dir():
+                    failures.append("target_not_directory")
+                else:
+                    try:
+                        list(target_path.iterdir())
+                    except PermissionError:
+                        failures.append("target_unreadable")
             else:
-                try:
-                    list(target_path.iterdir())
-                except PermissionError:
-                    failures.append("target_unreadable")
+                failures.append("target_missing")
 
         # --- Phase 5: Integration SHA validation (actual ancestor check) ---
         integration_result_sha = state_mid.get("integration_result_sha")
@@ -2515,7 +2640,9 @@ class SelfHostedTaskService:
         verifier_evidence: list[dict[str, Any]] = []
         verifier_commands_executed: list[str] = []
 
-        if target_worktree and Path(target_worktree).is_dir() and verifier_commands:
+        if durable_candidate_mode:
+            verifier_evidence = list(verified_receipt.get("verifier_evidence") or [])
+        elif target_worktree and Path(target_worktree).is_dir() and verifier_commands:
             class _MinimalContract:
                 pass
             _min = _MinimalContract()
@@ -2565,6 +2692,7 @@ class SelfHostedTaskService:
             "verified": verified,
             "failure_reasons": failures,
             "provider_calls": 0,
+            "verification_mode": verification_mode,
             "verifier_commands_executed": verifier_commands_executed,
             "verifier_evidence": verifier_evidence,
             "status": status,
