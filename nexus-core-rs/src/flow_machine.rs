@@ -33,7 +33,10 @@ impl FlowStateMachine {
         match current {
             FlowState::Intake => matches!(
                 next,
-                FlowState::Clarify | FlowState::Outline | FlowState::Plan
+                FlowState::Clarify
+                    | FlowState::Outline
+                    | FlowState::Plan
+                    | FlowState::Escalate
             ),
             FlowState::Clarify => matches!(
                 next,
@@ -167,7 +170,8 @@ mod tests {
         assert!(legal.contains(&FlowState::Clarify));
         assert!(legal.contains(&FlowState::Outline));
         assert!(legal.contains(&FlowState::Plan));
-        assert_eq!(legal.len(), 3);
+        assert!(legal.contains(&FlowState::Escalate));
+        assert_eq!(legal.len(), 4);
     }
 
     #[test]
@@ -361,7 +365,7 @@ mod tests {
     #[test]
     fn test_legal_transition_counts_match() {
         // Verify each state has exactly the expected number of legal transitions
-        assert_eq!(FlowStateMachine::legal_transitions(FlowState::Intake).len(), 3);
+        assert_eq!(FlowStateMachine::legal_transitions(FlowState::Intake).len(), 4);
         assert_eq!(FlowStateMachine::legal_transitions(FlowState::Clarify).len(), 3);
         assert_eq!(FlowStateMachine::legal_transitions(FlowState::Outline).len(), 3);
         assert_eq!(FlowStateMachine::legal_transitions(FlowState::Research).len(), 3);

@@ -9,7 +9,7 @@ impl TransitionGuard {
         }
 
         match from {
-            FlowState::INTAKE => matches!(to, FlowState::CLARIFY | FlowState::OUTLINE | FlowState::PLAN),
+            FlowState::INTAKE => matches!(to, FlowState::CLARIFY | FlowState::OUTLINE | FlowState::PLAN | FlowState::ESCALATE),
             FlowState::CLARIFY => matches!(to, FlowState::OUTLINE | FlowState::RESEARCH | FlowState::ESCALATE),
             FlowState::OUTLINE => matches!(to, FlowState::PLAN | FlowState::RESEARCH | FlowState::REPLAN),
             FlowState::RESEARCH => matches!(to, FlowState::DESIGN | FlowState::OUTLINE | FlowState::PLAN),

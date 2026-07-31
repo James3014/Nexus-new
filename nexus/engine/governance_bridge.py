@@ -231,23 +231,26 @@ class GovernanceBridge:
 
     def can_transition(self, from_state: str, to_state: str) -> bool:
         """
-        Primary: Python-side validation.
-        Shadow (dual-run): also query Rust and compare.
+        Primary: Rust authoritative validation.
+        Shadow (dual-run): compare the contract fallback against Rust.
         Mismatch → write to ledger.
         """
-        # Primary: Python flow machine (fallback if Rust unavailable)
+        rust_available = self.rs_client.binary_path.exists()
+        rs_result = self._rust_validate(from_state, to_state) if rust_available else None
         py_result = self._python_validate(from_state, to_state)
 
         if self.dual_run:
-            rs_result = self._rust_validate(from_state, to_state)
             self.comparator.compare(
                 module_name="flow_machine",
                 py_result=py_result,
-                rs_result=rs_result,
+                rs_result=bool(rs_result) if rs_result is not None else False,
                 input_data={"from": from_state, "to": to_state},
             )
 
-        return py_result
+        # Rust is the sole runtime authority when present.  The contract
+        # matrix remains a compatibility fallback for environments without
+        # the kernel binary and is intentionally not a second control plane.
+        return bool(rs_result) if rs_result is not None else py_result
 
     def _python_validate(self, from_state: str, to_state: str) -> bool:
         """Python-side validation: check against legal transitions from contract."""

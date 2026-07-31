@@ -6,7 +6,7 @@ from nexus.bridge.rust_kernel import RustKernelAdapter
 
 # Python reference implementation (must match Rust exactly)
 LEGAL_TRANSITIONS = {
-    "INTAKE": {"CLARIFY", "OUTLINE", "PLAN"},
+    "INTAKE": {"CLARIFY", "OUTLINE", "PLAN", "ESCALATE"},
     "CLARIFY": {"OUTLINE", "RESEARCH", "ESCALATE"},
     "OUTLINE": {"PLAN", "RESEARCH", "REPLAN"},
     "RESEARCH": {"DESIGN", "OUTLINE", "PLAN"},

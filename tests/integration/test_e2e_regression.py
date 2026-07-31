@@ -27,7 +27,7 @@ class TestE2EHybridGovernance(unittest.TestCase):
 
     def test_e2e_illegal_jump_blocked(self):
         """非法流程：INTAKE -> CLOSE (被 Rust 攔截)"""
-        raw = "r:0,d:0,p:6,c:0" # 模型建議 C (非法跳步)
+        raw = "r:0,d:0,p:4,c:0" # 模型建議 C (非法跳步)
         route, decision, target_phase, conf = self.adapter.process_model_output(raw)
         
         # Rust 裁決
