@@ -246,6 +246,11 @@ def validate(
             _finding(findings, "WARN", "STATE_DIR_MISSING", str(state_dir))
         else:
             card_by_task = {card["task_id"]: card for card in result["task_cards"] if card.get("task_id")}
+            campaign_card_paths = {
+                Path(card["path"]).resolve()
+                for card in result["task_cards"]
+                if card.get("path")
+            }
             for path in sorted(state_dir.glob("*.json")):
                 try:
                     state = json.loads(path.read_text(encoding="utf-8"))
@@ -256,6 +261,14 @@ def validate(
                 card_path_raw = str(state.get("task_card_path") or "")
                 card_hash = str(state.get("task_card_hash") or "")
                 if not card_path_raw and not card_hash:
+                    continue
+                if task_id not in card_by_task and card_path_raw:
+                    state_card_path = Path(card_path_raw).expanduser().resolve()
+                    if state_card_path not in campaign_card_paths and index_path.parent not in state_card_path.parents:
+                        # The canonical state directory is shared by many
+                        # campaigns; unrelated task receipts are out of scope.
+                        continue
+                elif task_id not in card_by_task and not card_path_raw:
                     continue
                 current_card = card_by_task.get(task_id)
                 status = str(state.get("status") or "")

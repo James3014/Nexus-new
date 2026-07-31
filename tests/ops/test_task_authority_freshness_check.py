@@ -131,3 +131,21 @@ def test_retained_card_hash_mismatch_is_warning_only(tmp_path):
 
     assert result["decision"] == "WARN"
     assert any(item["code"] == "STATE_CARD_HASH_MISMATCH" for item in result["findings"])
+
+
+def test_unrelated_lifecycle_state_is_ignored(tmp_path):
+    repo, index, _ = _repo(tmp_path)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state = {
+        "task_id": "other-campaign-task",
+        "status": "RETAINED_FOR_REVIEW",
+        "task_card_path": str(repo / "tasks/other-campaign/01-card.md"),
+        "task_card_hash": "0" * 64,
+    }
+    (state_dir / "other-campaign-task.json").write_text(json.dumps(state), encoding="utf-8")
+
+    result = validate(repo, index, state_dir=state_dir)
+
+    assert result["decision"] == "PASS"
+    assert result["lifecycle_checks"] == []
