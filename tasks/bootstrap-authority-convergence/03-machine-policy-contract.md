@@ -5,7 +5,7 @@
 - task_id: `machine-policy-contract`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `bootstrap-path-convergence` integrated
 - commit_required: true
@@ -76,6 +76,13 @@ git diff --cached --stat
 ## Exit criteria
 
 The protocol checker consumes a real baseline contract, supports a non-widening active Task Card overlay, passes all focused tests, and produces a scoped commit. P0-D startup freshness integration remains separate.
+
+## Integrated evidence
+
+- commits: `cb70c2505`, `09af43a78`
+- verification: `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/ops/test_agent_protocol_check.py tests/ops/test_agent_protocol_check_staged.py` (`13 passed`)
+- live checks: baseline and Task Card overlay strict checks returned `PASSED`
+- scope: 3 implementation files; canonical root remained untouched
 
 ## Residual debt
 
