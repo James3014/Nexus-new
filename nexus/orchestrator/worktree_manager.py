@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
@@ -1135,7 +1135,13 @@ class WorktreeManager:
         protected_refs: set[str] = set()
         try:
             raw_refs = self._run_git(
-                ["for-each-ref", "--format=%(objectname)", "refs/nexus-candidates/", "refs/nexus-candidate-commits/", "refs/nexus-salvage/"],
+                [
+                    "for-each-ref",
+                    "--format=%(objectname)",
+                    "refs/nexus-candidates/",
+                    "refs/nexus-candidate-commits/",
+                    "refs/nexus-salvage/",
+                ],
                 cwd=c_root,
             ).splitlines()
             protected_refs.update(r.strip() for r in raw_refs if r.strip())
@@ -1229,7 +1235,7 @@ class WorktreeManager:
                 if is_dirty:
                     classification = "KEEP_DIRTY_OR_UNKNOWN"
                     blocker_reason = "unmapped_dirty_worktree"
-                elif reachable:
+                elif reachable or protected:
                     classification = "RELEASABLE_REDUNDANT_CLEAN"
                 else:
                     classification = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
@@ -1365,29 +1371,38 @@ class WorktreeManager:
         plan: ConvergencePlan,
         expected_controller_revision: str,
         expected_plan_hash: str,
-        service: Optional[Any] = None,
     ) -> ConvergenceApplyReceipt:
         if plan.controller_revision != expected_controller_revision:
-            raise RuntimeError(f"CONTROLLER_REVISION_DRIFT: expected {expected_controller_revision}, got {plan.controller_revision}")
+            raise RuntimeError(
+                f"CONTROLLER_REVISION_DRIFT: plan controller revision {plan.controller_revision} "
+                f"does not match expected {expected_controller_revision}"
+            )
         if plan.plan_hash != expected_plan_hash:
-            raise RuntimeError(f"PLAN_HASH_DRIFT: expected {expected_plan_hash}, got {plan.plan_hash}")
+            raise RuntimeError(
+                f"PLAN_HASH_MISMATCH: plan hash {plan.plan_hash} "
+                f"does not match expected {expected_plan_hash}"
+            )
 
-        if "/Users/jameschen/Workspace/nexus" in plan.releasable_paths:
-            raise RuntimeError("LEGACY_ROOT_APPLY_FORBIDDEN: legacy root cannot be released")
+        controller_root = Path(
+            plan.groups.get("KEEP_CONTROLLER", ["."])[0]
+            if plan.groups.get("KEEP_CONTROLLER")
+            else "."
+        ).resolve()
 
         released_paths: list[str] = []
         failed_paths: list[dict[str, str]] = []
-        controller_root = Path(plan.groups.get("KEEP_CONTROLLER", ["."])[0] if plan.groups.get("KEEP_CONTROLLER") else ".").resolve()
 
         for p_str in plan.releasable_paths:
             p = Path(p_str).resolve()
+            if str(p) == str(Path("/Users/jameschen/Workspace/nexus").resolve()):
+                raise RuntimeError("LEGACY_ROOT_APPLY_FORBIDDEN: legacy root cannot be released")
             if not p.exists():
                 released_paths.append(p_str)
                 continue
             try:
                 entry = self._worktree_entry(controller_root, p)
                 if entry is not None:
-                    self._run_git(["worktree", "remove", "--force", str(p)], cwd=controller_root)
+                    self._run_git(["worktree", "remove", "--", str(p)], cwd=controller_root)
                     self._run_git(["worktree", "prune"], cwd=controller_root)
                 elif p.is_dir() and not any(p.iterdir()):
                     p.rmdir()
@@ -1488,7 +1503,12 @@ class WorktreeManager:
         slot_index: int = 0,
         task_states: Optional[Dict[str, dict]] = None,
     ) -> ReusableSlotLease:
-        status_lease = self.get_reusable_slot_status(campaign_id, slot_index, controller_root=Path(contract.controller_repo_root), task_states=task_states)
+        status_lease = self.get_reusable_slot_status(
+            campaign_id,
+            slot_index,
+            controller_root=Path(contract.controller_repo_root),
+            task_states=task_states,
+        )
         if status_lease.status == "BLOCKED":
             return status_lease
 
@@ -1511,7 +1531,45 @@ class WorktreeManager:
                         target_base_revision=contract.target_base_revision,
                         blocker=None,
                     )
-                self._run_git(["worktree", "remove", "--force", str(slot_path)], cwd=c_root)
+
+                # Different-base reuse check: fail closed unless prior slot is proven clean/releasable
+                protected_refs: set[str] = set()
+                try:
+                    raw_refs = self._run_git(
+                        [
+                            "for-each-ref",
+                            "--format=%(objectname)",
+                            "refs/nexus-candidates/",
+                            "refs/nexus-candidate-commits/",
+                            "refs/nexus-salvage/",
+                        ],
+                        cwd=c_root,
+                    ).splitlines()
+                    protected_refs.update(r.strip() for r in raw_refs if r.strip())
+                except Exception:
+                    pass
+
+                reachable = False
+                try:
+                    self._run_git(["merge-base", "--is-ancestor", current_head, contract.controller_revision], cwd=c_root)
+                    reachable = True
+                except Exception:
+                    reachable = False
+
+                if not reachable and current_head not in protected_refs:
+                    return ReusableSlotLease(
+                        schema="nexus.reusable_slot_lease.v1",
+                        slot_id=status_lease.slot_id,
+                        campaign_id=campaign_id,
+                        slot_path=str(slot_path),
+                        task_id=contract.task_id,
+                        status="BLOCKED",
+                        controller_revision=contract.controller_revision,
+                        target_base_revision=contract.target_base_revision,
+                        blocker="BLOCKED_UNPROTECTED_UNIQUE_COMMIT: slot contains unprotected unique commit",
+                    )
+
+                self._run_git(["worktree", "remove", "--", str(slot_path)], cwd=c_root)
                 self._run_git(["worktree", "prune"], cwd=c_root)
             elif not any(slot_path.iterdir()):
                 slot_path.rmdir()
