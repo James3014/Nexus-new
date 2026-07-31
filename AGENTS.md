@@ -49,7 +49,7 @@
 - **Implementation tasks require a scoped commit**: Unless the active Task Card explicitly declares `read_only: true`, `audit_only: true`, or `commit_forbidden: true`, a valid implementation task MUST end with a Git commit containing only that card's authorized changes.
 - **Task Card authority fields**: Implementation cards MUST declare `commit_required`, `candidate_required`, `worker_may_commit`, `worker_may_approve`, `worker_may_integrate`, and `worker_may_push`. Defaults are `commit_required: true`, `candidate_required: true`, `worker_may_commit: true`, and all three downstream authorities `false`.
 - **No commit from mixed dirty source checkout**: When unrelated tracked or untracked changes are present, implementation MUST occur in a clean isolated Target. Never stage, commit, reset, stash, clean, overwrite, or absorb unrelated source-checkout changes.
-- **Required pre-commit gates**: Before committing, verify allowed-file scope, run the Task Card's exact verification commands, run `git diff --check`, inspect tracked deletions, run GitNexus detect-changes, and review the complete staged diff.
+- **Required pre-commit gates**: Before committing, verify allowed-file scope, run the Task Card's exact verification commands, run `git diff --check`, inspect tracked deletions with `git diff --name-status --diff-filter=D` and `git diff --cached --name-status --diff-filter=D`, inspect `git diff --stat` and `git diff --cached --stat`, and review the complete staged diff.
 - **Worker responsibility**: The implementing Worker creates the scoped implementation commit and reports its exact SHA. Leaving verified implementation changes uncommitted and claiming completion is invalid.
 - **Candidate formation**: Under governed lifecycle execution, the scoped commit becomes a Candidate only after the card's required verification succeeds and the Candidate record is bound to the exact commit and task-card hash.
 - **Separation of authority**: A Worker MUST NOT approve, integrate, merge, push, or clean up its own Candidate unless the active Task Card explicitly grants that exact authority. Commit authority does not imply approval, integration, push, cleanup, or production-claim authority.
@@ -93,60 +93,6 @@
 - **禁用客套**: 禁止「希望能幫助你」、「隨時回報」。
 - **數據優先**: 僅輸出 [任務] -> [數據] -> [證據]。
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 relationships, 300 execution flows). Use GitNexus as a best-effort code intelligence aid to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, try `npx gitnexus analyze` once when it is practical. If GitNexus is unavailable, stale, missing symbols, or the refresh stalls, do not block the task; report the limitation and fall back to targeted `rg`, tests, and local code inspection.
-
-## Always Do
-
-- **Best effort: run impact analysis before editing important symbols.** Before modifying a function, class, or method, prefer `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **Best effort: run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- If impact analysis cannot run, returns `UNKNOWN`, or cannot find the symbol, state that GitNexus impact evidence is unavailable and proceed with a narrower manual blast-radius check.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-- **Always run deletion checks before committing:** Run the four commands below to audit modified and deleted paths. If deletions are present, explain the rationale for each file.
-  ```bash
-  git diff --name-status --diff-filter=D
-  git diff --cached --name-status --diff-filter=D
-  git diff --stat
-  git diff --cached --stat
-  ```
-
-## Never Do
-
-- Do not treat GitNexus failures as task blockers when the user request is otherwise clear and local verification is available.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- Before committing, prefer `gitnexus_detect_changes()`; if unavailable, use `git diff --stat`, targeted diff review, and focused tests instead.
-- **NEVER automatically delete tracked files that match `.gitignore` patterns** (such as historical metrics, learning logs, or tracked cache files) during feature implementation tasks. Git ignore rules only apply to untracked files.
-- **NEVER combine out-of-scope repository cleanup or file deletion with implementation commits.** Keep implementation scopes clean and isolated.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/actionlint/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/actionlint/clusters` | All functional areas |
-| `gitnexus://repo/actionlint/processes` | All execution flows |
-| `gitnexus://repo/actionlint/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
-
 # 🛡️ Generation Degeneration Guard
 
 懷疑輸出退化或失控重複時，停止後續工具與檔案修改，保留最後已確認動作，回傳 `retry_required=true`，並從新的 bounded context 重啟。AGENTS.md 規則不等於 runtime detector。
@@ -164,4 +110,3 @@ This project is indexed by GitNexus as **actionlint** (65342 symbols, 94771 rela
 
 ### 2. Strict Proof-Backed Gates (Anti-Hallucination)
 - **Adapter Validation**: Receipt adapters must not blindly trust `claim_verified=True`. They must validate `verifier_artifact` (or `verifier_status`) and `source_hash`. If proof attributes are missing, the gate must fail closed (`gate_passed=False`) and record the failure reason.
-
