@@ -49,6 +49,15 @@ class KnowledgeIndex:
             except ImportError:
                 self.use_embedding = False
                 logging.getLogger(__name__).warning("⚠️ sentence-transformers 未安裝，語義搜尋已降級。")
+            except Exception as exc:
+                # Embeddings are an optional acceleration layer.  A missing
+                # local model or an offline/cache failure must not prevent the
+                # engine from starting; keyword search remains deterministic.
+                self.use_embedding = False
+                logging.getLogger(__name__).warning(
+                    "⚠️ embedding model unavailable (%s)，語義搜尋已降級為 keyword。",
+                    exc,
+                )
         
         # 🔗 Phase 2.2: LanceDB 實體對位內容及性能性能性能
         self.db_path = workspace_root / ".nexus" / "learning" / "lancedb"
