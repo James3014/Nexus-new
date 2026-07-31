@@ -22,15 +22,16 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Final Physical Cutover Verification (2026-08-01)
 
 - Canonical daily entrypoint: `/Users/jameschen/Workspace/nexus`.
-- Canonical branch: `nexus/integration/main`; cutover base commit: `33e925795b7be0205c750481365e63cd935e2a20` (`fix(tasks): bind convergence authority metadata`). The current evidence update is the next commit on this branch.
+- Canonical branch: `nexus/integration/main`; current verified HEAD: `2eb73514e80b791a66bdde5c478d63202ac94de9` (`fix(runtime): use active verifier interpreter`).
 - Registered worktrees: `1`; exact path is the canonical root; `git worktree prune --dry-run` reports no stale metadata.
 - Canonical dirty state: clean (`git status --short --branch` reports only `## nexus/integration/main`).
 - Unregistered worktree root: `/Users/jameschen/Workspace/nexus-worktrees` is absent.
 - Process/launcher state: no `devspace`, `nexus-worktrees`, or `nexus-8a1be3f4` process; `com.waishnav.devspace` is disabled in `gui/501`, and its plist is preserved at `/Users/jameschen/Workspace/nexus-salvage/20260801-root-convergence/com.waishnav.devspace.plist.disabled_20260801`.
 - Retained refs: `70` `refs/nexus-salvage/*`, `33` `refs/heads/codex/*`, and `12` `refs/codex/turn-diffs/*`; salvage and branch deletion remain forbidden by this card.
 - External preservation: root dirty archive, staged/unstaged patches, ignored residue archives, SymPy archive, and unregistered-worktree residue remain under `/Users/jameschen/Workspace/nexus-salvage/20260801-root-convergence/`.
-- Gate evidence: bounded lifecycle suite `223 passed`; CI dry-run passed; startup contract passed with token `68c289a9474b3892`.
+- Gate evidence: bounded lifecycle suite `217 passed in 122.34s`; CI dry-run passed; startup contract passed with token `86589763f9282007`.
 - Gate hardening commits `c6a6ffc6b` and `89379333f` make Ultra Review and route smoke use the active interpreter, ignore dangling runtime links, and avoid the restricted uv cache; focused suites are `18 passed` and `36 passed`, and CI strict reached a passing Ultra Review lane.
+- Gate hardening commit `2eb73514e` makes research-flow child verification use the active interpreter; the nightshift/research-flow focused app suite reached `107 passed`, with two pre-existing public-claim telemetry assertions still failing.
 - Gate residuals: full pytest now collects cleanly (`11484 collected` after adding `jsonschema` to the local `.venv`), but the prior full execution reached `1806 passed / 29 failed` before hanging and interruption; acceptance is `UNVERIFIED_COLD_START` with zero samples; route smoke now produces evidence but P30 still fails capability receipt/public-safe gates; CI strict reaches Wiki Governance and reports `226 passed / 55 failed` legacy documentation contracts. These remain evidence blockers, not workspace residue.
 
 ## Ordered Cards
