@@ -28,6 +28,23 @@ def _write_contract(path: Path, *, forbidden=None, allowed=None, max_files=10):
     )
 
 
+def _write_overlay_card(path: Path, *, forbidden=None, allowed=None, max_files=10):
+    forbidden = forbidden or []
+    allowed = allowed or ["scripts/"]
+    path.write_text(
+        "## Machine policy overlay\n\n```json\n"
+        + json.dumps(
+            {
+                "allowed_paths": allowed,
+                "forbidden_paths": forbidden,
+                "max_files_touched": max_files,
+            }
+        )
+        + "\n```\n",
+        encoding="utf-8",
+    )
+
+
 def test_protocol_missing_agents_md(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert check_protocol(contract_path=tmp_path / "contract.json") == 1
@@ -106,3 +123,58 @@ def test_protocol_check_files_strict_boundary_fail(tmp_path, monkeypatch):
         )
         == 1
     )
+
+
+def test_protocol_missing_baseline_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "AGENTS.md").write_text(
+        "allowed_paths forbidden_paths max_files_touched Semantic Completion Criteria "
+        "Evidence Reporting Format Failure-to-Lesson Writeback"
+    )
+    assert check_protocol(contract_path=tmp_path / "missing.json") == 1
+
+
+def test_protocol_malformed_baseline_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "AGENTS.md").write_text(
+        "allowed_paths forbidden_paths max_files_touched Semantic Completion Criteria "
+        "Evidence Reporting Format Failure-to-Lesson Writeback"
+    )
+    contract = tmp_path / "contract.json"
+    contract.write_text("{not-json")
+    assert check_protocol(contract_path=contract) == 1
+
+
+def test_protocol_task_card_overlay_narrows_baseline(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "AGENTS.md").write_text(
+        "allowed_paths forbidden_paths max_files_touched Semantic Completion Criteria "
+        "Evidence Reporting Format Failure-to-Lesson Writeback"
+    )
+    contract = tmp_path / "contract.json"
+    _write_contract(contract, allowed=["."], forbidden=["packages/"], max_files=5)
+    card = tmp_path / "card.md"
+    _write_overlay_card(card, allowed=["scripts/"], forbidden=["scripts/private/"], max_files=2)
+
+    assert check_protocol(
+        check_files=["scripts/ops/check.py"],
+        strict=True,
+        contract_path=contract,
+        task_card_path=card,
+    ) == 0
+    assert check_protocol(
+        check_files=["docs/plan.md"],
+        strict=True,
+        contract_path=contract,
+        task_card_path=card,
+    ) == 1
+    assert check_protocol(
+        check_files=["scripts/private/key.txt"],
+        contract_path=contract,
+        task_card_path=card,
+    ) == 1
+    assert check_protocol(
+        check_files=["scripts/a.py", "scripts/b.py", "scripts/c.py"],
+        contract_path=contract,
+        task_card_path=card,
+    ) == 1

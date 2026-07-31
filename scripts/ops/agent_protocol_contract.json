@@ -1,0 +1,22 @@
+{
+  "schema": "nexus.agent_protocol_contract.v1",
+  "required_terms": [
+    "allowed_paths",
+    "forbidden_paths",
+    "max_files_touched",
+    "Semantic Completion Criteria",
+    "Evidence Reporting Format",
+    "Failure-to-Lesson Writeback"
+  ],
+  "boundaries": {
+    "allowed_paths": ["."],
+    "forbidden_paths": [
+      ".obsidian/",
+      "benchmarks/",
+      "logs/",
+      "nexus_swarm/",
+      "packages/"
+    ],
+    "max_files_touched": 10
+  }
+}
