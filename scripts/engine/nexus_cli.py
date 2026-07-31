@@ -217,6 +217,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_submit,
     run_self_hosted_verify,
     run_self_hosted_wait,
+    run_self_hosted_state_root_inventory,
     run_self_hosted_workspace_converge,
     run_self_hosted_workspace_inventory,
     run_self_hosted_workspace_plan,
@@ -3492,6 +3493,7 @@ nexus.add_command(self_hosted_group, name="self-hosted")
 @click.option("--target-worktree-root", help="Target worktree root path.")
 @click.option("--allowed-files", help="Comma-separated list of allowed file patterns.")
 @click.option("--forbidden-files", help="Comma-separated list of forbidden file patterns.")
+@click.option("--authorized-deletions", help="Comma-separated list of exact files allowed to be deleted.")
 @click.option("--verifier-commands", help="Comma-separated list of verifier commands.")
 @click.option("--protected-contracts", help="Comma-separated list of protected contracts.")
 @click.option("--worker", default=None, help="Worker provider (e.g. codex, auto).")
@@ -3509,6 +3511,7 @@ def self_hosted_submit(
     target_worktree_root: str | None,
     allowed_files: str | None,
     forbidden_files: str | None,
+    authorized_deletions: str | None,
     verifier_commands: str | None,
     protected_contracts: str | None,
     worker: str | None,
@@ -3550,6 +3553,9 @@ def self_hosted_submit(
     ff = _split_csv(forbidden_files)
     if ff is not None:
         request_data["forbidden_files"] = ff
+    ad = _split_csv(authorized_deletions)
+    if ad is not None:
+        request_data["authorized_deletions"] = ad
     vc = _split_csv(verifier_commands)
     if vc is not None:
         request_data["verifier_commands"] = vc
@@ -3573,11 +3579,12 @@ def self_hosted_retry(task_id: str, state_dir: str | None) -> None:
 
 @self_hosted_group.command(name="status")
 @click.option("--task-id", required=True, help="Task ID to inspect.")
+@click.option("--details", "include_details", is_flag=True, default=False, help="Include the full durable state.")
 @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
 @translate_action_exceptions
-def self_hosted_status(task_id: str, state_dir: str | None) -> None:
+def self_hosted_status(task_id: str, include_details: bool, state_dir: str | None) -> None:
     """Read durable status for a self-hosted task."""
-    res = run_self_hosted_status(task_id, state_dir=state_dir)
+    res = run_self_hosted_status(task_id, include_details=include_details, state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
@@ -3585,12 +3592,14 @@ def self_hosted_status(task_id: str, state_dir: str | None) -> None:
 @click.option("--task-id", required=True, help="Task ID to wait for.")
 @click.option("--timeout", "timeout_seconds", type=float, default=10.0, help="Timeout in seconds.")
 @click.option("--poll-interval", "poll_interval_seconds", type=float, default=0.25, help="Poll interval in seconds.")
+@click.option("--details", "include_details", is_flag=True, default=False, help="Include the full durable state.")
 @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
 @translate_action_exceptions
 def self_hosted_wait(
     task_id: str,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    include_details: bool,
     state_dir: str | None,
 ) -> None:
     """Wait for a self-hosted task until terminal/attention_required or timeout."""
@@ -3598,6 +3607,7 @@ def self_hosted_wait(
         task_id,
         timeout_seconds=timeout_seconds,
         poll_interval_seconds=poll_interval_seconds,
+        include_details=include_details,
         state_dir=state_dir,
     )
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
@@ -3641,6 +3651,15 @@ def self_hosted_workspace_plan(
         expected_controller_revision=expected_controller_revision,
         state_dir=state_dir,
     )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="state-root-inventory")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_state_root_inventory(state_dir: str | None) -> None:
+    """Inventory canonical and nested lifecycle receipts without mutation."""
+    res = run_self_hosted_state_root_inventory(state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 

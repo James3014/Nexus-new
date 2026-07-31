@@ -79,6 +79,7 @@ class SelfHostedTaskContract(BaseModel):
     target_worktree_root: str
     allowed_files: List[str]
     forbidden_files: List[str] = Field(default_factory=list)
+    authorized_deletions: List[str] = Field(default_factory=list)
     verifier_commands: List[str] = Field(default_factory=list)
     protected_contracts: List[str] = Field(default_factory=list)
     preferred_provider: Optional[str] = None
@@ -111,7 +112,7 @@ class SelfHostedTaskContract(BaseModel):
             raise ValueError(f"{info.field_name} must be an exact 40-char lowercase Git SHA")
         return value
 
-    @field_validator("allowed_files", "forbidden_files")
+    @field_validator("allowed_files", "forbidden_files", "authorized_deletions")
     @classmethod
     def _validate_repository_paths(cls, values: List[str]) -> List[str]:
         return [_normalize_repository_path(value) for value in values]
@@ -120,6 +121,21 @@ class SelfHostedTaskContract(BaseModel):
     def _validate_self_hosted_boundaries(self):
         if not self.allowed_files:
             raise ValueError("allowed_files must be non-empty")
+        forbidden = set(self.forbidden_files)
+        for path in self.authorized_deletions:
+            if path.endswith("/"):
+                raise ValueError("authorized_deletions must contain exact file paths")
+            allowed = any(
+                path == boundary or (boundary.endswith("/") and path.startswith(boundary))
+                for boundary in self.allowed_files
+            )
+            if not allowed:
+                raise ValueError(f"authorized deletion is outside allowed_files: {path}")
+            if any(
+                path == boundary or (boundary.endswith("/") and path.startswith(boundary))
+                for boundary in forbidden
+            ):
+                raise ValueError(f"authorized deletion is inside forbidden_files: {path}")
         if self.mutation_mode != MutationMode.WORKING_TREE_ONLY:
             raise ValueError("mutation_mode must be WORKING_TREE_ONLY")
         if not self.human_approval_required:
@@ -197,7 +213,13 @@ class AcceptanceProfile(BaseModel):
 
     verifier_commands: List[str] = Field(default_factory=list)
     protected_contracts: List[str] = Field(default_factory=list)
+    authorized_deletions: List[str] = Field(default_factory=list)
     required_evidence: List[str] = Field(default_factory=list)
+
+    @field_validator("authorized_deletions")
+    @classmethod
+    def _validate_authorized_deletions(cls, values: List[str]) -> List[str]:
+        return [_normalize_repository_path(value) for value in values]
 
     @field_validator("verifier_commands", "protected_contracts", "required_evidence")
     @classmethod
@@ -251,6 +273,8 @@ class ArchitectTaskContract(SelfHostedTaskContract):
             raise ValueError("acceptance_profile.verifier_commands must match verifier_commands")
         if self.acceptance_profile.protected_contracts != self.protected_contracts:
             raise ValueError("acceptance_profile.protected_contracts must match protected_contracts")
+        if self.acceptance_profile.authorized_deletions != self.authorized_deletions:
+            raise ValueError("acceptance_profile.authorized_deletions must match authorized_deletions")
         if not self.human_approval_required:
             raise ValueError("human approval is required")
         return self

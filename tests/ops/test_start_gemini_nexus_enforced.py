@@ -1,5 +1,6 @@
 import pytest
 import subprocess
+import os
 from pathlib import Path
 
 def test_gemini_enforced_startup_contract_block():
@@ -16,8 +17,25 @@ def test_gemini_enforced_startup_contract_block():
         pass
 
 def test_gemini_enforced_interactive_artifact():
-    # 驗證啟動後是否產生了 ack artifact
-    # 這裡我們直接執行 contract check 腳本來模擬成功路徑
-    subprocess.run(["python3", "scripts/ops/nexus_startup_contract_check.py"], capture_output=True)
-    ack_path = Path(".nexus/reports/startup_hardening/startup_contract_ack.json")
-    assert ack_path.exists()
+    # A dirty implementation Target must block, but the report must remain
+    # outside the source checkout so the block itself is observable.
+    state_dir = Path("/tmp") / "nexus-gemini-startup-test"
+    env = {**os.environ, "NEXUS_MACHINE_STATE_DIR": str(state_dir)}
+    dirty_sentinel = Path(".nexus-startup-dirty-sentinel")
+    source_report = Path(".nexus/reports/startup_hardening/startup_contract_check_report.json")
+    source_before = source_report.read_bytes() if source_report.exists() else None
+    try:
+        dirty_sentinel.write_text("test-only dirty Target sentinel\n")
+        result = subprocess.run(
+            ["python3", "scripts/ops/nexus_startup_contract_check.py"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        report_path = state_dir / "startup_hardening/startup_contract_check_report.json"
+        assert result.returncode != 0
+        assert report_path.exists()
+        source_after = source_report.read_bytes() if source_report.exists() else None
+        assert source_after == source_before
+    finally:
+        dirty_sentinel.unlink(missing_ok=True)

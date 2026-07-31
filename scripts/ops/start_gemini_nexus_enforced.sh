@@ -6,7 +6,12 @@ set -euo pipefail
 #   bash scripts/ops/start_gemini_nexus_enforced.sh <prompt-file> [report-file] [timeout-sec]
 #   bash scripts/ops/start_gemini_nexus_enforced.sh            # interactive gemini fallback
 
-BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh .nexus/reports/enforced_agent_briefing.md)"
+NEXUS_MACHINE_STATE_DIR="${NEXUS_MACHINE_STATE_DIR:-${NEXUS_STATE_DIR:-${TMPDIR:-/tmp}/nexus-machine-state}}"
+NEXUS_STARTUP_REPORT_DIR="${NEXUS_STARTUP_REPORT_DIR:-$NEXUS_MACHINE_STATE_DIR/startup_hardening}"
+export NEXUS_MACHINE_STATE_DIR NEXUS_STARTUP_REPORT_DIR
+mkdir -p "$NEXUS_MACHINE_STATE_DIR" "$NEXUS_STARTUP_REPORT_DIR"
+
+BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh "$NEXUS_MACHINE_STATE_DIR/enforced_agent_briefing.md")"
 echo "📘 Enforced briefing generated: $BRIEFING_PATH"
 
 bash scripts/ops/_nexus_preflight.sh || exit 1
@@ -24,14 +29,14 @@ unset NEXUS_RUNNER
 
 if [[ $# -ge 1 ]]; then
   PROMPT_FILE="$1"
-  REPORT_FILE="${2:-.nexus/reports/gemini_round_report.json}"
+  REPORT_FILE="${2:-$NEXUS_MACHINE_STATE_DIR/gemini_round_report.json}"
   TIMEOUT_SEC="${3:-240}"
   echo "🚀 Launching Gemini delegated round with Nexus enforcement..."
   exec bash scripts/ops/run_gemini_nexus_round.sh "$PROMPT_FILE" "$REPORT_FILE" "$TIMEOUT_SEC"
 fi
 
 echo "🚀 [ENFORCED-INTERACTIVE] Launching interactive Gemini shell..."
-echo "🛡️ Startup Contract ACK: $(cat .nexus/reports/startup_hardening/startup_contract_ack.json | grep ack_token)"
+echo "🛡️ Startup Contract ACK: $(cat "$NEXUS_STARTUP_REPORT_DIR/startup_contract_ack.json" | grep ack_token)"
 echo "📘 Loading Briefing: $BRIEFING_PATH"
 # 強制輸出 Briefing 摘要
 head -n 20 "$BRIEFING_PATH"

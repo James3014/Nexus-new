@@ -85,6 +85,17 @@ class CandidateCommitter:
     ) -> PromotionApprovalPacket:
         if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
+        expected_authorized_deletions = tuple(sorted(set(contract.authorized_deletions)))
+        expected_authorized_deletions_hash = hashlib.sha256(
+            json.dumps(expected_authorized_deletions, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        receipt_authorized_deletions = tuple(sorted(set(receipt.authorized_deletions or ())))
+        if receipt_authorized_deletions != expected_authorized_deletions:
+            raise RuntimeError("verified receipt authorized deletions do not match contract")
+        if receipt.authorized_deletions_hash != expected_authorized_deletions_hash and not (
+            not expected_authorized_deletions and receipt.authorized_deletions_hash == ""
+        ):
+            raise RuntimeError("verified receipt authorized deletion hash does not match contract")
         if receipt.candidate_commit_created or receipt.merge_performed:
             raise RuntimeError("receipt already contains a promotion mutation")
 
@@ -98,9 +109,18 @@ class CandidateCommitter:
         )
         if staged_before:
             raise RuntimeError("Target index must be clean before candidate commit")
-        paths = sorted(set(current.changed_files) | set(current.untracked_files))
-        if current.deleted_files:
-            raise RuntimeError("candidate deletions must be rejected before commit")
+        paths = sorted(
+            set(current.changed_files)
+            | set(current.untracked_files)
+            | set(current.deleted_files)
+        )
+        unauthorized_deletions = sorted(
+            set(current.deleted_files) - set(contract.authorized_deletions)
+        )
+        if unauthorized_deletions:
+            raise RuntimeError(
+                "candidate contains undeclared deletions: " + ", ".join(unauthorized_deletions)
+            )
         if not paths:
             raise RuntimeError("candidate commit requires a non-empty candidate diff")
         target_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)

@@ -34,6 +34,7 @@ class NexusSelfHostedMCPServer:
             "target_worktree_root": {"type": "string"},
             "allowed_files": {"type": "array", "items": {"type": "string"}},
             "forbidden_files": {"type": "array", "items": {"type": "string"}},
+            "authorized_deletions": {"type": "array", "items": {"type": "string"}},
             "verifier_commands": {"type": "array", "items": {"type": "string"}},
             "protected_contracts": {"type": "array", "items": {"type": "string"}},
             "worker": {"type": "string", "enum": ["auto", *WORKER_ENUM]},

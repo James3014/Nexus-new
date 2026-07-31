@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 import shlex
+import time
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -54,10 +56,14 @@ class VerifiedCandidateReceipt:
     verifier_evidence: tuple[VerifierEvidence, ...]
     candidate_commit_created: bool
     merge_performed: bool
+    authorized_deletions: tuple[str, ...] = ()
+    authorized_deletions_hash: str = ""
     repository_contract_gate_passed: bool = True
     repository_contract_mode: str = "shadow"
     repository_contract_policy_revision_hash: str = ""
     repository_contract_findings: tuple[RepositoryContractFinding, ...] = ()
+    verifier_manifest_sha256: str = ""
+    verification_wall_time_ms: int = 0
 
 
 class CandidateVerifier:
@@ -132,7 +138,7 @@ class CandidateVerifier:
     def _run_verifiers(contract: SelfHostedTaskContract, target: str) -> tuple[bool, tuple[VerifierEvidence, ...], list[str]]:
         evidence: list[VerifierEvidence] = []
         failures: list[str] = []
-        for command in contract.verifier_commands:
+        for command in CandidateVerifier._deduplicate_verifier_commands(contract.verifier_commands):
             try:
                 request = CandidateVerifier._build_verifier_request(command, target)
                 result = run_cli_worker(request)
@@ -162,6 +168,48 @@ class CandidateVerifier:
                 failures.append(f"verifier_invalid:{command}:{exc}")
         return not failures, tuple(evidence), failures
 
+    @staticmethod
+    def _deduplicate_verifier_commands(commands: tuple[str, ...]) -> tuple[str, ...]:
+        """Merge overlapping pytest manifests while preserving other commands."""
+        ordered: list[tuple[str, object]] = []
+        pytest_groups: dict[tuple[str, ...], list[str]] = {}
+        for command in commands:
+            tokens = shlex.split(command)
+            try:
+                module_index = tokens.index("-m")
+                if tokens[module_index + 1] != "pytest":
+                    raise ValueError
+            except (ValueError, IndexError):
+                ordered.append(("plain", command))
+                continue
+            tail = tokens[module_index + 2:]
+            first_test = next(
+                (
+                    index for index, token in enumerate(tail)
+                    if token.startswith("tests/") or ("/tests/" in token and token.endswith(".py"))
+                ),
+                None,
+            )
+            if first_test is None:
+                ordered.append(("plain", command))
+                continue
+            prefix = tuple(tokens[:module_index + 2]) + tuple(tail[:first_test])
+            test_paths = tuple(tail[first_test:])
+            if prefix not in pytest_groups:
+                pytest_groups[prefix] = []
+                ordered.append(("pytest", prefix))
+            for path in test_paths:
+                if path not in pytest_groups[prefix]:
+                    pytest_groups[prefix].append(path)
+        rendered: list[str] = []
+        for kind, value in ordered:
+            if kind == "plain":
+                rendered.append(str(value))
+            else:
+                prefix = value  # type: ignore[assignment]
+                rendered.append(" ".join(shlex.quote(token) for token in (*prefix, *pytest_groups[prefix])))
+        return tuple(rendered)
+
     def verify(
         self,
         contract: SelfHostedTaskContract,
@@ -170,6 +218,9 @@ class CandidateVerifier:
         *,
         protected_paths: Optional[Mapping[str, str]] = None,
     ) -> VerifiedCandidateReceipt:
+        verification_started = time.monotonic()
+        if candidate.contract_hash != contract.contract_hash:
+            raise RuntimeError("candidate contract hash does not match current authorization contract")
         current = self.worktree_manager.capture_candidate(contract, lease)
         if current.candidate_state_hash != candidate.candidate_state_hash:
             raise RuntimeError("candidate state changed before verification")
@@ -183,7 +234,12 @@ class CandidateVerifier:
             verifier_state_failures.append("verifier_mutated_candidate_state")
 
         scope_passed = post_verifier.allowed_scope_passed
-        deletion_passed = not post_verifier.deleted_files
+        authorized_deletions = tuple(sorted(set(contract.authorized_deletions)))
+        unauthorized_deletions = sorted(
+            set(post_verifier.deleted_files) - set(authorized_deletions)
+        )
+        deletion_failures = [f"undeclared_deletion:{path}" for path in unauthorized_deletions]
+        deletion_passed = not deletion_failures
         controller_passed = post_verifier.controller_unchanged
         protected_passed, protected_failures = self._protected_gate(
             post_verifier,
@@ -199,6 +255,7 @@ class CandidateVerifier:
         if not scope_passed:
             failures.append("scope_gate_failed")
         if not deletion_passed:
+            failures.extend(deletion_failures)
             failures.append("deletion_gate_failed")
         if not controller_passed:
             failures.append("controller_gate_failed")
@@ -207,6 +264,7 @@ class CandidateVerifier:
         failures.extend(verifier_state_failures)
         failures.extend(repository_contract.blocking_reasons)
         verified = not failures
+        verifier_manifest = tuple(CandidateVerifier._deduplicate_verifier_commands(contract.verifier_commands))
         return VerifiedCandidateReceipt(
             schema="nexus.verified_candidate_receipt.v1",
             task_id=contract.task_id,
@@ -226,8 +284,16 @@ class CandidateVerifier:
             verifier_evidence=verifier_evidence,
             candidate_commit_created=False,
             merge_performed=False,
+            authorized_deletions=authorized_deletions,
+            authorized_deletions_hash=hashlib.sha256(
+                json.dumps(authorized_deletions, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
             repository_contract_gate_passed=repository_contract.passed,
             repository_contract_mode=repository_contract.mode,
             repository_contract_policy_revision_hash=repository_contract.policy_revision_hash,
             repository_contract_findings=repository_contract.findings,
+            verifier_manifest_sha256=hashlib.sha256(
+                json.dumps(verifier_manifest, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+            verification_wall_time_ms=max(0, int((time.monotonic() - verification_started) * 1000)),
         )

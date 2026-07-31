@@ -104,6 +104,72 @@ def test_what_why_are_mapped_to_architect_contract(tmp_path):
     assert contract.human_approval_required is True
 
 
+def test_production_bound_ephemeral_receipt_cannot_be_approved(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "ephemeral-production-bound"
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "request": {"task_card_required": True, "lifecycle_identity_required": True},
+        "promotion_packet": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "candidate_state_hash": "e" * 64,
+            "verified_receipt_hash": "f" * 64,
+        },
+    })
+
+    with pytest.raises(RuntimeError, match="EPHEMERAL_PROMOTION_FORBIDDEN"):
+        service.approve_promotion(
+            task_id,
+            candidate_commit_sha="c" * 40,
+            candidate_tree_sha="d" * 40,
+            candidate_state_hash="e" * 64,
+            verified_receipt_hash="f" * 64,
+        )
+
+
+def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "snapshot-only"
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "attempts": [{"attempt_id": "a"}],
+    })
+    monkeypatch.setattr(service, "reconcile_task", lambda *_: (_ for _ in ()).throw(AssertionError("reconciled")))
+
+    compact = service.get_task_snapshot(task_id)
+    detailed = service.get_task_snapshot(task_id, include_details=True)
+
+    assert compact["schema"] == "nexus.self_hosted_task_status.v1"
+    assert compact["task_action"]["next_action"] == "inspect_blocker_and_retry_or_dispose"
+    assert "attempts" not in compact
+    assert detailed["attempts"] == [{"attempt_id": "a"}]
+
+
+def test_state_root_inventory_classifies_nested_receipts_and_conflicts(tmp_path, monkeypatch):
+    canonical = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical))
+    service = SelfHostedTaskService(state_dir=canonical, auto_reconcile=False)
+    canonical.mkdir()
+    (canonical / "task-a.json").write_text(json.dumps({"task_id": "task-a", "status": "FINAL_BLOCK"}))
+    nested = canonical / "rehearsal-v1"
+    nested.mkdir()
+    (nested / "task-a.json").write_text(json.dumps({"task_id": "task-a", "status": "PENDING_HUMAN_APPROVAL"}))
+
+    inventory = service.state_root_inventory()
+
+    assert inventory["authority_conflict"] is True
+    assert inventory["conflict_task_ids"] == ["task-a"]
+    assert {entry["authority"] for entry in inventory["entries"]} == {
+        "CANONICAL_AUTHORITY", "REHEARSAL_EVIDENCE",
+    }
+    assert len(inventory["inventory_sha256"]) == 64
+
+
 def test_submit_persists_idempotent_task_state(tmp_path):
     calls = []
 
@@ -443,6 +509,33 @@ def test_retry_task_blocks_retained_review_without_disposition(tmp_path):
 
     result = service.retry_task("retained-retry-task")
     assert result["retry"]["decision"] == "BLOCKED_RETAINED_REVIEW"
+
+
+def test_retry_task_reuses_clean_retained_no_candidate_after_cleanup(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("RETAINED_FOR_REVIEW", {
+            "promotion_status": "NOT_CREATED",
+            "cleanup_decision": "REMOVED",
+            "cleanup_performed": True,
+        })
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _request(tmp_path, task_id="retained-retry-clean")
+    service.submit_task(request)
+    assert _wait_for_status(service, "retained-retry-clean", "RETAINED_FOR_REVIEW")
+
+    retried = service.retry_task("retained-retry-clean")
+    assert retried["task_id"] == "retained-retry-clean"
+    assert retried["retry"]["decision"] == "REUSED_TASK_ID"
+    assert retried["retry"]["attempts"] == 2
+    assert _wait_for_status(service, "retained-retry-clean", "RETAINED_FOR_REVIEW")
+    assert calls == ["retained-retry-clean", "retained-retry-clean"]
 
 
 def test_safe_hooks_directory_does_not_require_rewrite(tmp_path, monkeypatch):
@@ -997,6 +1090,36 @@ def test_wait_task_timeout_returns_in_progress_envelope(tmp_path):
     assert waited["task_action"]["recommended_tool"] == "nexus_self_hosted_wait_task"
     release.set()
     service.wait_task("wait-timeout", timeout_seconds=2.0)
+
+
+def test_wait_task_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("wait-lock-free", {
+        "task_id": "wait-lock-free",
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+    })
+
+    def fail_lock():
+        raise AssertionError("wait_task must not acquire the state lock")
+
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
+    waited = service.wait_task("wait-lock-free", timeout_seconds=0)
+
+    assert waited["wait"]["timed_out"] is False
+    assert waited["task_action"]["action_state"] == "ACTION_REQUIRED"
+
+
+def test_verify_task_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+
+    def fail_lock():
+        raise AssertionError("verify_task must not acquire the state lock")
+
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
+    result = service.verify_task("verify-lock-free-missing")
+
+    assert result["verdict"] == "STATE_MISSING"
 
 
 def test_list_actionable_tasks_excludes_integrated_terminal_state(tmp_path):
@@ -1776,6 +1899,44 @@ def test_close_retained_dirty_salvage_requires_integrated_replacement(tmp_path):
     assert service._read_state(request["task_id"])["status"] == "RETAINED_FOR_REVIEW"
 
 
+def test_close_retained_clean_target_uses_archived_integrated_replacement(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _real_request(tmp_path, task_id="retained-clean-target")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    replacement_id = "workspace-convergence-retained-without-candidate-closure-hardening"
+    service._write_state(replacement_id, {
+        "task_id": replacement_id,
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "integration_result_sha": "i" * 40,
+    })
+    service.archive_states(dry_run=False)
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "target_worktree": str(lease.target_worktree),
+        "attempt_id": "attempt-retained-clean-target",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.close_retained_without_candidate(
+        request["task_id"], superseded_by=replacement_id
+    )
+
+    assert result["status"] == "SUPERSEDED"
+    assert result["superseded_by"] == replacement_id
+    assert result["cleanup_decision"] == "REMOVED"
+    assert result["cleanup_performed"] is True
+    assert not Path(lease.target_worktree).exists()
+
+
 def test_close_retained_dirty_salvage_rejects_mismatched_replacement_identity(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     request = _real_request(tmp_path, task_id="retained-salvage-identity-gated")
@@ -2183,6 +2344,27 @@ def test_cleanup_retained_dry_run_does_not_mutate_state(tmp_path, monkeypatch):
     assert target.exists(), "dry-run must not remove Target"
     assert state_after.get("salvage_commit_sha") is None, "dry-run must not create salvage"
     assert state_after.get("salvage_ref") is None, "dry-run must not record salvage ref"
+
+
+def test_cleanup_dry_run_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "cleanup-dry-run-lock-free"
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "REMOVED",
+    })
+    service._lock_path().unlink()
+
+    def fail_lock():
+        raise AssertionError("cleanup dry-run must not acquire the state lock")
+
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
+    result = service.cleanup_tasks(task_id=task_id, dry_run=True)
+
+    assert result["decisions"][0]["cleanup_decision"] == "ALREADY_REMOVED"
+    assert not service._lock_path().exists()
 
 
 # ---------- LC2: terminal failure restore wiring tests ----------
@@ -2694,6 +2876,8 @@ def test_verify_task_passes_for_valid_task(tmp_path):
     assert result["failure_reasons"] == []
     assert result["state_intact"] is True
     assert "verifier_commands_executed" in result
+    assert result["next_action"] == "wait_for_task"
+    assert result["recommended_tool"] == "nexus_self_hosted_wait_task"
 
 
 def test_verify_task_detects_state_hash_drift(tmp_path):
@@ -2704,7 +2888,7 @@ def test_verify_task_detects_state_hash_drift(tmp_path):
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
 
     # Tamper with state between reads
-    original_read = service._read_state
+    original_read = service._read_state_snapshot
     call_count = {"n": 0}
     def tampering_read(task_id):
         state = original_read(task_id)
@@ -2713,7 +2897,7 @@ def test_verify_task_detects_state_hash_drift(tmp_path):
             # Second read: tamper with contract_hash
             state = {**state, "contract_hash": "tampered"}
         return state
-    service._read_state = tampering_read
+    service._read_state_snapshot = tampering_read
 
     result = service.verify_task(task_id)
     assert result["verified"] is False
@@ -2728,7 +2912,7 @@ def test_verify_task_detects_attempt_drift(tmp_path):
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
 
     # Tamper with attempt_id between reads
-    original_read = service._read_state
+    original_read = service._read_state_snapshot
     call_count = {"n": 0}
     def tampering_read(task_id):
         state = original_read(task_id)
@@ -2736,7 +2920,7 @@ def test_verify_task_detects_attempt_drift(tmp_path):
         if call_count["n"] == 2 and state:
             state = {**state, "attempt_id": "tampered_attempt"}
         return state
-    service._read_state = tampering_read
+    service._read_state_snapshot = tampering_read
 
     result = service.verify_task(task_id)
     assert result["verified"] is False
@@ -2751,7 +2935,7 @@ def test_verify_task_detects_state_deletion(tmp_path):
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
 
     # Delete state between reads
-    original_read = service._read_state
+    original_read = service._read_state_snapshot
     call_count = {"n": 0}
     def deleting_read(task_id):
         state = original_read(task_id)
@@ -2759,7 +2943,7 @@ def test_verify_task_detects_state_deletion(tmp_path):
         if call_count["n"] == 2:
             return None
         return state
-    service._read_state = deleting_read
+    service._read_state_snapshot = deleting_read
 
     result = service.verify_task(task_id)
     assert result["verified"] is False
@@ -2833,6 +3017,42 @@ def test_verify_task_fails_on_missing_target(tmp_path):
     result = service.verify_task(task_id)
     assert result["verified"] is False
     assert "target_missing" in result["failure_reasons"]
+    assert result["next_action"] == "wait_for_task"
+
+
+def test_verify_task_fails_closed_when_verifier_mutates_target(tmp_path, monkeypatch):
+    """A verifier-created file must invalidate the read-only verification."""
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    request = _real_request(tmp_path, task_id="verify-target-mutation")
+    request["verifier_commands"] = [
+        "python3 -c \"from pathlib import Path; "
+        "Path('verifier-artifact.txt').write_text('created')\""
+    ]
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    attempt_id = "att-verify-target-mutation"
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "LEASED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.verify_task(contract.task_id)
+
+    assert Path(lease.target_worktree, "verifier-artifact.txt").exists()
+    assert result["verified"] is False, result
+    assert "target_digest_drift_during_verification" in result["failure_reasons"]
 
 
 # ---------- W1: End-to-end fast lane canary ----------

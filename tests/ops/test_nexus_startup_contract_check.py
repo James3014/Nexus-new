@@ -121,3 +121,20 @@ def test_startup_ack_binds_freshness_inputs(mock_project_root, monkeypatch):
     assert ack["index_path"].endswith("index.md")
     assert ack["task_card_hash"] == "b" * 64
     assert ack["policy_contract_sha256"] == startup._sha256(contract)
+
+
+def test_default_report_dir_is_external_to_source_checkout(mock_project_root, monkeypatch, tmp_path):
+    monkeypatch.delenv("NEXUS_STARTUP_REPORT_DIR", raising=False)
+    monkeypatch.delenv("NEXUS_MACHINE_STATE_DIR", raising=False)
+    monkeypatch.delenv("NEXUS_STATE_DIR", raising=False)
+    resolved = startup._default_report_dir(mock_project_root)
+    assert resolved.is_absolute()
+    assert mock_project_root not in resolved.parents
+    assert resolved.parts[-2:] == ("nexus-startup-contract", "startup_hardening") or resolved.name == "startup_hardening"
+
+
+def test_machine_state_dir_controls_default_report_dir(mock_project_root, monkeypatch, tmp_path):
+    machine_state = tmp_path / "machine-state"
+    monkeypatch.delenv("NEXUS_STARTUP_REPORT_DIR", raising=False)
+    monkeypatch.setenv("NEXUS_MACHINE_STATE_DIR", str(machine_state))
+    assert startup._default_report_dir(mock_project_root) == machine_state / "startup_hardening"

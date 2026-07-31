@@ -27,14 +27,31 @@ _FORBIDDEN_SUBCOMMANDS = {
     ("git", "rebase"),
 }
 
+_INHERITED_ENV_ALLOWLIST = frozenset({
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PYTHONPATH",
+    "TMPDIR",
+    "VIRTUAL_ENV",
+})
+
 
 def _resolve_executable(executable: str) -> str:
     if not isinstance(executable, str) or not executable.strip():
         raise ValueError("executable must be non-empty")
+    # Preserve an explicitly supplied symlink path (notably a virtualenv
+    # python shim).  Resolving it to the base interpreter changes the runtime
+    # environment and can make installed verifier packages disappear.
+    explicit = Path(executable).expanduser()
+    if explicit.is_absolute() and explicit.is_file():
+        return str(explicit)
     resolved = shutil.which(executable)
     if resolved is None:
         raise ValueError(f"executable not found: {executable}")
-    return str(Path(resolved).resolve())
+    resolved_path = Path(resolved)
+    return str(resolved_path if resolved_path.is_absolute() else resolved_path.resolve())
 
 
 def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
@@ -122,7 +139,13 @@ def run_cli_worker(
 
     started = time.monotonic()
     executable_sha256 = _hash_file(request.executable)
-    environment = os.environ.copy()
+    # Verifiers must not inherit ambient lifecycle controls, provider tokens,
+    # or target-root overrides.  Callers can still pass task-scoped values
+    # explicitly through ``request.env``.
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key in _INHERITED_ENV_ALLOWLIST
+    }
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"

@@ -9,6 +9,7 @@ import json
 import hashlib
 import time
 import subprocess
+import tempfile
 from pathlib import Path
 
 try:
@@ -33,7 +34,27 @@ REQUIRED_SURFACES = [
 
 DEFAULT_TASK_INDEX = "tasks/bootstrap-authority-convergence/INDEX.md"
 DEFAULT_POLICY_CONTRACT = "scripts/ops/agent_protocol_contract.json"
-DEFAULT_REPORT_DIR = ".nexus/reports/startup_hardening"
+DEFAULT_REPORT_DIR = "startup_hardening"
+
+
+def _default_report_dir(project_root: Path) -> Path:
+    """Resolve startup artifacts outside the source checkout by default.
+
+    Operators may still provide an explicit ``NEXUS_STARTUP_REPORT_DIR``.
+    Otherwise the shared machine-state directory wins, followed by a stable
+    temp-directory namespace derived from the worktree root.
+    """
+    explicit = os.getenv("NEXUS_STARTUP_REPORT_DIR")
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_absolute() else project_root / path
+
+    machine_state = os.getenv("NEXUS_MACHINE_STATE_DIR") or os.getenv("NEXUS_STATE_DIR")
+    if machine_state:
+        return Path(machine_state).expanduser() / DEFAULT_REPORT_DIR
+
+    root_key = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / "nexus-startup-contract" / root_key / DEFAULT_REPORT_DIR
 
 def check_files(project_root: Path) -> dict:
     results = {}
@@ -106,7 +127,7 @@ def run_check(
     )
     if not contract_path.is_absolute():
         contract_path = project_root / contract_path
-    report_dir = report_dir or project_root / os.getenv("NEXUS_STARTUP_REPORT_DIR", DEFAULT_REPORT_DIR)
+    report_dir = report_dir or _default_report_dir(project_root)
     if not report_dir.is_absolute():
         report_dir = project_root / report_dir
 

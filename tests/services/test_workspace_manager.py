@@ -62,12 +62,15 @@ def test_workspace_cleanup(workspace_mgr, tmp_path):
     with patch("subprocess.run") as mock_run:
         workspace_mgr.cleanup(task_id, branch)
         
-        # 檢查 git worktree remove 與 branch -D 是否被呼叫
-        assert mock_run.call_count == 2
+        # physical cleanup is allowed, but branch deletion is explicit-only.
+        assert mock_run.call_count == 1
         args1 = mock_run.call_args_list[0][0][0]
         assert "remove" in args1
-        args2 = mock_run.call_args_list[1][0][0]
-        assert "-D" in args2
+
+
+def test_workspace_harvest_fails_closed_without_explicit_legacy_mutation(workspace_mgr):
+    with pytest.raises(Exception, match="legacy harvest is disabled"):
+        workspace_mgr.harvest("isolated/task-T123", workspace_mgr.workspace_base / "T123")
 
 def test_sync_staged_to_sandbox(workspace_mgr, tmp_path):
     """驗證暫存區同步至沙盒的邏輯。"""
@@ -120,6 +123,7 @@ def test_lease_accepts_registered_swarm_worktree_and_preserves_controller(tmp_pa
     status_before = _git(controller, "status", "--porcelain=v1", "-z")
     branch_before = _git(controller, "branch", "--show-current")
     monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("NEXUS_ALLOW_LEGACY_SWARM_REUSE", "1")
     monkeypatch.setattr(WorkspaceManager, "_sync_brain_to_path", lambda self, path: None)
 
     manager = WorkspaceManager(controller)

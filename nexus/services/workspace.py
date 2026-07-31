@@ -23,6 +23,13 @@ class WorkspacePermissionError(Exception):
 
 
 class WorkspaceManager:
+    LEGACY_MUTATION_ENV = "NEXUS_ALLOW_LEGACY_WORKSPACE_MUTATION"
+    LEGACY_SWARM_REUSE_ENV = "NEXUS_ALLOW_LEGACY_SWARM_REUSE"
+
+    @staticmethod
+    def _env_enabled(name: str) -> bool:
+        return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
     def _acquire_workspace_lock(self, workspace_path: Path, timeout_sec: int = 10) -> bool:
         lock_file = workspace_path / ".lock"
         start_time = time.time()
@@ -92,7 +99,7 @@ class WorkspaceManager:
         # 🐝 [P1 Optimization] Swarm Reuse strategy
         # 優先尋找並租用 .nexus-swarm-* 目錄，避免 git worktree add 的開銷
         swarm_dirs = sorted([d for d in self.project_root.glob(".nexus-swarm-*") if d.is_dir()])
-        if swarm_dirs:
+        if swarm_dirs and self._env_enabled(self.LEGACY_SWARM_REUSE_ENV):
             try:
                 from nexus.research.swarm_broker import SwarmBroker
                 broker = SwarmBroker(self.project_root)
@@ -132,6 +139,12 @@ class WorkspaceManager:
                     return task_id, branch_name, swarm_path
             except Exception as e:
                 logger.warning(f"⚠️ [Swarm-Reuse] Failed to acquire swarm, falling back: {e}")
+        elif swarm_dirs:
+            logger.info(
+                "[Workspace] Legacy swarm reuse disabled; use governed TargetWorktreeLease "
+                "or explicitly set %s for compatibility.",
+                self.LEGACY_SWARM_REUSE_ENV,
+            )
 
         work_path = self.workspace_base / unique_id
         print(f"🏗️ [Provisioning] Leasing workspace: {task_id} at {work_path}")
@@ -223,6 +236,11 @@ class WorkspaceManager:
 
     def harvest(self, branch_name, sandbox_path):
         """原子化收割：排隊合併回主幹。"""
+        if not self._env_enabled(self.LEGACY_MUTATION_ENV):
+            raise WorkspacePermissionError(
+                "legacy harvest is disabled; use SelfHostedTaskService candidate approval "
+                "and integration surfaces"
+            )
         print(f"🚜 [Harvesting] Attempting to merge {branch_name}...")
 
         # 使用 fcntl 進行實體鎖定
@@ -312,5 +330,12 @@ class WorkspaceManager:
                 ["git", "worktree", "remove", str(work_path), "--force"],
                 cwd=self.project_root,
             )
-            subprocess.run(["git", "branch", "-D", branch_name], cwd=self.project_root, capture_output=True)
+            if self._env_enabled(self.LEGACY_MUTATION_ENV):
+                subprocess.run(["git", "branch", "-D", branch_name], cwd=self.project_root, capture_output=True)
+            else:
+                logger.info(
+                    "[Cleanup] Retaining legacy branch %s; branch deletion requires explicit %s",
+                    branch_name,
+                    self.LEGACY_MUTATION_ENV,
+                )
             print(f"🧹 [Cleanup] Workspace {task_id} destroyed.")
