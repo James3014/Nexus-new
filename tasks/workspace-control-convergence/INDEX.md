@@ -22,7 +22,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Final Physical Cutover Verification (2026-08-01)
 
 - Canonical daily entrypoint: `/Users/jameschen/Workspace/nexus`.
-- Canonical branch: `nexus/integration/main`; current verified HEAD: `2eb73514e80b791a66bdde5c478d63202ac94de9` (`fix(runtime): use active verifier interpreter`).
+- Canonical branch: `nexus/integration/main`; current verified HEAD: `e22ad0757beeebaabf70dd8ed53d7744daf542a4` (`docs(tasks): record p30 route receipt blockers`).
 - Registered worktrees: `1`; exact path is the canonical root; `git worktree prune --dry-run` reports no stale metadata.
 - Canonical dirty state: clean (`git status --short --branch` reports only `## nexus/integration/main`).
 - Unregistered worktree root: `/Users/jameschen/Workspace/nexus-worktrees` is absent.
@@ -34,6 +34,12 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - Gate hardening commits `c6a6ffc6b` and `89379333f` make Ultra Review and route smoke use the active interpreter, ignore dangling runtime links, and avoid the restricted uv cache; focused suites are `18 passed` and `36 passed`, and CI strict reached a passing Ultra Review lane.
 - Gate hardening commit `2eb73514e` makes research-flow child verification use the active interpreter; the nightshift/research-flow focused app suite reached `107 passed`, with two pre-existing public-claim telemetry assertions still failing.
 - Gate residuals: full pytest now collects cleanly (`11484 collected` after adding `jsonschema` to the local `.venv`); the latest bounded run reached `4787 passed / 145 failed / 6 skipped` in `358.47s` before keyboard interruption at 42%, with repeated LanceDB background-event-loop timeouts. Acceptance is `UNVERIFIED_COLD_START` with zero samples. P30 remains `passed:false`: route smoke public-safe capability set is empty versus required nine, and route evidence-to-outcome rate is `0.206349`; CI strict reaches Wiki Governance and reports `226 passed / 55 failed` legacy documentation contracts. These remain evidence blockers, not workspace residue.
+
+## Exact Live Inventory (2026-08-01 rechecked)
+
+- Worktree/dirty/process census: one registered worktree only (`/Users/jameschen/Workspace/nexus`, `refs/heads/nexus/integration/main`); `git status --short --branch` is clean; `git worktree prune --dry-run -v` is empty; `/Users/jameschen/Workspace/nexus-worktrees` is absent; read-only `ps` found no `devspace`, `nexus-worktrees`, `nexus-8a1be3f4`, or route-smoke process.
+- Ref census: `70` `refs/nexus-salvage/*`, `33` `refs/heads/codex/*`, and `12` `refs/codex/turn-diffs/*`. Salvage refs are owner-preserved evidence and are not disposable metadata under card 05.
+- Non-ancestor Codex branches were rechecked with `git cherry nexus/integration/main <ref>`; all remain preserved and intentionally not auto-integrated: `codex/fix-code16-rootcause` (`+6`), `codex/governance-p0-hardening-v2` (`+3`), `codex/lifecycle-authority-reconciliation` (`+0/-1`, patch-equivalent), `codex/lifecycle-p6-stack` (`+0/-2`, patch-equivalent), `codex/local-armor-baseline-integration` (`+44`), `codex/n30r-gate2-gate3-repair` (`+4/-4`, mixed patch-equivalent), `codex/n30r-v32-p8-integration-review` (`+20`), `codex/n30r-v32-value-closure` (`+17`), `codex/salvage-nexus-8a1be3f4-20260801` (`+7`), `codex/unified-production-closure-20260724` (`+7`), and `codex/wiki-final-audit-readonly-20260715` (`+3`). Each is either historical/generated, superseded, or requires a separate bounded owner-authorized integration packet; no unprotected unique state remains.
 
 ## Ordered Cards
 1. [00-lifecycle-control-plane-workspace-convergence.md](00-lifecycle-control-plane-workspace-convergence.md) - `lifecycle-control-plane-workspace-convergence`
