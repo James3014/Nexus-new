@@ -13,7 +13,14 @@ from click.testing import CliRunner
 from scripts.engine.nexus_cli import nexus
 import scripts.engine.commands.self_hosted_actions as self_hosted_actions
 from scripts.engine.commands.exception_translation import NexusCliActionError
-from scripts.engine.commands.self_hosted_actions import run_self_hosted_cleanup, set_test_runner
+from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_cleanup,
+    run_self_hosted_workspace_converge,
+    run_self_hosted_workspace_inventory,
+    run_self_hosted_workspace_plan,
+    run_self_hosted_workspace_slot_status,
+    set_test_runner,
+)
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
@@ -617,6 +624,88 @@ def test_self_hosted_cleanup_requires_one_task_id():
 
     assert result.exit_code != 0
     assert "Missing option '--task-id'" in result.output
+
+
+def test_workspace_action_wrappers_forward_exact_read_and_apply_contract():
+    calls = []
+
+    class FakeService:
+        def workspace_inventory(self, **kwargs):
+            calls.append(("inventory", kwargs))
+            return {"schema": "inventory"}
+
+        def workspace_convergence_plan(self, **kwargs):
+            calls.append(("plan", kwargs))
+            return {"schema": "plan"}
+
+        def workspace_slot_status(self, **kwargs):
+            calls.append(("slot", kwargs))
+            return {"schema": "slot"}
+
+        def apply_workspace_convergence(self, **kwargs):
+            calls.append(("converge", kwargs))
+            return {"schema": "converge", "applied": kwargs["apply"]}
+
+    service = FakeService()
+    assert run_self_hosted_workspace_inventory("/controller", service=service) == {"schema": "inventory"}
+    assert run_self_hosted_workspace_plan("/controller", "a" * 40, service=service) == {"schema": "plan"}
+    assert run_self_hosted_workspace_slot_status("campaign", 2, "/controller", service=service) == {"schema": "slot"}
+    assert run_self_hosted_workspace_converge("a" * 40, "b" * 64, apply=False, service=service) == {"schema": "converge", "applied": False}
+    assert calls == [
+        ("inventory", {"controller_root": "/controller"}),
+        ("plan", {"controller_root": "/controller", "expected_controller_revision": "a" * 40}),
+        ("slot", {"campaign_id": "campaign", "slot_index": 2, "controller_root": "/controller"}),
+        ("converge", {
+            "controller_root": None,
+            "expected_controller_revision": "a" * 40,
+            "expected_plan_hash": "b" * 64,
+            "apply": False,
+        }),
+    ]
+
+
+def test_workspace_cli_surfaces_are_registered_and_dry_run_first(monkeypatch):
+    class FakeService:
+        def workspace_inventory(self, **kwargs):
+            return {"schema": "inventory", "controller_root": kwargs.get("controller_root")}
+
+        def workspace_convergence_plan(self, **kwargs):
+            return {"schema": "plan", "controller_revision": kwargs.get("expected_controller_revision")}
+
+        def workspace_slot_status(self, **kwargs):
+            return {"schema": "slot", "status": "READY", "slot_index": kwargs.get("slot_index")}
+
+        def apply_workspace_convergence(self, **kwargs):
+            return {"schema": "converge", "applied": kwargs["apply"]}
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    runner = CliRunner()
+
+    inventory = runner.invoke(nexus, [
+        "nexus", "self-hosted", "workspace-inventory", "--controller-root", "/controller",
+    ])
+    assert inventory.exit_code == 0, inventory.output
+    assert json.loads(inventory.output)["schema"] == "inventory"
+
+    plan = runner.invoke(nexus, [
+        "nexus", "self-hosted", "workspace-plan", "--expected-controller-revision", "a" * 40,
+    ])
+    assert plan.exit_code == 0, plan.output
+    assert json.loads(plan.output)["schema"] == "plan"
+
+    slot = runner.invoke(nexus, [
+        "nexus", "self-hosted", "workspace-slot-status", "--campaign-id", "campaign", "--slot-index", "3",
+    ])
+    assert slot.exit_code == 0, slot.output
+    assert json.loads(slot.output)["slot_index"] == 3
+
+    converge = runner.invoke(nexus, [
+        "nexus", "self-hosted", "workspace-converge",
+        "--expected-controller-revision", "a" * 40,
+        "--expected-plan-hash", "b" * 64,
+    ])
+    assert converge.exit_code == 0, converge.output
+    assert json.loads(converge.output)["applied"] is False
 
 
 def test_self_hosted_cleanup_translates_service_error(monkeypatch):

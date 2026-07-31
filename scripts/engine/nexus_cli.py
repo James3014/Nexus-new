@@ -216,6 +216,10 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_submit,
     run_self_hosted_verify,
     run_self_hosted_wait,
+    run_self_hosted_workspace_converge,
+    run_self_hosted_workspace_inventory,
+    run_self_hosted_workspace_plan,
+    run_self_hosted_workspace_slot_status,
 )
 from scripts.engine.commands.registry_actions import (
     get_registry_status,
@@ -3511,6 +3515,85 @@ def self_hosted_list_actionable(state_dir: str | None) -> None:
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
+@self_hosted_group.command(name="workspace-inventory")
+@click.option("--controller-root", type=click.Path(), default=None, help="Controller repository root.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_workspace_inventory(controller_root: str | None, state_dir: str | None) -> None:
+    """Read-only machine-readable workspace inventory."""
+    res = run_self_hosted_workspace_inventory(
+        controller_root=controller_root,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="workspace-plan")
+@click.option("--controller-root", type=click.Path(), default=None, help="Controller repository root.")
+@click.option("--expected-controller-revision", default=None, help="Expected Controller revision SHA.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_workspace_plan(
+    controller_root: str | None,
+    expected_controller_revision: str | None,
+    state_dir: str | None,
+) -> None:
+    """Build a read-only workspace convergence plan."""
+    res = run_self_hosted_workspace_plan(
+        controller_root=controller_root,
+        expected_controller_revision=expected_controller_revision,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="workspace-slot-status")
+@click.option("--campaign-id", default="default", show_default=True, help="Reusable slot campaign ID.")
+@click.option("--slot-index", type=int, default=0, show_default=True, help="Reusable slot index.")
+@click.option("--controller-root", type=click.Path(), default=None, help="Controller repository root.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_workspace_slot_status(
+    campaign_id: str,
+    slot_index: int,
+    controller_root: str | None,
+    state_dir: str | None,
+) -> None:
+    """Read-only reusable-slot readiness status."""
+    res = run_self_hosted_workspace_slot_status(
+        campaign_id=campaign_id,
+        slot_index=slot_index,
+        controller_root=controller_root,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="workspace-converge")
+@click.option("--expected-controller-revision", required=True, help="Exact Controller revision bound to the plan.")
+@click.option("--expected-plan-hash", required=True, help="Exact plan hash bound to the dry-run.")
+@click.option("--controller-root", type=click.Path(), default=None, help="Controller repository root.")
+@click.option("--apply", is_flag=True, help="Apply eligible lifecycle-bound cleanup; default is dry-run.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_workspace_converge(
+    expected_controller_revision: str,
+    expected_plan_hash: str,
+    controller_root: str | None,
+    apply: bool,
+    state_dir: str | None,
+) -> None:
+    """Preview or explicitly apply an exact-bound workspace convergence plan."""
+    res = run_self_hosted_workspace_converge(
+        expected_controller_revision=expected_controller_revision,
+        expected_plan_hash=expected_plan_hash,
+        controller_root=controller_root,
+        apply=apply,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
 @self_hosted_group.command(name="cleanup")
 @click.option("--task-id", required=True, help="Exact task ID to clean up.")
 @click.option("--apply", is_flag=True, help="Apply eligible cleanup; default is dry-run.")
@@ -3670,4 +3753,3 @@ def self_hosted_verify(
 if __name__ == "__main__":
 
     nexus()
-

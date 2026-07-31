@@ -98,6 +98,84 @@ def run_self_hosted_list_actionable(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_workspace_inventory(
+    controller_root: str | Path | None = None,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.workspace_inventory(controller_root=controller_root)
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
+def run_self_hosted_workspace_plan(
+    controller_root: str | Path | None = None,
+    expected_controller_revision: str | None = None,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.workspace_convergence_plan(
+            controller_root=controller_root,
+            expected_controller_revision=expected_controller_revision,
+        )
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
+def run_self_hosted_workspace_slot_status(
+    campaign_id: str = "default",
+    slot_index: int = 0,
+    controller_root: str | Path | None = None,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.workspace_slot_status(
+            campaign_id=campaign_id,
+            slot_index=slot_index,
+            controller_root=controller_root,
+        )
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
+def run_self_hosted_workspace_converge(
+    expected_controller_revision: str,
+    expected_plan_hash: str,
+    apply: bool = False,
+    controller_root: str | Path | None = None,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    if not expected_controller_revision or not expected_controller_revision.strip():
+        raise NexusCliActionError("expected_controller_revision is required", exit_code=1)
+    if not expected_plan_hash or not expected_plan_hash.strip():
+        raise NexusCliActionError("expected_plan_hash is required", exit_code=1)
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.apply_workspace_convergence(
+            controller_root=controller_root,
+            expected_controller_revision=expected_controller_revision,
+            expected_plan_hash=expected_plan_hash,
+            apply=apply,
+        )
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_cleanup(
     task_id: str,
     apply: bool = False,
