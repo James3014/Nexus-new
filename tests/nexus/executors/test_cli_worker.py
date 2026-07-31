@@ -33,7 +33,7 @@ def test_worker_runs_without_shell_and_records_hashes_and_telemetry(tmp_path):
 
     assert result.status is CliWorkerStatus.COMPLETED
     assert result.exit_code == 0
-    assert result.executable_identity == str(Path(sys.executable).resolve())
+    assert result.executable_identity == request.executable
     assert result.executable_sha256 == result.hash_bytes(Path(result.executable_identity).read_bytes())
     assert result.argv == request.argv
     assert result.cwd == str(tmp_path.resolve())
@@ -57,6 +57,23 @@ def test_worker_records_nonzero_exit_with_executable_hash(tmp_path):
     assert result.executable_sha256 == result.hash_bytes(Path(result.executable_identity).read_bytes())
     assert result.timed_out is False
     assert result.process_group_killed is False
+
+
+def test_worker_preserves_explicit_interpreter_symlink(tmp_path):
+    alias = tmp_path / "python-alias"
+    alias.symlink_to(sys.executable)
+    request = CliWorkerRequest(
+        executable=str(alias),
+        argv=("-c", "print('alias-ok')"),
+        cwd=str(tmp_path),
+    )
+
+    result = run_cli_worker(request)
+
+    assert request.executable == str(alias)
+    assert result.executable_identity == str(alias)
+    assert result.exit_code == 0
+    assert result.stdout == b"alias-ok\n"
 
 
 def test_worker_invokes_and_clears_process_group_callback(tmp_path):

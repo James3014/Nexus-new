@@ -36,6 +36,8 @@ Make the legacy allocator and operator surfaces deterministic and fail-closed: d
 - `tests/services/test_workspace_manager.py`
 - `nexus/orchestrator/self_hosted_task_service.py`
 - `tests/nexus/orchestrator/test_self_hosted_task_service.py`
+- `nexus/executors/cli_worker.py`
+- `tests/nexus/executors/test_cli_worker.py`
 
 ## Forbidden scope
 
@@ -55,6 +57,7 @@ npx --yes gitnexus detect-changes --repo Nexus --scope unstaged
 
 - P3 targeted regression proves legacy reuse/harvest/cleanup are opt-in and fail-closed by default.
 - P6 wait and verify execute without `.state.lock` acquisition and return `task_action`/`next_action` for an existing task.
+- CLI verifier execution preserves explicit virtualenv interpreter symlinks so installed verifier dependencies remain available.
 - Full lifecycle regression remains green; semantic missing-candidate verification remains `FAILED` with `state_intact=true`.
 - Exact scoped commit and Candidate binding are reported; no approval/integration claim.
 

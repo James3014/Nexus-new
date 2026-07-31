@@ -21,7 +21,7 @@ Close the remaining lifecycle friction without mutating the dirty canonical root
 
 `lifecycle-p3-allocator-p6-operator-surfaces`
 
-Current frontier card hash (sha256): `9b64c01fa13adf97c2d59e0aaec9d767a846810b5919d0f3cb779a80d560b7a6`
+Current frontier card hash (sha256): `35c4acc5e945b17c996372116c5f047b2ac4bea66e0bcd84f0d520a544037849`
 
 ## Completed Evidence
 
