@@ -32,7 +32,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `read-only-status-lock-free-hardening`: `b975957dc` switched actionable/inventory state reads to atomic snapshots without creating or acquiring `.state.lock`; service/workflow and full P7 regression remained green at 109 and 230 passed.
 
 ## Blocked Cards
-- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 241 integration-only commits / 178 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
+- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 245 integration-only commits / 178 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
 - Retained evidence requiring explicit successor/owner decision: `exact-authorized-deletion-contract-bootstrap` and `workspace-convergence-core-primitives`. They remain visible through the formal actionable surface; no JSON was edited manually.
 
 ## Superseded Cards
