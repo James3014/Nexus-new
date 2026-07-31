@@ -19,7 +19,7 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 5. [05-workforce-compact-surface.md](05-workforce-compact-surface.md) - `workforce-compact-surface`
 6. [06-briefing-overlay-reduction.md](06-briefing-overlay-reduction.md) - `briefing-overlay-reduction`
 7. [07-workspace-retry-and-permission-gate.md](07-workspace-retry-and-permission-gate.md) - `workspace-retry-and-permission-gate`
-8. `orphan-workspace-reconciliation` - planned owner-gated audit/apply phase
+8. [08-orphan-workspace-reconciliation.md](08-orphan-workspace-reconciliation.md) - `orphan-workspace-reconciliation`
 
 ## Current Frontier
 
