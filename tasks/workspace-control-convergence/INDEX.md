@@ -22,7 +22,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Final Physical Cutover Verification (2026-08-01)
 
 - Canonical daily entrypoint: `/Users/jameschen/Workspace/nexus`.
-- Canonical branch: `nexus/integration/main`; current verified HEAD: `e22ad0757beeebaabf70dd8ed53d7744daf542a4` (`docs(tasks): record p30 route receipt blockers`).
+- Canonical branch: `nexus/integration/main`; current verified HEAD: `c9c05e5e1` (`fix(contract): restore numeric semantic and dto compatibility`).
 - Registered worktrees: `1`; exact path is the canonical root; `git worktree prune --dry-run` reports no stale metadata.
 - Canonical dirty state: clean (`git status --short --branch` reports only `## nexus/integration/main`).
 - Unregistered worktree root: `/Users/jameschen/Workspace/nexus-worktrees` is absent.
@@ -33,6 +33,8 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - Gate evidence: bounded lifecycle suite `217 passed in 122.34s`; CI dry-run passed; startup contract passed with token `86589763f9282007`.
 - Gate hardening commits `c6a6ffc6b` and `89379333f` make Ultra Review and route smoke use the active interpreter, ignore dangling runtime links, and avoid the restricted uv cache; focused suites are `18 passed` and `36 passed`, and CI strict reached a passing Ultra Review lane.
 - Gate hardening commit `2eb73514e` makes research-flow child verification use the active interpreter; the nightshift/research-flow focused app suite reached `107 passed`, with two pre-existing public-claim telemetry assertions still failing.
+- Contract compatibility commit `c9c05e5e1` restores numeric semantic-label decoding and dict-compatible DTO access; the bounded contract run is `231 passed / 1 failed`. The remaining failure is the stale expectation that fail-closed `INTAKE -> ESCALATE` is a legal transition; the authoritative transition matrix intentionally rejects that edge.
+- The card's named `scripts/ops/acceptance_suite.py` and `scripts/ops/contract_test.py` entrypoints are absent. Authoritative replacements used for this live checkout are `scripts/ops/nexus_acceptance_check.py`, `scripts/ops/nexus_p30_acceptance_gate.py`, and `tests/contracts tests/contract` (232 tests collected).
 - Gate residuals: full pytest now collects cleanly (`11484 collected` after adding `jsonschema` to the local `.venv`); the latest bounded run reached `4787 passed / 145 failed / 6 skipped` in `358.47s` before keyboard interruption at 42%, with repeated LanceDB background-event-loop timeouts. Acceptance is `UNVERIFIED_COLD_START` with zero samples. P30 remains `passed:false`: route smoke public-safe capability set is empty versus required nine, and route evidence-to-outcome rate is `0.206349`; CI strict reaches Wiki Governance and reports `226 passed / 55 failed` legacy documentation contracts. These remain evidence blockers, not workspace residue.
 
 ## Exact Live Inventory (2026-08-01 rechecked)
