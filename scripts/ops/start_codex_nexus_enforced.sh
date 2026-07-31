@@ -5,8 +5,13 @@ NEXUS_ROOT="."
 MODEL="${1:-gpt-5.4-mini}"
 APPROVAL_MODE="${2:-full-auto}"
 PROMPT_FILE="${3:-/tmp/antigravity_nexus_task.md}"
-REPORT_FILE="${REPORT_FILE:-$NEXUS_ROOT/.nexus/reports/antigravity_invoke_report.txt}"
+NEXUS_MACHINE_STATE_DIR="${NEXUS_MACHINE_STATE_DIR:-${NEXUS_STATE_DIR:-${TMPDIR:-/tmp}/nexus-machine-state}}"
+NEXUS_STARTUP_REPORT_DIR="${NEXUS_STARTUP_REPORT_DIR:-$NEXUS_MACHINE_STATE_DIR/startup_hardening}"
+export NEXUS_MACHINE_STATE_DIR NEXUS_STARTUP_REPORT_DIR
+REPORT_FILE="${REPORT_FILE:-$NEXUS_MACHINE_STATE_DIR/antigravity_invoke_report.txt}"
 LOCK_FILE="${LOCK_FILE:-/tmp/nexus_antigravity_invoke.lock}"
+
+mkdir -p "$NEXUS_MACHINE_STATE_DIR" "$NEXUS_STARTUP_REPORT_DIR"
 
 if [[ ! -f "$PROMPT_FILE" ]]; then
   cat >&2 <<EOF
@@ -40,7 +45,7 @@ echo "[nexus-enforced] report_file=$REPORT_FILE"
 
 cd "$NEXUS_ROOT"
 
-BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh .nexus/reports/enforced_agent_briefing.md)"
+BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh "$NEXUS_MACHINE_STATE_DIR/enforced_agent_briefing.md")"
 echo "[nexus-enforced] briefing=$BRIEFING_PATH"
 
 # 🛡️ Nexus Startup Contract Check
