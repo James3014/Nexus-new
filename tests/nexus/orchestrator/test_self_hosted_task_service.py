@@ -976,6 +976,79 @@ def test_list_actionable_tasks_excludes_integrated_terminal_state(tmp_path):
     assert result["tasks"][1]["task_action"]["next_action"] == "integrate_approved_candidate"
 
 
+def test_list_actionable_tasks_is_compact_and_does_not_reconcile(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("blocked", {
+        "task_id": "blocked",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "error": "worker failed",
+        "request": {"large": "x" * 10000},
+    })
+
+    def fail_reconcile(_task_id):
+        raise AssertionError("list_actionable_tasks must not reconcile task state")
+
+    monkeypatch.setattr(service, "reconcile_task", fail_reconcile)
+    result = service.list_actionable_tasks()
+
+    assert result["details_included"] is False
+    assert result["actionable_count"] == 1
+    assert result["tasks"][0]["task_id"] == "blocked"
+    assert "error" not in result["tasks"][0]
+
+
+def test_workspace_inventory_plan_and_slot_status_are_read_only(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="workspace-service")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    before = sorted(path.name for path in (tmp_path / "state").iterdir())
+
+    inventory = service.workspace_inventory(controller_root=contract.controller_repo_root)
+    plan = service.workspace_convergence_plan(
+        controller_root=contract.controller_repo_root,
+        expected_controller_revision=contract.controller_revision,
+    )
+    slot = service.workspace_slot_status(
+        campaign_id="workspace-service",
+        controller_root=contract.controller_repo_root,
+    )
+
+    assert inventory["schema"] == "nexus.workspace_inventory.v1"
+    assert plan["schema"] == "nexus.workspace_convergence_plan.v1"
+    assert plan["controller_revision"] == contract.controller_revision
+    assert slot["status"] in {"READY", "BLOCKED"}
+    assert Path(lease.target_worktree).exists()
+    assert sorted(path.name for path in (tmp_path / "state").iterdir()) == before
+
+
+def test_workspace_apply_requires_exact_plan_binding(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="workspace-apply")
+    contract = service.build_contract(request)
+    plan = service.workspace_convergence_plan(controller_root=contract.controller_repo_root)
+
+    with pytest.raises(RuntimeError, match="PLAN_HASH_MISMATCH"):
+        service.apply_workspace_convergence(
+            controller_root=contract.controller_repo_root,
+            expected_controller_revision=contract.controller_revision,
+            expected_plan_hash="0" * 64,
+            apply=True,
+        )
+
+    preview = service.apply_workspace_convergence(
+        controller_root=contract.controller_repo_root,
+        expected_controller_revision=contract.controller_revision,
+        expected_plan_hash=plan["plan_hash"],
+        apply=False,
+    )
+    assert preview["applied"] is False
+    assert preview["next_gate"] == "EXPLICIT_APPLY"
+
+
 def test_integrated_task_action_envelope_is_terminal(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("integrated", {

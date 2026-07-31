@@ -1565,19 +1565,162 @@ class SelfHostedTaskService:
                 }
             time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
 
-    def list_actionable_tasks(self) -> dict[str, Any]:
+    def list_actionable_tasks(self, *, include_details: bool = False) -> dict[str, Any]:
+        """Return action envelopes without reconciling or mutating task state.
+
+        The default response is intentionally compact.  Callers that need the
+        full durable state must opt in with ``include_details=True`` or use
+        ``get_task``/``get_receipt`` for one task.  This keeps status polling
+        from repeatedly traversing Target worktrees and from creating hidden
+        lifecycle mutations.
+        """
         tasks = []
         for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
-            state = self.get_task(path.stem)
+            state = self._read_state(path.stem)
             if state is None:
                 continue
-            action = state.get("task_action") or self._task_action_envelope(state)
+            action = self._task_action_envelope(state)
             if action.get("attention_required") is True:
-                tasks.append(state)
+                if include_details:
+                    tasks.append(state)
+                else:
+                    tasks.append({**action, "task_action": action})
         return {
             "schema": "nexus.self_hosted_actionable_tasks.v1",
             "actionable_count": len(tasks),
+            "details_included": include_details,
             "tasks": tasks,
+        }
+
+    def _workspace_task_states(self) -> dict[str, dict[str, Any]]:
+        """Load durable task snapshots without invoking reconciliation."""
+        if not self.state_dir.exists():
+            return {}
+        states: dict[str, dict[str, Any]] = {}
+        for path in sorted(self.state_dir.glob("*.json")):
+            state = self._read_state(path.stem)
+            if state is not None:
+                states[path.stem] = state
+        return states
+
+    def workspace_inventory(
+        self,
+        *,
+        controller_root: Optional[str | Path] = None,
+    ) -> dict[str, Any]:
+        """Read-only inventory of registered worktrees and lifecycle ownership."""
+        states = self._workspace_task_states()
+        root = Path(controller_root or Path.cwd()).resolve()
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        inventory = manager.get_workspace_inventory(
+            controller_root=root,
+            task_states=states,
+        )
+        return _jsonable(inventory)
+
+    def workspace_convergence_plan(
+        self,
+        *,
+        controller_root: Optional[str | Path] = None,
+        expected_controller_revision: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Build a stable dry-run plan; no state or workspace mutation occurs."""
+        states = self._workspace_task_states()
+        root = Path(controller_root or Path.cwd()).resolve()
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        inventory = manager.get_workspace_inventory(
+            controller_root=root,
+            task_states=states,
+        )
+        expected = expected_controller_revision or inventory.controller_head
+        plan = manager.plan_convergence(inventory, expected_controller_revision=expected)
+        return _jsonable(plan)
+
+    def workspace_slot_status(
+        self,
+        *,
+        campaign_id: str = "default",
+        slot_index: int = 0,
+        controller_root: Optional[str | Path] = None,
+    ) -> dict[str, Any]:
+        """Read-only reusable-slot readiness check."""
+        states = self._workspace_task_states()
+        root = Path(controller_root or Path.cwd()).resolve()
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        status = manager.get_reusable_slot_status(
+            campaign_id=campaign_id,
+            slot_index=slot_index,
+            controller_root=root,
+            task_states=states,
+        )
+        return _jsonable(status)
+
+    def apply_workspace_convergence(
+        self,
+        *,
+        controller_root: Optional[str | Path] = None,
+        expected_controller_revision: str,
+        expected_plan_hash: str,
+        apply: bool = False,
+    ) -> dict[str, Any]:
+        """Apply only lifecycle-bound terminal cleanup through existing authority.
+
+        The default is a dry-run.  Unbound redundant worktrees remain blocked
+        because they have no task contract through which existing cleanup
+        authority can safely operate.
+        """
+        root = Path(controller_root or Path.cwd()).resolve()
+        states = self._workspace_task_states()
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        inventory = manager.get_workspace_inventory(controller_root=root, task_states=states)
+        if inventory.controller_head != expected_controller_revision:
+            raise RuntimeError(
+                f"CONTROLLER_REVISION_DRIFT: current controller {inventory.controller_head} "
+                f"does not match expected {expected_controller_revision}"
+            )
+        plan = manager.plan_convergence(
+            inventory,
+            expected_controller_revision=expected_controller_revision,
+        )
+        if plan.plan_hash != expected_plan_hash:
+            raise RuntimeError(
+                f"PLAN_HASH_MISMATCH: current plan {plan.plan_hash} "
+                f"does not match expected {expected_plan_hash}"
+            )
+        if not apply:
+            return {
+                **_jsonable(plan),
+                "applied": False,
+                "next_gate": "EXPLICIT_APPLY",
+            }
+
+        decisions: list[dict[str, Any]] = []
+        path_to_state = {
+            str(Path((state.get("lease") or {}).get("target_worktree") or "").resolve()): state
+            for state in states.values()
+            if (state.get("lease") or {}).get("target_worktree")
+        }
+        for path in plan.releasable_paths:
+            if Path(path).resolve() == Path("/Users/jameschen/Workspace/nexus").resolve():
+                raise RuntimeError("LEGACY_ROOT_APPLY_FORBIDDEN: legacy root cannot be released")
+            state = path_to_state.get(str(Path(path).resolve()))
+            if state is None:
+                decisions.append({
+                    "path": path,
+                    "cleanup_decision": "BLOCKED_UNBOUND_WORKSPACE",
+                    "cleanup_blocker": "no lifecycle task contract owns this worktree",
+                    "cleanup_performed": False,
+                })
+                continue
+            task_id = str(state.get("task_id"))
+            result = self.cleanup_tasks(task_id=task_id, dry_run=False)
+            decisions.extend(result.get("decisions", []))
+
+        return {
+            **_jsonable(plan),
+            "applied": True,
+            "decisions": decisions,
+            "next_gate": "OWNER_REVIEW",
         }
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
