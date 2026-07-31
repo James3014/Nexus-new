@@ -108,6 +108,30 @@ def test_ultra_review_sandbox_mirror_falls_back_to_copytree(tmp_path, monkeypatc
     assert payload["sandbox_mirror"]["fallback_reason"] == "worktree unavailable"
 
 
+def test_ultra_review_copytree_ignores_dangling_runtime_symlinks(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    dangling = tmp_path / ".runtime" / "missing-state.json"
+    dangling.parent.mkdir()
+    dangling.symlink_to(tmp_path / "outside" / "missing-state.json")
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["git", "worktree", "add"]:
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="worktree unavailable")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+
+    execution_root = tmp_path / "copy"
+    UltraReviewService(tmp_path)._copy_execution_workspace(execution_root, tmp_path / "sandbox")
+
+    copied_link = execution_root / ".runtime" / "missing-state.json"
+    assert not copied_link.exists()
+    assert not copied_link.is_symlink()
+
+
 def test_ultra_review_worktree_mirror_keeps_empty_diff_fast_path(tmp_path):
     _init_repo(tmp_path)
 
@@ -194,7 +218,7 @@ def test_ultra_review_security_repro_failure_becomes_unverified_observation(tmp_
     original_run = subprocess.run
 
     def fake_run(cmd, **kwargs):
-        if cmd[:4] == ["uv", "run", "--active", "python"] and "ultra_security_repro_" in str(cmd[4]):
+        if "ultra_security_repro_" in str(cmd[-1]):
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not reproduced")
         return original_run(cmd, **kwargs)
 
@@ -241,7 +265,7 @@ def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path
     original_run = subprocess.run
 
     def fake_run(cmd, **kwargs):
-        if cmd[:5] == ["uv", "run", "--active", "pytest", "-q"]:
+        if "pytest" in cmd and "-q" in cmd:
             raise subprocess.TimeoutExpired(cmd=cmd, timeout=30, output="running", stderr="timeout")
         return original_run(cmd, **kwargs)
 
@@ -266,7 +290,7 @@ def test_ultra_review_logic_breaker_failure_becomes_verified_finding(tmp_path, m
     original_run = subprocess.run
 
     def fake_run(cmd, **kwargs):
-        if cmd[:4] == ["uv", "run", "--active", "python"] and str(cmd[4]).endswith("ultra_logic_repro.py"):
+        if str(cmd[-1]).endswith("ultra_logic_repro.py"):
             return subprocess.CompletedProcess(cmd, 1, stdout="logic failed", stderr="edge mismatch")
         return original_run(cmd, **kwargs)
 

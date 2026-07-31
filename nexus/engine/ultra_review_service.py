@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -356,7 +357,16 @@ class UltraReviewService:
                     ignored.add(sandbox_anchor)
             return ignored
 
-        shutil.copytree(self.project_root, execution_root, ignore=ignore)
+        # Runtime-local links (for example user-specific Gemini state or an
+        # unbuilt native extension) may be dangling in the source checkout.
+        # They are not review inputs and must not make the fallback mirror
+        # fail before the actual diff is evaluated.
+        shutil.copytree(
+            self.project_root,
+            execution_root,
+            ignore=ignore,
+            ignore_dangling_symlinks=True,
+        )
         return {"strategy": "copytree", "diff_applied": True}
 
     def _capture_diff(self, base_ref: str) -> str:
@@ -593,7 +603,7 @@ class UltraReviewService:
                 encoding="utf-8",
             )
             shutil.copy2(self._resolve(sandbox_path / "changes.diff"), execution_root / "changes.diff")
-            cmd = ["uv", "run", "--active", "python", str(script_path)]
+            cmd = [sys.executable, str(script_path)]
             executed_checks.append(script_name)
             timeout = False
             try:
@@ -684,7 +694,7 @@ class UltraReviewService:
             ),
             encoding="utf-8",
         )
-        cmd = ["uv", "run", "--active", "python", str(repro_script)]
+        cmd = [sys.executable, str(repro_script)]
         timeout = False
         try:
             result = subprocess.run(
@@ -772,7 +782,7 @@ class UltraReviewService:
                 "pytest_stderr_tail": "",
             }
 
-        cmd = ["uv", "run", "--active", "pytest", "-q", *test_candidates]
+        cmd = [sys.executable, "-m", "pytest", "-q", *test_candidates]
         env = os.environ.copy()
         sanitized_env = []
         for key in BENCHMARK_ONLY_ENV_VARS:
