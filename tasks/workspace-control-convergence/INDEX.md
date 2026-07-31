@@ -22,7 +22,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Final Physical Cutover Verification (2026-08-01)
 
 - Canonical daily entrypoint: `/Users/jameschen/Workspace/nexus`.
-- Canonical branch: `nexus/integration/main`; current verified HEAD: `ba8334d36` (`docs(tasks): clarify startup token evidence`).
+- Canonical branch: `nexus/integration/main`; current verified HEAD: `HEAD` on the canonical branch (re-query with `git rev-parse HEAD` after each index update).
 - Registered worktrees: `1`; exact path is the canonical root; `git worktree prune --dry-run` reports no stale metadata.
 - Canonical dirty state: clean (`git status --short --branch` reports only `## nexus/integration/main`).
 - Unregistered worktree root: `/Users/jameschen/Workspace/nexus-worktrees` is absent.
