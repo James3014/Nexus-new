@@ -104,6 +104,52 @@ def test_what_why_are_mapped_to_architect_contract(tmp_path):
     assert contract.human_approval_required is True
 
 
+def test_production_bound_ephemeral_receipt_cannot_be_approved(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "ephemeral-production-bound"
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "request": {"task_card_required": True, "lifecycle_identity_required": True},
+        "promotion_packet": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "candidate_state_hash": "e" * 64,
+            "verified_receipt_hash": "f" * 64,
+        },
+    })
+
+    with pytest.raises(RuntimeError, match="EPHEMERAL_PROMOTION_FORBIDDEN"):
+        service.approve_promotion(
+            task_id,
+            candidate_commit_sha="c" * 40,
+            candidate_tree_sha="d" * 40,
+            candidate_state_hash="e" * 64,
+            verified_receipt_hash="f" * 64,
+        )
+
+
+def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "snapshot-only"
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "attempts": [{"attempt_id": "a"}],
+    })
+    monkeypatch.setattr(service, "reconcile_task", lambda *_: (_ for _ in ()).throw(AssertionError("reconciled")))
+
+    compact = service.get_task_snapshot(task_id)
+    detailed = service.get_task_snapshot(task_id, include_details=True)
+
+    assert compact["schema"] == "nexus.self_hosted_task_status.v1"
+    assert compact["task_action"]["next_action"] == "inspect_blocker_and_retry_or_dispose"
+    assert "attempts" not in compact
+    assert detailed["attempts"] == [{"attempt_id": "a"}]
+
+
 def test_submit_persists_idempotent_task_state(tmp_path):
     calls = []
 

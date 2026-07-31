@@ -3578,11 +3578,12 @@ def self_hosted_retry(task_id: str, state_dir: str | None) -> None:
 
 @self_hosted_group.command(name="status")
 @click.option("--task-id", required=True, help="Task ID to inspect.")
+@click.option("--details", "include_details", is_flag=True, default=False, help="Include the full durable state.")
 @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
 @translate_action_exceptions
-def self_hosted_status(task_id: str, state_dir: str | None) -> None:
+def self_hosted_status(task_id: str, include_details: bool, state_dir: str | None) -> None:
     """Read durable status for a self-hosted task."""
-    res = run_self_hosted_status(task_id, state_dir=state_dir)
+    res = run_self_hosted_status(task_id, include_details=include_details, state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
@@ -3590,12 +3591,14 @@ def self_hosted_status(task_id: str, state_dir: str | None) -> None:
 @click.option("--task-id", required=True, help="Task ID to wait for.")
 @click.option("--timeout", "timeout_seconds", type=float, default=10.0, help="Timeout in seconds.")
 @click.option("--poll-interval", "poll_interval_seconds", type=float, default=0.25, help="Poll interval in seconds.")
+@click.option("--details", "include_details", is_flag=True, default=False, help="Include the full durable state.")
 @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
 @translate_action_exceptions
 def self_hosted_wait(
     task_id: str,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    include_details: bool,
     state_dir: str | None,
 ) -> None:
     """Wait for a self-hosted task until terminal/attention_required or timeout."""
@@ -3603,6 +3606,7 @@ def self_hosted_wait(
         task_id,
         timeout_seconds=timeout_seconds,
         poll_interval_seconds=poll_interval_seconds,
+        include_details=include_details,
         state_dir=state_dir,
     )
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))

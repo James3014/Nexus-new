@@ -47,7 +47,7 @@ from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeMan
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
     "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
-    "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED",
+    "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
 })
 PENDING_CANDIDATE_STATUSES = frozenset({
     "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
@@ -471,6 +471,65 @@ class SelfHostedTaskService:
             _, archived = self._latest_archived_state(task_id)
             return archived
         return self._with_task_action(json.loads(payload))
+
+    def _promotion_authority_error(
+        self,
+        *,
+        contract: Optional[ArchitectTaskContract] = None,
+        request: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[str]:
+        """Return a fail-closed reason when a task cannot become promotable.
+
+        Ephemeral services are test/rehearsal surfaces.  A production-bound
+        task (one with a task card or lifecycle identity requirement) must be
+        backed by the canonical state root and a durable, existing Controller.
+        This prevents a temporary rehearsal receipt from becoming an
+        approval/integration authority by accident.
+        """
+        req = request or {}
+        production_bound = bool(
+            req.get("task_card_required") or req.get("lifecycle_identity_required")
+        )
+        if self.ephemeral and production_bound:
+            return "EPHEMERAL_PROMOTION_FORBIDDEN: rehearsal state cannot become a promotable Candidate"
+        if not production_bound or contract is None:
+            return None
+        if self.state_dir != self.canonical_state_dir():
+            return "CANONICAL_STATE_REQUIRED: production Candidate must use the canonical state root"
+        controller = Path(contract.controller_repo_root).expanduser().resolve()
+        if not controller.is_dir():
+            return f"CONTROLLER_MISSING: {controller}"
+        temporary_roots = (Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders"))
+        if any(controller == root or root in controller.parents for root in temporary_roots):
+            return f"DURABLE_CONTROLLER_REQUIRED: temporary Controller is not promotable: {controller}"
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            return f"CONTROLLER_PROBE_FAILED: {exc}"
+        if result.returncode != 0 or Path(result.stdout.strip()).resolve() != controller:
+            return f"CONTROLLER_NOT_A_REPOSITORY: {controller}"
+        try:
+            current_revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+        except OSError as exc:
+            return f"CONTROLLER_REVISION_PROBE_FAILED: {exc}"
+        if contract.controller_revision and current_revision != contract.controller_revision:
+            return (
+                "CONTROLLER_REVISION_MISMATCH: "
+                f"expected {contract.controller_revision}, got {current_revision}"
+            )
+        return None
 
     def _reactivate_archived_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock():
@@ -1012,6 +1071,51 @@ class SelfHostedTaskService:
             reasons = ", ".join(resolution.failure_reasons) or f"verdict is {resolution.verdict}"
             raise RuntimeError(f"candidate verification failed: {reasons}")
 
+        authority_error = self._promotion_authority_error(
+            contract=contract,
+            request=request,
+        )
+        if authority_error:
+            cleanup = manager.cleanup_terminal_target(contract, lease)
+            cleanup_ok = cleanup.decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            terminal_status = (
+                "REHEARSAL_VERIFIED"
+                if self.ephemeral and cleanup_ok
+                else "RETAINED_FOR_REVIEW"
+                if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+                else "FINAL_BLOCK"
+            )
+            update(terminal_status, {
+                "error": authority_error,
+                "candidate_status": "REHEARSAL_VERIFIED" if self.ephemeral and cleanup_ok else terminal_status,
+                "promotion_status": "NOT_CREATED",
+                "promotion_eligible": False,
+                "verification_verdict": "PROVEN" if self.ephemeral and cleanup_ok else "FAILED",
+                "verified_receipt": verified,
+                "attempt_resolution": resolution,
+                "cleanup_decision": cleanup.decision,
+                "cleanup_blocker": cleanup.blocker,
+                "cleanup_performed": cleanup.performed,
+                "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                "cleanup_eligible": cleanup.eligible,
+                "terminal_status": terminal_status,
+                "state_retention_status": "TERMINAL",
+                "archive_eligible": False,
+            })
+            return {
+                "execution": execution,
+                "candidate": candidate,
+                "verified_receipt": verified,
+                "attempt_resolution": resolution,
+                "candidate_status": "REHEARSAL_VERIFIED" if self.ephemeral and cleanup_ok else terminal_status,
+                "promotion_status": "NOT_CREATED",
+                "promotion_eligible": False,
+                "cleanup_decision": cleanup.decision,
+                "cleanup_performed": cleanup.performed,
+                "terminal_status": terminal_status,
+                "error": authority_error,
+            }
+
         packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
         candidate_values = {
             "execution": execution,
@@ -1547,6 +1651,7 @@ class SelfHostedTaskService:
         *,
         timeout_seconds: float = 10.0,
         poll_interval_seconds: float = 0.25,
+        include_details: bool = False,
     ) -> Optional[dict[str, Any]]:
         timeout_seconds = float(timeout_seconds)
         poll_interval_seconds = float(poll_interval_seconds)
@@ -1568,18 +1673,33 @@ class SelfHostedTaskService:
                 return None
             envelope = state.get("task_action") or self._task_action_envelope(state)
             if envelope.get("action_state") != "IN_PROGRESS":
-                return {
-                    **state,
+                result = {
+                    **(state if include_details else {
+                        "schema": "nexus.self_hosted_task_status.v1",
+                        "task_id": state.get("task_id"),
+                        "status": state.get("status"),
+                        "promotion_status": state.get("promotion_status"),
+                        "verification_verdict": state.get("verification_verdict"),
+                        "task_action": envelope,
+                    }),
                     "wait": {
                         "timed_out": False,
                         "timeout_seconds": timeout_seconds,
                         "poll_interval_seconds": poll_interval_seconds,
                     },
                 }
+                return result
             if time.monotonic() >= deadline:
                 envelope = {**envelope, "wait_timed_out": True}
                 return {
-                    **state,
+                    **(state if include_details else {
+                        "schema": "nexus.self_hosted_task_status.v1",
+                        "task_id": state.get("task_id"),
+                        "status": state.get("status"),
+                        "promotion_status": state.get("promotion_status"),
+                        "verification_verdict": state.get("verification_verdict"),
+                        "task_action": envelope,
+                    }),
                     "task_action": envelope,
                     "wait": {
                         "timed_out": True,
@@ -2581,6 +2701,23 @@ class SelfHostedTaskService:
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.reconcile_task(task_id)
 
+    def get_task_snapshot(self, task_id: str, *, include_details: bool = False) -> Optional[dict[str, Any]]:
+        """Read status without reconciliation or state-lock acquisition."""
+        state = self._read_state_snapshot(task_id)
+        if state is None:
+            return None
+        if include_details:
+            return state
+        action = state.get("task_action") or self._task_action_envelope(state)
+        return {
+            "schema": "nexus.self_hosted_task_status.v1",
+            "task_id": state.get("task_id"),
+            "status": state.get("status"),
+            "promotion_status": state.get("promotion_status"),
+            "verification_verdict": state.get("verification_verdict"),
+            "task_action": action,
+        }
+
     def get_receipt(self, task_id: str) -> Optional[dict[str, Any]]:
         state = self.get_task(task_id)
         if state is None:
@@ -3074,6 +3211,11 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+        request = state.get("request") or {}
+        if self.ephemeral and (
+            request.get("task_card_required") or request.get("lifecycle_identity_required")
+        ):
+            raise RuntimeError("EPHEMERAL_PROMOTION_FORBIDDEN: rehearsal state cannot be approved")
         packet = state.get("promotion_packet") or {}
         expected = {
             "candidate_commit_sha": candidate_commit_sha,
@@ -3197,6 +3339,11 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+        request = state.get("request") or {}
+        if self.ephemeral and (
+            request.get("task_card_required") or request.get("lifecycle_identity_required")
+        ):
+            raise RuntimeError("EPHEMERAL_INTEGRATION_FORBIDDEN: rehearsal state cannot be integrated")
         if state.get("status") == "INTEGRATED" and state.get("promotion_status") == "INTEGRATED":
             return state
         promotion_status = state.get("promotion_status") or state.get("status")
