@@ -328,6 +328,91 @@ def local_assist():
     pass
 
 
+@nexus.group(name="workforce")
+def workforce_group():
+    """Read-only governed workforce admission surfaces."""
+    pass
+
+
+@workforce_group.command(name="status")
+@click.option("--role", default=None, help="Optional role filter; does not select a worker.")
+def workforce_status(role: str | None) -> None:
+    """Emit a compact, read-only view of policy-admissible workforce entries."""
+    from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
+
+    try:
+        loader = WorkforcePolicyLoader()
+        snapshot = loader.load()
+    except Exception as exc:  # noqa: BLE001 - the policy boundary must fail closed
+        click.echo(
+            json.dumps(
+                {
+                    "schema": "nexus.workforce_compact_surface.v1",
+                    "status": "BLOCK",
+                    "route_authority": "CapabilityPlanner",
+                    "error": f"policy_load_failed:{type(exc).__name__}:{exc}",
+                },
+                ensure_ascii=False,
+            )
+        )
+        raise click.exceptions.Exit(1)
+
+    rows: list[dict[str, object]] = []
+    for worker_id, worker in sorted(snapshot.workers.items()):
+        if role and role not in worker.roles:
+            continue
+        if worker.state in NON_ADMISSIBLE_STATES:
+            eligible = False
+            reason = f"state_non_admissible:{worker.state}"
+        elif worker.availability != "AVAILABLE":
+            eligible = False
+            reason = f"availability:{worker.availability}"
+        elif worker.state == "EXPERIMENT_ONLY":
+            eligible = False
+            reason = "explicit_experiment_authorization_required"
+        else:
+            eligible = True
+            reason = "policy_admissible_without_experiment_authorization"
+        rows.append(
+            {
+                "worker_id": worker_id,
+                "provider": worker.provider,
+                "model": worker.model,
+                "state": worker.state,
+                "availability": worker.availability,
+                "eligible": eligible,
+                "reason": reason,
+                "roles": list(worker.roles),
+                "autonomy": worker.autonomy,
+                "preferred_context": worker.preferred_context,
+            }
+        )
+
+    eligible_count = sum(1 for row in rows if row["eligible"] is True)
+    payload = {
+        "schema": "nexus.workforce_compact_surface.v1",
+        "status": "PASS",
+        "route_authority": snapshot.route_authority,
+        "policy": {
+            "schema": snapshot.schema,
+            "status": snapshot.status,
+            "last_verified": snapshot.last_verified,
+            "hash": snapshot.policy_hash,
+            "authority_document": snapshot.authority_document,
+        },
+        "filter": {"role": role},
+        "summary": {"eligible": eligible_count, "ineligible": len(rows) - eligible_count},
+        "workers": rows,
+        "mutation_authority": {
+            "query_only": True,
+            "can_select_worker": False,
+            "can_mutate_workspace": False,
+            "can_approve_or_integrate": False,
+        },
+    }
+    click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
 def _local_assist_cli(
     *,
     action: str,
