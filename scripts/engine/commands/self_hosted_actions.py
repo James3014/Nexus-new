@@ -41,6 +41,22 @@ def run_self_hosted_submit(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_retry(
+    task_id: str,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    if not task_id or not str(task_id).strip():
+        raise NexusCliActionError("task_id is required", exit_code=1)
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.retry_task(task_id)
+    except (OSError, ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_status(
     task_id: str,
     state_dir: str | Path | None = None,

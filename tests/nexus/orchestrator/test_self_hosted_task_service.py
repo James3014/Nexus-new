@@ -18,7 +18,11 @@ import pytest
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.orchestrator.worktree_manager import (
+    TargetWorktreeLease,
+    WorktreeManager,
+    get_canonical_git_hooks_dir,
+)
 
 
 def _request(tmp_path: Path, **overrides):
@@ -397,6 +401,61 @@ def test_terminal_retry_keeps_task_identity_and_increments_attempt(tmp_path):
     assert state["attempt_id"] != first_attempt
     assert len(state["attempts"]) == 2
     assert calls == ["stable-task", "stable-task"]
+
+
+def test_retry_task_reuses_terminal_request_without_duplicate_task(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _request(tmp_path, task_id="retry-surface-task")
+    service.submit_task(request)
+    assert _wait_for_status(service, "retry-surface-task", "FINAL_BLOCK")
+
+    retried = service.retry_task("retry-surface-task")
+    assert retried["task_id"] == "retry-surface-task"
+    assert retried["retry"]["decision"] == "REUSED_TASK_ID"
+    assert retried["retry"]["attempts"] == 2
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and len(calls) < 2:
+        time.sleep(0.01)
+    assert calls == ["retry-surface-task", "retry-surface-task"]
+
+
+def test_retry_task_blocks_retained_review_without_disposition(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state(
+        "retained-retry-task",
+        {
+            "task_id": "retained-retry-task",
+            "status": "RETAINED_FOR_REVIEW",
+            "attempt_id": "attempt-1",
+            "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+            "request": {"task_id": "retained-retry-task"},
+        },
+    )
+
+    result = service.retry_task("retained-retry-task")
+    assert result["retry"]["decision"] == "BLOCKED_RETAINED_REVIEW"
+
+
+def test_safe_hooks_directory_does_not_require_rewrite(tmp_path, monkeypatch):
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    hooks.chmod(0o700)
+    monkeypatch.setenv("NEXUS_CANONICAL_GIT_HOOKS_DIR", str(hooks))
+
+    def failing_chmod(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "chmod", failing_chmod)
+    assert get_canonical_git_hooks_dir() == hooks.resolve()
 
 
 def test_noncanonical_state_root_requires_ephemeral_mode(tmp_path):

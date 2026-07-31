@@ -1956,6 +1956,62 @@ class SelfHostedTaskService:
             return self.reconcile_task(contract.task_id) or existing
         return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(state)
 
+    def retry_task(self, task_id: str) -> dict[str, Any]:
+        """Retry one durable task without creating a second task or Target.
+
+        Only a terminal task whose previous Target disposition is already
+        removed/cleaned may be reactivated. Active, pending, and retained
+        tasks return a structured block so callers do not blindly resubmit.
+        """
+        state = self._read_state_snapshot(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+
+        status = str(state.get("status") or "UNKNOWN")
+        cleanup_decision = str(state.get("cleanup_decision") or "")
+        retry_meta = {
+            "task_id": task_id,
+            "previous_status": status,
+            "previous_attempt_id": state.get("attempt_id"),
+            "decision": None,
+            "blocker": None,
+        }
+        if status == "RETAINED_FOR_REVIEW":
+            retry_meta.update(
+                decision="BLOCKED_RETAINED_REVIEW",
+                blocker="human disposition or retained-candidate recovery is required before retry",
+            )
+            return {**state, "retry": retry_meta}
+        if status not in TERMINAL_STATUSES:
+            retry_meta.update(
+                decision="NO_DUPLICATE_ACTIVE_TASK",
+                blocker=f"task is {status}; wait for its existing attempt instead of resubmitting",
+            )
+            return {**state, "retry": retry_meta}
+        if cleanup_decision not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
+            retry_meta.update(
+                decision="BLOCKED_TARGET_DISPOSITION",
+                blocker="previous Target disposition is not removed/cleaned",
+            )
+            return {**state, "retry": retry_meta}
+
+        request = state.get("request")
+        if not isinstance(request, Mapping):
+            retry_meta.update(
+                decision="BLOCKED_MISSING_REQUEST",
+                blocker="durable request is missing; cannot safely reconstruct the task",
+            )
+            return {**state, "retry": retry_meta}
+
+        result = dict(self.submit_task(request))
+        retry_meta.update(
+            decision="REUSED_TASK_ID",
+            new_attempt_id=result.get("attempt_id"),
+            attempts=len(result.get("attempts") or ()),
+        )
+        result["retry"] = retry_meta
+        return result
+
     def dispose_candidate(
         self,
         task_id: str,

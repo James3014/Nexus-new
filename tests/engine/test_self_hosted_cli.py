@@ -15,6 +15,7 @@ import scripts.engine.commands.self_hosted_actions as self_hosted_actions
 from scripts.engine.commands.exception_translation import NexusCliActionError
 from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_cleanup,
+    run_self_hosted_retry,
     run_self_hosted_workspace_converge,
     run_self_hosted_workspace_inventory,
     run_self_hosted_workspace_plan,
@@ -592,6 +593,34 @@ def test_run_self_hosted_cleanup_forwards_exact_task_and_dry_run(apply: bool):
 def test_run_self_hosted_cleanup_rejects_blank_task_id():
     with pytest.raises(NexusCliActionError, match="task_id is required"):
         run_self_hosted_cleanup(" ", service=object())
+
+
+def test_run_self_hosted_retry_forwards_exact_task_id():
+    calls = []
+    expected = {"task_id": "retry-cli-001", "retry": {"decision": "NO_DUPLICATE_ACTIVE_TASK"}}
+
+    class FakeService:
+        def retry_task(self, task_id):
+            calls.append(task_id)
+            return expected
+
+    result = run_self_hosted_retry("retry-cli-001", service=FakeService())
+    assert result is expected
+    assert calls == ["retry-cli-001"]
+
+
+def test_self_hosted_retry_cli_returns_structured_no_duplicate_decision(monkeypatch):
+    class FakeService:
+        def retry_task(self, task_id):
+            return {"task_id": task_id, "retry": {"decision": "NO_DUPLICATE_ACTIVE_TASK"}}
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    result = CliRunner().invoke(
+        nexus,
+        ["nexus", "self-hosted", "retry", "--task-id", "retry-cli-002"],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["retry"]["decision"] == "NO_DUPLICATE_ACTIVE_TASK"
 
 
 def test_self_hosted_cleanup_cli_registered_json_and_apply(monkeypatch):

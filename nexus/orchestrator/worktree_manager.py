@@ -152,17 +152,19 @@ def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
             hooks_root = root / "nexus-worktrees" / "runtime-targets"
         hooks_dir = hooks_root / ".nexus_git_hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        hooks_dir.chmod(0o700)
-    except Exception as exc:
-        raise RuntimeError(f"failed to set permissions 0700 on canonical git hooks dir: {exc}") from exc
-
     if not hooks_dir.is_dir():
         raise RuntimeError(f"canonical git hooks path is not a directory: {hooks_dir}")
 
     st = hooks_dir.stat()
     current_uid = os.getuid()
     mode = st.st_mode & 0o777
+    if mode != 0o700:
+        try:
+            hooks_dir.chmod(0o700)
+        except Exception as exc:
+            raise RuntimeError(f"failed to set permissions 0700 on canonical git hooks dir: {exc}") from exc
+        st = hooks_dir.stat()
+        mode = st.st_mode & 0o777
     if mode != 0o700:
         raise RuntimeError(f"canonical git hooks dir permissions must be 0700, got {oct(mode)}: {hooks_dir}")
     if st.st_uid != current_uid:
