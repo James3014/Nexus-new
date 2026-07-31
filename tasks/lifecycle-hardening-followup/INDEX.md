@@ -8,21 +8,22 @@ AUTO_CHAIN: false
 
 ## Campaign Overview
 
-Close the two verified lifecycle gaps before applying workspace cleanup: startup must operate from a writable machine-state/report location even when the source worktree is read-only, and read-only task verification must fail closed when verifier commands mutate the Target. The campaign also prepares a current authorized-deletion contract successor. It must not mutate the dirty canonical root, approve or integrate Candidates, or perform P6 cutover.
+Close the verified lifecycle gaps before applying workspace cleanup: startup must operate from a writable machine-state/report location even when the source worktree is read-only, read-only task verification must fail closed when verifier commands mutate the Target, and retained clean Targets must have a formal close path when an integrated replacement is archived. The campaign also prepares a current authorized-deletion contract successor. It must not mutate the dirty canonical root, approve or integrate Candidates, or perform P6 cutover.
 
 ## Ordered Cards
 
 1. [01-startup-report-portability.md](01-startup-report-portability.md) - `startup-report-path-portability`
 2. [02-verify-task-target-integrity.md](02-verify-task-target-integrity.md) - `verify-task-target-integrity`
 3. [03-authorized-deletion-contract.md](03-authorized-deletion-contract.md) - `authorized-deletion-contract`
+4. [04-retained-clean-target-closure.md](04-retained-clean-target-closure.md) - `retained-clean-target-closure`
 
 ## Current Frontier
 
-`authorized-deletion-contract`
+`retained-clean-target-closure`
 
 ## Ready Cards
 
-- None; all three implementation cards are integrated with owner review pending.
+- None; the fourth implementation card is the current frontier.
 
 ## Completed Cards
 

@@ -2128,8 +2128,13 @@ class SelfHostedTaskService:
                     has_recorded_salvage = bool(
                         state.get("salvage_commit_sha") and state.get("salvage_ref")
                     )
-                    if not manager._status_bytes(target_path) and not has_recorded_salvage:
-                        raise RuntimeError(f"recorded Target path exists: {target_path}")
+                    target_dirty = bool(manager._status_bytes(target_path))
+                    if not target_dirty and not has_recorded_salvage:
+                        target_head = manager._run_git(["rev-parse", "HEAD"], cwd=target_path)
+                        if target_head != lease_object.initial_head:
+                            raise RuntimeError(
+                                "recorded clean Target HEAD changed without durable snapshot"
+                            )
                     self._require_integrated_replacement(task_id, superseded_by)
                     salvage = {
                         "salvage_commit_sha": state.get("salvage_commit_sha"),
@@ -2139,34 +2144,43 @@ class SelfHostedTaskService:
                     }
                     try:
                         if not salvage["salvage_commit_sha"] or not salvage["salvage_ref"]:
-                            salvage = manager.create_salvage_snapshot(
-                                self._contract_from_state(state),
-                                lease_object,
-                                str(state.get("attempt_id") or ""),
-                            )
+                            if target_dirty:
+                                salvage = manager.create_salvage_snapshot(
+                                    self._contract_from_state(state),
+                                    lease_object,
+                                    str(state.get("attempt_id") or ""),
+                                )
+                            else:
+                                salvage = {}
                         elif salvage["salvage_only"] is not True or salvage["promotion_eligible"] is not False:
                             raise RuntimeError("recorded salvage metadata is invalid")
-                        self._checkpoint(
-                            task_id,
-                            "RETAINED_FOR_REVIEW",
-                            {
-                                **salvage,
-                                "promotion_status": "NOT_CREATED",
-                                "superseded_by": superseded_by,
-                                "cleanup_decision": "SALVAGED",
-                                "cleanup_blocker": None,
-                                "cleanup_performed": False,
-                                "cleanup_eligible": False,
-                                "state_retention_status": "TERMINAL",
-                            },
-                            attempt_id=state.get("attempt_id"),
-                        )
-                        cleanup = manager.cleanup_terminal_target(
-                            self._contract_from_state(state),
-                            lease_object,
-                            salvage_commit=str(salvage["salvage_commit_sha"]),
-                            salvage_ref=str(salvage["salvage_ref"]),
-                        )
+                        if salvage:
+                            self._checkpoint(
+                                task_id,
+                                "RETAINED_FOR_REVIEW",
+                                {
+                                    **salvage,
+                                    "promotion_status": "NOT_CREATED",
+                                    "superseded_by": superseded_by,
+                                    "cleanup_decision": "SALVAGED",
+                                    "cleanup_blocker": None,
+                                    "cleanup_performed": False,
+                                    "cleanup_eligible": False,
+                                    "state_retention_status": "TERMINAL",
+                                },
+                                attempt_id=state.get("attempt_id"),
+                            )
+                            cleanup = manager.cleanup_terminal_target(
+                                self._contract_from_state(state),
+                                lease_object,
+                                salvage_commit=str(salvage["salvage_commit_sha"]),
+                                salvage_ref=str(salvage["salvage_ref"]),
+                            )
+                        else:
+                            cleanup = manager.cleanup_terminal_target(
+                                self._contract_from_state(state),
+                                lease_object,
+                            )
                     except Exception as exc:
                         retained = self._checkpoint(
                             task_id,

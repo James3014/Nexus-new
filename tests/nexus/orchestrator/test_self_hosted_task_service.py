@@ -1776,6 +1776,44 @@ def test_close_retained_dirty_salvage_requires_integrated_replacement(tmp_path):
     assert service._read_state(request["task_id"])["status"] == "RETAINED_FOR_REVIEW"
 
 
+def test_close_retained_clean_target_uses_archived_integrated_replacement(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _real_request(tmp_path, task_id="retained-clean-target")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    replacement_id = "workspace-convergence-retained-without-candidate-closure-hardening"
+    service._write_state(replacement_id, {
+        "task_id": replacement_id,
+        "status": "INTEGRATED",
+        "promotion_status": "INTEGRATED",
+        "integration_result_sha": "i" * 40,
+    })
+    service.archive_states(dry_run=False)
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "lease": lease.__dict__,
+        "target_worktree": str(lease.target_worktree),
+        "attempt_id": "attempt-retained-clean-target",
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.close_retained_without_candidate(
+        request["task_id"], superseded_by=replacement_id
+    )
+
+    assert result["status"] == "SUPERSEDED"
+    assert result["superseded_by"] == replacement_id
+    assert result["cleanup_decision"] == "REMOVED"
+    assert result["cleanup_performed"] is True
+    assert not Path(lease.target_worktree).exists()
+
+
 def test_close_retained_dirty_salvage_rejects_mismatched_replacement_identity(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     request = _real_request(tmp_path, task_id="retained-salvage-identity-gated")
