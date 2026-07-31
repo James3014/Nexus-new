@@ -4,7 +4,7 @@
 - task_id: `workspace-convergence-cli-surface`
 - campaign_id: `workspace-control-convergence`
 - artifact_authority: current
-- status: BLOCKED_ON_DEPENDENCY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `workspace-convergence-service-orchestration` integrated
 - commit_required: true
@@ -56,4 +56,4 @@ One verified three-file Candidate; zero deletions; Controller unchanged; no auto
 `WORKSPACE_CONVERGENCE_CLI_SURFACE_CANDIDATE_READY`
 
 ## Next gate
-Independent review and owner-controlled integration only.
+Owner-integrated at `72dee3d5d`; self-hosted CLI verifier suite passed 28 tests. P6 canonical-root cutover remains separately gated.

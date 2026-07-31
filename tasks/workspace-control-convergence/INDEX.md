@@ -2,12 +2,12 @@
 
 artifact_authority: current
 owner: James Chen
-status: active
+status: active_p6_owner_gate
 source_specification: owner-authorized conversation on 2026-07-31
 AUTO_CHAIN: false
 
 ## Campaign Overview
-Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority.
+Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; P6 canonical-root cutover remains an owner gate because the legacy root is dirty and the histories diverge.
 
 ## Ordered Cards
 1. [00-lifecycle-control-plane-workspace-convergence.md](00-lifecycle-control-plane-workspace-convergence.md) - `lifecycle-control-plane-workspace-convergence`
@@ -17,17 +17,20 @@ Converge Nexus workspace authority onto the clean integration controller and add
 5. [04-workspace-convergence-cli-surface.md](04-workspace-convergence-cli-surface.md) - `workspace-convergence-cli-surface`
 
 ## Current Frontier
-`workspace-convergence-core-primitives`
+`P6-canonical-root-cutover-readiness`
 
 ## Ready Cards
-- `workspace-convergence-core-primitives`: READY; bounded two-file L1 implementation slice. OpenCode MiMo `opencode/mimo-v2.5-free` passed a live read-only smoke on 2026-07-31.
+- None; P6 requires owner cutover decision after readiness evidence.
 
 ## Completed Cards
-- None.
+- `workspace-convergence-core-primitives`: owner-integrated at `74808adb6`; core manager suite 66 passed; worker lifecycle state remains retained for review because the original capture contract rejected worker commits.
+- `workspace-convergence-service-orchestration`: owner-integrated at `eece9edd9`; service/workflow suite 109 passed; compact list and exact-bound dry-run/apply surfaces added.
+- `workspace-convergence-cli-surface`: owner-integrated at `72dee3d5d`; CLI suite 28 passed; inventory/plan/slot/converge commands are dry-run-first.
+- `commit-aware-candidate-capture`: `9afd8f0a2`; commit/verifier/worktree suites 120 passed; scoped Worker commits are now reusable without wrapper commits.
+- `workspace-cleanup-and-soak`: cleanup removed 13 clean redundant worktrees without deleting branches/refs; registered worktrees reduced from 29 to 16; P7 combined lifecycle suite 230 passed; ten sequential slot cycles passed.
 
 ## Blocked Cards
-- `workspace-convergence-service-orchestration`: BLOCKED_ON_DEPENDENCY until `workspace-convergence-core-primitives` is independently reviewed and integrated.
-- `workspace-convergence-cli-surface`: BLOCKED_ON_DEPENDENCY until `workspace-convergence-service-orchestration` is independently reviewed and integrated.
+- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 240 integration-only commits / 177 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
 
 ## Superseded Cards
 - `lifecycle-control-plane-workspace-convergence`: SUPERSEDED_BY `lifecycle-control-plane-workspace-convergence-recovery`; three Agy account-pool subprocesses exited 1 after orphaned `/usr/bin/security -i` credential pipes. Salvage ref `refs/nexus-salvage/worktree/lifecycle-control-plane-workspace-convergence-2e73a792d9144335999fea648e038479` preserves the unverified implementation.
@@ -36,9 +39,9 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Task Dependencies
 - `lifecycle-control-plane-workspace-convergence`: historical original attempt; no Candidate.
 - `lifecycle-control-plane-workspace-convergence-recovery`: historical Codex recovery attempt; no Candidate.
-- `workspace-convergence-core-primitives`: clean Controller plus read-only salvage evidence.
-- `workspace-convergence-service-orchestration`: integrated core-primitives Candidate.
-- `workspace-convergence-cli-surface`: integrated service-orchestration Candidate.
+- `workspace-convergence-core-primitives`: owner-integrated commit `74808adb6`; no formal Candidate record was created from the historical retained task.
+- `workspace-convergence-service-orchestration`: owner-integrated commit `eece9edd9`; no auto-chain.
+- `workspace-convergence-cli-surface`: owner-integrated commit `72dee3d5d`; no auto-chain.
 
 ## Downstream Gate
-A verified Candidate may proceed only to independent review. Approval, integration, live convergence apply, push, branch deletion, ref deletion, and historical worktree disposal remain separate owner-controlled gates.
+P6 owner decision is required before any canonical-root mutation. Approval, push, branch deletion, ref deletion, and remaining dirty/unique worktree disposal remain separate owner-controlled gates.

@@ -4,7 +4,7 @@
 - task_id: `workspace-convergence-core-primitives`
 - campaign_id: `workspace-control-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - supersedes_slice_of: `lifecycle-control-plane-workspace-convergence-recovery`
 - commit_required: true
@@ -100,4 +100,4 @@ Implement and test only the deterministic Git/worktree primitives required for c
 `WORKSPACE_CONVERGENCE_CORE_PRIMITIVES_CANDIDATE_READY`
 
 ## Next gate
-Independent Candidate review and owner-controlled integration only.
+Historical worker Candidate state remains `RETAINED_FOR_REVIEW`; the equivalent implementation was owner-integrated at `74808adb6` after the commit-aware contract fix, with 66 WorktreeManager tests passing. No downstream card may infer formal Candidate promotion from this owner integration.

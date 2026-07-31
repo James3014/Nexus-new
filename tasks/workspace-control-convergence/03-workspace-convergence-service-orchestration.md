@@ -4,7 +4,7 @@
 - task_id: `workspace-convergence-service-orchestration`
 - campaign_id: `workspace-control-convergence`
 - artifact_authority: current
-- status: BLOCKED_ON_DEPENDENCY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `workspace-convergence-core-primitives` integrated
 - commit_required: true
@@ -59,4 +59,4 @@ One verified three-file Candidate; zero deletions; Controller unchanged; no auto
 `WORKSPACE_CONVERGENCE_SERVICE_ORCHESTRATION_CANDIDATE_READY`
 
 ## Next gate
-Independent review and owner-controlled integration only.
+Owner-integrated at `eece9edd9`; service/workflow verifier suite passed 109 tests. CLI surface remains the next bounded consumer.
