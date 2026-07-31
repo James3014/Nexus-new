@@ -5,7 +5,7 @@
 - task_id: `workspace-retry-and-permission-gate`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `briefing-overlay-reduction` integrated
 - commit_required: true
@@ -53,6 +53,13 @@ git diff --cached --name-status --diff-filter=D
 ## Exit criteria
 
 Same-task retry and permission-safe read-only inventory are implemented, tested, and committed; no duplicate Target is created and retained evidence remains protected.
+
+## Integrated evidence
+
+- commit: `86c197690`
+- verification: `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/nexus/orchestrator/test_self_hosted_task_service.py tests/engine/test_self_hosted_cli.py` (`88 + 30 passed`)
+- focused proof: retry/permission subset `27 passed`; live `self-hosted retry` on retained task returned `BLOCKED_RETAINED_REVIEW` without acquiring the canonical state lock
+- live workspace proof: inventory completed and classified controller, protected root, dirty/unmapped Targets, and retained task Target without PermissionError
 
 ## Residual debt
 
