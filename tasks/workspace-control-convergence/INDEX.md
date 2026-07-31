@@ -22,7 +22,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Final Physical Cutover Verification (2026-08-01)
 
 - Canonical daily entrypoint: `/Users/jameschen/Workspace/nexus`.
-- Canonical branch/HEAD: `nexus/integration/main` / `33e925795b7be0205c750481365e63cd935e2a20` (`fix(tasks): bind convergence authority metadata`).
+- Canonical branch: `nexus/integration/main`; cutover base commit: `33e925795b7be0205c750481365e63cd935e2a20` (`fix(tasks): bind convergence authority metadata`). The current evidence update is the next commit on this branch.
 - Registered worktrees: `1`; exact path is the canonical root; `git worktree prune --dry-run` reports no stale metadata.
 - Canonical dirty state: clean (`git status --short --branch` reports only `## nexus/integration/main`).
 - Unregistered worktree root: `/Users/jameschen/Workspace/nexus-worktrees` is absent.
