@@ -9,6 +9,16 @@ AUTO_CHAIN: false
 ## Campaign Overview
 Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; terminal lifecycle receipts are now archived through the formal archive API; P6 canonical-root cutover remains an owner gate because the legacy root is dirty and the histories diverge.
 
+## Live Authority Reconciliation (2026-07-31)
+
+- Controller: `/Users/jameschen/Workspace/nexus-worktrees/integration-main`, branch `nexus/integration/main`, HEAD `ba1fe9b6d59d9e47600d9a06babdd2f5a06a9fad`.
+- Canonical root: `/Users/jameschen/Workspace/nexus`, branch `feature/full-capability-closure-20260718`, HEAD `a2185edb0e67e3fc9d6ed7169593d9d80bb1c03a`; it remains protected and is not a mutation Target.
+- Current workspace inventory hash: `795ad3bd4832e4592e899888ef316419106879882f3ccf35765756b16259ec48`.
+- Current convergence plan hash: `a285fd2045b352162d903ab1d73f4e2a7d2c3783a5cc9c546b811425bcf2e646`; `deletion_count: 0`; `AUTO_CHAIN: false`.
+- Controller versus canonical divergence is 266 controller-only commits and 4 canonical-only commits; P6 remains a separate owner gate.
+- `workspace-convergence-core-primitives` is formally `SUPERSEDED`; its salvage ref remains evidence-only and it is no longer an actionable retained receipt.
+- `exact-authorized-deletion-contract-bootstrap` remains the only actionable owner decision: `RETAINED_FOR_REVIEW` / `FINAL_BLOCK`, with cleanup `REMOVED`; no candidate, close, or disposal is authorized by this index.
+
 ## Ordered Cards
 1. [00-lifecycle-control-plane-workspace-convergence.md](00-lifecycle-control-plane-workspace-convergence.md) - `lifecycle-control-plane-workspace-convergence`
 2. [01-lifecycle-control-plane-workspace-convergence-recovery.md](01-lifecycle-control-plane-workspace-convergence-recovery.md) - `lifecycle-control-plane-workspace-convergence-recovery`
@@ -23,7 +33,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - None; P6 requires owner cutover decision after readiness evidence.
 
 ## Completed Cards
-- `workspace-convergence-core-primitives`: owner-integrated at `74808adb6`; core manager suite 66 passed; worker lifecycle state remains retained for review because the original capture contract rejected worker commits.
+- `workspace-convergence-core-primitives`: historical owner-integrated evidence at `74808adb6`; the corresponding lifecycle receipt is now formally `SUPERSEDED`, with salvage preserved and no Candidate promotion.
 - `workspace-convergence-service-orchestration`: owner-integrated at `eece9edd9`; service/workflow suite 109 passed; compact list and exact-bound dry-run/apply surfaces added.
 - `workspace-convergence-cli-surface`: owner-integrated at `72dee3d5d`; CLI suite 28 passed; inventory/plan/slot/converge commands are dry-run-first.
 - `commit-aware-candidate-capture`: `9afd8f0a2`; commit/verifier/worktree suites 120 passed; scoped Worker commits are now reusable without wrapper commits.
@@ -32,8 +42,8 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `read-only-status-lock-free-hardening`: `b975957dc` switched actionable/inventory state reads to atomic snapshots without creating or acquiring `.state.lock`; service/workflow and full P7 regression remained green at 109 and 230 passed.
 
 ## Blocked Cards
-- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 245 integration-only commits / 178 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
-- Retained evidence requiring explicit successor/owner decision: `exact-authorized-deletion-contract-bootstrap` and `workspace-convergence-core-primitives`. They remain visible through the formal actionable surface; no JSON was edited manually.
+- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (118 short status entries; 9,806 full status records), differs from integration by 4 canonical-only vs 266 controller-only commits, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
+- Retained evidence requiring explicit owner decision: `exact-authorized-deletion-contract-bootstrap`. `workspace-convergence-core-primitives` is superseded and closed; its salvage ref remains evidence-only. No lifecycle JSON was edited manually.
 
 ## Superseded Cards
 - `lifecycle-control-plane-workspace-convergence`: SUPERSEDED_BY `lifecycle-control-plane-workspace-convergence-recovery`; three Agy account-pool subprocesses exited 1 after orphaned `/usr/bin/security -i` credential pipes. Salvage ref `refs/nexus-salvage/worktree/lifecycle-control-plane-workspace-convergence-2e73a792d9144335999fea648e038479` preserves the unverified implementation.
@@ -42,7 +52,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 ## Task Dependencies
 - `lifecycle-control-plane-workspace-convergence`: historical original attempt; no Candidate.
 - `lifecycle-control-plane-workspace-convergence-recovery`: historical Codex recovery attempt; no Candidate.
-- `workspace-convergence-core-primitives`: owner-integrated commit `74808adb6`; no formal Candidate record was created from the historical retained task.
+- `workspace-convergence-core-primitives`: historical owner-integrated commit `74808adb6`; formal lifecycle receipt `SUPERSEDED`, no Candidate record, salvage-only evidence retained.
 - `workspace-convergence-service-orchestration`: owner-integrated commit `eece9edd9`; no auto-chain.
 - `workspace-convergence-cli-surface`: owner-integrated commit `72dee3d5d`; no auto-chain.
 
