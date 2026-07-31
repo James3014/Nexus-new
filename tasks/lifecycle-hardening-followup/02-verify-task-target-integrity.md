@@ -5,7 +5,7 @@
 - task_id: `verify-task-target-integrity`
 - campaign_id: `lifecycle-hardening-followup`
 - artifact_authority: current
-- status: PLANNED
+- status: READY
 - owner: James Chen
 - depends_on: `startup-report-path-portability` integrated
 - read_only: false

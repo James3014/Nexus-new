@@ -5,7 +5,7 @@
 - task_id: `startup-report-path-portability`
 - campaign_id: `lifecycle-hardening-followup`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `orphan-workspace-reconciliation` audit complete
 - read_only: false
@@ -63,6 +63,13 @@ The launcher and direct checker use explicit writable machine state, preserve al
 ## Residual debt
 
 Verifier Target integrity and authorized-deletion contract remain separate cards. Workspace cleanup and P6 remain owner-gated.
+
+## Integrated evidence
+
+- commit: `41b55bf31`
+- verification: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider tests/ops/test_nexus_startup_contract_check.py tests/ops/test_start_gemini_nexus_enforced.py` (`8 passed`)
+- live proof: `NEXUS_MACHINE_STATE_DIR=/tmp/nexus-startup-portability-live python3 scripts/ops/nexus_startup_contract_check.py` (`ENFORCED`)
+- scope: five allowed files, no tracked deletions
 
 ## Block classification
 

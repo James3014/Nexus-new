@@ -18,15 +18,15 @@ Close the two verified lifecycle gaps before applying workspace cleanup: startup
 
 ## Current Frontier
 
-`startup-report-path-portability`
+`verify-task-target-integrity`
 
 ## Ready Cards
 
-- `startup-report-path-portability`: ready on clean Target at `ba1fe9b6d`.
+- `verify-task-target-integrity`: ready on clean Target at `41b55bf31`.
 
 ## Completed Cards
 
-- None.
+- `startup-report-path-portability`: INTEGRATED_WITH_OWNER_REVIEW at `41b55bf31`; 8 focused tests passed and live external-state startup returned `ENFORCED`.
 
 ## Blocked Cards
 
