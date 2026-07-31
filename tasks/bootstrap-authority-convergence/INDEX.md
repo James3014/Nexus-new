@@ -13,7 +13,7 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 ## Ordered Cards
 
 1. [01-task-authority-freshness.md](01-task-authority-freshness.md) - `task-authority-freshness`
-2. `bootstrap-path-convergence` - planned after P0-A
+2. [02-bootstrap-path-convergence.md](02-bootstrap-path-convergence.md) - `bootstrap-path-convergence`
 3. `machine-policy-contract` - planned after P0-A
 4. `startup-freshness-gate` - planned after P0-A and P0-C
 5. `workforce-compact-surface` - planned after P0-D
@@ -21,15 +21,15 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 ## Current Frontier
 
-`task-authority-freshness`
+`bootstrap-path-convergence`
 
 ## Ready Cards
 
-- `task-authority-freshness`: READY; isolated implementation on clean `nexus/integration/main`.
+- `bootstrap-path-convergence`: READY; P0-A freshness validator integrated at `e7d4b876b` and live PASS proven on clean `nexus/integration/main`.
 
 ## Completed Cards
 
-- None.
+- `task-authority-freshness`: INTEGRATED_WITH_OWNER_REVIEW at `e7d4b876b`; 7 focused tests passed and live validator returned `PASS` with `dirty=false`.
 
 ## Blocked Cards
 

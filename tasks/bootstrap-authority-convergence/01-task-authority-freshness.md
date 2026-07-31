@@ -5,7 +5,7 @@
 - task_id: `task-authority-freshness`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - commit_required: true
 - candidate_required: true
@@ -62,7 +62,7 @@ git diff --cached --stat
 
 ## Exit criteria
 
-`task_authority_freshness_check.py` has a scoped commit, all required tests pass, and the live campaign invocation returns a truthful decision for the current HEAD.
+`task_authority_freshness_check.py` is integrated at `e7d4b876b`, all required tests pass, and the live campaign invocation returned `PASS` for clean HEAD `e7d4b876b` before this campaign-index advance.
 
 ## Residual debt
 
