@@ -7,7 +7,7 @@ source_specification: owner-authorized conversation on 2026-07-31
 AUTO_CHAIN: false
 
 ## Campaign Overview
-Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; P6 canonical-root cutover remains an owner gate because the legacy root is dirty and the histories diverge.
+Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; terminal lifecycle receipts are now archived through the formal archive API; P6 canonical-root cutover remains an owner gate because the legacy root is dirty and the histories diverge.
 
 ## Ordered Cards
 1. [00-lifecycle-control-plane-workspace-convergence.md](00-lifecycle-control-plane-workspace-convergence.md) - `lifecycle-control-plane-workspace-convergence`
@@ -28,9 +28,11 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `workspace-convergence-cli-surface`: owner-integrated at `72dee3d5d`; CLI suite 28 passed; inventory/plan/slot/converge commands are dry-run-first.
 - `commit-aware-candidate-capture`: `9afd8f0a2`; commit/verifier/worktree suites 120 passed; scoped Worker commits are now reusable without wrapper commits.
 - `workspace-cleanup-and-soak`: cleanup removed 13 clean redundant worktrees without deleting branches/refs; registered worktrees reduced from 29 to 16; P7 combined lifecycle suite 230 passed; ten sequential slot cycles passed.
+- `terminal-receipt-archive-and-ghost-task-disposal`: formal archive API preserved 68 terminal receipts with 68/68 hash checks; `python-verification-isolation-guard` and `self-hosted-verification-entrypoint-final-amendment` were formally superseded by their documented successors; actionable tasks reduced from 10 to 2. Two retained records remain for evidence review.
 
 ## Blocked Cards
 - `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 241 integration-only commits / 178 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
+- Retained evidence requiring explicit successor/owner decision: `exact-authorized-deletion-contract-bootstrap` and `workspace-convergence-core-primitives`. They remain visible through the formal actionable surface; no JSON was edited manually.
 
 ## Superseded Cards
 - `lifecycle-control-plane-workspace-convergence`: SUPERSEDED_BY `lifecycle-control-plane-workspace-convergence-recovery`; three Agy account-pool subprocesses exited 1 after orphaned `/usr/bin/security -i` credential pipes. Salvage ref `refs/nexus-salvage/worktree/lifecycle-control-plane-workspace-convergence-2e73a792d9144335999fea648e038479` preserves the unverified implementation.
@@ -44,4 +46,4 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `workspace-convergence-cli-surface`: owner-integrated commit `72dee3d5d`; no auto-chain.
 
 ## Downstream Gate
-P6 owner decision is required before any canonical-root mutation. Approval, push, branch deletion, ref deletion, and remaining dirty/unique worktree disposal remain separate owner-controlled gates.
+P6 owner decision is required before any canonical-root mutation. Approval, push, branch deletion, ref deletion, remaining retained-evidence disposal, and dirty/unique worktree disposal remain separate owner-controlled gates.
