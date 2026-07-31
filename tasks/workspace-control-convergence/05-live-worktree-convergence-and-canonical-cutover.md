@@ -1,20 +1,21 @@
 # Task Card: Live Worktree Convergence and Canonical Cutover
 
-artifact_authority: current
-owner: James Chen
-status: approved_in_progress
-task_id: live-worktree-convergence-and-canonical-cutover
-source_specification: owner instruction on 2026-08-01 to merge valuable work, remove redundant worktrees, and make `/Users/jameschen/Workspace/nexus` the sole daily entrypoint
-read_only: false
-audit_only: false
-commit_forbidden: false
-commit_required: true
-candidate_required: false
-worker_may_commit: true
-worker_may_approve: false
-worker_may_integrate: false
-worker_may_push: false
-AUTO_CHAIN: false
+## Identity
+- artifact_authority: current
+- owner: James Chen
+- status: APPROVED_IN_PROGRESS
+- task_id: `live-worktree-convergence-and-canonical-cutover`
+- source_specification: owner instruction on 2026-08-01 to merge valuable work, remove redundant worktrees, and make `/Users/jameschen/Workspace/nexus` the sole daily entrypoint
+- read_only: false
+- audit_only: false
+- commit_forbidden: false
+- commit_required: true
+- candidate_required: false
+- worker_may_commit: true
+- worker_may_approve: false
+- worker_may_integrate: false
+- worker_may_push: false
+- AUTO_CHAIN: false
 
 ## Objective
 
