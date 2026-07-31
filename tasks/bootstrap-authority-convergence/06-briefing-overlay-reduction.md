@@ -5,7 +5,7 @@
 - task_id: `briefing-overlay-reduction`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `workforce-compact-surface` integrated
 - commit_required: true
@@ -51,6 +51,13 @@ git diff --cached --name-status --diff-filter=D
 ## Exit criteria
 
 Default briefing is compact, task-aware, policy-bound, legacy mode is explicit, focused tests pass, and a scoped commit is created.
+
+## Integrated evidence
+
+- commits: `e25902e30`, `143ded47c`
+- verification: `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/ops/test_nexus_enforced_briefing.py tests/ops/test_local_assist_agent_workflow.py` (`10 passed`); `bash -n scripts/ops/_nexus_enforced_briefing.sh`
+- size proof: compact output `2491` bytes vs explicit legacy output `6049` bytes
+- scope: briefing launcher and focused test only; no model/provider/runtime router changes
 
 ## Residual debt
 

@@ -18,14 +18,15 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 4. [04-startup-freshness-gate.md](04-startup-freshness-gate.md) - `startup-freshness-gate`
 5. [05-workforce-compact-surface.md](05-workforce-compact-surface.md) - `workforce-compact-surface`
 6. [06-briefing-overlay-reduction.md](06-briefing-overlay-reduction.md) - `briefing-overlay-reduction`
+7. [07-workspace-retry-and-permission-gate.md](07-workspace-retry-and-permission-gate.md) - `workspace-retry-and-permission-gate`
 
 ## Current Frontier
 
-`briefing-overlay-reduction`
+`workspace-retry-and-permission-gate`
 
 ## Ready Cards
 
-- `briefing-overlay-reduction`: READY; P1 workforce status surface integrated at `cd9894707` with read-only and fail-closed tests.
+- `workspace-retry-and-permission-gate`: READY; compact task-aware briefing integrated at `e25902e30` with explicit legacy opt-in and size proof.
 
 ## Completed Cards
 
@@ -34,6 +35,7 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 - `machine-policy-contract`: INTEGRATED_WITH_OWNER_REVIEW at `09af43a78`; 13 focused tests passed, missing/malformed baseline fails closed, and overlay narrowing passed.
 - `startup-freshness-gate`: INTEGRATED_WITH_OWNER_REVIEW at `f62b4da21`; 4 focused tests passed and live ACK bound worktree/HEAD/index/card/policy hashes.
 - `workforce-compact-surface`: INTEGRATED_WITH_OWNER_REVIEW at `cd9894707`; 2 focused tests passed, policy hash and route authority are exposed, and mutation authority is explicitly false.
+- `briefing-overlay-reduction`: INTEGRATED_WITH_OWNER_REVIEW at `e25902e30`; 10 focused tests passed, compact output is task-aware, and legacy output requires explicit opt-in.
 
 ## Blocked Cards
 
@@ -48,4 +50,4 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 ## Downstream Gate
 
-Briefing overlay reduction may start only after P1 workforce surface has deterministic tests and a clean scoped commit. `AUTO_CHAIN=false`; completion never self-authorizes the next card.
+Workspace retry/permission gate may start only after briefing overlay reduction has deterministic tests and a clean scoped commit. `AUTO_CHAIN=false`; completion never self-authorizes the next card.
