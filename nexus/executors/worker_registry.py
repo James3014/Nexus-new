@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -224,7 +225,7 @@ class AgyWorkerAdapter:
 
     @staticmethod
     def _timeout_arg(timeout_seconds: float) -> str:
-        seconds = float(timeout_seconds)
+        seconds = round(float(timeout_seconds), 3)
         value = str(int(seconds)) if seconds.is_integer() else str(seconds)
         return f"{value}s"
 
@@ -293,35 +294,100 @@ class AgyWorkerAdapter:
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
     ) -> WorkerExecutionReceipt:
+        started_at = time.monotonic()
         preflight = self.preflight()
         if not preflight.ready:
             raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
         target = str(Path(lease.target_worktree).resolve())
-        timeout = timeout_seconds or 900.0
+        timeout = 900.0 if timeout_seconds is None else max(0.0, float(timeout_seconds))
         executable = preflight.executable or self._configured_executable()
-        argv = (
-            "--new-project",
-            "--add-dir",
-            target,
-            "--dangerously-skip-permissions",
-            "--mode",
-            "accept-edits",
-            "--model",
-            self._model(),
-            "--print-timeout",
-            self._timeout_arg(timeout),
-            "--print",
-            prompt,
-        )
+        raw_budget = getattr(contract, "maximum_provider_calls", 1)
+        provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
+
+        def build_argv(call_timeout: float) -> tuple[str, ...]:
+            return (
+                "--new-project",
+                "--add-dir",
+                target,
+                "--dangerously-skip-permissions",
+                "--mode",
+                "accept-edits",
+                "--model",
+                self._model(),
+                "--print-timeout",
+                self._timeout_arg(call_timeout),
+                "--print",
+                prompt,
+            )
+
+        argv = build_argv(timeout)
+
+        if provider_call_budget == 0:
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=target,
+                worker_status=CliWorkerStatus.START_FAILED.value,
+                outcome=WorkerOutcome.FAILED.value,
+                exit_code=1,
+                executable_identity=executable,
+                argv=argv,
+                stdout_sha256=CliWorkerResult.hash_bytes(b""),
+                stderr_sha256=CliWorkerResult.hash_bytes(b""),
+                wall_time_ms=int((time.monotonic() - started_at) * 1000),
+                process_group_id=None,
+                process_group_killed=False,
+                timed_out=False,
+                provider_calls=0,
+                evidence_complete=False,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason="maximum_provider_calls is 0",
+                account_alias_hash=None,
+                provider_attempt_count=0,
+            )
+
+        def get_remaining_seconds() -> float:
+            if timeout <= 0.0:
+                return 0.0
+            return timeout - (time.monotonic() - started_at)
 
         pool = self._get_account_pool()
 
         if pool is None:
+            remaining_seconds = get_remaining_seconds()
+            if remaining_seconds <= 0:
+                return WorkerExecutionReceipt(
+                    provider=self.provider,
+                    task_id=contract.task_id,
+                    target_worktree=target,
+                    worker_status=CliWorkerStatus.START_FAILED.value,
+                    outcome=WorkerOutcome.FAILED.value,
+                    exit_code=1,
+                    executable_identity=executable,
+                    argv=argv,
+                    stdout_sha256=CliWorkerResult.hash_bytes(b""),
+                    stderr_sha256=CliWorkerResult.hash_bytes(b""),
+                    wall_time_ms=int((time.monotonic() - started_at) * 1000),
+                    process_group_id=None,
+                    process_group_killed=False,
+                    timed_out=False,
+                    provider_calls=0,
+                    evidence_complete=False,
+                    commit_created=False,
+                    merge_performed=False,
+                    push_performed=False,
+                    failure_reason="shared wall-time budget exhausted",
+                    account_alias_hash=None,
+                    provider_attempt_count=0,
+                )
+
             request = CliWorkerRequest(
                 executable=executable,
-                argv=argv,
+                argv=build_argv(remaining_seconds),
                 cwd=target,
-                timeout_seconds=timeout,
+                timeout_seconds=remaining_seconds,
             )
             result = run_cli_worker(request, on_process_group=on_process_group)
             if result.status is CliWorkerStatus.TIMED_OUT:
@@ -341,7 +407,7 @@ class AgyWorkerAdapter:
                 argv=result.argv,
                 stdout_sha256=result.stdout_sha256,
                 stderr_sha256=result.stderr_sha256,
-                wall_time_ms=result.wall_time_ms,
+                wall_time_ms=max(result.wall_time_ms, int((time.monotonic() - started_at) * 1000)),
                 process_group_id=result.process_group_id,
                 process_group_killed=result.process_group_killed,
                 timed_out=result.timed_out,
@@ -355,7 +421,7 @@ class AgyWorkerAdapter:
                 provider_attempt_count=1,
             )
 
-        max_subprocesses = 3
+        max_subprocesses = min(3, provider_call_budget)
         actual_calls = 0
         total_wall_time_ms = 0
         last_result = None
@@ -397,12 +463,17 @@ class AgyWorkerAdapter:
                 from nexus.services.agy_account_pool import build_isolated_env
                 sub_env = build_isolated_env()
 
+            remaining_seconds = get_remaining_seconds()
+            if remaining_seconds <= 0:
+                failure_reason = "shared wall-time budget exhausted"
+                break
+
             request = CliWorkerRequest(
                 executable=executable,
-                argv=argv,
+                argv=build_argv(remaining_seconds),
                 cwd=target,
                 env=sub_env,
-                timeout_seconds=timeout,
+                timeout_seconds=remaining_seconds,
             )
 
             keys_to_restore = {}
@@ -426,6 +497,10 @@ class AgyWorkerAdapter:
                 break
             else:
                 if self._is_auth_or_quota_failure(result.status, result.exit_code, result.stdout, result.stderr):
+                    remaining_after_call = timeout - (time.monotonic() - started_at)
+                    if remaining_after_call <= 0:
+                        failure_reason = "shared wall-time budget exhausted"
+                        break
                     if attempt < max_subprocesses - 1:
                         try:
                             if hasattr(pool, "rotate_account"):
@@ -455,7 +530,7 @@ class AgyWorkerAdapter:
                 argv=argv,
                 stdout_sha256=CliWorkerResult.hash_bytes(b""),
                 stderr_sha256=CliWorkerResult.hash_bytes(b""),
-                wall_time_ms=0,
+                wall_time_ms=int((time.monotonic() - started_at) * 1000),
                 process_group_id=None,
                 process_group_killed=False,
                 timed_out=False,
@@ -487,7 +562,7 @@ class AgyWorkerAdapter:
             argv=last_result.argv,
             stdout_sha256=last_result.stdout_sha256,
             stderr_sha256=last_result.stderr_sha256,
-            wall_time_ms=total_wall_time_ms,
+            wall_time_ms=max(total_wall_time_ms, int((time.monotonic() - started_at) * 1000)),
             process_group_id=last_result.process_group_id,
             process_group_killed=last_result.process_group_killed,
             timed_out=last_result.timed_out,
