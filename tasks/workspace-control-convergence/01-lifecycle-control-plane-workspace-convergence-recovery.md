@@ -4,7 +4,8 @@
 - task_id: `lifecycle-control-plane-workspace-convergence-recovery`
 - campaign_id: `workspace-control-convergence`
 - artifact_authority: current
-- status: READY
+- status: SUPERSEDED
+- superseded_by: `workspace-convergence-core-primitives`, `workspace-convergence-service-orchestration`, `workspace-convergence-cli-surface`
 - owner: James Chen
 - supersedes: `lifecycle-control-plane-workspace-convergence`
 - commit_required: true
