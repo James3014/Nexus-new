@@ -20,13 +20,7 @@ from nexus.orchestrator.worktree_manager import WorktreeManager
 
 
 def _git(cwd: Path, *args: str) -> str:
-    env = os.environ.copy()
-    env["GIT_CONFIG_NOSYSTEM"] = "1"
-    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-    empty_hooks = cwd.parent / "empty_git_hooks"
-    empty_hooks.mkdir(exist_ok=True)
-    cmd = ["git", "-c", f"core.hooksPath={empty_hooks}", *args]
-    result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, env=env)
+    result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True, text=True)
     return result.stdout.strip()
 
 

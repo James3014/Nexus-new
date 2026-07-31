@@ -33,7 +33,7 @@ def safe_test_runner():
 import subprocess
 
 def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def _valid_request(tmp_path: Path, **overrides) -> dict:

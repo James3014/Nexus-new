@@ -7,7 +7,7 @@ from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 
 
 def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
+    result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=repo, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 

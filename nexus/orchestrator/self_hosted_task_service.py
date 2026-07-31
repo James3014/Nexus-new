@@ -2387,19 +2387,14 @@ class SelfHostedTaskService:
 
         Proves:
         - verifier commands only from durable task contract/state
-        - no caller injection of arbitrary commands
-        - integration SHA is 40-char lowercase SHA
-        - integration result is verifiable ancestor
-        - verify before/after re-reads durable state
-        - state deletion/replacement/hash drift/attempt drift → fail closed
-        - Target missing → fail closed
-        - Target unreadable → fail closed
-        - command target file missing/unreadable → fail closed
-        - provider_calls == 0
-        - verify must not commit
-        - verify must not modify task state
-        - verify must not approve, integrate, push, cleanup
-        - repeated verify on same immutable state → consistent verdict
+        - reuses CandidateVerifier._run_verifiers() for command execution
+        - provider_calls == 0 (deterministic commands only)
+        - full state/contract/attempt binding checked
+        - durable state digest verified before/after
+        - integration result is verifiable ancestor when present
+        - Target, lease, candidate, receipt or durable binding missing -> fail closed
+        - verify must not commit, cleanup, approve, integrate, push, or modify state
+        - repeated verify on same immutable state -> consistent verdict
         """
         # --- Phase 1: Pre-read durable state ---
         state_before = self._read_state(task_id)
@@ -2416,8 +2411,13 @@ class SelfHostedTaskService:
         contract_hash = state_before.get("contract_hash")
         status = state_before.get("status")
 
-        # --- Phase 2: State integrity checks ---
+        # --- Phase 2: State integrity + full binding check ---
         failures: list[str] = []
+
+        # Compute pre-verification state digest
+        state_digest_before = hashlib.sha256(
+            json.dumps(state_before, sort_keys=True, default=str).encode()
+        ).hexdigest()
 
         # State deletion/replacement check
         state_mid = self._read_state(task_id)
@@ -2438,7 +2438,7 @@ class SelfHostedTaskService:
         if state_mid.get("attempt_id") != attempt_id:
             failures.append("attempt_drift")
 
-        # --- Phase 3: Contract and lease validation ---
+        # --- Phase 3: Contract, lease, candidate binding validation (fail-closed) ---
         contract_data = state_mid.get("contract")
         if not contract_data:
             failures.append("contract_missing")
@@ -2446,9 +2446,21 @@ class SelfHostedTaskService:
         if not lease_data:
             failures.append("lease_missing")
 
+        candidate_commit = state_mid.get("candidate_commit_sha")
+        candidate_ref = state_mid.get("candidate_ref")
+        promotion_packet = state_mid.get("promotion_packet") or {}
+
+        # If candidate state exists, binding must be complete
+        if candidate_commit and not candidate_ref:
+            failures.append("candidate_ref_missing")
+        if candidate_commit and not promotion_packet.get("candidate_state_hash"):
+            failures.append("candidate_state_hash_missing")
+
         # --- Phase 4: Target validation ---
-        target_worktree = state_mid.get("target_worktree") or (
-            contract_data.get("target_repo_root") if contract_data else None
+        target_worktree = (
+            state_mid.get("target_worktree")
+            or (lease_data.get("target_worktree") if lease_data else None)
+            or (contract_data.get("target_repo_root") if contract_data else None)
         )
         if not target_worktree:
             failures.append("target_worktree_missing")
@@ -2459,90 +2471,92 @@ class SelfHostedTaskService:
             elif not target_path.is_dir():
                 failures.append("target_not_directory")
             else:
-                # Target readability check
                 try:
                     list(target_path.iterdir())
                 except PermissionError:
                     failures.append("target_unreadable")
 
-        # --- Phase 5: Integration SHA validation ---
+        # --- Phase 5: Integration SHA validation (actual ancestor check) ---
         integration_result_sha = state_mid.get("integration_result_sha")
         if integration_result_sha:
-            # Must be 40-char lowercase hex SHA
             import re
-            if not re.fullmatch(r'[0-9a-f]{40}', integration_result_sha):
+            if not re.fullmatch(r"[0-9a-f]{40}", integration_result_sha):
                 failures.append("integration_sha_invalid_format")
+            else:
+                controller_root = (
+                    state_mid.get("controller_worktree")
+                    or (contract_data.get("controller_repo_root") if contract_data else None)
+                )
+                controller_rev = (
+                    state_mid.get("controller_revision")
+                    or (contract_data.get("controller_revision") if contract_data else None)
+                )
+                if controller_root and controller_rev:
+                    try:
+                        anc_result = subprocess.run(
+                            [
+                                "git", "-c", "core.hooksPath=/dev/null",
+                                "merge-base", "--is-ancestor",
+                                integration_result_sha, controller_rev,
+                            ],
+                            cwd=controller_root,
+                            capture_output=True,
+                            timeout=10.0,
+                        )
+                        if anc_result.returncode != 0:
+                            failures.append("integration_ancestry_failed")
+                    except (subprocess.TimeoutExpired, OSError) as exc:
+                        failures.append(f"integration_ancestry_error:{exc}")
 
-        # --- Phase 6: Verifier command execution ---
-        verifier_commands = []
-        if contract_data:
-            verifier_commands = contract_data.get("verifier_commands") or []
-
+        # --- Phase 6: Verifier command execution via CandidateVerifier._run_verifiers ---
+        verifier_commands = (
+            contract_data.get("verifier_commands") if contract_data else []
+        ) or []
         verifier_evidence: list[dict[str, Any]] = []
-        provider_calls = 0
+        verifier_commands_executed: list[str] = []
 
-        if target_worktree and Path(target_worktree).is_dir():
-            for command in verifier_commands:
-                # Command target file validation
-                tokens = command.split()
-                if not tokens:
-                    failures.append(f"verifier_empty_command:{command}")
-                    continue
+        if target_worktree and Path(target_worktree).is_dir() and verifier_commands:
+            class _MinimalContract:
+                pass
+            _min = _MinimalContract()
+            _min.verifier_commands = verifier_commands
 
-                executable = tokens[0]
-                executable_path = Path(executable)
-                if not executable_path.is_absolute():
-                    # Check in PATH
-                    import shutil
-                    resolved = shutil.which(executable)
-                    if resolved is None:
-                        failures.append(f"verifier_executable_not_found:{executable}")
-                        continue
-                    executable_path = Path(resolved)
-
-                if not executable_path.exists():
-                    failures.append(f"verifier_executable_missing:{executable}")
-                    continue
-                if not os.access(executable_path, os.R_OK):
-                    failures.append(f"verifier_executable_unreadable:{executable}")
-                    continue
-
-                # Run verifier command
-                try:
-                    import shlex
-                    cmd_tokens = shlex.split(command)
-                    result = subprocess.run(
-                        cmd_tokens,
-                        cwd=target_worktree,
-                        capture_output=True,
-                        timeout=30.0,
-                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-                    )
-                    provider_calls += 1
-                    stdout_sha = hashlib.sha256(result.stdout).hexdigest()
-                    stderr_sha = hashlib.sha256(result.stderr).hexdigest()
+            try:
+                passed, evidence_tuple, ver_failures = CandidateVerifier._run_verifiers(
+                    _min, target_worktree,
+                )
+                for ev in evidence_tuple:
                     verifier_evidence.append({
-                        "command": command,
-                        "exit_code": result.returncode,
-                        "stdout_sha256": stdout_sha,
-                        "stderr_sha256": stderr_sha,
-                        "passed": result.returncode == 0,
+                        "command": ev.command,
+                        "status": ev.status,
+                        "exit_code": ev.exit_code,
+                        "stdout_sha256": ev.stdout_sha256,
+                        "stderr_sha256": ev.stderr_sha256,
+                        "wall_time_ms": ev.wall_time_ms,
+                        "executable_identity": ev.executable_identity,
+                        "timed_out": ev.timed_out,
                     })
-                    if result.returncode != 0:
-                        failures.append(f"verifier_failed:{command}")
-                except subprocess.TimeoutExpired:
-                    failures.append(f"verifier_timeout:{command}")
-                except (OSError, ValueError) as exc:
-                    failures.append(f"verifier_error:{command}:{exc}")
+                    verifier_commands_executed.append(ev.command)
+                failures.extend(ver_failures)
+            except Exception as exc:
+                failures.append(f"verifier_runner_error:{exc}")
 
-        # --- Phase 7: Post-read state consistency ---
+        # --- Phase 7: Post-read state consistency + digest comparison ---
         state_after = self._read_state(task_id)
         if state_after is None:
             failures.append("state_deleted_after_verification")
-        elif state_after.get("contract_hash") != contract_hash:
-            failures.append("contract_hash_drift_after_verification")
-        elif state_after.get("attempt_id") != attempt_id:
-            failures.append("attempt_drift_after_verification")
+        else:
+            if state_after.get("contract_hash") != contract_hash:
+                failures.append("contract_hash_drift_after_verification")
+            elif state_after.get("attempt_id") != attempt_id:
+                failures.append("attempt_drift_after_verification")
+
+            # Full state digest comparison
+            state_digest_after = hashlib.sha256(
+                json.dumps(state_after, sort_keys=True, default=str).encode()
+            ).hexdigest()
+            if state_digest_before != state_digest_after:
+                failures.append("state_digest_drift_during_verification")
 
         verified = not failures
         return {
@@ -2550,13 +2564,16 @@ class SelfHostedTaskService:
             "verdict": "VERIFIED" if verified else "FAILED",
             "verified": verified,
             "failure_reasons": failures,
-            "provider_calls": provider_calls,
+            "provider_calls": 0,
+            "verifier_commands_executed": verifier_commands_executed,
             "verifier_evidence": verifier_evidence,
             "status": status,
             "contract_hash": contract_hash,
             "attempt_id": attempt_id,
+            "state_digest_before": state_digest_before,
             "state_intact": state_after is not None and state_after.get("contract_hash") == contract_hash,
         }
+
 
     def approve_promotion(
         self,

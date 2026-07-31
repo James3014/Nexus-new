@@ -16,7 +16,7 @@ from nexus.orchestrator.worktree_manager import WorktreeManager
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True, text=True)
     return result.stdout.strip()
 
 
