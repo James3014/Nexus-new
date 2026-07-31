@@ -27,6 +27,21 @@ Replace the protocol checker's permissive missing-contract fallback with one che
 - `tests/ops/test_agent_protocol_check.py`
 - `tests/ops/test_agent_protocol_check_staged.py`
 
+## Machine policy overlay
+
+```json
+{
+  "allowed_paths": [
+    "scripts/ops/agent_protocol_contract.json",
+    "scripts/ops/agent_protocol_check.py",
+    "tests/ops/test_agent_protocol_check.py",
+    "tests/ops/test_agent_protocol_check_staged.py"
+  ],
+  "forbidden_paths": [],
+  "max_files_touched": 4
+}
+```
+
 ## Forbidden scope
 
 No bootstrap-file edits; no runtime router/workforce/startup changes; no changes to canonical root; no weakening of lifecycle authority; no silent fallback to an unrestricted contract; no deletion of receipts/reports.
