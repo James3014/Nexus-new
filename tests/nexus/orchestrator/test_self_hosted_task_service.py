@@ -999,6 +999,36 @@ def test_wait_task_timeout_returns_in_progress_envelope(tmp_path):
     service.wait_task("wait-timeout", timeout_seconds=2.0)
 
 
+def test_wait_task_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("wait-lock-free", {
+        "task_id": "wait-lock-free",
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+    })
+
+    def fail_lock():
+        raise AssertionError("wait_task must not acquire the state lock")
+
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
+    waited = service.wait_task("wait-lock-free", timeout_seconds=0)
+
+    assert waited["wait"]["timed_out"] is False
+    assert waited["task_action"]["action_state"] == "ACTION_REQUIRED"
+
+
+def test_verify_task_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+
+    def fail_lock():
+        raise AssertionError("verify_task must not acquire the state lock")
+
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
+    result = service.verify_task("verify-lock-free-missing")
+
+    assert result["verdict"] == "STATE_MISSING"
+
+
 def test_list_actionable_tasks_excludes_integrated_terminal_state(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     packet = {
@@ -2753,6 +2783,8 @@ def test_verify_task_passes_for_valid_task(tmp_path):
     assert result["failure_reasons"] == []
     assert result["state_intact"] is True
     assert "verifier_commands_executed" in result
+    assert result["next_action"] == "wait_for_task"
+    assert result["recommended_tool"] == "nexus_self_hosted_wait_task"
 
 
 def test_verify_task_detects_state_hash_drift(tmp_path):
@@ -2763,7 +2795,7 @@ def test_verify_task_detects_state_hash_drift(tmp_path):
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
 
     # Tamper with state between reads
-    original_read = service._read_state
+    original_read = service._read_state_snapshot
     call_count = {"n": 0}
     def tampering_read(task_id):
         state = original_read(task_id)
@@ -2772,7 +2804,7 @@ def test_verify_task_detects_state_hash_drift(tmp_path):
             # Second read: tamper with contract_hash
             state = {**state, "contract_hash": "tampered"}
         return state
-    service._read_state = tampering_read
+    service._read_state_snapshot = tampering_read
 
     result = service.verify_task(task_id)
     assert result["verified"] is False
@@ -2787,7 +2819,7 @@ def test_verify_task_detects_attempt_drift(tmp_path):
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
 
     # Tamper with attempt_id between reads
-    original_read = service._read_state
+    original_read = service._read_state_snapshot
     call_count = {"n": 0}
     def tampering_read(task_id):
         state = original_read(task_id)
@@ -2795,7 +2827,7 @@ def test_verify_task_detects_attempt_drift(tmp_path):
         if call_count["n"] == 2 and state:
             state = {**state, "attempt_id": "tampered_attempt"}
         return state
-    service._read_state = tampering_read
+    service._read_state_snapshot = tampering_read
 
     result = service.verify_task(task_id)
     assert result["verified"] is False
@@ -2810,7 +2842,7 @@ def test_verify_task_detects_state_deletion(tmp_path):
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, task_id)
 
     # Delete state between reads
-    original_read = service._read_state
+    original_read = service._read_state_snapshot
     call_count = {"n": 0}
     def deleting_read(task_id):
         state = original_read(task_id)
@@ -2818,7 +2850,7 @@ def test_verify_task_detects_state_deletion(tmp_path):
         if call_count["n"] == 2:
             return None
         return state
-    service._read_state = deleting_read
+    service._read_state_snapshot = deleting_read
 
     result = service.verify_task(task_id)
     assert result["verified"] is False
@@ -2892,6 +2924,7 @@ def test_verify_task_fails_on_missing_target(tmp_path):
     result = service.verify_task(task_id)
     assert result["verified"] is False
     assert "target_missing" in result["failure_reasons"]
+    assert result["next_action"] == "wait_for_task"
 
 
 def test_verify_task_fails_closed_when_verifier_mutates_target(tmp_path, monkeypatch):

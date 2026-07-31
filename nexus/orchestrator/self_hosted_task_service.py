@@ -1559,7 +1559,11 @@ class SelfHostedTaskService:
 
         deadline = time.monotonic() + timeout_seconds
         while True:
-            state = self.get_task(task_id)
+            # Waiting is a read-only operator surface.  Do not reconcile or
+            # acquire the lifecycle write lock while polling durable state.
+            state = self._read_state_snapshot(task_id)
+            if state is not None:
+                state = self._with_task_action(state)
             if state is None:
                 return None
             envelope = state.get("task_action") or self._task_action_envelope(state)
@@ -2705,7 +2709,7 @@ class SelfHostedTaskService:
         - repeated verify on same immutable state -> consistent verdict
         """
         # --- Phase 1: Pre-read durable state ---
-        state_before = self._read_state(task_id)
+        state_before = self._read_state_snapshot(task_id)
         if state_before is None:
             return {
                 "task_id": task_id,
@@ -2728,7 +2732,7 @@ class SelfHostedTaskService:
         ).hexdigest()
 
         # State deletion/replacement check
-        state_mid = self._read_state(task_id)
+        state_mid = self._read_state_snapshot(task_id)
         if state_mid is None:
             return {
                 "task_id": task_id,
@@ -3003,7 +3007,7 @@ class SelfHostedTaskService:
                 failures.append("target_digest_drift_during_verification")
 
         # --- Phase 7: Post-read state consistency + digest comparison ---
-        state_after = self._read_state(task_id)
+        state_after = self._read_state_snapshot(task_id)
         if state_after is None:
             failures.append("state_deleted_after_verification")
         else:
@@ -3020,6 +3024,7 @@ class SelfHostedTaskService:
                 failures.append("state_digest_drift_during_verification")
 
         verified = not failures
+        action_state = self._task_action_envelope(state_after or state_before)
         return {
             "task_id": task_id,
             "verdict": "VERIFIED" if verified else "FAILED",
@@ -3037,6 +3042,11 @@ class SelfHostedTaskService:
             "target_integrity_before": target_integrity_before,
             "target_integrity_after": target_integrity_after,
             "target_integrity_error": target_integrity_error_before or target_integrity_error_after,
+            "task_action": action_state,
+            "action_state": action_state.get("action_state"),
+            "attention_required": action_state.get("attention_required"),
+            "next_action": action_state.get("next_action"),
+            "recommended_tool": action_state.get("recommended_tool"),
         }
 
 
