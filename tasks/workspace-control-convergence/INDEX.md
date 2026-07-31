@@ -29,6 +29,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `commit-aware-candidate-capture`: `9afd8f0a2`; commit/verifier/worktree suites 120 passed; scoped Worker commits are now reusable without wrapper commits.
 - `workspace-cleanup-and-soak`: cleanup removed 13 clean redundant worktrees without deleting branches/refs; registered worktrees reduced from 29 to 16; P7 combined lifecycle suite 230 passed; ten sequential slot cycles passed.
 - `terminal-receipt-archive-and-ghost-task-disposal`: formal archive API preserved 68 terminal receipts with 68/68 hash checks; `python-verification-isolation-guard` and `self-hosted-verification-entrypoint-final-amendment` were formally superseded by their documented successors; actionable tasks reduced from 10 to 2. Two retained records remain for evidence review.
+- `read-only-status-lock-free-hardening`: `b975957dc` switched actionable/inventory state reads to atomic snapshots without creating or acquiring `.state.lock`; service/workflow and full P7 regression remained green at 109 and 230 passed.
 
 ## Blocked Cards
 - `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 241 integration-only commits / 178 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
