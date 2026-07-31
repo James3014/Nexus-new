@@ -2,12 +2,12 @@
 
 artifact_authority: current
 owner: James Chen
-status: active_p6_owner_gate
+status: active_p6_owner_approved
 source_specification: owner-authorized conversation on 2026-07-31
 AUTO_CHAIN: false
 
 ## Campaign Overview
-Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; terminal lifecycle receipts are now archived through the formal archive API; P6 canonical-root cutover remains an owner gate because the legacy root is dirty and the histories diverge.
+Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; terminal lifecycle receipts are now archived through the formal archive API. On 2026-08-01 the owner explicitly approved worktree reconciliation, required valuable changes to be integrated, required redundant worktrees to be removed, and required `/Users/jameschen/Workspace/nexus` to become the sole daily entrypoint.
 
 ## Live Authority Reconciliation (2026-07-31)
 
@@ -25,12 +25,13 @@ Converge Nexus workspace authority onto the clean integration controller and add
 3. [02-workspace-convergence-core-primitives.md](02-workspace-convergence-core-primitives.md) - `workspace-convergence-core-primitives`
 4. [03-workspace-convergence-service-orchestration.md](03-workspace-convergence-service-orchestration.md) - `workspace-convergence-service-orchestration`
 5. [04-workspace-convergence-cli-surface.md](04-workspace-convergence-cli-surface.md) - `workspace-convergence-cli-surface`
+6. [05-live-worktree-convergence-and-canonical-cutover.md](05-live-worktree-convergence-and-canonical-cutover.md) - `live-worktree-convergence-and-canonical-cutover`
 
 ## Current Frontier
-`P6-canonical-root-cutover-readiness`
+`live-worktree-convergence-and-canonical-cutover`
 
 ## Ready Cards
-- None; P6 requires owner cutover decision after readiness evidence.
+- `live-worktree-convergence-and-canonical-cutover`: owner approved on 2026-08-01.
 
 ## Completed Cards
 - `workspace-convergence-core-primitives`: historical owner-integrated evidence at `74808adb6`; the corresponding lifecycle receipt is now formally `SUPERSEDED`, with salvage preserved and no Candidate promotion.
@@ -42,7 +43,6 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `read-only-status-lock-free-hardening`: `b975957dc` switched actionable/inventory state reads to atomic snapshots without creating or acquiring `.state.lock`; service/workflow and full P7 regression remained green at 109 and 230 passed.
 
 ## Blocked Cards
-- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (118 short status entries; 9,806 full status records), differs from integration by 4 canonical-only vs 266 controller-only commits, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
 - Retained evidence requiring explicit owner decision: `exact-authorized-deletion-contract-bootstrap`. `workspace-convergence-core-primitives` is superseded and closed; its salvage ref remains evidence-only. No lifecycle JSON was edited manually.
 
 ## Superseded Cards
@@ -57,4 +57,4 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `workspace-convergence-cli-surface`: owner-integrated commit `72dee3d5d`; no auto-chain.
 
 ## Downstream Gate
-P6 owner decision is required before any canonical-root mutation. Approval, push, branch deletion, ref deletion, remaining retained-evidence disposal, and dirty/unique worktree disposal remain separate owner-controlled gates.
+The 2026-08-01 owner approval authorizes the exact worktree cleanup and canonical-root cutover in card 05. It does not authorize push, remote mutation, protected-history rewrite, deletion of salvage refs, or disposal of `exact-authorized-deletion-contract-bootstrap`.
