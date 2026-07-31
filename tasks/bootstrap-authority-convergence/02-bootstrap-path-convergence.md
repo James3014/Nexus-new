@@ -5,7 +5,7 @@
 - task_id: `bootstrap-path-convergence`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `task-authority-freshness` integrated
 - commit_required: true
@@ -65,7 +65,14 @@ git diff --cached --stat
 
 ## Exit criteria
 
-All bootstrap files resolve to current-worktree authority, focused tests pass, and a scoped commit is created. P0-C and P0-D remain separate downstream cards.
+All bootstrap files resolve to current-worktree authority, focused tests pass, and a scoped commit is created.
+
+## Integrated evidence
+
+- commit: `70945794c`
+- verification: `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/ops/test_bootstrap_authority_files.py` (`2 passed`)
+- scope: 8 changed files, all within the allowed file list; canonical root remained untouched
+- follow-up: P0-C machine policy contract and P0-D startup freshness integration remain separate cards
 
 ## Residual debt
 

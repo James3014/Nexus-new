@@ -14,22 +14,23 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 1. [01-task-authority-freshness.md](01-task-authority-freshness.md) - `task-authority-freshness`
 2. [02-bootstrap-path-convergence.md](02-bootstrap-path-convergence.md) - `bootstrap-path-convergence`
-3. `machine-policy-contract` - planned after P0-A
-4. `startup-freshness-gate` - planned after P0-A and P0-C
+3. [03-machine-policy-contract.md](03-machine-policy-contract.md) - `machine-policy-contract`
+4. `startup-freshness-gate` - planned after P0-C
 5. `workforce-compact-surface` - planned after P0-D
 6. `briefing-overlay-reduction` - planned after P1 workforce surface
 
 ## Current Frontier
 
-`bootstrap-path-convergence`
+`machine-policy-contract`
 
 ## Ready Cards
 
-- `bootstrap-path-convergence`: READY; P0-A freshness validator integrated at `e7d4b876b` and live PASS proven on clean `nexus/integration/main`.
+- `machine-policy-contract`: READY; P0-B bootstrap authority files integrated at `70945794c` and focused tests passed.
 
 ## Completed Cards
 
 - `task-authority-freshness`: INTEGRATED_WITH_OWNER_REVIEW at `e7d4b876b`; 7 focused tests passed and live validator returned `PASS` with `dirty=false`.
+- `bootstrap-path-convergence`: INTEGRATED_WITH_OWNER_REVIEW at `70945794c`; 2 focused tests passed and no forbidden bootstrap tokens remain in the scoped file set.
 
 ## Blocked Cards
 
@@ -44,4 +45,4 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 ## Downstream Gate
 
-P0-B/P0-C/P0-D may start only after the P0-A validator has deterministic tests and a clean scoped commit. `AUTO_CHAIN=false`; completion never self-authorizes the next card.
+P0-C may start only after P0-A and P0-B have deterministic tests and clean scoped commits. `AUTO_CHAIN=false`; completion never self-authorizes the next card.
