@@ -547,12 +547,12 @@ def test_candidate_ref_uses_immutable_fallback_when_legacy_parent_exists(sh2_rep
     assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
 
 
-def test_five_clean_attempts_do_not_grow_worktrees(sh2_repo):
-    contract = _contract(sh2_repo, task_id="stable-five")
+def test_ten_clean_attempts_do_not_grow_worktrees(sh2_repo):
+    contract = _contract(sh2_repo, task_id="stable-ten")
     manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
     baseline = len(manager._registered_worktrees(sh2_repo["controller"]))
 
-    for _ in range(5):
+    for _ in range(10):
         lease = manager.create_lease(contract)
         assert manager.cleanup_terminal_target(contract, lease).decision == "REMOVED"
 
