@@ -7,9 +7,11 @@ campaign_id: lifecycle-canonical-authority-convergence
 source_specification: owner-authorized execution of the lifecycle P1-P6 authority, verifier, state-root, Candidate, integration, and workspace convergence plan
 ordered_cards:
   - 01-lifecycle-canonical-authority-convergence.md
+  - 02-lifecycle-canonical-authority-convergence-v2.md
 dependencies: []
-current_frontier: 01-canonical-authority-stack.md
-completed_cards: []
+current_frontier: 02-lifecycle-canonical-authority-convergence-v2.md
+completed_cards:
+  - 01-lifecycle-canonical-authority-convergence.md (RETAINED_FOR_REVIEW; salvage ref recorded)
 blocked_cards: []
 superseded_cards: []
 AUTO_CHAIN: false
