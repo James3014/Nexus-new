@@ -150,6 +150,26 @@ def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypa
     assert detailed["attempts"] == [{"attempt_id": "a"}]
 
 
+def test_state_root_inventory_classifies_nested_receipts_and_conflicts(tmp_path, monkeypatch):
+    canonical = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical))
+    service = SelfHostedTaskService(state_dir=canonical, auto_reconcile=False)
+    canonical.mkdir()
+    (canonical / "task-a.json").write_text(json.dumps({"task_id": "task-a", "status": "FINAL_BLOCK"}))
+    nested = canonical / "rehearsal-v1"
+    nested.mkdir()
+    (nested / "task-a.json").write_text(json.dumps({"task_id": "task-a", "status": "PENDING_HUMAN_APPROVAL"}))
+
+    inventory = service.state_root_inventory()
+
+    assert inventory["authority_conflict"] is True
+    assert inventory["conflict_task_ids"] == ["task-a"]
+    assert {entry["authority"] for entry in inventory["entries"]} == {
+        "CANONICAL_AUTHORITY", "REHEARSAL_EVIDENCE",
+    }
+    assert len(inventory["inventory_sha256"]) == 64
+
+
 def test_submit_persists_idempotent_task_state(tmp_path):
     calls = []
 

@@ -131,6 +131,19 @@ def run_self_hosted_workspace_inventory(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_state_root_inventory(
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.state_root_inventory()
+    except (OSError, ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_workspace_plan(
     controller_root: str | Path | None = None,
     expected_controller_revision: str | None = None,

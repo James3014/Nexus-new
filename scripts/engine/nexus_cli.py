@@ -217,6 +217,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_submit,
     run_self_hosted_verify,
     run_self_hosted_wait,
+    run_self_hosted_state_root_inventory,
     run_self_hosted_workspace_converge,
     run_self_hosted_workspace_inventory,
     run_self_hosted_workspace_plan,
@@ -3650,6 +3651,15 @@ def self_hosted_workspace_plan(
         expected_controller_revision=expected_controller_revision,
         state_dir=state_dir,
     )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="state-root-inventory")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_state_root_inventory(state_dir: str | None) -> None:
+    """Inventory canonical and nested lifecycle receipts without mutation."""
+    res = run_self_hosted_state_root_inventory(state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 

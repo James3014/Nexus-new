@@ -1762,6 +1762,60 @@ class SelfHostedTaskService:
         )
         return _jsonable(inventory)
 
+    def state_root_inventory(self) -> dict[str, Any]:
+        """Inventory canonical and nested lifecycle state without mutation."""
+        canonical = self.canonical_state_dir()
+        entries: list[dict[str, Any]] = []
+        if canonical.exists():
+            candidates = sorted(canonical.glob("**/*.json"))
+        else:
+            candidates = []
+        for path in candidates:
+            if path.name.startswith("manifest-"):
+                continue
+            try:
+                raw = path.read_bytes()
+                state = json.loads(raw)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(state, Mapping) or not state.get("task_id"):
+                continue
+            relative_parent = path.parent.relative_to(canonical)
+            if str(relative_parent) == ".":
+                authority = "CANONICAL_AUTHORITY"
+            elif "nexus-state-archive" in path.parts:
+                authority = "ARCHIVE_EVIDENCE"
+            else:
+                authority = "REHEARSAL_EVIDENCE"
+            entries.append({
+                "path": str(path),
+                "authority": authority,
+                "task_id": state.get("task_id"),
+                "attempt_id": state.get("attempt_id"),
+                "status": state.get("status"),
+                "promotion_status": state.get("promotion_status"),
+                "candidate_commit_sha": state.get("candidate_commit_sha"),
+                "candidate_ref": state.get("candidate_ref"),
+                "state_sha256": hashlib.sha256(raw).hexdigest(),
+                "updated_at": state.get("updated_at"),
+            })
+        by_task: dict[str, list[dict[str, Any]]] = {}
+        for entry in entries:
+            by_task.setdefault(str(entry["task_id"]), []).append(entry)
+        conflicts = sorted(task_id for task_id, values in by_task.items() if len(values) > 1)
+        return {
+            "schema": "nexus.lifecycle_state_root_inventory.v1",
+            "canonical_state_root": str(canonical),
+            "entry_count": len(entries),
+            "task_count": len(by_task),
+            "conflict_task_ids": conflicts,
+            "authority_conflict": bool(conflicts),
+            "entries": entries,
+            "inventory_sha256": hashlib.sha256(
+                json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        }
+
     def workspace_convergence_plan(
         self,
         *,
