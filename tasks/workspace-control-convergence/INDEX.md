@@ -30,7 +30,7 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `workspace-cleanup-and-soak`: cleanup removed 13 clean redundant worktrees without deleting branches/refs; registered worktrees reduced from 29 to 16; P7 combined lifecycle suite 230 passed; ten sequential slot cycles passed.
 
 ## Blocked Cards
-- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 240 integration-only commits / 177 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
+- `P6-canonical-root-cutover-readiness`: HARD_BLOCK_OWNER_GATE; root `feature/full-capability-closure-20260718` remains dirty (117 porcelain entries), differs from integration by 4 root-only vs 241 integration-only commits / 178 files, and remote `HEAD` does not point to this controller. No reset, stash, clean, merge, or cutover was performed.
 
 ## Superseded Cards
 - `lifecycle-control-plane-workspace-convergence`: SUPERSEDED_BY `lifecycle-control-plane-workspace-convergence-recovery`; three Agy account-pool subprocesses exited 1 after orphaned `/usr/bin/security -i` credential pipes. Salvage ref `refs/nexus-salvage/worktree/lifecycle-control-plane-workspace-convergence-2e73a792d9144335999fea648e038479` preserves the unverified implementation.
