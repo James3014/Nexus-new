@@ -985,17 +985,23 @@ def test_list_actionable_tasks_is_compact_and_does_not_reconcile(tmp_path, monke
         "error": "worker failed",
         "request": {"large": "x" * 10000},
     })
+    service._lock_path().unlink()
 
     def fail_reconcile(_task_id):
         raise AssertionError("list_actionable_tasks must not reconcile task state")
 
+    def fail_lock():
+        raise AssertionError("read-only actionable listing must not acquire the state lock")
+
     monkeypatch.setattr(service, "reconcile_task", fail_reconcile)
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
     result = service.list_actionable_tasks()
 
     assert result["details_included"] is False
     assert result["actionable_count"] == 1
     assert result["tasks"][0]["task_id"] == "blocked"
     assert "error" not in result["tasks"][0]
+    assert not service._lock_path().exists()
 
 
 def test_workspace_inventory_plan_and_slot_status_are_read_only(tmp_path):

@@ -455,6 +455,22 @@ class SelfHostedTaskService:
                 return None
             return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
 
+    def _read_state_snapshot(self, task_id: str) -> Optional[dict[str, Any]]:
+        """Read a durable snapshot without creating or acquiring the state lock.
+
+        Read-only status and workspace inventory surfaces must not mutate the
+        lifecycle store. State writes use atomic ``replace`` semantics, so a
+        direct read observes either the previous complete JSON or the next
+        complete JSON; a concurrent disappearance is treated as absent.
+        """
+        path = self._state_path(task_id)
+        try:
+            payload = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            _, archived = self._latest_archived_state(task_id)
+            return archived
+        return self._with_task_action(json.loads(payload))
+
     def _reactivate_archived_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock():
             path = self._state_path(task_id)
@@ -1576,7 +1592,7 @@ class SelfHostedTaskService:
         """
         tasks = []
         for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
-            state = self._read_state(path.stem)
+            state = self._read_state_snapshot(path.stem)
             if state is None:
                 continue
             action = self._task_action_envelope(state)
@@ -1598,7 +1614,7 @@ class SelfHostedTaskService:
             return {}
         states: dict[str, dict[str, Any]] = {}
         for path in sorted(self.state_dir.glob("*.json")):
-            state = self._read_state(path.stem)
+            state = self._read_state_snapshot(path.stem)
             if state is not None:
                 states[path.stem] = state
         return states
