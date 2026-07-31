@@ -10,6 +10,32 @@ class SemanticAdapter:
     def __init__(self):
         self.bridge = GovernanceBridge()
 
+    _ROUTE_CODES = {
+        "0": "LOCAL",
+        "1": "LARGE",
+        "2": "HYBRID",
+        "3": "REMOTE",
+    }
+    _DECISION_CODES = {
+        "0": "ALLOW",
+        "1": "REVIEW",
+        "2": "STOP",
+        "3": "STOP",
+    }
+    _PHASE_CODES = {
+        "0": FlowState.INTAKE,
+        "1": FlowState.PLAN,
+        "2": FlowState.VERIFY,
+        "3": FlowState.EXECUTE,
+        "4": FlowState.CLOSE,
+    }
+    _CONFIDENCE_CODES = {"0": "HIGH", "1": "MEDIUM", "2": "LOW"}
+
+    @classmethod
+    def _decode_label(cls, value: str, mapping: dict[str, str], default: str) -> str:
+        normalized = str(value or "").strip()
+        return mapping.get(normalized, normalized.upper() or default)
+
     def process_model_output(self, raw_output: str) -> Tuple[str, str, FlowState, str]:
         """
         將模型輸出轉為 (Route, Decision, FlowState, Confidence)。
@@ -21,11 +47,17 @@ class SemanticAdapter:
             # 觸發 Fail-Closed 安全網：模型格式錯誤，不允許推進
             return ("LARGE", "STOP", FlowState.ESCALATE, "LOW")
             
-        route_str, decision_str, phase_str, confidence_str = normalized
-        
+        route_raw, decision_raw, phase_raw, confidence_raw = normalized
+        route_str = self._decode_label(route_raw, self._ROUTE_CODES, "LARGE")
+        decision_str = self._decode_label(decision_raw, self._DECISION_CODES, "STOP")
+        confidence_str = self._decode_label(confidence_raw, self._CONFIDENCE_CODES, "LOW")
+
         # 簡單映射回 Python 的 FlowState Enum
         try:
-            phase = FlowState(phase_str)
+            phase_key = str(phase_raw).strip()
+            phase = self._PHASE_CODES.get(phase_key)
+            if phase is None:
+                phase = FlowState(phase_key.upper())
         except ValueError:
             phase = FlowState.UNKNOWN
 

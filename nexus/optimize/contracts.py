@@ -9,6 +9,15 @@ class RouteDecision:
     reason: str
     version: str = "1.0"
 
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in {"flow", "lite_preferred", "reason", "version"}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
 @dataclass(frozen=True)
 class CostClassification:
     """[NEXUS v2.5.1] Published Interface: Cost Evidence DTO"""
@@ -22,3 +31,12 @@ class ChainAssembly:
     core: List[str]
     optional: List[str]
     version: str = "1.0"
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in {"core", "optional", "version"}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
