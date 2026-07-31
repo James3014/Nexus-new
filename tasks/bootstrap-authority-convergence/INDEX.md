@@ -17,15 +17,15 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 3. [03-machine-policy-contract.md](03-machine-policy-contract.md) - `machine-policy-contract`
 4. [04-startup-freshness-gate.md](04-startup-freshness-gate.md) - `startup-freshness-gate`
 5. [05-workforce-compact-surface.md](05-workforce-compact-surface.md) - `workforce-compact-surface`
-6. `briefing-overlay-reduction` - planned after P1 workforce surface
+6. [06-briefing-overlay-reduction.md](06-briefing-overlay-reduction.md) - `briefing-overlay-reduction`
 
 ## Current Frontier
 
-`workforce-compact-surface`
+`briefing-overlay-reduction`
 
 ## Ready Cards
 
-- `workforce-compact-surface`: READY; P0-D startup freshness gate integrated at `f62b4da21` with live `ENFORCED` ACK proof.
+- `briefing-overlay-reduction`: READY; P1 workforce status surface integrated at `cd9894707` with read-only and fail-closed tests.
 
 ## Completed Cards
 
@@ -33,6 +33,7 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 - `bootstrap-path-convergence`: INTEGRATED_WITH_OWNER_REVIEW at `70945794c`; 2 focused tests passed and no forbidden bootstrap tokens remain in the scoped file set.
 - `machine-policy-contract`: INTEGRATED_WITH_OWNER_REVIEW at `09af43a78`; 13 focused tests passed, missing/malformed baseline fails closed, and overlay narrowing passed.
 - `startup-freshness-gate`: INTEGRATED_WITH_OWNER_REVIEW at `f62b4da21`; 4 focused tests passed and live ACK bound worktree/HEAD/index/card/policy hashes.
+- `workforce-compact-surface`: INTEGRATED_WITH_OWNER_REVIEW at `cd9894707`; 2 focused tests passed, policy hash and route authority are exposed, and mutation authority is explicitly false.
 
 ## Blocked Cards
 
@@ -47,4 +48,4 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 ## Downstream Gate
 
-P1 workforce surface may start only after P0-D has deterministic tests, a clean scoped commit, and a live freshness-bound ACK. `AUTO_CHAIN=false`; completion never self-authorizes the next card.
+Briefing overlay reduction may start only after P1 workforce surface has deterministic tests and a clean scoped commit. `AUTO_CHAIN=false`; completion never self-authorizes the next card.

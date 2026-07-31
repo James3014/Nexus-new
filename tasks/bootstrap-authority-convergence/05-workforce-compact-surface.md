@@ -5,7 +5,7 @@
 - task_id: `workforce-compact-surface`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `startup-freshness-gate` integrated
 - commit_required: true
@@ -53,6 +53,13 @@ git diff --cached --name-status --diff-filter=D
 ## Exit criteria
 
 One compact read-only workforce query is wired to existing route authority, has bounded tests and evidence, and is committed as a separate Candidate. Briefing reduction remains downstream.
+
+## Integrated evidence
+
+- commit: `cd9894707`
+- verification: `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/ops/test_nexus_cli.py` (`2 passed`)
+- live proof: `python3 scripts/engine/nexus_cli.py workforce status` returned `PASS`, `CapabilityPlanner`, 25 policy workers, and explicit mutation authority false
+- scope: CLI and focused test only; no runtime router or model policy mutation
 
 ## Residual debt
 
