@@ -97,9 +97,7 @@ SMOKE_SUITES: tuple[SmokeSuite, ...] = (
 
 def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:
     cmd = [
-        "uv",
-        "run",
-        "python",
+        sys.executable,
         "scripts/bench/capability_ab_runner.py",
         "--tasks-file",
         suite.manifest,

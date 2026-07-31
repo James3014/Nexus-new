@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,7 @@ def test_build_command_keeps_manifest_and_max_tasks_order():
     suite = capability_route_smoke.SMOKE_SUITES[0]
     cmd = capability_route_smoke.build_command(Path("."), suite)
 
-    assert cmd[:4] == ["uv", "run", "python", "scripts/bench/capability_ab_runner.py"]
+    assert cmd[:2] == [sys.executable, "scripts/bench/capability_ab_runner.py"]
     assert cmd[cmd.index("--tasks-file") + 1] == "scripts/bench/public_benchmark_route_oracles_v1.json"
     assert cmd[cmd.index("--max-tasks") + 1] == "8"
     assert cmd[cmd.index("--task-id-filter") + 1].startswith("route-oracle-autoreason-001,")
