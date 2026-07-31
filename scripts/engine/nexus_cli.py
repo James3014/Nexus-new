@@ -3492,6 +3492,7 @@ nexus.add_command(self_hosted_group, name="self-hosted")
 @click.option("--target-worktree-root", help="Target worktree root path.")
 @click.option("--allowed-files", help="Comma-separated list of allowed file patterns.")
 @click.option("--forbidden-files", help="Comma-separated list of forbidden file patterns.")
+@click.option("--authorized-deletions", help="Comma-separated list of exact files allowed to be deleted.")
 @click.option("--verifier-commands", help="Comma-separated list of verifier commands.")
 @click.option("--protected-contracts", help="Comma-separated list of protected contracts.")
 @click.option("--worker", default=None, help="Worker provider (e.g. codex, auto).")
@@ -3509,6 +3510,7 @@ def self_hosted_submit(
     target_worktree_root: str | None,
     allowed_files: str | None,
     forbidden_files: str | None,
+    authorized_deletions: str | None,
     verifier_commands: str | None,
     protected_contracts: str | None,
     worker: str | None,
@@ -3550,6 +3552,9 @@ def self_hosted_submit(
     ff = _split_csv(forbidden_files)
     if ff is not None:
         request_data["forbidden_files"] = ff
+    ad = _split_csv(authorized_deletions)
+    if ad is not None:
+        request_data["authorized_deletions"] = ad
     vc = _split_csv(verifier_commands)
     if vc is not None:
         request_data["verifier_commands"] = vc

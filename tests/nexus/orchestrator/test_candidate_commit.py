@@ -82,6 +82,31 @@ def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     assert changed.splitlines() == ["bounded.txt"]
 
 
+def test_candidate_commit_allows_only_explicit_authorized_deletion(tmp_path):
+    contract, lease, _, manager = _scenario(tmp_path)
+    authorized_contract = contract.model_copy(update={"authorized_deletions": ["bounded.txt"]})
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").unlink()
+    candidate = manager.capture_candidate(authorized_contract, lease)
+    verified = CandidateVerifier(manager).verify(authorized_contract, lease, candidate)
+
+    assert verified.verified is True
+    packet = CandidateCommitter(manager).create_candidate_commit(
+        authorized_contract, lease, verified
+    )
+
+    assert packet.candidate_commit_created is True
+    assert _git(Path(lease.target_worktree), "status", "--short") == ""
+    tree_paths = _git(
+        Path(lease.target_worktree),
+        "ls-tree",
+        "-r",
+        "--name-only",
+        packet.candidate_commit_sha,
+    )
+    assert "bounded.txt" not in tree_paths.splitlines()
+
+
 def test_precommitted_worker_candidate_is_reused_without_wrapper_commit(tmp_path):
     contract, lease, _, manager = _scenario(tmp_path)
     target = Path(lease.target_worktree)

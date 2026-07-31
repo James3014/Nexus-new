@@ -1640,6 +1640,7 @@ class WorktreeManager:
             target_worktree_root=str(slot_path.parent),
             allowed_files=contract.allowed_files,
             forbidden_files=contract.forbidden_files,
+            authorized_deletions=contract.authorized_deletions,
             verifier_commands=contract.verifier_commands,
             protected_contracts=contract.protected_contracts,
             preferred_provider=contract.preferred_provider,

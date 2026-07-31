@@ -103,6 +103,7 @@ def test_candidate_verifier_fails_closed_for_nonzero_verifier_exit(scenario):
     failing_contract = contract.model_copy(
         update={"verifier_commands": ["python3 -c 'import sys; sys.exit(4)'"]}
     )
+    candidate = controller.collect_candidate(failing_contract, lease)
 
     receipt = CandidateVerifier(controller.worktree_manager).verify(failing_contract, lease, candidate)
 
@@ -119,6 +120,7 @@ def test_candidate_verifier_records_timeout_cleanup(scenario, monkeypatch):
     timeout_contract = contract.model_copy(
         update={"verifier_commands": ["python3 -c 'import time; time.sleep(30)'"]}
     )
+    candidate = controller.collect_candidate(timeout_contract, lease)
     monkeypatch.setattr(CandidateVerifier, "VERIFIER_TIMEOUT_SECONDS", 0.05)
 
     receipt = CandidateVerifier(controller.worktree_manager).verify(timeout_contract, lease, candidate)
@@ -285,6 +287,48 @@ def test_candidate_verifier_fails_closed_for_deleted_file(scenario):
     assert receipt.public_claim_allowed is False
 
 
+def test_candidate_verifier_accepts_explicit_authorized_deletion(scenario):
+    contract, lease, candidate, controller = scenario
+    authorized_contract = contract.model_copy(update={"authorized_deletions": ["bounded.txt"]})
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").unlink()
+    deleted_candidate = controller.collect_candidate(authorized_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        authorized_contract,
+        lease,
+        deleted_candidate,
+    )
+
+    assert receipt.verified is True
+    assert receipt.deletion_gate_passed is True
+    assert receipt.authorized_deletions == ("bounded.txt",)
+
+
+def test_authorized_deletion_contract_rejects_out_of_scope_path(scenario):
+    contract, _, _, _ = scenario
+    payload = contract.model_dump(mode="json")
+    payload.pop("contract_hash", None)
+    payload["authorized_deletions"] = ["outside.txt"]
+    with pytest.raises(ValueError, match="outside allowed_files"):
+        type(contract)(**payload)
+
+
+def test_candidate_verifier_rejects_tampered_authorization_contract(scenario):
+    contract, lease, _, controller = scenario
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").unlink()
+    candidate = controller.collect_candidate(contract, lease)
+    authorized_contract = contract.model_copy(update={"authorized_deletions": ["bounded.txt"]})
+
+    with pytest.raises(RuntimeError, match="contract hash"):
+        CandidateVerifier(controller.worktree_manager).verify(
+            authorized_contract,
+            lease,
+            candidate,
+        )
+
+
 def test_candidate_verifier_shadow_repository_findings_do_not_block(scenario):
     contract, lease, candidate, controller = scenario
     shadow_contract = contract.model_copy(
@@ -361,6 +405,7 @@ def test_candidate_verifier_fails_closed_when_verifier_mutates_candidate_state(s
             ]
         }
     )
+    candidate = controller.collect_candidate(mutating_contract, lease)
 
     receipt = CandidateVerifier(controller.worktree_manager).verify(
         mutating_contract,

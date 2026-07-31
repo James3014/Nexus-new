@@ -622,6 +622,7 @@ class SelfHostedTaskService:
         ]
         verifier_commands = [str(item) for item in request.get("verifier_commands", [])]
         protected_contracts = [str(item) for item in request.get("protected_contracts", [])]
+        authorized_deletions = [str(item) for item in request.get("authorized_deletions", [])]
         base_worktree_root, target_repo_root = resolve_canonical_target_roots(
             task_id=task_id,
             campaign_id=request.get("campaign_id"),
@@ -655,6 +656,7 @@ class SelfHostedTaskService:
             acceptance_profile=AcceptanceProfile(
                 verifier_commands=verifier_commands,
                 protected_contracts=protected_contracts,
+                authorized_deletions=authorized_deletions,
                 required_evidence=["candidate_state_hash", "controller_unchanged", "verified_candidate_receipt"],
             ),
             human_approval_policy=HumanApprovalPolicy(
@@ -667,6 +669,7 @@ class SelfHostedTaskService:
             target_worktree_root=str(base_worktree_root),
             allowed_files=list(request["allowed_files"]),
             forbidden_files=list(request.get("forbidden_files", [])),
+            authorized_deletions=authorized_deletions,
             verifier_commands=verifier_commands,
             protected_contracts=protected_contracts,
             preferred_provider=worker,
