@@ -48,7 +48,7 @@ def test_compact_briefing_is_task_aware_and_smaller_than_legacy(tmp_path):
     compact_text = compact_path.read_text(encoding="utf-8")
     legacy_text = legacy_path.read_text(encoding="utf-8")
     assert len(compact_text) < len(legacy_text)
-    assert "task_id: briefing-overlay-reduction" in compact_text
+    assert "task_id: orphan-workspace-reconciliation" in compact_text
     assert "workforce_query: python3 scripts/engine/nexus_cli.py workforce status" in compact_text
     assert "authority: non_normative" in legacy_text
 
