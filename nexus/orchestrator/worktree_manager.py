@@ -833,15 +833,37 @@ class WorktreeManager:
             raise RuntimeError("Controller changed after the target lease was created")
 
         target_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
+        committed_changed: list[str] = []
+        committed_deleted: list[str] = []
         if target_head != lease.initial_head:
-            raise RuntimeError("Target HEAD drifted; working-tree-only mutation was required")
+            try:
+                self._run_git(
+                    ["merge-base", "--is-ancestor", lease.initial_head, target_head],
+                    cwd=target_path,
+                )
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    "Target HEAD must descend from the leased initial_head"
+                ) from exc
+            committed_changed, committed_deleted = self._parse_commit_diff(
+                self._run_git(
+                    ["diff", "--name-status", lease.initial_head, target_head],
+                    cwd=target_path,
+                )
+            )
         target_status = self._status_bytes(target_path)
-        changed_files, untracked_files, deleted_files = self._parse_status(target_status)
-        tracked_diff = self._run_git_bytes(
+        working_changed, untracked_files, working_deleted = self._parse_status(target_status)
+        changed_files = sorted(set(committed_changed) | set(working_changed))
+        deleted_files = sorted(set(committed_deleted) | set(working_deleted))
+        committed_diff = self._run_git_bytes(
+            ["diff", "--binary", "--no-ext-diff", f"{lease.initial_head}..{target_head}", "--"],
+            cwd=target_path,
+        ) if target_head != lease.initial_head else b""
+        working_diff = self._run_git_bytes(
             ["diff", "--binary", "--no-ext-diff", "HEAD", "--"],
             cwd=target_path,
         )
-        tracked_diff_sha256 = sha256(tracked_diff).hexdigest()
+        tracked_diff_sha256 = sha256(committed_diff + b"\0" + working_diff).hexdigest()
         untracked_content_hashes = {
             path: self._hash_untracked_path(target_path / path)
             for path in untracked_files
@@ -1054,6 +1076,26 @@ class WorktreeManager:
             sorted(untracked_files),
             sorted(deleted_files),
         )
+
+    @staticmethod
+    def _parse_commit_diff(diff_text: str) -> tuple[list[str], list[str]]:
+        """Return changed and deleted paths introduced by committed Target work."""
+        changed_files: set[str] = set()
+        deleted_files: set[str] = set()
+        for line in diff_text.splitlines():
+            if not line.strip():
+                continue
+            fields = line.split("\t")
+            status = fields[0]
+            path = fields[-1]
+            if status.startswith("D"):
+                deleted_files.add(path)
+            elif status.startswith(("R", "C")) and len(fields) > 2:
+                changed_files.add(fields[-1])
+                changed_files.add(fields[-2])
+            else:
+                changed_files.add(path)
+        return sorted(changed_files), sorted(deleted_files)
 
     @staticmethod
     def _hash_untracked_path(path: Path) -> str:

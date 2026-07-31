@@ -103,36 +103,54 @@ class CandidateCommitter:
             raise RuntimeError("candidate deletions must be rejected before commit")
         if not paths:
             raise RuntimeError("candidate commit requires a non-empty candidate diff")
-
-        self.worktree_manager._run_git(["add", "--", *paths], cwd=target)
-        staged_after = self.worktree_manager._run_git(
-            ["diff", "--cached", "--name-only"],
-            cwd=target,
-        ).splitlines()
-        if staged_after != paths:
-            raise RuntimeError("staged candidate paths differ from verified paths")
-        commit_env = os.environ.copy()
-        commit_env["GIT_CONFIG_NOSYSTEM"] = "1"
-        commit_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-        commit_env["MUSE_RUN_CODEX_LOOP"] = "0"
-        commit_env["HOME"] = self._resolve_git_home()
-        hooks_dir = get_canonical_git_hooks_dir(target)
-        self.worktree_manager._run_git(
-            [
-                "-c",
-                f"user.name={self.AUTHOR_NAME}",
-                "-c",
-                f"user.email={self.AUTHOR_EMAIL}",
-                "-c",
-                f"core.hooksPath={hooks_dir}",
-                "commit",
-                "-m",
-                f"candidate({contract.task_id}): governed worker result",
-            ],
-            cwd=target,
-            env=commit_env,
-        )
-        commit_sha = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        target_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        if target_head != lease.initial_head:
+            # Workers are allowed to create scoped commits in the isolated
+            # Target.  Reuse that exact commit chain; never create a second
+            # wrapper commit or rewrite worker history.
+            if self.worktree_manager._run_git(["status", "--short"], cwd=target):
+                raise RuntimeError("precommitted Target must be clean before capture")
+            parents = self.worktree_manager._run_git(
+                ["rev-list", "--parents", "-n", "1", target_head], cwd=target,
+            ).split()
+            if len(parents) != 2:
+                raise RuntimeError("precommitted candidate must not be a merge commit")
+            committed_paths = self.worktree_manager._run_git(
+                ["diff", "--name-only", lease.initial_head, target_head], cwd=target,
+            ).splitlines()
+            if sorted(committed_paths) != paths:
+                raise RuntimeError("committed candidate paths differ from verified paths")
+            commit_sha = target_head
+        else:
+            self.worktree_manager._run_git(["add", "--", *paths], cwd=target)
+            staged_after = self.worktree_manager._run_git(
+                ["diff", "--cached", "--name-only"],
+                cwd=target,
+            ).splitlines()
+            if staged_after != paths:
+                raise RuntimeError("staged candidate paths differ from verified paths")
+            commit_env = os.environ.copy()
+            commit_env["GIT_CONFIG_NOSYSTEM"] = "1"
+            commit_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+            commit_env["MUSE_RUN_CODEX_LOOP"] = "0"
+            commit_env["HOME"] = self._resolve_git_home()
+            hooks_dir = get_canonical_git_hooks_dir(target)
+            self.worktree_manager._run_git(
+                [
+                    "-c",
+                    f"user.name={self.AUTHOR_NAME}",
+                    "-c",
+                    f"user.email={self.AUTHOR_EMAIL}",
+                    "-c",
+                    f"core.hooksPath={hooks_dir}",
+                    "commit",
+                    "-m",
+                    f"candidate({contract.task_id}): governed worker result",
+                ],
+                cwd=target,
+                env=commit_env,
+            )
+            commit_sha = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
         tree_sha = self.worktree_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target)
         committed_paths = self.worktree_manager._run_git(
             ["diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],

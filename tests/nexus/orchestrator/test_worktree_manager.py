@@ -236,6 +236,20 @@ def test_candidate_receipt_captures_allowed_tracked_edit(sh2_repo):
     assert receipt.out_of_scope_paths == []
 
 
+def test_candidate_receipt_accepts_precommitted_target_changes(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("committed candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "worker candidate")
+
+    receipt = manager.capture_candidate(contract, lease)
+
+    assert receipt.target_head == _git(target, "rev-parse", "HEAD")
+    assert receipt.changed_files == ["src/allowed.txt"]
+    assert receipt.allowed_scope_passed is True
+    assert _git(target, "status", "--porcelain") == ""
+
+
 def test_candidate_receipt_captures_untracked_file(sh2_repo):
     contract, manager, lease, target = _prepare_candidate(sh2_repo)
     content = b"new candidate\n"

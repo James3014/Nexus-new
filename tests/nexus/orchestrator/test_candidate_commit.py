@@ -82,6 +82,24 @@ def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     assert changed.splitlines() == ["bounded.txt"]
 
 
+def test_precommitted_worker_candidate_is_reused_without_wrapper_commit(tmp_path):
+    contract, lease, _, manager = _scenario(tmp_path)
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").write_text("worker committed\n", encoding="utf-8")
+    _git(target, "add", "bounded.txt")
+    _git(target, "commit", "-m", "worker candidate")
+    worker_head = _git(target, "rev-parse", "HEAD")
+
+    candidate = manager.capture_candidate(contract, lease)
+    verified = CandidateVerifier(manager).verify(contract, lease, candidate)
+    assert verified.verified is True
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+    assert packet.candidate_commit_created is True
+    assert packet.candidate_commit_sha == worker_head
+    assert _git(target, "rev-list", "--count", f"{lease.initial_head}..HEAD") == "1"
+
+
 def test_candidate_commit_rejects_unverified_receipt(tmp_path):
     contract, lease, verified, manager = _scenario(tmp_path)
     object.__setattr__(verified, "verified", False)
