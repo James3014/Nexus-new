@@ -1,7 +1,3 @@
-# 🛡️ Nexus Agent Mandatory Rule
-# -----------------------------
-# Whenever you start a task in this workspace, you MUST first read:
-# /Users/jameschen/Workspace/nexus/docs/AGENT_MANDATORY_PROTOCOL.md
+# Current-worktree bootstrap rule
 
-# [IDENTITY REQUIRED]
-# 回報開場白：[NEXUS:SHA|CI:PASS/FAIL]
+Read `AGENTS.md`, `MUSE_PROTO.md`, and the active Git-tracked Task Card from the current worktree. Resolve all relative paths from the current worktree; never redirect to a fixed checkout or legacy protocol document. Freeze branch, HEAD, and dirty state before mutation, and report evidence at closeout.

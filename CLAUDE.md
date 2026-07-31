@@ -1,7 +1,6 @@
-# 🛑 MANDATORY: READ AGENTS.md AND MUSE_PROTO.md FIRST (located in project root).
-# AGENTS.md governs evidence reporting, persistent-artifact admission, and deletion safety.
-# MUSE_PROTO.md governs response compression and domain tagging.
-# ADVISE: Use `nexus-sync` to poll the latest session summary.
+# Claude bootstrap
+
+Read `AGENTS.md`, `MUSE_PROTO.md`, and the active Git-tracked Task Card from the current worktree first. Recover through formal lifecycle state and receipts; do not depend on a legacy sync command or another checkout.
 
 ## Agent skills
 

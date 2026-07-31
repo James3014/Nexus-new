@@ -1,6 +1,8 @@
-# 📜 Universal Agent Guidelines: READ MUSE_PROTO.md
+# 📜 Universal Agent Guidelines
 # SCOPE: Antigravity, Gemini, OpenClaw, Codex, Claude.
-# SSOT: ./MUSE_PROTO.md
+# Repository authority: ./AGENTS.md
+# Task execution authority: the active Git-tracked Task Card under ./tasks/<campaign-id>/.
+# Response/domain overlay: ./MUSE_PROTO.md
 
 ## 🎯 Semantic Completion Criteria
 - **Behavioral Integrity**: The requested functionality is verified through empirical testing.
