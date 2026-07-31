@@ -1856,10 +1856,16 @@ class SelfHostedTaskService:
         }
         existing, created = self._create_state(contract.task_id, state)
         if not created:
+            retained_retry = (
+                existing.get("status") == "RETAINED_FOR_REVIEW"
+                and existing.get("promotion_status") == "NOT_CREATED"
+                and existing.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                and not (existing.get("promotion_packet") or existing.get("candidate_commit_sha") or existing.get("candidate_ref"))
+            )
             terminal_retry = existing.get("status") in {
                 "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED",
                 "INTEGRATION_FAILED", "INTEGRATED",
-            }
+            } or retained_retry
             contract_refreshed = existing.get("contract_hash") != contract.contract_hash
             if contract_refreshed and not (
                 terminal_retry
@@ -1984,10 +1990,16 @@ class SelfHostedTaskService:
             "decision": None,
             "blocker": None,
         }
-        if status == "RETAINED_FOR_REVIEW":
+        retained_retry = (
+            status == "RETAINED_FOR_REVIEW"
+            and state.get("promotion_status") == "NOT_CREATED"
+            and cleanup_decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            and not (state.get("promotion_packet") or state.get("candidate_commit_sha") or state.get("candidate_ref"))
+        )
+        if status == "RETAINED_FOR_REVIEW" and not retained_retry:
             retry_meta.update(
                 decision="BLOCKED_RETAINED_REVIEW",
-                blocker="human disposition or retained-candidate recovery is required before retry",
+                blocker="human disposition or retained-candidate recovery is required before retry; clean no-Candidate retention may retry only after formal cleanup",
             )
             return {**state, "retry": retry_meta}
         if status not in TERMINAL_STATUSES:

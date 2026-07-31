@@ -445,6 +445,33 @@ def test_retry_task_blocks_retained_review_without_disposition(tmp_path):
     assert result["retry"]["decision"] == "BLOCKED_RETAINED_REVIEW"
 
 
+def test_retry_task_reuses_clean_retained_no_candidate_after_cleanup(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("RETAINED_FOR_REVIEW", {
+            "promotion_status": "NOT_CREATED",
+            "cleanup_decision": "REMOVED",
+            "cleanup_performed": True,
+        })
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    request = _request(tmp_path, task_id="retained-retry-clean")
+    service.submit_task(request)
+    assert _wait_for_status(service, "retained-retry-clean", "RETAINED_FOR_REVIEW")
+
+    retried = service.retry_task("retained-retry-clean")
+    assert retried["task_id"] == "retained-retry-clean"
+    assert retried["retry"]["decision"] == "REUSED_TASK_ID"
+    assert retried["retry"]["attempts"] == 2
+    assert _wait_for_status(service, "retained-retry-clean", "RETAINED_FOR_REVIEW")
+    assert calls == ["retained-retry-clean", "retained-retry-clean"]
+
+
 def test_safe_hooks_directory_does_not_require_rewrite(tmp_path, monkeypatch):
     hooks = tmp_path / "hooks"
     hooks.mkdir()
