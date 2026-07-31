@@ -146,3 +146,23 @@ def test_worker_forces_pythondontwritebytecode_and_prevents_bytecode_generation(
     assert b"BYTECODE_ENV=1" in result.stdout
     pycache_dir = tmp_path / "__pycache__"
     assert not pycache_dir.exists()
+
+
+def test_worker_does_not_inherit_ambient_target_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", "/ambient/override")
+    script_path = tmp_path / "print_env.py"
+    script_path.write_text(
+        "import os; print(os.environ.get('NEXUS_TARGET_ROOT_OVERRIDE', 'MISSING'))\n",
+        encoding="utf-8",
+    )
+    request = CliWorkerRequest(
+        executable=sys.executable,
+        argv=(str(script_path),),
+        cwd=str(tmp_path),
+        env={"TASK_SCOPED_MARKER": "kept"},
+    )
+
+    result = run_cli_worker(request)
+
+    assert result.status is CliWorkerStatus.COMPLETED
+    assert result.stdout == b"MISSING\n"

@@ -27,6 +27,16 @@ _FORBIDDEN_SUBCOMMANDS = {
     ("git", "rebase"),
 }
 
+_INHERITED_ENV_ALLOWLIST = frozenset({
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PYTHONPATH",
+    "TMPDIR",
+    "VIRTUAL_ENV",
+})
+
 
 def _resolve_executable(executable: str) -> str:
     if not isinstance(executable, str) or not executable.strip():
@@ -129,7 +139,13 @@ def run_cli_worker(
 
     started = time.monotonic()
     executable_sha256 = _hash_file(request.executable)
-    environment = os.environ.copy()
+    # Verifiers must not inherit ambient lifecycle controls, provider tokens,
+    # or target-root overrides.  Callers can still pass task-scoped values
+    # explicitly through ``request.env``.
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key in _INHERITED_ENV_ALLOWLIST
+    }
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"

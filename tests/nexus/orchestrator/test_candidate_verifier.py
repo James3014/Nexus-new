@@ -16,6 +16,21 @@ def _git(cwd: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def test_deduplicate_verifier_commands_merges_overlapping_pytest_manifests():
+    commands = (
+        "python3 -m pytest -q -p no:cacheprovider tests/a.py tests/shared.py",
+        "python3 -m pytest -q -p no:cacheprovider tests/shared.py tests/b.py",
+        "python3 -c 'print(\"other\")'",
+    )
+
+    merged = CandidateVerifier._deduplicate_verifier_commands(commands)
+
+    assert merged == (
+        "python3 -m pytest -q -p no:cacheprovider tests/a.py tests/shared.py tests/b.py",
+        "python3 -c 'print(\"other\")'",
+    )
+
+
 @pytest.fixture
 def scenario(tmp_path):
     controller_root = tmp_path / "controller"
@@ -88,6 +103,8 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert len(receipt.repository_contract_policy_revision_hash) == 64
     assert receipt.repository_contract_findings == ()
     assert verifier_evidence.argv == ("-c", 'print("verifier pass")')
+    assert len(receipt.verifier_manifest_sha256) == 64
+    assert receipt.verification_wall_time_ms >= 0
     assert verifier_evidence.cwd == str(Path(lease.target_worktree).resolve())
     assert verifier_evidence.executable_identity
     assert verifier_evidence.executable_sha256 == hashlib.sha256(
