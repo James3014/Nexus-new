@@ -987,3 +987,281 @@ def test_restore_rejects_refreshed_contract_with_stale_lease(sh2_repo):
 
 
 # integrity-seal: 1776512137
+
+
+# ---------------------------------------------------------------------------
+# Workspace Convergence & Reusable Slot Tests (Card 02)
+# ---------------------------------------------------------------------------
+
+def test_workspace_inventory_and_classification(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    # Create one terminal task worktree (clean, reachable)
+    contract1 = _contract(sh2_repo, task_id="term-clean")
+    lease1 = manager.create_lease(contract1)
+
+    # Create unmapped clean worktree
+    unmapped_dir = target_root / "unmapped-clean"
+    _git(controller, "worktree", "add", "-b", "nexus/task/unmapped-clean", str(unmapped_dir), sh2_repo["target_base_revision"])
+
+    # Build inventory
+    task_states = {
+        "term-clean": {
+            "task_id": "term-clean",
+            "status": "INTEGRATED",
+            "lease": lease1.__dict__,
+            "contract": contract1.model_dump() if hasattr(contract1, "model_dump") else contract1.__dict__,
+        }
+    }
+    inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
+
+    assert inventory.schema == "nexus.workspace_inventory.v1"
+    assert inventory.controller_root == str(controller.resolve())
+    assert len(inventory.inventory_hash) == 64
+
+    class_map = {w.path: w.classification for w in inventory.worktrees}
+    assert class_map[str(controller.resolve())] == "KEEP_CONTROLLER"
+    assert class_map[str(Path(lease1.target_worktree).resolve())] == "RELEASABLE_TERMINAL_TARGET"
+    assert class_map[str(unmapped_dir.resolve())] == "RELEASABLE_REDUNDANT_CLEAN"
+
+
+def test_dirty_or_unknown_worktree_kept(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="term-dirty")
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "src" / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    task_states = {
+        "term-dirty": {
+            "task_id": "term-dirty",
+            "status": "INTEGRATED",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+    inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
+
+    class_map = {w.path: w.classification for w in inventory.worktrees}
+    assert class_map[str(target.resolve())] == "KEEP_DIRTY_OR_UNKNOWN"
+
+
+def test_active_or_retained_target_kept(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="task-active")
+    lease = manager.create_lease(contract)
+
+    task_states = {
+        "task-active": {
+            "task_id": "task-active",
+            "status": "RUNNING",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+    inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
+
+    class_map = {w.path: w.classification for w in inventory.worktrees}
+    assert class_map[str(Path(lease.target_worktree).resolve())] == "KEEP_ACTIVE_OR_RETAINED"
+
+
+def test_unique_commit_without_protection_is_blocked(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="unprotected-unique")
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("unique content\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "unprotected unique commit")
+
+    task_states = {
+        "unprotected-unique": {
+            "task_id": "unprotected-unique",
+            "status": "SUPERSEDED",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+    inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
+    plan = manager.plan_convergence(inventory)
+
+    assert str(target.resolve()) in plan.groups["BLOCKED_UNPROTECTED_UNIQUE_COMMIT"]
+    assert str(target.resolve()) not in plan.releasable_paths
+
+
+def test_clean_redundant_terminal_classified_releasable_without_removal(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="term-releasable")
+    lease = manager.create_lease(contract)
+
+    task_states = {
+        "term-releasable": {
+            "task_id": "term-releasable",
+            "status": "INTEGRATED",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+    inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
+    plan = manager.plan_convergence(inventory)
+
+    target_path = Path(lease.target_worktree).resolve()
+    assert str(target_path) in plan.releasable_paths
+    # Verify worktree is classified releasable without being removed on disk
+    assert target_path.exists()
+
+
+def test_convergence_plan_and_apply(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="releasable-1")
+    lease = manager.create_lease(contract)
+
+    task_states = {
+        "releasable-1": {
+            "task_id": "releasable-1",
+            "status": "INTEGRATED",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+    inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
+    plan = manager.plan_convergence(inventory, expected_controller_revision=sh2_repo["controller_revision"])
+
+    assert plan.schema == "nexus.workspace_convergence_plan.v1"
+    assert str(Path(lease.target_worktree).resolve()) in plan.releasable_paths
+    assert plan.deletion_count == 1
+    assert plan.next_allowed_gate == "INDEPENDENT_CANDIDATE_REVIEW"
+
+    # Test apply seam on temporary repository fixture
+    receipt = manager.apply_convergence_plan(
+        plan,
+        expected_controller_revision=sh2_repo["controller_revision"],
+        expected_plan_hash=plan.plan_hash,
+    )
+    assert receipt.applied is True
+    assert str(Path(lease.target_worktree).resolve()) in receipt.released_paths
+    assert not Path(lease.target_worktree).exists()
+
+
+def test_controller_revision_drift_invalidates_plan(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    inventory = manager.get_workspace_inventory(controller_root=controller)
+    plan = manager.plan_convergence(inventory, expected_controller_revision=sh2_repo["controller_revision"])
+
+    with pytest.raises(RuntimeError, match="CONTROLLER_REVISION_DRIFT"):
+        manager.apply_convergence_plan(
+            plan,
+            expected_controller_revision="wrong_sha_1234567890123456789012345678901234567890",
+            expected_plan_hash=plan.plan_hash,
+        )
+
+
+def test_dirty_reusable_slot_fails_closed(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="slot-task-dirty")
+    slot_lease = manager.prepare_reusable_slot(
+        contract,
+        campaign_id="campaign-dirty",
+        slot_index=0,
+    )
+    slot_path = Path(slot_lease.slot_path)
+    (slot_path / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    contract2 = _contract(sh2_repo, task_id="slot-task-next")
+    blocked_lease = manager.prepare_reusable_slot(
+        contract2,
+        campaign_id="campaign-dirty",
+        slot_index=0,
+    )
+
+    assert blocked_lease.status == "BLOCKED"
+    assert "BLOCKED_DIRTY_SLOT" in (blocked_lease.blocker or "")
+    assert (slot_path / "dirty.txt").exists()
+
+
+def test_reusable_slot_preparation_and_idempotency(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract = _contract(sh2_repo, task_id="slot-task-1")
+    slot_lease = manager.prepare_reusable_slot(
+        contract,
+        campaign_id="campaign-test",
+        slot_index=0,
+    )
+
+    assert slot_lease.status == "READY"
+    assert "slot-0" in slot_lease.slot_path
+
+    # Second preparation with exact same contract is idempotent
+    second_lease = manager.prepare_reusable_slot(
+        contract,
+        campaign_id="campaign-test",
+        slot_index=0,
+    )
+    assert second_lease.status == "READY"
+    assert second_lease.slot_path == slot_lease.slot_path
+
+
+def test_different_base_slot_reuse_blocks_until_verified_release(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root))
+
+    contract1 = _contract(sh2_repo, task_id="slot-task-base1")
+    slot_lease1 = manager.prepare_reusable_slot(
+        contract1,
+        campaign_id="campaign-diffbase",
+        slot_index=0,
+    )
+    slot_path = Path(slot_lease1.slot_path)
+
+    # Commit an unprotected unique commit to slot
+    (slot_path / "src" / "allowed.txt").write_text("unique work in slot\n", encoding="utf-8")
+    _git(slot_path, "add", "src/allowed.txt")
+    _git(slot_path, "commit", "-m", "unprotected slot commit")
+
+    # Create new base commit on controller
+    (controller / "new_base.txt").write_text("new base\n", encoding="utf-8")
+    _git(controller, "add", "new_base.txt")
+    _git(controller, "commit", "-m", "controller new base")
+    new_base_sha = _git(controller, "rev-parse", "HEAD")
+
+    contract2 = _contract(sh2_repo, task_id="slot-task-base2")
+    contract2 = contract2.model_copy(update={
+        "controller_revision": new_base_sha,
+        "target_base_revision": new_base_sha,
+    })
+
+    # Prepare reusable slot with different base: must block because slot has unprotected unique commit
+    blocked_lease = manager.prepare_reusable_slot(
+        contract2,
+        campaign_id="campaign-diffbase",
+        slot_index=0,
+    )
+    assert blocked_lease.status == "BLOCKED"
+    assert "BLOCKED_UNPROTECTED_UNIQUE_COMMIT" in (blocked_lease.blocker or "")

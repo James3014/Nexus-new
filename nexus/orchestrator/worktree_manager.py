@@ -72,6 +72,73 @@ class TargetCleanupReceipt:
     eligible: bool
 
 
+@dataclass(frozen=True)
+class WorkspaceWorktreeEntry:
+    path: str
+    head: str
+    branch: str
+    classification: str
+    is_dirty: bool
+    reachable_from_controller: bool
+    protected_by_ref: bool
+    task_id: Optional[str] = None
+    blocker_reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class WorkspaceInventory:
+    schema: str
+    controller_root: str
+    controller_branch: str
+    controller_head: str
+    controller_dirty: bool
+    legacy_root_path: str
+    legacy_root_exists: bool
+    legacy_root_dirty: bool
+    legacy_root_status_count: int
+    worktrees: list[WorkspaceWorktreeEntry]
+    inventory_hash: str
+
+
+@dataclass(frozen=True)
+class ConvergencePlan:
+    schema: str
+    controller_revision: str
+    inventory_hash: str
+    plan_hash: str
+    groups: Dict[str, list[str]]
+    releasable_paths: list[str]
+    blocked_paths: list[str]
+    blocker_codes: list[str]
+    affected_paths: list[str]
+    deletion_count: int
+    next_allowed_gate: str
+
+
+@dataclass(frozen=True)
+class ConvergenceApplyReceipt:
+    schema: str
+    controller_revision: str
+    plan_hash: str
+    applied: bool
+    released_paths: list[str]
+    failed_paths: list[dict[str, str]]
+    next_allowed_gate: str
+
+
+@dataclass(frozen=True)
+class ReusableSlotLease:
+    schema: str
+    slot_id: str
+    campaign_id: str
+    slot_path: str
+    task_id: Optional[str]
+    status: str
+    controller_revision: str
+    target_base_revision: Optional[str]
+    blocker: Optional[str]
+
+
 def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
     override = os.getenv("NEXUS_CANONICAL_GIT_HOOKS_DIR", "").strip()
     if override:
@@ -1030,6 +1097,527 @@ class WorktreeManager:
             digest.update(len(component).to_bytes(8, "big"))
             digest.update(component)
         return digest.hexdigest()
+
+    def get_workspace_inventory(
+        self,
+        controller_root: Optional[str | Path] = None,
+        task_states: Optional[Dict[str, dict]] = None,
+    ) -> WorkspaceInventory:
+        c_root = Path(controller_root or Path.cwd()).resolve()
+        c_head = self._run_git(["rev-parse", "HEAD"], cwd=c_root)
+        try:
+            c_branch = self._run_git(["branch", "--show-current"], cwd=c_root)
+            if not c_branch:
+                c_branch = self._run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=c_root)
+        except Exception:
+            c_branch = "HEAD"
+        c_dirty_bytes = self._status_bytes(c_root)
+        c_dirty = bool(c_dirty_bytes)
+
+        legacy_path = Path("/Users/jameschen/Workspace/nexus")
+        legacy_exists = legacy_path.exists()
+        legacy_dirty = False
+        legacy_status_count = 0
+        if legacy_exists and legacy_path.is_dir():
+            try:
+                l_bytes = self._status_bytes(legacy_path)
+                legacy_dirty = bool(l_bytes)
+                if l_bytes:
+                    records = [r for r in l_bytes.split(b"\0") if r]
+                    legacy_status_count = len(records)
+            except Exception:
+                legacy_dirty = True
+                legacy_status_count = 1
+
+        registered = self._registered_worktrees(c_root)
+        worktree_entries: list[WorkspaceWorktreeEntry] = []
+
+        protected_refs: set[str] = set()
+        try:
+            raw_refs = self._run_git(
+                [
+                    "for-each-ref",
+                    "--format=%(objectname)",
+                    "refs/nexus-candidates/",
+                    "refs/nexus-candidate-commits/",
+                    "refs/nexus-salvage/",
+                ],
+                cwd=c_root,
+            ).splitlines()
+            protected_refs.update(r.strip() for r in raw_refs if r.strip())
+        except Exception:
+            pass
+
+        states = task_states or {}
+        path_to_task: dict[str, tuple[str, dict]] = {}
+        for tid, st in states.items():
+            lease_dict = st.get("lease") or {}
+            target_wt = lease_dict.get("target_worktree") or (st.get("contract") or {}).get("target_repo_root")
+            if target_wt:
+                path_to_task[str(Path(target_wt).resolve())] = (tid, st)
+
+        for reg in registered:
+            wt_path_str = reg.get("worktree")
+            if not wt_path_str:
+                continue
+            wt_path = Path(wt_path_str).resolve()
+            wt_str = str(wt_path)
+
+            if not wt_path.exists():
+                worktree_entries.append(
+                    WorkspaceWorktreeEntry(
+                        path=wt_str,
+                        head=reg.get("HEAD", ""),
+                        branch=reg.get("branch", ""),
+                        classification="KEEP_DIRTY_OR_UNKNOWN",
+                        is_dirty=False,
+                        reachable_from_controller=False,
+                        protected_by_ref=False,
+                        blocker_reason="missing_worktree_directory",
+                    )
+                )
+                continue
+
+            try:
+                head = self._run_git(["rev-parse", "HEAD"], cwd=wt_path)
+            except Exception:
+                head = reg.get("HEAD", "")
+            try:
+                branch = self._run_git(["branch", "--show-current"], cwd=wt_path)
+                if not branch:
+                    branch = reg.get("branch", "detached")
+            except Exception:
+                branch = reg.get("branch", "detached")
+
+            is_dirty = bool(self._status_bytes(wt_path))
+
+            reachable = False
+            if head == c_head:
+                reachable = True
+            else:
+                try:
+                    self._run_git(["merge-base", "--is-ancestor", head, c_head], cwd=c_root)
+                    reachable = True
+                except Exception:
+                    reachable = False
+
+            protected = head in protected_refs
+
+            task_info = path_to_task.get(wt_str)
+            mapped_task_id = task_info[0] if task_info else None
+            task_st = task_info[1] if task_info else None
+            task_status = task_st.get("status") if task_st else None
+
+            classification = "KEEP_DIRTY_OR_UNKNOWN"
+            blocker_reason = None
+
+            if wt_path == c_root:
+                classification = "KEEP_CONTROLLER"
+            elif wt_path == legacy_path.resolve() or wt_str == "/Users/jameschen/Workspace/nexus":
+                classification = "KEEP_DIRTY_OR_UNKNOWN"
+                blocker_reason = "legacy_root_protected"
+            elif task_status is not None and task_status not in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED", "RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+                classification = "KEEP_ACTIVE_OR_RETAINED"
+                blocker_reason = "active_task_ownership"
+            elif task_status in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+                classification = "KEEP_ACTIVE_OR_RETAINED"
+                blocker_reason = "retained_for_review_evidence"
+            elif task_status in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED"}:
+                if is_dirty:
+                    classification = "KEEP_DIRTY_OR_UNKNOWN"
+                    blocker_reason = "dirty_terminal_target"
+                elif reachable or protected or head == (task_st.get("lease") or {}).get("initial_head"):
+                    classification = "RELEASABLE_TERMINAL_TARGET"
+                else:
+                    classification = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
+                    blocker_reason = "unprotected_unique_commit"
+            else:
+                if is_dirty:
+                    classification = "KEEP_DIRTY_OR_UNKNOWN"
+                    blocker_reason = "unmapped_dirty_worktree"
+                elif reachable or protected:
+                    classification = "RELEASABLE_REDUNDANT_CLEAN"
+                else:
+                    classification = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
+                    blocker_reason = "unmapped_unique_commit"
+
+            worktree_entries.append(
+                WorkspaceWorktreeEntry(
+                    path=wt_str,
+                    head=head,
+                    branch=branch,
+                    classification=classification,
+                    is_dirty=is_dirty,
+                    reachable_from_controller=reachable,
+                    protected_by_ref=protected,
+                    task_id=mapped_task_id,
+                    blocker_reason=blocker_reason,
+                )
+            )
+
+        if legacy_exists and not any(w.path == str(legacy_path.resolve()) or w.path == "/Users/jameschen/Workspace/nexus" for w in worktree_entries):
+            worktree_entries.append(
+                WorkspaceWorktreeEntry(
+                    path=str(legacy_path.resolve()),
+                    head="",
+                    branch="",
+                    classification="KEEP_DIRTY_OR_UNKNOWN",
+                    is_dirty=legacy_dirty,
+                    reachable_from_controller=False,
+                    protected_by_ref=False,
+                    blocker_reason="legacy_root_protected",
+                )
+            )
+
+        inv_payload = {
+            "controller_root": str(c_root),
+            "controller_head": c_head,
+            "controller_dirty": c_dirty,
+            "legacy_root_path": str(legacy_path),
+            "legacy_root_dirty": legacy_dirty,
+            "worktrees": [
+                {
+                    "path": w.path,
+                    "head": w.head,
+                    "branch": w.branch,
+                    "classification": w.classification,
+                    "is_dirty": w.is_dirty,
+                    "reachable_from_controller": w.reachable_from_controller,
+                    "protected_by_ref": w.protected_by_ref,
+                    "task_id": w.task_id,
+                }
+                for w in sorted(worktree_entries, key=lambda x: x.path)
+            ],
+        }
+        inv_hash = sha256(json.dumps(inv_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+        return WorkspaceInventory(
+            schema="nexus.workspace_inventory.v1",
+            controller_root=str(c_root),
+            controller_branch=c_branch,
+            controller_head=c_head,
+            controller_dirty=c_dirty,
+            legacy_root_path=str(legacy_path),
+            legacy_root_exists=legacy_exists,
+            legacy_root_dirty=legacy_dirty,
+            legacy_root_status_count=legacy_status_count,
+            worktrees=worktree_entries,
+            inventory_hash=inv_hash,
+        )
+
+    def plan_convergence(
+        self,
+        inventory: WorkspaceInventory,
+        expected_controller_revision: Optional[str] = None,
+    ) -> ConvergencePlan:
+        c_rev = inventory.controller_head
+        groups: Dict[str, list[str]] = {
+            "KEEP_CONTROLLER": [],
+            "KEEP_DIRTY_OR_UNKNOWN": [],
+            "KEEP_ACTIVE_OR_RETAINED": [],
+            "RELEASABLE_TERMINAL_TARGET": [],
+            "RELEASABLE_REDUNDANT_CLEAN": [],
+            "BLOCKED_UNPROTECTED_UNIQUE_COMMIT": [],
+        }
+        blocker_codes_set: set[str] = set()
+
+        if expected_controller_revision and c_rev != expected_controller_revision:
+            blocker_codes_set.add("CONTROLLER_REVISION_DRIFT")
+
+        for w in inventory.worktrees:
+            cls = w.classification
+            if cls not in groups:
+                groups[cls] = []
+            groups[cls].append(w.path)
+            if w.blocker_reason:
+                blocker_codes_set.add(w.blocker_reason)
+
+        releasable_paths = sorted(groups["RELEASABLE_TERMINAL_TARGET"] + groups["RELEASABLE_REDUNDANT_CLEAN"])
+        blocked_paths = sorted(
+            groups["KEEP_DIRTY_OR_UNKNOWN"]
+            + groups["KEEP_ACTIVE_OR_RETAINED"]
+            + groups["BLOCKED_UNPROTECTED_UNIQUE_COMMIT"]
+        )
+        blocked_paths = [p for p in blocked_paths if p != inventory.controller_root]
+        blocker_codes = sorted(blocker_codes_set)
+        affected_paths = sorted(set(releasable_paths) | set(blocked_paths))
+
+        plan_payload = {
+            "controller_revision": c_rev,
+            "inventory_hash": inventory.inventory_hash,
+            "groups": {k: sorted(v) for k, v in sorted(groups.items())},
+            "releasable_paths": releasable_paths,
+            "blocked_paths": blocked_paths,
+            "blocker_codes": blocker_codes,
+        }
+        plan_hash = sha256(json.dumps(plan_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+        return ConvergencePlan(
+            schema="nexus.workspace_convergence_plan.v1",
+            controller_revision=c_rev,
+            inventory_hash=inventory.inventory_hash,
+            plan_hash=plan_hash,
+            groups=groups,
+            releasable_paths=releasable_paths,
+            blocked_paths=blocked_paths,
+            blocker_codes=blocker_codes,
+            affected_paths=affected_paths,
+            deletion_count=len(releasable_paths),
+            next_allowed_gate="INDEPENDENT_CANDIDATE_REVIEW",
+        )
+
+    def apply_convergence_plan(
+        self,
+        plan: ConvergencePlan,
+        expected_controller_revision: str,
+        expected_plan_hash: str,
+    ) -> ConvergenceApplyReceipt:
+        if plan.controller_revision != expected_controller_revision:
+            raise RuntimeError(
+                f"CONTROLLER_REVISION_DRIFT: plan controller revision {plan.controller_revision} "
+                f"does not match expected {expected_controller_revision}"
+            )
+        if plan.plan_hash != expected_plan_hash:
+            raise RuntimeError(
+                f"PLAN_HASH_MISMATCH: plan hash {plan.plan_hash} "
+                f"does not match expected {expected_plan_hash}"
+            )
+
+        controller_root = Path(
+            plan.groups.get("KEEP_CONTROLLER", ["."])[0]
+            if plan.groups.get("KEEP_CONTROLLER")
+            else "."
+        ).resolve()
+
+        released_paths: list[str] = []
+        failed_paths: list[dict[str, str]] = []
+
+        for p_str in plan.releasable_paths:
+            p = Path(p_str).resolve()
+            if str(p) == str(Path("/Users/jameschen/Workspace/nexus").resolve()):
+                raise RuntimeError("LEGACY_ROOT_APPLY_FORBIDDEN: legacy root cannot be released")
+            if not p.exists():
+                released_paths.append(p_str)
+                continue
+            try:
+                entry = self._worktree_entry(controller_root, p)
+                if entry is not None:
+                    self._run_git(["worktree", "remove", "--", str(p)], cwd=controller_root)
+                    self._run_git(["worktree", "prune"], cwd=controller_root)
+                elif p.is_dir() and not any(p.iterdir()):
+                    p.rmdir()
+                released_paths.append(p_str)
+            except Exception as exc:
+                failed_paths.append({"path": p_str, "error": str(exc)})
+
+        return ConvergenceApplyReceipt(
+            schema="nexus.workspace_convergence_apply_receipt.v1",
+            controller_revision=expected_controller_revision,
+            plan_hash=expected_plan_hash,
+            applied=True,
+            released_paths=released_paths,
+            failed_paths=failed_paths,
+            next_allowed_gate="INDEPENDENT_CANDIDATE_REVIEW",
+        )
+
+    def get_reusable_slot_path(self, campaign_id: str = "default", slot_index: int = 0) -> Path:
+        return self.root_dir / campaign_id / f"slot-{slot_index}"
+
+    def get_reusable_slot_status(
+        self,
+        campaign_id: str = "default",
+        slot_index: int = 0,
+        controller_root: Optional[Path] = None,
+        task_states: Optional[Dict[str, dict]] = None,
+    ) -> ReusableSlotLease:
+        c_root = (controller_root or Path.cwd()).resolve()
+        c_head = self._run_git(["rev-parse", "HEAD"], cwd=c_root)
+        slot_path = self.get_reusable_slot_path(campaign_id, slot_index).resolve()
+        slot_id = f"{campaign_id}/slot-{slot_index}"
+
+        states = task_states or {}
+        active_task_id = None
+        for tid, st in states.items():
+            lease_dict = st.get("lease") or {}
+            target_wt = lease_dict.get("target_worktree") or (st.get("contract") or {}).get("target_repo_root")
+            if target_wt and Path(target_wt).resolve() == slot_path:
+                if st.get("status") not in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED"}:
+                    active_task_id = tid
+                    break
+
+        if active_task_id:
+            return ReusableSlotLease(
+                schema="nexus.reusable_slot_lease.v1",
+                slot_id=slot_id,
+                campaign_id=campaign_id,
+                slot_path=str(slot_path),
+                task_id=active_task_id,
+                status="BLOCKED",
+                controller_revision=c_head,
+                target_base_revision=None,
+                blocker=f"BLOCKED_SLOT_IN_USE: active task {active_task_id} owns slot",
+            )
+
+        if not slot_path.exists():
+            return ReusableSlotLease(
+                schema="nexus.reusable_slot_lease.v1",
+                slot_id=slot_id,
+                campaign_id=campaign_id,
+                slot_path=str(slot_path),
+                task_id=None,
+                status="READY",
+                controller_revision=c_head,
+                target_base_revision=c_head,
+                blocker=None,
+            )
+
+        if self._status_bytes(slot_path):
+            return ReusableSlotLease(
+                schema="nexus.reusable_slot_lease.v1",
+                slot_id=slot_id,
+                campaign_id=campaign_id,
+                slot_path=str(slot_path),
+                task_id=None,
+                status="BLOCKED",
+                controller_revision=c_head,
+                target_base_revision=None,
+                blocker="BLOCKED_DIRTY_SLOT: dirty reusable slot fails closed and remains untouched",
+            )
+
+        return ReusableSlotLease(
+            schema="nexus.reusable_slot_lease.v1",
+            slot_id=slot_id,
+            campaign_id=campaign_id,
+            slot_path=str(slot_path),
+            task_id=None,
+            status="READY",
+            controller_revision=c_head,
+            target_base_revision=c_head,
+            blocker=None,
+        )
+
+    def prepare_reusable_slot(
+        self,
+        contract: SelfHostedTaskContract,
+        campaign_id: str = "default",
+        slot_index: int = 0,
+        task_states: Optional[Dict[str, dict]] = None,
+    ) -> ReusableSlotLease:
+        status_lease = self.get_reusable_slot_status(
+            campaign_id,
+            slot_index,
+            controller_root=Path(contract.controller_repo_root),
+            task_states=task_states,
+        )
+        if status_lease.status == "BLOCKED":
+            return status_lease
+
+        slot_path = Path(status_lease.slot_path)
+        c_root = Path(contract.controller_repo_root).resolve()
+
+        if slot_path.exists():
+            entry = self._worktree_entry(c_root, slot_path)
+            if entry is not None:
+                current_head = self._run_git(["rev-parse", "HEAD"], cwd=slot_path)
+                if current_head == contract.target_base_revision:
+                    return ReusableSlotLease(
+                        schema="nexus.reusable_slot_lease.v1",
+                        slot_id=status_lease.slot_id,
+                        campaign_id=campaign_id,
+                        slot_path=str(slot_path),
+                        task_id=contract.task_id,
+                        status="READY",
+                        controller_revision=contract.controller_revision,
+                        target_base_revision=contract.target_base_revision,
+                        blocker=None,
+                    )
+
+                # Different-base reuse check: fail closed unless prior slot is proven clean/releasable
+                protected_refs: set[str] = set()
+                try:
+                    raw_refs = self._run_git(
+                        [
+                            "for-each-ref",
+                            "--format=%(objectname)",
+                            "refs/nexus-candidates/",
+                            "refs/nexus-candidate-commits/",
+                            "refs/nexus-salvage/",
+                        ],
+                        cwd=c_root,
+                    ).splitlines()
+                    protected_refs.update(r.strip() for r in raw_refs if r.strip())
+                except Exception:
+                    pass
+
+                reachable = False
+                try:
+                    self._run_git(["merge-base", "--is-ancestor", current_head, contract.controller_revision], cwd=c_root)
+                    reachable = True
+                except Exception:
+                    reachable = False
+
+                if not reachable and current_head not in protected_refs:
+                    return ReusableSlotLease(
+                        schema="nexus.reusable_slot_lease.v1",
+                        slot_id=status_lease.slot_id,
+                        campaign_id=campaign_id,
+                        slot_path=str(slot_path),
+                        task_id=contract.task_id,
+                        status="BLOCKED",
+                        controller_revision=contract.controller_revision,
+                        target_base_revision=contract.target_base_revision,
+                        blocker="BLOCKED_UNPROTECTED_UNIQUE_COMMIT: slot contains unprotected unique commit",
+                    )
+
+                self._run_git(["worktree", "remove", "--", str(slot_path)], cwd=c_root)
+                self._run_git(["worktree", "prune"], cwd=c_root)
+            elif not any(slot_path.iterdir()):
+                slot_path.rmdir()
+            else:
+                return ReusableSlotLease(
+                    schema="nexus.reusable_slot_lease.v1",
+                    slot_id=status_lease.slot_id,
+                    campaign_id=campaign_id,
+                    slot_path=str(slot_path),
+                    task_id=contract.task_id,
+                    status="BLOCKED",
+                    controller_revision=contract.controller_revision,
+                    target_base_revision=contract.target_base_revision,
+                    blocker="BLOCKED_DIRTY_SLOT: unregistered directory in slot",
+                )
+
+        slot_contract = SelfHostedTaskContract(
+            task_id=contract.task_id,
+            objective=contract.objective,
+            controller_revision=contract.controller_revision,
+            target_base_revision=contract.target_base_revision,
+            controller_repo_root=contract.controller_repo_root,
+            target_repo_root=str(slot_path),
+            target_worktree_root=str(slot_path.parent),
+            allowed_files=contract.allowed_files,
+            forbidden_files=contract.forbidden_files,
+            verifier_commands=contract.verifier_commands,
+            protected_contracts=contract.protected_contracts,
+            preferred_provider=contract.preferred_provider,
+            fallback_provider=contract.fallback_provider,
+            maximum_provider_calls=contract.maximum_provider_calls,
+            maximum_replans=contract.maximum_replans,
+            mutation_mode=contract.mutation_mode,
+            human_approval_required=contract.human_approval_required,
+        )
+        self.create_lease(slot_contract)
+
+        return ReusableSlotLease(
+            schema="nexus.reusable_slot_lease.v1",
+            slot_id=status_lease.slot_id,
+            campaign_id=campaign_id,
+            slot_path=str(slot_path),
+            task_id=contract.task_id,
+            status="READY",
+            controller_revision=contract.controller_revision,
+            target_base_revision=contract.target_base_revision,
+            blocker=None,
+        )
 
 
 # integrity-seal: 1776512137
