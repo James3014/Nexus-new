@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -17,10 +18,39 @@ def _render_briefing(tmp_path: Path) -> str:
 def test_enforced_briefing_requires_bootstrap_before_active(tmp_path):
     briefing = _render_briefing(tmp_path)
 
-    assert briefing.splitlines()[0] == "[NEXUS v26 BOOTSTRAP-CANDIDATE]"
-    assert "[NEXUS v26 ACTIVE]" in briefing
-    assert "[NEXUS v24 ACTIVE]" not in briefing
-    assert "[NEXUS v22 ACTIVE]" not in briefing
+    assert briefing.splitlines()[0] == "[NEXUS BOOTSTRAP-CANDIDATE]"
+    assert "[NEXUS ACTIVE]" in briefing
+    assert "NEXUS v26" not in briefing
+    assert "NEXUS v24" not in briefing
+    assert "NEXUS v22" not in briefing
+
+
+def test_compact_briefing_is_task_aware_and_smaller_than_legacy(tmp_path):
+    compact_path = tmp_path / "compact.md"
+    legacy_path = tmp_path / "legacy.md"
+    compact = subprocess.run(
+        ["bash", "scripts/ops/_nexus_enforced_briefing.sh", str(compact_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=os.environ.copy(),
+    )
+    legacy = subprocess.run(
+        ["bash", "scripts/ops/_nexus_enforced_briefing.sh", str(legacy_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "NEXUS_BRIEFING_MODE": "legacy"},
+    )
+
+    assert compact.stdout.strip().endswith("compact.md")
+    assert legacy.stdout.strip().endswith("legacy.md")
+    compact_text = compact_path.read_text(encoding="utf-8")
+    legacy_text = legacy_path.read_text(encoding="utf-8")
+    assert len(compact_text) < len(legacy_text)
+    assert "task_id: briefing-overlay-reduction" in compact_text
+    assert "workforce_query: python3 scripts/engine/nexus_cli.py workforce status" in compact_text
+    assert "authority: non_normative" in legacy_text
 
 
 def test_enforced_briefing_blocks_report_trust_overclaims(tmp_path):

@@ -1,157 +1,99 @@
 #!/bin/bash
 set -euo pipefail
 
-# Generate a single source-of-truth startup briefing that forces
-# Nexus bootstrap proof before any agent may claim ACTIVE wearing.
-
+# Emit the smallest useful startup briefing by default.  The historical
+# protocol remains available only as an explicit, non-normative reference.
 OUT_FILE="${1:-.nexus/reports/enforced_agent_briefing.md}"
+MODE="${NEXUS_BRIEFING_MODE:-compact}"
 mkdir -p "$(dirname "$OUT_FILE")"
 
-cat > "$OUT_FILE" <<'EOF'
-[NEXUS v26 BOOTSTRAP-CANDIDATE]
+if [[ "$MODE" == "legacy" ]]; then
+  LEGACY_FILE="${NEXUS_LEGACY_PROTOCOL_PATH:-docs/AGENT_MANDATORY_PROTOCOL.md}"
+  if [[ ! -f "$LEGACY_FILE" ]]; then
+    echo "legacy briefing reference missing: $LEGACY_FILE" >&2
+    exit 1
+  fi
+  {
+    echo "[NEXUS LEGACY BRIEFING REFERENCE]"
+    echo "authority: non_normative; mode: explicit legacy opt-in"
+    cat "$LEGACY_FILE"
+  } > "$OUT_FILE"
+  echo "$OUT_FILE"
+  exit 0
+fi
 
-# AGENT 強制執行規約 v2.9
-(Fail-Closed, Runtime-Aligned, Report-Trust Hardened, Capability-Receipt Gated)
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+BRANCH="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo DETACHED)"
+HEAD="$(git rev-parse --short HEAD 2>/dev/null || echo UNKNOWN)"
+if [[ -n "$(git status --porcelain=v1 2>/dev/null || true)" ]]; then
+  DIRTY_STATE="dirty"
+else
+  DIRTY_STATE="clean"
+fi
 
-## 0) Identity Rule
-Nexus is the governance/runtime armor, not a second agent. A model may claim `[NEXUS v26 ACTIVE]` only after it proves all bootstrap evidence below:
-1. `commit_sha` from `git rev-parse --short HEAD`.
-2. `_nexus_preflight.sh` completed or failed with explicit reason.
-3. `uv run scripts/engine/nexus_cli.py --help` and `uv run scripts/engine/nexus_cli.py nexus --help` prove the command surface.
-4. Nexus context/briefing was delivered to the model.
-5. CapabilityReceipt or equivalent runtime evidence exists for selected/invoked/gated capabilities.
+INDEX_PATH="${NEXUS_TASK_INDEX:-tasks/bootstrap-authority-convergence/INDEX.md}"
+TASK_ID="${NEXUS_TASK_ID:-unknown}"
+if [[ "$TASK_ID" == "unknown" && -f "$INDEX_PATH" ]]; then
+  TASK_ID="$(awk '/^## Current Frontier/{found=1; next} found && /`/{gsub(/`/, ""); print; exit}' "$INDEX_PATH" || true)"
+  TASK_ID="${TASK_ID:-unknown}"
+fi
+POLICY_PATH="${NEXUS_WORKFORCE_POLICY:-nexus/config/model_workforce.yaml}"
+if [[ -f "$POLICY_PATH" ]]; then
+  POLICY_HASH="$(shasum -a 256 "$POLICY_PATH" | awk '{print $1}')"
+else
+  POLICY_HASH="MISSING"
+fi
 
-If any item is missing, report `NEXUS_BOOTSTRAP_INCOMPLETE`; do not claim ACTIVE.
+cat > "$OUT_FILE" <<EOF
+[NEXUS BOOTSTRAP-CANDIDATE]
 
-## 1) Required Files
-Read these if present; report `MISSING:<path>` without blocking when optional fallback is documented:
-1. `AGENTS.md`
-2. `MUSE_PROTO.md` or `nexus_wiki_vault/01_System/MUSE_PROTO.md`
-3. `scripts/ops/_nexus_preflight.sh`
-4. `scripts/engine/nexus_cli.py`
-5. `nexus/engine/capability_planner.py`
-6. `nexus/engine/capability_receipt_adapters.py`
-7. `nexus/engine/autonomic_routing_service.py`
-8. `nexus/core/hallucination_guard.py`
-9. `.agents/skills/nexus-root-cause-probe/SKILL.md`
-10. `.agents/skills/nexus-benchmark-public-report/SKILL.md`
-11. `.nexus/reports/enforced_agent_briefing.md`
+# Compact current-worktree briefing
 
-## 2) Startup Entrypoints
-Use enforced scripts for external agents:
-- Gemini: `bash scripts/ops/start_gemini_nexus_enforced.sh [prompt-file] [report-file] [timeout-sec]`
-- Antigravity compatibility: `bash scripts/ops/start_antigravity_nexus_enforced.sh [model] [approval_mode] [prompt-file]`
-- Codex: `bash scripts/ops/start_codex_nexus_enforced.sh [prompt-file]`
+## Identity and freshness
+- worktree_root: $ROOT
+- branch: $BRANCH
+- head: $HEAD
+- dirty: $DIRTY_STATE
+- task_index: $INDEX_PATH
+- task_id: $TASK_ID
+- workforce_policy_sha256: $POLICY_HASH
+- startup_gate: python3 scripts/ops/nexus_startup_contract_check.py
+- workforce_query: python3 scripts/engine/nexus_cli.py workforce status
 
-Bare `gemini`, `antigravity`, or model CLI output is not Nexus wearing evidence. If an enforced script is missing or fails, report `NEXUS_BOOTSTRAP_FAILED`.
+## Authority
+- AGENTS.md is repository governance authority.
+- The active Git-tracked Task Card is execution authority.
+- MUSE_PROTO.md is response/domain overlay only; it cannot override AGENTS.md or the Task Card.
+- Workforce route authority remains CapabilityPlanner; this briefing never selects a worker.
+- Missing or stale authority is NEXUS_BOOTSTRAP_INCOMPLETE and must block claims of active execution.
 
-## 3) CLI Alignment
-Run help before using commands:
-1. `uv run scripts/engine/nexus_cli.py --help`
-2. `uv run scripts/engine/nexus_cli.py nexus --help`
+## Required evidence
+- Verify worktree, branch, HEAD, dirty state, INDEX/card freshness, and policy hash before mutation.
+- FAIL_CLOSED != SUCCESS; distinguish INFRA_INVALID from model or Nexus failure.
+- Capability claims require selected, invoked, evidence, gate, and contribution proof; selected-only is not a claim.
+- deterministic local rescue profile claims require their own evidence.
+- Closeout must preserve receipt paths, command exit codes, and recovery classification.
 
-Use only commands shown by help. Prefer `nexus <command>`; legacy `nexus:*` may be used only when help proves it still exists.
-
-## 4) Capability Routing
-Nexus must produce a capability plan before execution. The route input must include task type, risk, impact scope, cost budget, evidence needs, hidden verifier need, and public-claim need.
-
-Capability claim requires all of:
-- `selected=true`
-- `invoked=true`
-- `evidence_present=true`
-- `gate_passed=true`
-- `outcome_contributed=true`
-- `public_claim_safe=true` for public claims
-
-`selected-only`, recommendation-only, disabled flags, pending executors, and inferred report labels are not valid capability claims.
-
-## 5) Report Trust Hard Rules
-- `FAIL_CLOSED != SUCCESS`; fail-closed protects integrity but does not prove delivery.
-- `ENV_INVALID` / `INFRA_INVALID` / dependency missing / Docker missing must be separated from model or Nexus capability failure.
-- RLM/self-heal claims require `rlm_trace_present=true` or `capability_self_heal_used=true`.
-- DDTree savings require pruning evidence.
-- Swarm/Drone/Nightshift claims require concrete report/evidence paths.
-- Deterministic local rescue profile claims must say `deterministic local rescue profile` or equivalent Nexus-system rescue wording; do not claim the same external model became cheaper unless same-model token evidence proves it.
-
-## 6) Workspace Safety
+## Workspace safety
 - Do not kill/stash/restore/clean ambiguous targets.
-- For `kill`, `pkill`, `git stash`, `git restore`, `git clean`, or unrelated untracked deletion, list exact candidates and wait for explicit user confirmation unless the user already named the exact PID, command, or path.
-- Root artifacts such as `task_*.patch`, `*_test.patch`, and `element_task_*` are `ROOT_ARTIFACT_LEAK` unless the task explicitly asks to keep them.
-- Do not mutate `.obsidian/`, `benchmarks/`, `logs/`, `nexus_swarm/`, or `packages/` unless explicitly authorized.
+- Root artifacts such as task patches are ROOT_ARTIFACT_LEAK unless explicitly scoped.
+- Do not mutate protected directories or another worktree without explicit task authority.
+- One task maps to one target worktree; retry the same task/card instead of opening a duplicate.
 
-## 7) Gates
-General closeout should report actual status for:
-1. `delivery_gate`
-2. `acceptance_check`
-3. `contract_check`
-4. `ci_gate`
-5. `public_claim_gate` or `NOT_APPLICABLE`
+## Local Assist contract
+- Read-only: nexus local-assist advisor
+- Candidate: nexus local-assist candidate
+- Bounded verifier: nexus local-assist verified-subtask
+- Closeout: nexus local-assist closeout
+- User relay validation: nexus local-assist user-relay-validate
+- Required fields include local_assist_output_consumed, output_consumption_evidence, and every receipt path or task identity.
+- Local Assist is advisory/candidate support, never verifier, approval, integration, push, or cleanup authority.
 
-Missing evidence is `UNVERIFIED`; do not declare Done.
+## Active marker
+Only after the startup gate and evidence are true may the agent report:
+[NEXUS ACTIVE]
 
-## 8) Public Claim Gate
-Public improvement claims require same model, same task/trial multiset, hidden verifier, complete run eligibility, separated infra-invalid rows, trust mismatch 0, Nexus wearing valid rate 100%, context delivered 100%, claim verified 100%, evidence bundle hash, raw JSONL preserved, and per-capability public gate PASS.
-
-## 9) Required Report Shape
-Every closeout must include:
-```json
-{
-  "commit_sha": "<sha>",
-  "semantic_audit": {"state": "VERIFIED/PARTIAL/REJECTED/UNVERIFIED", "failures": []},
-  "nexus_wearing": {
-    "model_calls": 0,
-    "model_uses_nexus": false,
-    "nexus_context_delivered": false,
-    "nexus_usage_valid": false
-  },
-  "capability_receipts": {"public_safe": [], "selected_only": [], "failures": []},
-  "gate_summary": {
-    "delivery_gate": "PASS/FAIL/NOT_RUN",
-    "acceptance_check": "PASS/FAIL/NOT_RUN",
-    "contract_check": "PASS/FAIL/NOT_RUN",
-    "ci_gate": "PASS/FAIL/NOT_RUN",
-    "public_claim_gate": "PASS/FAIL/NOT_APPLICABLE"
-  },
-  "report_file": "<absolute-path>",
-  "commands": [{"cmd": "<command>", "exit_code": 0, "evidence": "<key output or report path>"}],
-  "recovery_directive": "none/stateless_pivot/report_trust_probe/route_replan"
-}
-```
-
-## 10) Local Assist Agent Workflow (M1/M2)
-For an audited task, the Online Agent may explicitly request Local Assist:
-1. `advisor` for read-only localization, diagnosis, risk, and evidence compression.
-2. `candidate` for one or more isolated candidates; never formal-workspace mutation.
-3. `verified-subtask` only for a bounded allowed-file task with a deterministic verifier.
-
-Use the real CLI surface and read both returned JSON artifacts before continuing:
-```bash
-nexus local-assist advisor --task-file <TASK.json> --workspace <REPO> --report-file <REPORT.json>
-nexus local-assist candidate --task-file <TASK.json> --workspace <REPO> --target-file <FILE> --verifier-command "<COMMAND>"
-nexus local-assist verified-subtask --task-file <TASK.json> --workspace <REPO> --allowed-file <FILE> --verifier-command "<COMMAND>"
-```
-The response and `execution_receipt.json` must prove `provider=ollama`, a resolved model, provider call count, `runtime_invoked`, and `output_delivered`. A receipt alone does not prove that the Agent consumed the output.
-
-Before closeout, the Agent must submit a machine-readable closeout containing:
-`local_assist_requested`, `local_assist_selected`, `local_assist_invoked`, `local_assist_receipt_paths`, `local_assist_output_delivered`, `local_assist_output_consumed`, `local_candidate_selected`, `local_assist_contribution_claim`, `output_consumption_evidence`, and `final_output`.
-Run:
-```bash
-nexus local-assist closeout --closeout-file <CLOSEOUT.json> --workspace <REPO> --report-file <CLOSEOUT_REPORT.json>
-```
-`local_assist_output_consumed=true` is valid only when the final output and consumption evidence explicitly reference every receipt path or task identity. Local Assist is advisory/candidate support; it is never verifier authority. If Local Assist was not invoked, report it as not invoked and do not infer contribution.
-
-For real repository context that cannot be automatically delivered, use the human-relay path:
-```bash
-nexus local-assist user-relay-validate --package-file <PACKAGE.json> --workspace <REPO> --report-file <REPORT.json>
-```
-This must remain `USER_RELAY_REQUIRED` until the user imports an external response. Automated exfiltration is forbidden; imported responses must cite every Local Assist receipt identity before `agent_consumed_proven=true` is eligible.
-
-## 11) Active Marker
-Only after the bootstrap and wearing evidence are true may the agent switch to:
-`[NEXUS v26 ACTIVE]`
-
-Close with:
-`[NEXUS IDENTITY: <SHA> + v2.9 RUNTIME-ALIGNED]`
+Legacy protocol text is non-normative and requires explicit NEXUS_BRIEFING_MODE=legacy.
 EOF
 
 echo "$OUT_FILE"
