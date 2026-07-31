@@ -38,6 +38,7 @@ No direct JSON editing, live state mutation, live worktree removal, branch/ref d
 3. A retained clean Target whose HEAD changed without a durable snapshot fails closed.
 4. An integrated replacement may be resolved from the verified archived lifecycle state surface; arbitrary strings must not satisfy the replacement gate when a live Target exists.
 5. No candidate evidence is created by this close path; cleanup and final disposition remain separately recorded.
+6. Cleanup dry-run reads durable snapshots without creating or acquiring `.state.lock`.
 
 ## Verification commands
 

@@ -2223,6 +2223,27 @@ def test_cleanup_retained_dry_run_does_not_mutate_state(tmp_path, monkeypatch):
     assert state_after.get("salvage_ref") is None, "dry-run must not record salvage ref"
 
 
+def test_cleanup_dry_run_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "cleanup-dry-run-lock-free"
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "REMOVED",
+    })
+    service._lock_path().unlink()
+
+    def fail_lock():
+        raise AssertionError("cleanup dry-run must not acquire the state lock")
+
+    monkeypatch.setattr(service, "_state_lock", fail_lock)
+    result = service.cleanup_tasks(task_id=task_id, dry_run=True)
+
+    assert result["decisions"][0]["cleanup_decision"] == "ALREADY_REMOVED"
+    assert not service._lock_path().exists()
+
+
 # ---------- LC2: terminal failure restore wiring tests ----------
 
 

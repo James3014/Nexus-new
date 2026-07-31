@@ -2302,7 +2302,7 @@ class SelfHostedTaskService:
         ids = [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
         decisions = []
         for item in ids:
-            state = self._read_state(item) or {}
+            state = (self._read_state_snapshot(item) if dry_run else self._read_state(item)) or {}
             if not state:
                 decisions.append({"task_id": item, "cleanup_decision": "ALREADY_REMOVED", "cleanup_blocker": "task state not found", "cleanup_performed": False})
                 continue
