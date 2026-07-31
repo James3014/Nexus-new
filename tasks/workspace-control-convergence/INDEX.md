@@ -30,8 +30,8 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - Retained refs: `70` `refs/nexus-salvage/*`, `33` `refs/heads/codex/*`, and `12` `refs/codex/turn-diffs/*`; salvage and branch deletion remain forbidden by this card.
 - External preservation: root dirty archive, staged/unstaged patches, ignored residue archives, SymPy archive, and unregistered-worktree residue remain under `/Users/jameschen/Workspace/nexus-salvage/20260801-root-convergence/`.
 - Gate evidence: bounded lifecycle suite `223 passed`; CI dry-run passed; startup contract passed with token `68c289a9474b3892`.
-- Gate hardening commit `c6a6ffc6b` makes Ultra Review ignore dangling runtime links and use the active interpreter directly; focused Ultra Review suite `18 passed`, and CI strict reached a passing Ultra Review lane.
-- Gate residuals: full pytest collected `11483`, reached `1806 passed / 29 failed`, then hung and was interrupted; acceptance is `UNVERIFIED_COLD_START` with zero samples; P30 acceptance is blocked by missing `route_smoke_summary`; CI strict now reaches Wiki Governance and reports `226 passed / 55 failed` legacy documentation contracts. These remain evidence blockers, not workspace residue.
+- Gate hardening commits `c6a6ffc6b` and `89379333f` make Ultra Review and route smoke use the active interpreter, ignore dangling runtime links, and avoid the restricted uv cache; focused suites are `18 passed` and `36 passed`, and CI strict reached a passing Ultra Review lane.
+- Gate residuals: full pytest collected `11483`, reached `1806 passed / 29 failed`, then hung and was interrupted; acceptance is `UNVERIFIED_COLD_START` with zero samples; route smoke now produces evidence but P30 still fails capability receipt/public-safe gates; CI strict reaches Wiki Governance and reports `226 passed / 55 failed` legacy documentation contracts. These remain evidence blockers, not workspace residue.
 
 ## Ordered Cards
 1. [00-lifecycle-control-plane-workspace-convergence.md](00-lifecycle-control-plane-workspace-convergence.md) - `lifecycle-control-plane-workspace-convergence`
