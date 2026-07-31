@@ -16,22 +16,23 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 2. [02-bootstrap-path-convergence.md](02-bootstrap-path-convergence.md) - `bootstrap-path-convergence`
 3. [03-machine-policy-contract.md](03-machine-policy-contract.md) - `machine-policy-contract`
 4. [04-startup-freshness-gate.md](04-startup-freshness-gate.md) - `startup-freshness-gate`
-5. `workforce-compact-surface` - planned after P0-D
+5. [05-workforce-compact-surface.md](05-workforce-compact-surface.md) - `workforce-compact-surface`
 6. `briefing-overlay-reduction` - planned after P1 workforce surface
 
 ## Current Frontier
 
-`startup-freshness-gate`
+`workforce-compact-surface`
 
 ## Ready Cards
 
-- `startup-freshness-gate`: READY; P0-C machine policy contract integrated at `09af43a78` and 13 focused tests passed.
+- `workforce-compact-surface`: READY; P0-D startup freshness gate integrated at `f62b4da21` with live `ENFORCED` ACK proof.
 
 ## Completed Cards
 
 - `task-authority-freshness`: INTEGRATED_WITH_OWNER_REVIEW at `e7d4b876b`; 7 focused tests passed and live validator returned `PASS` with `dirty=false`.
 - `bootstrap-path-convergence`: INTEGRATED_WITH_OWNER_REVIEW at `70945794c`; 2 focused tests passed and no forbidden bootstrap tokens remain in the scoped file set.
 - `machine-policy-contract`: INTEGRATED_WITH_OWNER_REVIEW at `09af43a78`; 13 focused tests passed, missing/malformed baseline fails closed, and overlay narrowing passed.
+- `startup-freshness-gate`: INTEGRATED_WITH_OWNER_REVIEW at `f62b4da21`; 4 focused tests passed and live ACK bound worktree/HEAD/index/card/policy hashes.
 
 ## Blocked Cards
 
@@ -46,4 +47,4 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 ## Downstream Gate
 
-P0-D may start only after P0-A, P0-B, and P0-C have deterministic tests and clean scoped commits. `AUTO_CHAIN=false`; completion never self-authorizes the next card.
+P1 workforce surface may start only after P0-D has deterministic tests, a clean scoped commit, and a live freshness-bound ACK. `AUTO_CHAIN=false`; completion never self-authorizes the next card.

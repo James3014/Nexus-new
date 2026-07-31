@@ -5,7 +5,7 @@
 - task_id: `startup-freshness-gate`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: INTEGRATED_WITH_OWNER_REVIEW
 - owner: James Chen
 - depends_on: `machine-policy-contract` integrated
 - commit_required: true
@@ -58,6 +58,13 @@ git diff --cached --stat
 ## Exit criteria
 
 The startup checker emits a freshness-bound ACK only on a clean, current, policy-valid worktree and passes focused tests in a scoped commit.
+
+## Integrated evidence
+
+- commit: `f62b4da21`
+- verification: `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/ops/test_nexus_startup_contract_check.py` (`4 passed`)
+- live proof: `NEXUS_STARTUP_REPORT_DIR=/tmp/nexus-startup-proof NEXUS_TASK_INDEX=tasks/bootstrap-authority-convergence/INDEX.md python3 scripts/ops/nexus_startup_contract_check.py` returned `ENFORCED`
+- ACK bound HEAD `aa05c3a63`, index commit `6b066c643`, frontier `startup-freshness-gate`, card hash, and policy SHA-256
 
 ## Residual debt
 
