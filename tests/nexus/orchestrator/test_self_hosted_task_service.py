@@ -1049,6 +1049,19 @@ def test_workspace_apply_requires_exact_plan_binding(tmp_path):
     assert preview["next_gate"] == "EXPLICIT_APPLY"
 
 
+def test_workspace_slot_prepare_is_idempotent_and_reuses_same_path(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="slot-service")
+
+    first = service.workspace_slot_prepare(request, campaign_id="slot-campaign", slot_index=0)
+    second = service.workspace_slot_prepare(request, campaign_id="slot-campaign", slot_index=0)
+
+    assert first["status"] == "READY"
+    assert second["status"] == "READY"
+    assert first["slot_path"] == second["slot_path"]
+    assert Path(first["slot_path"]).exists()
+
+
 def test_integrated_task_action_envelope_is_terminal(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("integrated", {

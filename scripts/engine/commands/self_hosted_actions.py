@@ -150,6 +150,26 @@ def run_self_hosted_workspace_slot_status(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_workspace_slot_prepare(
+    request: dict[str, Any],
+    campaign_id: str = "default",
+    slot_index: int = 0,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.workspace_slot_prepare(
+            request,
+            campaign_id=campaign_id,
+            slot_index=slot_index,
+        )
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_workspace_converge(
     expected_controller_revision: str,
     expected_plan_hash: str,

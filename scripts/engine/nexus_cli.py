@@ -219,6 +219,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_workspace_converge,
     run_self_hosted_workspace_inventory,
     run_self_hosted_workspace_plan,
+    run_self_hosted_workspace_slot_prepare,
     run_self_hosted_workspace_slot_status,
 )
 from scripts.engine.commands.registry_actions import (
@@ -3564,6 +3565,30 @@ def self_hosted_workspace_slot_status(
         campaign_id=campaign_id,
         slot_index=slot_index,
         controller_root=controller_root,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="workspace-slot-prepare")
+@click.option("--request-file", "request_file", type=click.Path(exists=True, dir_okay=False), required=True, help="JSON task request used to prepare the slot.")
+@click.option("--campaign-id", default="default", show_default=True, help="Reusable slot campaign ID.")
+@click.option("--slot-index", type=int, default=0, show_default=True, help="Reusable slot index.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_workspace_slot_prepare(
+    request_file: str,
+    campaign_id: str,
+    slot_index: int,
+    state_dir: str | None,
+) -> None:
+    """Prepare or reuse one governed sequential workspace slot."""
+    with open(request_file, "r", encoding="utf-8") as handle:
+        request_data = json.load(handle)
+    res = run_self_hosted_workspace_slot_prepare(
+        request_data,
+        campaign_id=campaign_id,
+        slot_index=slot_index,
         state_dir=state_dir,
     )
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))

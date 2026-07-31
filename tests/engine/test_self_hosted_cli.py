@@ -18,6 +18,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_workspace_converge,
     run_self_hosted_workspace_inventory,
     run_self_hosted_workspace_plan,
+    run_self_hosted_workspace_slot_prepare,
     run_self_hosted_workspace_slot_status,
     set_test_runner,
 )
@@ -664,6 +665,21 @@ def test_workspace_action_wrappers_forward_exact_read_and_apply_contract():
     ]
 
 
+def test_workspace_slot_prepare_wrapper_forwards_request():
+    calls = []
+
+    class FakeService:
+        def workspace_slot_prepare(self, request, **kwargs):
+            calls.append((request, kwargs))
+            return {"schema": "slot", "status": "READY"}
+
+    request = {"task_id": "slot-task", "controller_revision": "a" * 40}
+    assert run_self_hosted_workspace_slot_prepare(
+        request, campaign_id="campaign", slot_index=1, service=FakeService()
+    ) == {"schema": "slot", "status": "READY"}
+    assert calls == [(request, {"campaign_id": "campaign", "slot_index": 1})]
+
+
 def test_workspace_cli_surfaces_are_registered_and_dry_run_first(monkeypatch):
     class FakeService:
         def workspace_inventory(self, **kwargs):
@@ -706,6 +722,33 @@ def test_workspace_cli_surfaces_are_registered_and_dry_run_first(monkeypatch):
     ])
     assert converge.exit_code == 0, converge.output
     assert json.loads(converge.output)["applied"] is False
+
+
+def test_workspace_slot_prepare_cli_reads_request_file(tmp_path, monkeypatch):
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps({"task_id": "slot-task"}), encoding="utf-8")
+
+    class FakeService:
+        def workspace_slot_prepare(self, request, **kwargs):
+            return {
+                "schema": "slot",
+                "status": "READY",
+                "task_id": request["task_id"],
+                "slot_index": kwargs["slot_index"],
+            }
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    result = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "workspace-slot-prepare",
+        "--request-file", str(request_path),
+        "--campaign-id", "campaign",
+        "--slot-index", "2",
+    ])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["task_id"] == "slot-task"
+    assert data["slot_index"] == 2
 
 
 def test_self_hosted_cleanup_translates_service_error(monkeypatch):

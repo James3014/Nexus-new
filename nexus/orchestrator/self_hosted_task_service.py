@@ -1655,6 +1655,25 @@ class SelfHostedTaskService:
         )
         return _jsonable(status)
 
+    def workspace_slot_prepare(
+        self,
+        request: Mapping[str, Any],
+        *,
+        campaign_id: str = "default",
+        slot_index: int = 0,
+    ) -> dict[str, Any]:
+        """Prepare one reusable slot through WorktreeManager authority."""
+        contract = self.build_contract(request)
+        states = self._workspace_task_states()
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        prepared = manager.prepare_reusable_slot(
+            contract,
+            campaign_id=campaign_id,
+            slot_index=slot_index,
+            task_states=states,
+        )
+        return _jsonable(prepared)
+
     def apply_workspace_convergence(
         self,
         *,
