@@ -19,6 +19,19 @@ Converge Nexus workspace authority onto the clean integration controller and add
 - `workspace-convergence-core-primitives` is formally `SUPERSEDED`; its salvage ref remains evidence-only and it is no longer an actionable retained receipt.
 - `exact-authorized-deletion-contract-bootstrap` remains the only actionable owner decision: `RETAINED_FOR_REVIEW` / `FINAL_BLOCK`, with cleanup `REMOVED`; no candidate, close, or disposal is authorized by this index.
 
+## Final Physical Cutover Verification (2026-08-01)
+
+- Canonical daily entrypoint: `/Users/jameschen/Workspace/nexus`.
+- Canonical branch/HEAD: `nexus/integration/main` / `33e925795b7be0205c750481365e63cd935e2a20` (`fix(tasks): bind convergence authority metadata`).
+- Registered worktrees: `1`; exact path is the canonical root; `git worktree prune --dry-run` reports no stale metadata.
+- Canonical dirty state: clean (`git status --short --branch` reports only `## nexus/integration/main`).
+- Unregistered worktree root: `/Users/jameschen/Workspace/nexus-worktrees` is absent.
+- Process/launcher state: no `devspace`, `nexus-worktrees`, or `nexus-8a1be3f4` process; `com.waishnav.devspace` is disabled in `gui/501`, and its plist is preserved at `/Users/jameschen/Workspace/nexus-salvage/20260801-root-convergence/com.waishnav.devspace.plist.disabled_20260801`.
+- Retained refs: `70` `refs/nexus-salvage/*`, `33` `refs/heads/codex/*`, and `12` `refs/codex/turn-diffs/*`; salvage and branch deletion remain forbidden by this card.
+- External preservation: root dirty archive, staged/unstaged patches, ignored residue archives, SymPy archive, and unregistered-worktree residue remain under `/Users/jameschen/Workspace/nexus-salvage/20260801-root-convergence/`.
+- Gate evidence: bounded lifecycle suite `223 passed`; CI dry-run passed; startup contract passed with token `ec333a7fb35ad547`.
+- Gate residuals: full pytest collected `11483`, reached `1806 passed / 29 failed`, then hung and was interrupted; acceptance is `UNVERIFIED_COLD_START` with zero samples; P30 acceptance is blocked by missing `route_smoke_summary`; CI strict is blocked in Ultra Review by stale/missing `.antigravitycli` and `scripts/engine/nexus_core.so` copy sources. These remain evidence blockers, not workspace residue.
+
 ## Ordered Cards
 1. [00-lifecycle-control-plane-workspace-convergence.md](00-lifecycle-control-plane-workspace-convergence.md) - `lifecycle-control-plane-workspace-convergence`
 2. [01-lifecycle-control-plane-workspace-convergence-recovery.md](01-lifecycle-control-plane-workspace-convergence-recovery.md) - `lifecycle-control-plane-workspace-convergence-recovery`
