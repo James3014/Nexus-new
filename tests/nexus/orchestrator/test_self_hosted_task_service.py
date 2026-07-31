@@ -2835,6 +2835,41 @@ def test_verify_task_fails_on_missing_target(tmp_path):
     assert "target_missing" in result["failure_reasons"]
 
 
+def test_verify_task_fails_closed_when_verifier_mutates_target(tmp_path, monkeypatch):
+    """A verifier-created file must invalidate the read-only verification."""
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    request = _real_request(tmp_path, task_id="verify-target-mutation")
+    request["verifier_commands"] = [
+        "python3 -c \"from pathlib import Path; "
+        "Path('verifier-artifact.txt').write_text('created')\""
+    ]
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    attempt_id = "att-verify-target-mutation"
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id,
+        "status": "LEASED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_child_pgid": None,
+    })
+
+    result = service.verify_task(contract.task_id)
+
+    assert Path(lease.target_worktree, "verifier-artifact.txt").exists()
+    assert result["verified"] is False, result
+    assert "target_digest_drift_during_verification" in result["failure_reasons"]
+
+
 # ---------- W1: End-to-end fast lane canary ----------
 
 

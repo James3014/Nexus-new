@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2618,6 +2619,60 @@ class SelfHostedTaskService:
             "push_performed": state.get("push_performed", False),
         }
 
+    @staticmethod
+    def _snapshot_target_integrity(target_path: Path) -> tuple[str, Optional[str]]:
+        """Hash Target entries and contents without following external links.
+
+        Read-only verification executes commands supplied by the durable task
+        contract.  A verifier is not allowed to create, delete, or rewrite
+        anything in its Target, even when the command exits successfully.
+        Missing or unreadable entries are represented as explicit integrity
+        errors so the caller can fail closed instead of trusting a partial
+        digest.
+        """
+        try:
+            if not target_path.exists():
+                return "MISSING", f"target worktree missing: {target_path}"
+            if not target_path.is_dir():
+                return "NOT_DIRECTORY", f"target worktree is not a directory: {target_path}"
+        except OSError as exc:
+            return "UNREADABLE", f"unable to inspect target worktree: {exc}"
+
+        digest = hashlib.sha256()
+        try:
+            for root, dirs, files in os.walk(target_path, topdown=True, followlinks=False):
+                dirs.sort()
+                files.sort()
+                for name, kind in [(name, "dir") for name in dirs] + [(name, "file") for name in files]:
+                    path = Path(root) / name
+                    relative = path.relative_to(target_path).as_posix()
+                    try:
+                        metadata = path.lstat()
+                    except OSError as exc:
+                        return f"UNREADABLE:{relative}", f"unable to stat {relative}: {exc}"
+
+                    digest.update(f"{kind}:{relative}\0".encode("utf-8"))
+                    digest.update(
+                        f"mode={metadata.st_mode & 0o7777};size={metadata.st_size};mtime={metadata.st_mtime_ns}\0".encode(
+                            "utf-8"
+                        )
+                    )
+                    if stat.S_ISLNK(metadata.st_mode):
+                        try:
+                            digest.update(os.readlink(path).encode("utf-8", errors="surrogateescape"))
+                        except OSError as exc:
+                            return f"UNREADABLE:{relative}", f"unable to read link {relative}: {exc}"
+                    elif stat.S_ISREG(metadata.st_mode):
+                        try:
+                            digest.update(path.read_bytes())
+                        except OSError as exc:
+                            return f"UNREADABLE:{relative}", f"unable to read {relative}: {exc}"
+                    else:
+                        digest.update(f"special={metadata.st_mode}\0".encode("utf-8"))
+        except OSError as exc:
+            return "UNREADABLE", f"unable to walk target worktree: {exc}"
+        return digest.hexdigest(), None
+
     def verify_task(self, task_id: str) -> dict[str, Any]:
         """Read-only verification of a self-hosted task.
 
@@ -2702,6 +2757,10 @@ class SelfHostedTaskService:
         durable_candidate_mode = False
         verified_receipt = state_mid.get("verified_receipt") or {}
         cleanup_decision = state_mid.get("cleanup_decision")
+        target_integrity_before = "SKIPPED"
+        target_integrity_after = "SKIPPED"
+        target_integrity_error_before: Optional[str] = None
+        target_integrity_error_after: Optional[str] = None
 
         if not target_worktree:
             failures.append("target_worktree_missing")
@@ -2716,6 +2775,8 @@ class SelfHostedTaskService:
             ):
                 verification_mode = "durable_candidate_receipt"
                 durable_candidate_mode = True
+                target_integrity_before = "DURABLE_CANDIDATE"
+                target_integrity_after = "DURABLE_CANDIDATE"
                 import re
 
                 candidate_tree = state_mid.get("candidate_tree_sha") or promotion_packet.get("candidate_tree_sha")
@@ -2832,8 +2893,14 @@ class SelfHostedTaskService:
                         list(target_path.iterdir())
                     except PermissionError:
                         failures.append("target_unreadable")
+                    target_integrity_before, target_integrity_error_before = self._snapshot_target_integrity(target_path)
+                    if target_integrity_error_before:
+                        failures.append(
+                            f"target_integrity_before_verification:{target_integrity_error_before}"
+                        )
             else:
                 failures.append("target_missing")
+                target_integrity_before, target_integrity_error_before = self._snapshot_target_integrity(target_path)
 
         # --- Phase 5: Integration SHA validation (actual ancestor check) ---
         integration_result_sha = state_mid.get("integration_result_sha")
@@ -2876,7 +2943,12 @@ class SelfHostedTaskService:
 
         if durable_candidate_mode:
             verifier_evidence = list(verified_receipt.get("verifier_evidence") or [])
-        elif target_worktree and Path(target_worktree).is_dir() and verifier_commands:
+        elif (
+            target_worktree
+            and Path(target_worktree).is_dir()
+            and verifier_commands
+            and target_integrity_error_before is None
+        ):
             class _MinimalContract:
                 pass
             _min = _MinimalContract()
@@ -2901,6 +2973,17 @@ class SelfHostedTaskService:
                 failures.extend(ver_failures)
             except Exception as exc:
                 failures.append(f"verifier_runner_error:{exc}")
+
+        if not durable_candidate_mode and target_worktree and target_integrity_before != "SKIPPED":
+            target_integrity_after, target_integrity_error_after = self._snapshot_target_integrity(
+                Path(target_worktree)
+            )
+            if target_integrity_error_after:
+                failures.append(
+                    f"target_integrity_after_verification:{target_integrity_error_after}"
+                )
+            if target_integrity_before != target_integrity_after:
+                failures.append("target_digest_drift_during_verification")
 
         # --- Phase 7: Post-read state consistency + digest comparison ---
         state_after = self._read_state(task_id)
@@ -2934,6 +3017,9 @@ class SelfHostedTaskService:
             "attempt_id": attempt_id,
             "state_digest_before": state_digest_before,
             "state_intact": state_after is not None and state_after.get("contract_hash") == contract_hash,
+            "target_integrity_before": target_integrity_before,
+            "target_integrity_after": target_integrity_after,
+            "target_integrity_error": target_integrity_error_before or target_integrity_error_after,
         }
 
 
