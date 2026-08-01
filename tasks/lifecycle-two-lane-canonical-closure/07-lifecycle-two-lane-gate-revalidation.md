@@ -74,7 +74,7 @@ git worktree list --porcelain
 - Default route regression: `test_ordinary_primary_request_defaults_to_direct_canonical` passed; an ordinary primary request returned a Direct handoff with no state or Target.
 - Read SLO regression: `test_original_gate_read_p95_stays_below_300ms_without_side_effects` passed across 20 in-process read samples with no state-root creation.
 - Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
-- Commits: `48dbab1fa` (physical matrix) and `957bc41f0` (cleaned verified block action routing).
+- Commits: `48dbab1fa` (physical matrix), `957bc41f0` (cleaned verified block action routing), `bf57dcb54` (20 fault gate), `816aa5874` (Direct-by-default), `5d98bffeb` (CLI/MCP lane exposure), and `c41bcb00f` (read p95 gate).
 - Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
 - External disposition: `/Users/jameschen/Workspace/nexus-devspace-mcp` is clean on `nexus/mcp-tools-v1`; merged local branch `nexus/mcp-batch-1d-remediation-3` removed; residue preserved under `/Users/jameschen/Workspace/nexus-salvage/20260801-nexus-devspace-mcp`.
 
