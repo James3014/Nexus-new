@@ -18,6 +18,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
 class FakeService:
     def __init__(self):
         self.submitted = []
+        self.completed = []
 
     def lifecycle_status(self):
         return {"active_targets": 0, "actionable_count": 0}
@@ -32,6 +33,7 @@ class FakeService:
         return {"task_id": task_id, "status": "PENDING_HUMAN_APPROVAL", "task_action": {"action_state": "ACTION_REQUIRED", "next_action": "owner_finish"}, "wait": kwargs}
 
     def complete_direct_canonical(self, request, *, expected_commit_sha=None):
+        self.completed.append(dict(request))
         return {"status": "DIRECT_CANONICAL_COMPLETED", "task_id": request["task_id"], "expected_commit_sha": expected_commit_sha}
 
     def owner_finish(self, task_id, **kwargs):
@@ -101,6 +103,16 @@ def test_minimal_direct_finish_derives_canonical_target_fields():
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "DIRECT_CANONICAL_COMPLETED"
     assert payload["task_id"] == "direct-1"
+
+
+def test_minimal_direct_finish_accepts_public_base_sha_alias():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    base = "b" * 40
+    response = gateway.handle({"jsonrpc": "2.0", "id": 17, "method": "tools/call", "params": {"name": "nexus_task_finish", "arguments": {"execution_lane": "DIRECT_CANONICAL", "task_id": "direct-base-sha", "base_sha": base, "allowed_files": ["README.md"]}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "DIRECT_CANONICAL_COMPLETED"
+    assert service.completed[0]["controller_revision"] == base
 
 
 def test_task_run_routes_small_request_direct_without_target_fields():

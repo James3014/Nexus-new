@@ -198,6 +198,7 @@ class UnifiedMCPGateway:
                     "properties": {
                         "execution_lane": {"type": "string", "enum": ["DIRECT_CANONICAL", "ISOLATED_TARGET"]},
                         "request": {"type": "object"},
+                        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "controller_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
                         "verifier_commands": {"type": "array", "items": {"type": "string"}},
@@ -550,9 +551,9 @@ class UnifiedMCPGateway:
             request = dict(arguments.get("request") or {})
             if not request:
                 task_id = _text(arguments.get("task_id"), "task_id")
-                base = arguments.get("controller_revision")
+                base = arguments.get("base_sha") or arguments.get("controller_revision")
                 if not isinstance(base, str) or not _SHA_RE.fullmatch(base):
-                    raise GatewayInputError("controller_revision is required for minimal Direct finish")
+                    raise GatewayInputError("base_sha is required for minimal Direct finish")
                 allowed = [str(path).strip() for path in (arguments.get("allowed_files") or []) if str(path).strip()]
                 if not allowed or len(allowed) > 4:
                     raise GatewayInputError("allowed_files is required for minimal Direct finish")
