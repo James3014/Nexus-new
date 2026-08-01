@@ -150,6 +150,16 @@ def test_manager_root_derivation(tmp_path, monkeypatch):
     assert AgyAccountPoolManager.resolve_manager_root(manager_path=str(mgr_bin)) == str((tmp_path / "override_root").resolve())
 
 
+def test_manager_path_resolution_uses_home_without_user_specific_absolute_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("NEXUS_AGY_ACCOUNT_POOL_MANAGER_PATH", raising=False)
+
+    resolved = AgyAccountPoolManager.resolve_manager_path()
+
+    assert resolved == str((tmp_path / ".nexus/agy-account-pool/bin/agy-cli-manager"))
+    assert "/Users/jameschen/" not in resolved
+
+
 def test_live_dir_parent_home(tmp_path):
     from nexus.services.agy_account_pool import AgyAccountPoolManagerError
 

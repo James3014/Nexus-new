@@ -80,6 +80,17 @@ def test_agy_adapter_uses_isolated_project_without_project_id(monkeypatch):
     assert preflight.reason == "ready"
 
 
+def test_agy_adapter_discovers_binary_from_path_and_uses_policy_model(monkeypatch):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.delenv("NEXUS_AGY_EXECUTABLE", raising=False)
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/opt/agy/bin/agy")
+
+    adapter = AgyWorkerAdapter()
+
+    assert adapter._configured_executable() == "/opt/agy/bin/agy"
+    assert adapter._model() == "gemini-3.6-flash-high"
+
+
 def test_agy_adapter_requires_executable(monkeypatch):
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.setenv("NEXUS_AGY_PROJECT_ID", "project-123")
@@ -157,7 +168,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
         "--mode",
         "accept-edits",
         "--model",
-        "gemini-3.6-flash-medium",
+        "gemini-3.6-flash-high",
         "--print-timeout",
         "42s",
         "--print",

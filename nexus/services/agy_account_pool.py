@@ -111,19 +111,11 @@ class AgyAccountPoolManager:
             p = Path(env_path).expanduser()
             return str(p.resolve()) if p.exists() else str(p)
 
-        installed_path = Path("/Users/jameschen/.nexus/agy-account-pool/bin/agy-cli-manager")
-        if installed_path.exists():
-            return str(installed_path.resolve())
-
-        home = Path.home()
-        home_str = str(home)
-        if "live-home" not in home_str and "agy-account-pool" not in home_str:
-            default_path = home / ".nexus/agy-account-pool/bin/agy-cli-manager"
-            if default_path.exists():
-                return str(default_path.resolve())
-            return str(default_path)
-
-        return str(installed_path)
+        # Resolve the manager from the current process HOME.  The AGY
+        # credential HOME is only applied to the provider subprocess; it must
+        # never make a user-specific host path part of the source contract.
+        default_path = Path.home() / ".nexus/agy-account-pool/bin/agy-cli-manager"
+        return str(default_path.resolve()) if default_path.exists() else str(default_path)
 
     @staticmethod
     def resolve_manager_root(override_root: Optional[str] = None, manager_path: Optional[str] = None) -> str:
@@ -154,10 +146,7 @@ class AgyAccountPoolManager:
             if _is_populated_runtime(derived_from_mgr) or manager_path is not None:
                 return str(derived_from_mgr.resolve()) if derived_from_mgr.exists() else str(derived_from_mgr)
 
-        candidates = [
-            Path("/Users/jameschen/.nexus/agy-account-pool/runtime"),
-            Path.home() / ".nexus/agy-account-pool/runtime",
-        ]
+        candidates = [Path.home() / ".nexus/agy-account-pool/runtime"]
 
         for cand in candidates:
             if _is_populated_runtime(cand):
@@ -170,8 +159,8 @@ class AgyAccountPoolManager:
         if derived_from_mgr:
             return str(derived_from_mgr.resolve()) if derived_from_mgr.exists() else str(derived_from_mgr)
 
-        installed_root = Path("/Users/jameschen/.nexus/agy-account-pool/runtime")
-        return str(installed_root.resolve()) if installed_root.exists() else str(installed_root)
+        fallback_root = Path.home() / ".nexus/agy-account-pool/runtime"
+        return str(fallback_root.resolve()) if fallback_root.exists() else str(fallback_root)
 
     def _call_manager_cli(self, args: list[str]) -> dict:
         mgr = self._manager_path or self.resolve_manager_path()

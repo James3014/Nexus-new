@@ -199,7 +199,7 @@ class AgyWorkerAdapter:
         executable_env: str = "NEXUS_AGY_EXECUTABLE",
         project_id_env: str = "NEXUS_AGY_PROJECT_ID",
         model_env: str = "NEXUS_AGY_WORKER_MODEL",
-        default_model: str = "gemini-3.6-flash-medium",
+        default_model: str = "gemini-3.6-flash-high",
         account_pool: Optional[Any] = None,
     ):
         self.executable_env = executable_env
@@ -212,10 +212,15 @@ class AgyWorkerAdapter:
         configured = os.getenv(self.executable_env, "").strip()
         if configured:
             return str(Path(configured).expanduser())
+        # Prefer the process PATH so a Gateway launched with a non-login shell
+        # can still discover the installed executable.  Fall back to the
+        # conventional per-user location without embedding a user-specific
+        # absolute path in production source.
+        discovered = shutil.which("agy")
+        if discovered:
+            return str(Path(discovered).resolve())
         home = os.getenv("HOME")
-        if home:
-            return str(Path(home) / ".local/bin/agy")
-        return str(Path.home() / ".local/bin/agy")
+        return str((Path(home).expanduser() if home else Path.home()) / ".local/bin/agy")
 
     def _project_id(self) -> str:
         return os.getenv(self.project_id_env, "").strip()
