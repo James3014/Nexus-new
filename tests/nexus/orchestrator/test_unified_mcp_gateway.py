@@ -659,6 +659,8 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     assert receipt["stream_flush_status"] == "FLUSHED"
     assert receipt["stdout_sha256"]
     assert receipt["stderr_sha256"]
+    assert receipt["stdout_bytes"] > 0
+    assert receipt["stderr_bytes"] > 0
     assert not Path(receipt["workspace_root"]).exists()
 
 

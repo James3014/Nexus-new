@@ -427,6 +427,8 @@ class UnifiedMCPGateway:
             "last_stderr_at": job.get("last_stderr_at"),
             "stdout_sha256": job.get("stdout_sha256"),
             "stderr_sha256": job.get("stderr_sha256"),
+            "stdout_bytes": job.get("stdout_bytes"),
+            "stderr_bytes": job.get("stderr_bytes"),
             "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
             "reconciliation_required": bool(job.get("reconciliation_required", False)),
             "context_arm": job.get("context_arm"),
