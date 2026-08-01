@@ -65,6 +65,7 @@ production closure is implied.
 ## Verification receipt
 
 - implementation commit: `c78f268da`
+- qualification hardening commit: `75860fcb9`
 - focused suite: `32 passed`
 - storage: existing `.nexus/memory/outcome_history.jsonl` and
   `.nexus/reports/learn/learning_closure.jsonl` only; no database added
@@ -74,6 +75,11 @@ production closure is implied.
   require reconcile/owner review before resume
 - lesson attribution: retrieved and applied IDs are separate; terminal
   outcomes emit reinforce/contradict/retire disposition
+- qualification gate: terminal outcome alone is insufficient; explicit
+  terminal evidence is required before `QUALIFIED`
+- authority dependency: Workforce T4A learning-qualification card is still
+  absent and its campaign index remains at T3C2 Candidate; no T4A authority or
+  downstream workforce promotion is claimed here
 - `git diff --check`: pass; tracked deletion audit: empty
 - claim ceiling: `MEMORY_LEARNING_LINEAGE_VERIFIED` only
 
