@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: VERIFIED_PENDING_OWNER_REVIEW
 task_id: lifecycle-workflow-p4-public-recovery-actions
 commit_required: true
 candidate_required: true
@@ -28,6 +28,7 @@ existing self-hosted service methods.
 - `nexus/orchestrator/self_hosted_mcp.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
 - `tests/nexus/orchestrator/test_self_hosted_mcp.py`
+- `tests/nexus/orchestrator/test_unified_mcp_gateway_http.py`
 
 ## Verification
 
@@ -40,6 +41,18 @@ git diff --check
 
 Every non-terminal response has one `next_action`; retries reuse task_id;
 pending Candidates are actionable without creating another task or Target.
+
+## Verified evidence
+
+- Gateway and HTTP recovery surface tests: `25 passed`, 0 failed, 0 skipped.
+- Public tool manifest now contains 17 typed tools while retaining one Gateway.
+- Recovery responses carry task/attempt/action identity, one next action,
+  candidate binding, cleanup status, and uncertain-mutation state.
+- Candidate approval, integration, and disposal remain separate service calls;
+  the Gateway does not auto-approve or auto-integrate.
+
+Promotion remains owner-gated; no Candidate approval, integration, push, or
+cleanup was performed by the implementing Worker.
 
 ## Block classification
 

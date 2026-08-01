@@ -60,7 +60,7 @@ def test_health_exposes_one_gateway_identity():
         response = urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/health", timeout=3)
         payload = json.loads(response.read())
         assert payload["server"] == "nexus-mcp-gateway"
-        assert payload["tool_count"] == 10
+        assert payload["tool_count"] == 17
         assert payload["git_head"]
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=3)
@@ -77,7 +77,7 @@ def test_mcp_requires_bearer_and_forwards_jsonrpc():
             raise AssertionError("missing bearer token must fail")
         response = _request(server, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, token="secret")
         payload = json.loads(response.read())
-        assert len(payload["result"]["tools"]) == 10
+        assert len(payload["result"]["tools"]) == 17
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=3)
 

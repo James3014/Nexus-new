@@ -47,6 +47,13 @@ PUBLIC_TOOL_NAMES = (
     "nexus_task_wait",
     "nexus_task_finish",
     "nexus_task_cancel",
+    "nexus_task_list_actionable",
+    "nexus_task_reconcile",
+    "nexus_task_retry",
+    "nexus_task_resume",
+    "nexus_candidate_approve",
+    "nexus_candidate_integrate",
+    "nexus_candidate_dispose",
 )
 TOOL_MANIFEST_REVISION = hashlib.sha256(
     json.dumps(PUBLIC_TOOL_NAMES, separators=(",", ":")).encode("utf-8")
@@ -249,6 +256,51 @@ class UnifiedMCPGateway:
                 "description": "Cancel one non-running lifecycle task through formal cleanup authority.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
             },
+            {
+                "name": "nexus_task_list_actionable",
+                "description": "List durable tasks that require exactly one recovery or owner action.",
+                "inputSchema": {"type": "object", "properties": {"include_details": {"type": "boolean", "default": False}}},
+            },
+            {
+                "name": "nexus_task_reconcile",
+                "description": "Reconcile one uncertain task from durable evidence without replaying a mutation.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_task_retry",
+                "description": "Retry one terminal task with the same task_id and a new attempt_id after cleanup.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_task_resume",
+                "description": "Resume one durable task only from its recorded execution evidence.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_candidate_approve",
+                "description": "Approve an exact Candidate binding; approval does not integrate or push.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_state_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "verified_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    },
+                },
+            },
+            {
+                "name": "nexus_candidate_integrate",
+                "description": "Integrate an already approved exact Candidate binding without pushing.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string", "default": "nexus/integration/main"}}},
+            },
+            {
+                "name": "nexus_candidate_dispose",
+                "description": "Dispose a pending Candidate as REJECTED or SUPERSEDED through cleanup authority.",
+                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+            },
         ]
 
     @staticmethod
@@ -274,6 +326,124 @@ class UnifiedMCPGateway:
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
             "lifecycle": lifecycle,
         }
+
+    @staticmethod
+    def _recovery_payload(state: Mapping[str, Any], *, operation: str = "status", include_state: bool = False) -> dict[str, Any]:
+        """Normalize every recovery response to one actionable contract."""
+        action = state.get("task_action") if isinstance(state.get("task_action"), Mapping) else {}
+        action = dict(action)
+        task_id = str(state.get("task_id") or action.get("task_id") or "")
+        status = str(state.get("status") or action.get("task_status") or "UNKNOWN")
+        terminal = status in {"CANCELLED", "INTEGRATED", "REJECTED", "SUPERSEDED", "FINAL_BLOCK"} and not bool(state.get("reconciliation_required"))
+        next_action = str(action.get("next_action") or ("none" if terminal else "nexus_task_reconcile"))
+        candidate = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        if not candidate and isinstance(action.get("candidate"), Mapping):
+            candidate = action.get("candidate") or {}
+        cleanup = state.get("cleanup_status") if isinstance(state.get("cleanup_status"), Mapping) else {}
+        cleanup = dict(cleanup)
+        if not cleanup:
+            cleanup = {
+                "state_retention_status": state.get("state_retention_status"),
+                "cleanup_eligible": state.get("cleanup_eligible"),
+                "cleanup_performed": state.get("cleanup_performed"),
+                "cleanup_decision": state.get("cleanup_decision"),
+                "cleanup_blocker": state.get("cleanup_blocker"),
+            }
+        action_id = state.get("action_id")
+        if not action_id and isinstance(state.get("action"), Mapping):
+            action_id = state["action"].get("action_id")
+        if not action_id and isinstance(state.get("request"), Mapping) and isinstance(state["request"].get("action"), Mapping):
+            action_id = state["request"]["action"].get("action_id")
+        result: dict[str, Any] = {
+            "schema": "nexus.lifecycle_recovery.v1",
+            "operation": operation,
+            "task_id": task_id,
+            "attempt_id": state.get("attempt_id") or action.get("attempt_id"),
+            "last_action_id": action_id,
+            "status": status,
+            "attention_required": bool(action.get("attention_required", not terminal)),
+            "next_action": next_action,
+            "recommended_tool": action.get("recommended_tool") or next_action,
+            "candidate_binding": {
+                "candidate_commit_sha": state.get("candidate_commit_sha") or candidate.get("candidate_commit_sha"),
+                "candidate_tree_sha": state.get("candidate_tree_sha") or candidate.get("candidate_tree_sha"),
+                "candidate_state_hash": state.get("candidate_state_hash") or candidate.get("candidate_state_hash"),
+                "verified_receipt_hash": state.get("verified_receipt_hash") or candidate.get("verified_receipt_hash"),
+                "candidate_ref": state.get("candidate_ref"),
+            },
+            "cleanup_status": cleanup,
+            "uncertain_mutation": status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or bool(state.get("reconciliation_required")),
+        }
+        if include_state:
+            result["state"] = dict(state)
+        return result
+
+    def _task_list_actionable(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        include_details = bool(arguments.get("include_details", False))
+        raw = self.service.list_actionable_tasks(include_details=include_details)
+        tasks = [self._recovery_payload(item, operation="list", include_state=include_details) for item in raw.get("tasks", []) if isinstance(item, Mapping)]
+        return {
+            "schema": "nexus.task_actionable_list.v1",
+            "actionable_count": len(tasks),
+            "details_included": include_details,
+            "tasks": tasks,
+        }
+
+    def _task_reconcile(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(arguments.get("task_id"), "task_id")
+        result = self.service.reconcile_task(task_id)
+        if result is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        return self._recovery_payload(result, operation="reconcile", include_state=True)
+
+    def _task_retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(arguments.get("task_id"), "task_id")
+        return self._recovery_payload(self.service.retry_task(task_id), operation="retry", include_state=True)
+
+    def _task_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(arguments.get("task_id"), "task_id")
+        result = self.service.resume_task(task_id)
+        if result is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        return self._recovery_payload(result, operation="resume", include_state=True)
+
+    @staticmethod
+    def _exact_hash(value: Any, field: str, length: int) -> str:
+        text = _text(value, field)
+        pattern = rf"^[0-9a-f]{{{length}}}$"
+        if not re.fullmatch(pattern, text):
+            raise GatewayInputError(f"{field} must be an exact lowercase Git hash")
+        return text
+
+    def _candidate_approve(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(arguments.get("task_id"), "task_id")
+        result = self.service.approve_promotion(
+            task_id,
+            candidate_commit_sha=self._exact_hash(arguments.get("candidate_commit_sha"), "candidate_commit_sha", 40),
+            candidate_tree_sha=self._exact_hash(arguments.get("candidate_tree_sha"), "candidate_tree_sha", 40),
+            candidate_state_hash=self._exact_hash(arguments.get("candidate_state_hash"), "candidate_state_hash", 64),
+            verified_receipt_hash=self._exact_hash(arguments.get("verified_receipt_hash"), "verified_receipt_hash", 64),
+        )
+        return self._recovery_payload(result, operation="candidate_approve", include_state=True)
+
+    def _candidate_integrate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(arguments.get("task_id"), "task_id")
+        branch = str(arguments.get("integration_branch") or "nexus/integration/main").strip()
+        if not branch or branch.startswith("-") or any(char in branch for char in "\n\r"):
+            raise GatewayInputError("integration_branch is invalid")
+        result = self.service.integrate_approved(task_id, integration_branch=branch)
+        return self._recovery_payload(result, operation="candidate_integrate", include_state=True)
+
+    def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(arguments.get("task_id"), "task_id")
+        disposition = str(arguments.get("disposition") or "").strip().upper()
+        if disposition not in {"REJECTED", "SUPERSEDED"}:
+            raise GatewayInputError("disposition must be REJECTED or SUPERSEDED")
+        superseded_by = str(arguments.get("superseded_by") or "").strip() or None
+        if disposition == "SUPERSEDED" and not superseded_by:
+            raise GatewayInputError("superseded_by is required for SUPERSEDED")
+        result = self.service.dispose_candidate(task_id, disposition=disposition, superseded_by=superseded_by)
+        return self._recovery_payload(result, operation="candidate_dispose", include_state=True)
 
     def _workspace_snapshot(self) -> dict[str, Any]:
         status = _git("status", "--porcelain=v1")
@@ -790,6 +960,20 @@ class UnifiedMCPGateway:
         if name == "nexus_task_cancel":
             task_id = _text(arguments.get("task_id"), "task_id")
             return self.service.cancel_task(task_id)
+        if name == "nexus_task_list_actionable":
+            return self._task_list_actionable(arguments)
+        if name == "nexus_task_reconcile":
+            return self._task_reconcile(arguments)
+        if name == "nexus_task_retry":
+            return self._task_retry(arguments)
+        if name == "nexus_task_resume":
+            return self._task_resume(arguments)
+        if name == "nexus_candidate_approve":
+            return self._candidate_approve(arguments)
+        if name == "nexus_candidate_integrate":
+            return self._candidate_integrate(arguments)
+        if name == "nexus_candidate_dispose":
+            return self._candidate_dispose(arguments)
         raise GatewayInputError(f"unknown public tool: {name}")
 
     def handle(self, request: Mapping[str, Any]) -> Optional[dict[str, Any]]:

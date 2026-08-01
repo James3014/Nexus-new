@@ -24,8 +24,8 @@ class FakeService:
     def lifecycle_status(self):
         return {"active_targets": 0, "actionable_count": 0}
 
-    def list_actionable_tasks(self):
-        return {"actionable_count": 0, "tasks": []}
+    def list_actionable_tasks(self, *, include_details=False):
+        return {"actionable_count": 0, "details_included": include_details, "tasks": []}
 
     def get_task(self, task_id):
         return {"task_id": task_id, "status": "TERMINAL"}
@@ -43,6 +43,24 @@ class FakeService:
     def cancel_task(self, task_id):
         return {"status": "CANCELLED", "task_id": task_id}
 
+    def reconcile_task(self, task_id):
+        return {"task_id": task_id, "attempt_id": "attempt-1", "status": "FINAL_BLOCK", "task_action": {"task_id": task_id, "task_status": "FINAL_BLOCK", "attention_required": True, "next_action": "nexus_task_reconcile", "recommended_tool": "nexus_task_reconcile"}, "reconciliation_required": True}
+
+    def retry_task(self, task_id):
+        return {"task_id": task_id, "attempt_id": "attempt-2", "status": "SUBMITTED", "task_action": {"task_id": task_id, "task_status": "SUBMITTED", "attention_required": True, "next_action": "nexus_task_wait", "recommended_tool": "nexus_task_wait"}}
+
+    def resume_task(self, task_id):
+        return self.reconcile_task(task_id)
+
+    def approve_promotion(self, task_id, **kwargs):
+        return {"task_id": task_id, "status": "APPROVED", "promotion_status": "APPROVED", "approved_binding": kwargs, "task_action": {"task_id": task_id, "task_status": "APPROVED", "attention_required": True, "next_action": "nexus_candidate_integrate", "recommended_tool": "nexus_candidate_integrate"}}
+
+    def integrate_approved(self, task_id, **kwargs):
+        return {"task_id": task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED", "task_action": {"task_id": task_id, "task_status": "INTEGRATED", "attention_required": False, "next_action": "none", "recommended_tool": "none"}}
+
+    def dispose_candidate(self, task_id, **kwargs):
+        return {"task_id": task_id, "status": kwargs["disposition"], "promotion_status": kwargs["disposition"], "task_action": {"task_id": task_id, "task_status": kwargs["disposition"], "attention_required": False, "next_action": "none", "recommended_tool": "none"}}
+
     def submit_task(self, request):
         self.submitted.append(request)
         return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"], "target_created": False, "state_created": False}
@@ -55,7 +73,7 @@ def test_gateway_has_one_identity_and_bounded_public_surface():
 
     assert initialized["result"]["serverInfo"]["name"] == GATEWAY_NAME
     assert initialized["result"]["serverInfo"]["toolManifestRevision"] == TOOL_MANIFEST_REVISION
-    assert len(listed["result"]["tools"]) == 10
+    assert len(listed["result"]["tools"]) == 17
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in UnifiedMCPGateway.tool_specs()}
 
 
@@ -242,6 +260,35 @@ def test_task_run_isolated_requires_task_card_binding():
     assert payload["execution_lane"] == "ISOLATED_TARGET"
     assert payload["blocker"] == "TASK_CARD_BINDING_REQUIRED"
     assert service.submitted == []
+
+
+def test_public_recovery_surface_has_one_actionable_contract():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    base40 = "a" * 40
+    base64 = "b" * 64
+    calls = [
+        ("nexus_task_list_actionable", {}),
+        ("nexus_task_reconcile", {"task_id": "recover-1"}),
+        ("nexus_task_retry", {"task_id": "recover-1"}),
+        ("nexus_task_resume", {"task_id": "recover-1"}),
+        ("nexus_candidate_approve", {"task_id": "recover-1", "candidate_commit_sha": base40, "candidate_tree_sha": base40, "candidate_state_hash": base64, "verified_receipt_hash": base64}),
+        ("nexus_candidate_integrate", {"task_id": "recover-1"}),
+        ("nexus_candidate_dispose", {"task_id": "recover-1", "disposition": "REJECTED"}),
+    ]
+    for index, (name, arguments) in enumerate(calls):
+        response = gateway.handle({"jsonrpc": "2.0", "id": 500 + index, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
+        payload = response["result"]["structuredContent"]
+        assert payload["schema"] == "nexus.lifecycle_recovery.v1" or payload["schema"] == "nexus.task_actionable_list.v1"
+        if name != "nexus_task_list_actionable":
+            assert {"task_id", "attempt_id", "last_action_id", "status", "attention_required", "next_action", "recommended_tool", "candidate_binding", "cleanup_status", "uncertain_mutation"} <= set(payload)
+
+
+def test_public_recovery_surface_rejects_malformed_candidate_hash():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 501, "method": "tools/call", "params": {"name": "nexus_candidate_approve", "arguments": {"task_id": "recover-1", "candidate_commit_sha": "not-a-sha", "candidate_tree_sha": "a" * 40, "candidate_state_hash": "b" * 64, "verified_receipt_hash": "b" * 64}}})
+    assert response["result"]["isError"] is True
+    assert "candidate_commit_sha" in response["result"]["structuredContent"]["error"]
 
 
 def test_bounded_soak_matrix_keeps_direct_and_assisted_off_targets():

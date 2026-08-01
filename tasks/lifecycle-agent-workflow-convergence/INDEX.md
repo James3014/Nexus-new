@@ -34,7 +34,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 1b | `lifecycle-workflow-p1b-fresh-suite-evidence-gate` | `01b-fresh-suite-evidence-gate.md` | COMPLETED_PENDING_OWNER_REVIEW | P1 `4cd6da508` + bootstrap-authority-convergence current frontier |
 | 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | VERIFIED_PENDING_OWNER_REVIEW | P1b + bootstrap-authority-convergence owner review |
 | 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | VERIFIED_PENDING_OWNER_REVIEW | P2 implementation verified |
-| 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | PENDING | P3 owner review |
+| 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | VERIFIED_PENDING_OWNER_REVIEW | P3 owner review |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
 | 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | PENDING | P5 integrated |
 | 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | PENDING | P6 integrated |
@@ -54,6 +54,6 @@ at P1 through the formal lifecycle surface and the current frontier card.
 `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
 remains the required pre-P2 implementation gate. `01b-fresh-suite-evidence-gate.md`
 and the P2/P3 cards now have current verification evidence, but remain
-`VERIFIED_PENDING_OWNER_REVIEW`. P4 cannot start until the Owner explicitly
-accepts the bootstrap, P1b, P2, and P3 gates through the formal lifecycle
-surface.
+`VERIFIED_PENDING_OWNER_REVIEW`. P4 implementation is also verified but
+remains owner-gated. P5 cannot start until the Owner explicitly accepts the
+bootstrap, P1b, P2, P3, and P4 gates through the formal lifecycle surface.
