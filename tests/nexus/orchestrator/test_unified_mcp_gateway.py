@@ -42,7 +42,7 @@ class FakeService:
 
     def submit_task(self, request):
         self.submitted.append(request)
-        return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"]}
+        return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"], "target_created": False, "state_created": False}
 
 
 def test_gateway_has_one_identity_and_bounded_public_surface():
@@ -164,6 +164,42 @@ def test_task_run_isolated_requires_task_card_binding():
     assert payload["execution_lane"] == "ISOLATED_TARGET"
     assert payload["blocker"] == "TASK_CARD_BINDING_REQUIRED"
     assert service.submitted == []
+
+
+def test_bounded_soak_matrix_keeps_direct_and_assisted_off_targets():
+    direct_service = FakeService()
+    direct_gateway = UnifiedMCPGateway(service=direct_service)
+    for index in range(10):
+        response = direct_gateway.handle({"jsonrpc": "2.0", "id": 100 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-direct-{index}", "what": "Fix one bounded README typo", "why": "Synthetic Direct soak", "allowed_files": ["README.md"]}}})
+        payload = response["result"]["structuredContent"]
+        assert payload["status"] == "DIRECT_CANONICAL_READY"
+        assert payload["handoff"]["target_created"] is False
+        assert payload["handoff"]["state_created"] is False
+
+    assisted_service = FakeService()
+    assisted_gateway = UnifiedMCPGateway(
+        service=assisted_service,
+        model_runner=lambda **_: {"provider": "agy", "patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@\n"},
+        apply_runner=lambda **_: {"status": "DIRECT_CANONICAL_COMPLETED", "target_created": False, "state_created": False, "telemetry": {"commit_time_ms": 0}},
+    )
+    assisted_gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
+    for index in range(20):
+        response = assisted_gateway.handle({"jsonrpc": "2.0", "id": 200 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-assisted-{index}", "what": "Propose one bounded README typo fix", "why": "Synthetic Assisted soak", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
+        payload = response["result"]["structuredContent"]
+        assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
+        assert payload["receipt"]["target_created"] is False
+        assert payload["receipt"]["state_created"] is False
+        assert payload["telemetry"]["total_wall_time_ms"] >= payload["telemetry"]["provider_time_ms"]
+    assert assisted_service.submitted == []
+
+    isolated_service = FakeService()
+    isolated_gateway = UnifiedMCPGateway(service=isolated_service)
+    for index in range(10):
+        response = isolated_gateway.handle({"jsonrpc": "2.0", "id": 300 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-isolated-{index}", "what": "Implement a cross-module task", "why": "Synthetic isolated binding gate", "allowed_files": ["nexus/a.py", "tests/a.py"], "execution_preference": "ISOLATED_TARGET", "preferred_worker": "agy"}}})
+        payload = response["result"]["structuredContent"]
+        assert payload["status"] == "FINAL_BLOCK"
+        assert payload["blocker"] == "TASK_CARD_BINDING_REQUIRED"
+    assert isolated_service.submitted == []
 
 
 def test_gateway_stdio_round_trip():
