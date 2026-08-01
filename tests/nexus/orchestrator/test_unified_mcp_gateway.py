@@ -183,7 +183,8 @@ def test_task_run_assisted_is_fail_closed_without_side_effect():
     assert payload["blocker"] == "ASSIST_PROVIDER_UNAVAILABLE"
     assert "provider_error" in payload
     assert set(payload["telemetry"]) >= {"control_plane_ms", "provider_start_ms", "total_wall_time_ms"}
-    assert service.submitted == []
+    assert len(service.submitted) == 1
+    assert service.submitted[0]["execution_lane"] == "DIRECT_CANONICAL"
 
 
 def test_task_run_assisted_applies_injected_bounded_patch_without_target():
@@ -200,7 +201,7 @@ def test_task_run_assisted_applies_injected_bounded_patch_without_target():
     assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
     assert payload["route_authority"] == "CapabilityPlanner"
     assert len(applied) == 1
-    assert service.submitted == []
+    assert len(service.submitted) == 1
     assert payload["telemetry"]["provider_time_ms"] >= 0
     assert payload["telemetry"]["patch_validation_ms"] >= 0
     assert payload["telemetry"]["total_wall_time_ms"] >= payload["telemetry"]["provider_time_ms"]
@@ -240,7 +241,7 @@ def test_bounded_soak_matrix_keeps_direct_and_assisted_off_targets():
         assert payload["receipt"]["target_created"] is False
         assert payload["receipt"]["state_created"] is False
         assert payload["telemetry"]["total_wall_time_ms"] >= payload["telemetry"]["provider_time_ms"]
-    assert assisted_service.submitted == []
+    assert len(assisted_service.submitted) == 20
 
     isolated_service = FakeService()
     isolated_gateway = UnifiedMCPGateway(service=isolated_service)

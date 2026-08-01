@@ -457,6 +457,23 @@ class UnifiedMCPGateway:
             defaults["control_plane_ms"] = max(0, defaults["total_wall_time_ms"] - defaults["provider_time_ms"])
             return defaults
         if route["execution_lane"] == "ASSISTED_CANONICAL":
+            request = self._canonical_request(
+                task_id,
+                what,
+                why,
+                allowed,
+                list(arguments.get("verifier_commands") or ["git diff --check"]),
+                base,
+                action=action.model_dump(mode="json"),
+            )
+            request.update({"execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary"})
+            try:
+                handoff = self.service.submit_task(request)
+            except Exception as exc:
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_ACTION_STATE_FAILED", "error": str(exc), "telemetry": telemetry(), "next_action": "inspect_action_state"}
+            handoff_action = handoff.get("task_action") if isinstance(handoff, Mapping) else None
+            if isinstance(handoff_action, Mapping) and handoff_action.get("action_state") == "FINAL_BLOCK":
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "DIRECT_RECONCILE_REQUIRED", "handoff": handoff, "telemetry": telemetry(), "next_action": "nexus_task_reconcile"}
             context_started = time.perf_counter()
             prompt = self._assist_prompt(what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]))
             context_build_ms = max(0, int((time.perf_counter() - context_started) * 1000))
@@ -470,27 +487,38 @@ class UnifiedMCPGateway:
                     model=resolved_model,
                 )
             except Exception as exc:
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": str(exc), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms), "next_action": "inspect_provider_or_retry_same_task"}
+                recorder = getattr(self.service, "record_canonical_action_failure", None)
+                if recorder:
+                    recorder(task_id, "ASSIST_PROVIDER_FAILED", str(exc))
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": str(exc), "handoff": self.service.get_task(task_id) if hasattr(self.service, "get_task") else handoff, "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms), "next_action": "inspect_provider_or_retry_same_task"}
             provider_time_ms = max(0, int((time.perf_counter() - started) * 1000))
             if not proposal.get("patch"):
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": str(proposal.get("blocker") or "EMPTY_ASSIST_PATCH"), "provider": proposal.get("provider", "unknown"), "provider_error": str(proposal.get("error") or ""), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms), "next_action": "inspect_provider_or_retry_same_task"}
+                recorder = getattr(self.service, "record_canonical_action_failure", None)
+                if recorder:
+                    recorder(task_id, str(proposal.get("blocker") or "EMPTY_ASSIST_PATCH"), str(proposal.get("error") or ""))
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": str(proposal.get("blocker") or "EMPTY_ASSIST_PATCH"), "provider": proposal.get("provider", "unknown"), "provider_error": str(proposal.get("error") or ""), "handoff": self.service.get_task(task_id) if hasattr(self.service, "get_task") else handoff, "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms), "next_action": "inspect_provider_or_retry_same_task"}
             patch_validation_started = time.perf_counter()
             try:
                 changed = self._validate_assisted_patch(str(proposal["patch"]), allowed)
             except Exception as exc:
                 patch_validation_ms = max(0, int((time.perf_counter() - patch_validation_started) * 1000))
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PATCH_REJECTED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
+                recorder = getattr(self.service, "record_canonical_action_failure", None)
+                if recorder:
+                    recorder(task_id, "ASSIST_PATCH_REJECTED", str(exc))
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PATCH_REJECTED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "handoff": self.service.get_task(task_id) if hasattr(self.service, "get_task") else handoff, "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
             patch_validation_ms = max(0, int((time.perf_counter() - patch_validation_started) * 1000))
             if not bool(arguments.get("apply", True)):
-                return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "patch": str(proposal["patch"]), "changed_files": changed, "next_action": "apply_assisted_candidate"}
-            request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base, action=action.model_dump(mode="json"))
+                return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "patch": str(proposal["patch"]), "changed_files": changed, "handoff": handoff, "next_action": "apply_assisted_candidate"}
             try:
                 applied = self._apply_runner(patch=str(proposal["patch"]), request=request, provider=str(proposal.get("provider") or "agy"), provider_time_ms=provider_time_ms)
             except Exception as exc:
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_APPLY_FAILED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
+                recorder = getattr(self.service, "record_canonical_action_failure", None)
+                if recorder:
+                    recorder(task_id, "ASSIST_APPLY_FAILED", str(exc))
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_APPLY_FAILED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "handoff": self.service.get_task(task_id) if hasattr(self.service, "get_task") else handoff, "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
             applied_telemetry = dict(applied.get("telemetry") or {}) if isinstance(applied, Mapping) else {}
             applied_telemetry.update(telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms, verifier_time_ms=int(applied_telemetry.get("verifier_time_ms", 0) or 0), commit_time_ms=int(applied_telemetry.get("commit_time_ms", 0) or 0), worktree_time_ms=int(applied_telemetry.get("worktree_time_ms", 0) or 0), cleanup_time_ms=int(applied_telemetry.get("cleanup_time_ms", 0) or 0)))
-            return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "telemetry": applied_telemetry, "changed_files": changed, "receipt": applied, "next_action": "none"}
+            return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "telemetry": applied_telemetry, "changed_files": changed, "receipt": applied, "handoff": handoff, "next_action": "none"}
         request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base, action=action.model_dump(mode="json"))
         request.update({"execution_lane": route["execution_lane"]})
         if route["execution_lane"] == "DIRECT_CANONICAL":

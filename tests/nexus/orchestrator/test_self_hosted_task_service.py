@@ -1235,7 +1235,7 @@ def test_workspace_read_only_calls_do_not_create_missing_target_root(tmp_path):
     assert not (controller.parent / "nexus-runtime-targets").exists()
 
 
-def test_direct_canonical_lane_returns_handoff_without_state_or_target(tmp_path, monkeypatch):
+def test_direct_canonical_lane_records_intent_without_target(tmp_path, monkeypatch):
     controller = tmp_path / "canonical"
     controller.mkdir()
     subprocess.run(["git", "init", "-q", str(controller)], check=True)
@@ -1260,8 +1260,10 @@ def test_direct_canonical_lane_returns_handoff_without_state_or_target(tmp_path,
 
     assert result["status"] == "DIRECT_CANONICAL_READY"
     assert result["execution_lane"] == "DIRECT_CANONICAL"
-    assert result["state_created"] is False
-    assert not (tmp_path / "state").exists()
+    assert result["state_created"] is True
+    assert result["durable_status"] == "DIRECT_INTENT_RECORDED"
+    assert (tmp_path / "state" / "direct-canary.json").exists()
+    assert result["task_action"]["next_action"] == "nexus_task_finish"
 
 
 def test_ordinary_primary_request_defaults_to_direct_canonical(tmp_path, monkeypatch):
@@ -1296,7 +1298,8 @@ def test_ordinary_primary_request_defaults_to_direct_canonical(tmp_path, monkeyp
     })
     assert handoff["execution_lane"] == "DIRECT_CANONICAL"
     assert handoff["target_created"] is False
-    assert handoff["state_created"] is False
+    assert handoff["state_created"] is True
+    assert handoff["durable_status"] == "DIRECT_INTENT_RECORDED"
     assert not (tmp_path / "nexus-runtime-targets").exists()
 
 
@@ -1321,7 +1324,7 @@ def test_direct_canonical_lane_fails_closed_to_isolated_for_delegated_worker(tmp
     assert "delegated_worker_forbidden" in lane["blockers"]
 
 
-def test_direct_canonical_completion_verifies_scoped_commit_without_lifecycle_state(tmp_path, monkeypatch):
+def test_direct_canonical_completion_verifies_scoped_commit_with_durable_state(tmp_path, monkeypatch):
     controller = tmp_path / "canonical"
     controller.mkdir()
     subprocess.run(["git", "init", "-q", str(controller)], check=True)
@@ -1335,8 +1338,7 @@ def test_direct_canonical_completion_verifies_scoped_commit_without_lifecycle_st
     head = subprocess.run(["git", "-C", str(controller), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
-
-    receipt = service.complete_direct_canonical({
+    request = {
         "task_id": "direct-complete",
         "controller_repo_root": str(controller),
         "controller_revision": base,
@@ -1345,15 +1347,103 @@ def test_direct_canonical_completion_verifies_scoped_commit_without_lifecycle_st
         "primary_agent": True,
         "worker": "primary",
         "execution_lane": "DIRECT_CANONICAL",
-    }, expected_commit_sha=head)
+    }
+    service.submit_task(request)
+
+    receipt = service.complete_direct_canonical(request, expected_commit_sha=head)
 
     assert receipt["status"] == "DIRECT_CANONICAL_COMPLETED"
     assert receipt["commit_sha"] == head
     assert receipt["candidate_created"] is False
     assert receipt["target_created"] is False
-    assert receipt["state_created"] is False
+    assert receipt["state_created"] is True
     assert receipt["telemetry"]["overhead_ms"] >= 0
-    assert not (tmp_path / "state").exists()
+    assert receipt["reconciliation_status"] == "RECONCILED"
+    assert service.get_task("direct-complete")["status"] == "DIRECT_COMPLETED"
+
+
+def test_direct_canonical_duplicate_finish_reuses_receipt_without_second_commit(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "branch", "-M", "nexus/integration/main")
+    _git(controller, "commit", "--allow-empty", "-m", "init")
+    base = _git(controller, "rev-parse", "HEAD")
+    (controller / "src").mkdir()
+    (controller / "src" / "duplicate.py").write_text("value = 1\n", encoding="utf-8")
+    _git(controller, "add", "src/duplicate.py")
+    _git(controller, "commit", "-m", "direct duplicate")
+    head = _git(controller, "rev-parse", "HEAD")
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = {
+        "task_id": "direct-duplicate",
+        "controller_repo_root": str(controller),
+        "controller_revision": base,
+        "allowed_files": ["src/duplicate.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }
+    service.submit_task(request)
+    first = service.complete_direct_canonical(request, expected_commit_sha=head)
+    second = service.complete_direct_canonical(request, expected_commit_sha=head)
+    assert first["commit_sha"] == second["commit_sha"] == head
+    assert second["duplicate"] is True
+    assert _git(controller, "rev-list", "--count", f"{base}..HEAD") == "1"
+
+
+def test_direct_canonical_interrupted_state_reconciles_without_replay(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "branch", "-M", "nexus/integration/main")
+    _git(controller, "commit", "--allow-empty", "-m", "init")
+    base = _git(controller, "rev-parse", "HEAD")
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = {
+        "task_id": "direct-interrupted",
+        "controller_repo_root": str(controller),
+        "controller_revision": base,
+        "allowed_files": ["src/interrupted.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }
+    service.submit_task(request)
+    service._mutate_state("direct-interrupted", lambda state: state.update({"status": "DIRECT_STARTED"}))
+    reconciled = service.reconcile_task("direct-interrupted")
+    assert reconciled["status"] == "DIRECT_RECONCILE_REQUIRED"
+    assert reconciled["reconciliation_required"] is True
+    assert reconciled["canonical_action"]["reconciliation"]["blocker"] == "UNKNOWN_REQUIRES_RECONCILE"
+    assert reconciled["target_worktree"] is None
+
+
+def test_direct_canonical_idempotency_key_reuse_fails_closed_across_tasks(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "branch", "-M", "nexus/integration/main")
+    _git(controller, "commit", "--allow-empty", "-m", "init")
+    base = _git(controller, "rev-parse", "HEAD")
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    common = {
+        "controller_repo_root": str(controller),
+        "controller_revision": base,
+        "allowed_files": ["src/idempotent.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+        "idempotency_key": "shared-idempotency-key",
+    }
+    service.submit_task({**common, "task_id": "direct-idempotency-a"})
+    with pytest.raises(ValueError, match="IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST"):
+        service.submit_task({**common, "task_id": "direct-idempotency-b"})
 
 
 def test_direct_lane_rejects_lockfile_and_active_mutation_task():
@@ -1615,7 +1705,7 @@ def test_thirty_task_cutover_matrix_uses_one_of_two_explicit_lanes(tmp_path, mon
     direct_results = []
     isolated_results = []
     for index in range(30):
-        direct = service.submit_task({
+        request = {
             "task_id": f"matrix-direct-{index}",
             "what": "matrix direct canary",
             "why": "prove no Target allocation",
@@ -1625,15 +1715,17 @@ def test_thirty_task_cutover_matrix_uses_one_of_two_explicit_lanes(tmp_path, mon
             "primary_agent": True,
             "worker": "primary",
             "execution_lane": "DIRECT_CANONICAL",
-        })
+        }
+        direct = service.submit_task(request)
+        service.record_canonical_action_failure(request["task_id"], "MATRIX_ABORTED")
         direct_results.append(direct)
         isolated_results.append(resolve_execution_lane({"execution_lane": "ISOLATED_TARGET"}))
 
     assert len(direct_results) == 30
     assert {result["execution_lane"] for result in direct_results} == {"DIRECT_CANONICAL"}
-    assert all(result["state_created"] is False and result["target_created"] is False for result in direct_results)
+    assert all(result["state_created"] is True and result["target_created"] is False for result in direct_results)
     assert all(result["execution_lane"] == "ISOLATED_TARGET" for result in isolated_results)
-    assert not (tmp_path / "state").exists()
+    assert (tmp_path / "state").exists()
     assert not (tmp_path / "nexus-runtime-targets").exists()
 
 
@@ -1658,7 +1750,7 @@ def test_revalidation_15_direct_10_isolated_5_fault_matrix(tmp_path, monkeypatch
         _git(controller, "add", relative)
         _git(controller, "commit", "-m", f"direct matrix {index}")
         head = _git(controller, "rev-parse", "HEAD")
-        direct_receipts.append(service.complete_direct_canonical({
+        request = {
             "task_id": f"direct-matrix-{index}",
             "controller_repo_root": str(controller),
             "controller_revision": base,
@@ -1667,10 +1759,12 @@ def test_revalidation_15_direct_10_isolated_5_fault_matrix(tmp_path, monkeypatch
             "primary_agent": True,
             "worker": "primary",
             "execution_lane": "DIRECT_CANONICAL",
-        }, expected_commit_sha=head))
+        }
+        service.submit_task(request)
+        direct_receipts.append(service.complete_direct_canonical(request, expected_commit_sha=head))
 
     assert len(direct_receipts) == 15
-    assert all(item["target_created"] is False and item["state_created"] is False for item in direct_receipts)
+    assert all(item["target_created"] is False and item["state_created"] is True for item in direct_receipts)
     direct_overheads = sorted(item["telemetry"]["overhead_ms"] for item in direct_receipts)
     assert direct_overheads[int(len(direct_overheads) * 0.95) - 1] < 1000
 

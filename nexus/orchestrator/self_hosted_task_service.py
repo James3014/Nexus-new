@@ -48,6 +48,7 @@ Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict
 TERMINAL_STATUSES = frozenset({
     "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
     "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
+    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED",
 })
 PENDING_CANDIDATE_STATUSES = frozenset({
     "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
@@ -404,7 +405,22 @@ class SelfHostedTaskService:
         promotion_status = str(state.get("promotion_status") or "")
         candidate_commit = cls._candidate_commit(state)
 
-        if status == "INTEGRATING":
+        if status == "DIRECT_RECONCILE_REQUIRED":
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "nexus_task_reconcile"
+            recommended_tool = "nexus_task_reconcile"
+        elif status == "DIRECT_COMPLETED":
+            action_state = "TERMINAL"
+            attention_required = False
+            next_action = "none"
+            recommended_tool = None
+        elif status in {"DIRECT_INTENT_RECORDED", "DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
+            action_state = "IN_PROGRESS"
+            attention_required = False
+            next_action = "nexus_task_finish"
+            recommended_tool = "nexus_task_finish"
+        elif status == "INTEGRATING":
             action_state = "IN_PROGRESS"
             attention_required = False
             next_action = "wait_for_task"
@@ -650,6 +666,41 @@ class SelfHostedTaskService:
             state = json.loads(path.read_text(encoding="utf-8"))
             mutator(state)
             return self._write_state_locked(task_id, state)
+
+    @staticmethod
+    def _request_hash(request: Mapping[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(dict(request), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+
+    def _record_direct_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
+        """Persist an uncertain Direct/Assisted outcome without allocating a Target."""
+        now = _utc_now()
+
+        def mutate(state: dict[str, Any]) -> None:
+            if state.get("status") == "DIRECT_COMPLETED":
+                return
+            action = dict(state.get("canonical_action") or {})
+            reconciliation = dict(action.get("reconciliation") or {})
+            reconciliation.update({
+                "status": "REQUIRED",
+                "blocker": blocker,
+                "error": error,
+                "at": now,
+            })
+            action["reconciliation"] = reconciliation
+            state["canonical_action"] = action
+            state["status"] = "DIRECT_RECONCILE_REQUIRED"
+            state["error"] = error or blocker
+            state["reconciliation_required"] = True
+            state["updated_at"] = now
+            state.setdefault("status_history", []).append({"status": state["status"], "at": now})
+
+        return self._mutate_state(task_id, mutate)
+
+    def record_canonical_action_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
+        """Public observer-safe hook for an Assisted provider/apply failure."""
+        return self._record_direct_failure(task_id, blocker, error)
 
     def _checkpoint(
         self,
@@ -1545,9 +1596,55 @@ class SelfHostedTaskService:
             except (PermissionError, ProcessLookupError):
                 continue
 
+    def _reconcile_direct_action(self, task_id: str) -> Optional[dict[str, Any]]:
+        """Classify an interrupted canonical action without replaying it."""
+        state = self._read_state(task_id)
+        if state is None:
+            return None
+        if state.get("status") == "DIRECT_INTENT_RECORDED":
+            return state
+        request = state.get("request") or {}
+        controller_raw = request.get("controller_repo_root") or state.get("controller_worktree")
+        controller = Path(str(controller_raw or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
+        base = str(request.get("controller_revision") or state.get("controller_revision") or "")
+        observed: dict[str, Any] = {
+            "controller_repo_root": str(controller),
+            "expected_head": base,
+            "current_head": None,
+            "dirty": None,
+            "commits_since_base": [],
+            "working_tree_changes": [],
+        }
+        try:
+            observed["current_head"] = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False,
+            ).stdout.strip()
+            observed["dirty"] = bool(subprocess.run(
+                ["git", "status", "--porcelain=v1"], cwd=controller, capture_output=True, text=True, check=False,
+            ).stdout.strip())
+            if len(base) == 40:
+                observed["commits_since_base"] = subprocess.run(
+                    ["git", "diff", "--name-only", f"{base}..HEAD"], cwd=controller,
+                    capture_output=True, text=True, check=False,
+                ).stdout.splitlines()
+            observed["working_tree_changes"] = subprocess.run(
+                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
+            ).stdout.splitlines()
+        except OSError as exc:
+            observed["probe_error"] = str(exc)
+        return self._record_direct_failure(
+            task_id,
+            "UNKNOWN_REQUIRES_RECONCILE",
+            json.dumps(observed, sort_keys=True, separators=(",", ":")),
+        )
+
     def reconcile_task(self, task_id: str) -> Optional[dict[str, Any]]:
         state = self._read_state(task_id)
-        if state is None or state.get("status") in TERMINAL_STATUSES:
+        if state is None:
+            return state
+        if state.get("status") in {"DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
+            return self._reconcile_direct_action(task_id)
+        if state.get("status") in TERMINAL_STATUSES:
             return state
         if state.get("status") in PENDING_CANDIDATE_STATUSES:
             return state
@@ -2084,7 +2181,231 @@ class SelfHostedTaskService:
             "next_gate": "OWNER_REVIEW",
         }
 
+    def _submit_direct_canonical(self, request: Mapping[str, Any], task_id: str) -> dict[str, Any]:
+        """Record a Target-free canonical mutation intent exactly once."""
+        action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
+        action_id = str(request.get("action_id") or action.get("action_id") or f"action-{uuid4().hex}")
+        attempt_id = str(request.get("attempt_id") or action.get("attempt_id") or f"attempt-{uuid4().hex}")
+        idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or f"{task_id}:{self._request_hash(request)}")
+        request_hash = str(request.get("action_request_hash") or action.get("request_hash") or self._request_hash(request))
+        if idempotency_key and self.state_dir.exists():
+            for path in sorted(self.state_dir.glob("*.json")):
+                current = json.loads(path.read_text(encoding="utf-8"))
+                if str(current.get("idempotency_key") or "") != idempotency_key:
+                    continue
+                current_hash = str(current.get("action_request_hash") or current.get("request_hash") or "")
+                if current_hash and current_hash != request_hash:
+                    raise ValueError("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")
+                return {
+                    "schema": "nexus.self_hosted_direct_handoff.v1",
+                    "task_id": current.get("task_id"),
+                    "status": "DIRECT_CANONICAL_READY",
+                    "durable_status": current.get("status"),
+                    "execution_lane": "DIRECT_CANONICAL",
+                    "target_created": False,
+                    "state_created": False,
+                    "duplicate": True,
+                    "action_id": current.get("action_id"),
+                    "attempt_id": current.get("attempt_id"),
+                    "idempotency_key": current.get("idempotency_key"),
+                    "action_request_hash": current.get("action_request_hash"),
+                    "task_action": current.get("task_action") or self._task_action_envelope(current),
+                    "next_action": (current.get("task_action") or {}).get("next_action", "nexus_task_finish"),
+                }
+        state = self._read_state_snapshot(task_id)
+        if state is not None:
+            existing_key = str(state.get("idempotency_key") or "")
+            existing_hash = str(state.get("action_request_hash") or state.get("request_hash") or "")
+            if existing_key == idempotency_key and existing_hash and existing_hash != request_hash:
+                raise ValueError("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")
+            if existing_key and existing_key != idempotency_key and existing_hash and existing_hash != request_hash:
+                raise ValueError("DIRECT_TASK_ID_REUSED_WITH_DIFFERENT_REQUEST")
+            return {
+                "schema": "nexus.self_hosted_direct_handoff.v1",
+                "task_id": task_id,
+                "status": "DIRECT_CANONICAL_READY",
+                "durable_status": state.get("status"),
+                "execution_lane": "DIRECT_CANONICAL",
+                "target_created": False,
+                "state_created": False,
+                "duplicate": True,
+                "action_id": state.get("action_id"),
+                "attempt_id": state.get("attempt_id"),
+                "idempotency_key": state.get("idempotency_key"),
+                "action_request_hash": state.get("action_request_hash"),
+                "task_action": state.get("task_action") or self._task_action_envelope(state),
+                "next_action": (state.get("task_action") or {}).get("next_action", "nexus_task_finish"),
+            }
+        now = _utc_now()
+        base = str(request.get("controller_revision") or "")
+        canonical_action = {
+            "schema": "nexus.canonical_action.v1",
+            "action_id": action_id,
+            "attempt_id": attempt_id,
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+            "execution_lane": "DIRECT_CANONICAL",
+            "intent": {
+                "status": "RECORDED",
+                "at": now,
+                "base_sha": base,
+                "allowed_paths": list(request.get("allowed_files") or ()),
+            },
+            "application": {"status": "PENDING"},
+            "verification": {"status": "PENDING"},
+            "commit": {"status": "PENDING"},
+            "reconciliation": {"status": "PENDING"},
+        }
+        durable_state = {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": task_id,
+            "status": "DIRECT_INTENT_RECORDED",
+            "submitted_at": now,
+            "updated_at": now,
+            "heartbeat_at": now,
+            "status_history": [{"status": "DIRECT_INTENT_RECORDED", "at": now}],
+            "request": _jsonable(dict(request)),
+            "action": _jsonable(dict(action)) if action else None,
+            "action_id": action_id,
+            "attempt_id": attempt_id,
+            "attempts": [{"attempt_id": attempt_id, "started_at": now}],
+            "idempotency_key": idempotency_key,
+            "action_request_hash": request_hash,
+            "request_hash": request_hash,
+            "controller_worktree": str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT),
+            "controller_revision": base,
+            "execution_lane": "DIRECT_CANONICAL",
+            "target_worktree": None,
+            "target_created_at": None,
+            "canonical_action": canonical_action,
+            "direct_receipt": None,
+            "reconciliation_required": False,
+            "promotion_status": "NOT_CREATED",
+            "candidate_created": False,
+            "cleanup_eligible": False,
+            "cleanup_decision": None,
+            "cleanup_performed": False,
+            "state_retention_status": "ACTIVE",
+            "archive_eligible": False,
+            "archive_location": None,
+            "worker_pid": None,
+            "worker_pgid": None,
+            "push_performed": False,
+        }
+        created_state, created = self._create_state(task_id, durable_state)
+        return {
+            "schema": "nexus.self_hosted_direct_handoff.v1",
+            "task_id": task_id,
+            "status": "DIRECT_CANONICAL_READY",
+            "durable_status": created_state.get("status"),
+            "execution_lane": "DIRECT_CANONICAL",
+            "controller_repo_root": str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT),
+            "controller_branch": CANONICAL_SOURCE_BRANCH,
+            "target_created": False,
+            "state_created": created,
+            "duplicate": not created,
+            "action_id": created_state.get("action_id"),
+            "attempt_id": created_state.get("attempt_id"),
+            "idempotency_key": created_state.get("idempotency_key"),
+            "action_request_hash": created_state.get("action_request_hash"),
+            "next_action": "nexus_task_finish",
+            "required_surface": "nexus_self_hosted_direct_complete",
+            "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
+            "task_action": created_state.get("task_action") or self._task_action_envelope(created_state),
+        }
+
     def complete_direct_canonical(
+        self,
+        request: Mapping[str, Any],
+        *,
+        expected_commit_sha: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Complete one durable Target-free canonical action idempotently."""
+        task_id = str(request.get("task_id") or "")
+        if not task_id:
+            raise RuntimeError("DIRECT_ACTION_ID_REQUIRED")
+        state = self._read_state_snapshot(task_id)
+        if state is None:
+            raise RuntimeError("DIRECT_ACTION_NOT_FOUND_RECONCILE_REQUIRED")
+        if state.get("status") == "DIRECT_COMPLETED":
+            receipt = dict(state.get("direct_receipt") or {})
+            if expected_commit_sha and receipt.get("commit_sha") != expected_commit_sha:
+                raise RuntimeError("DIRECT_CANONICAL_COMMIT_MISMATCH: duplicate finish commit differs")
+            receipt.update({"duplicate": True, "state_created": True, "target_created": False})
+            return receipt
+        if state.get("status") == "DIRECT_RECONCILE_REQUIRED":
+            raise RuntimeError("DIRECT_RECONCILE_REQUIRED: reconcile before retry")
+        stored_request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+        effective_request = dict(stored_request)
+        effective_request.update(dict(request))
+        action = dict(state.get("canonical_action") or {})
+        now = _utc_now()
+        self._mutate_state(task_id, lambda current: (
+            current.update({
+                "status": "DIRECT_STARTED",
+                "updated_at": now,
+                "heartbeat_at": now,
+                "canonical_action": {
+                    **dict(current.get("canonical_action") or {}),
+                    "application": {"status": "STARTED", "at": now},
+                },
+            }),
+            current.setdefault("status_history", []).append({"status": "DIRECT_STARTED", "at": now}),
+        ))
+        try:
+            receipt = dict(self._complete_direct_canonical_physical(effective_request, expected_commit_sha=expected_commit_sha))
+        except Exception as exc:
+            self._record_direct_failure(task_id, "DIRECT_CANONICAL_FAILED", str(exc))
+            raise
+        commit_sha = str(receipt.get("commit_sha") or "")
+        controller = Path(str(effective_request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).resolve()
+        tree_sha = ""
+        if commit_sha:
+            tree_sha = subprocess.run(
+                ["git", "rev-parse", f"{commit_sha}^{{tree}}"], cwd=controller,
+                capture_output=True, text=True, check=False,
+            ).stdout.strip()
+        completed_at = _utc_now()
+        action = dict(state.get("canonical_action") or action)
+        action.update({
+            "application": {"status": "APPLIED", "at": completed_at},
+            "verification": {
+                "status": "PASSED",
+                "at": completed_at,
+                "evidence": receipt.get("verifier_evidence") or {},
+            },
+            "commit": {"status": "COMMITTED", "at": completed_at, "sha": commit_sha, "tree_sha": tree_sha},
+            "reconciliation": {"status": "RECONCILED", "at": completed_at},
+        })
+        receipt.update({
+            "state_created": True,
+            "target_created": False,
+            "duplicate": False,
+            "action_id": state.get("action_id"),
+            "attempt_id": state.get("attempt_id"),
+            "idempotency_key": state.get("idempotency_key"),
+            "action_request_hash": state.get("action_request_hash"),
+            "base_sha": state.get("controller_revision"),
+            "candidate_tree_sha": tree_sha,
+            "reconciliation_status": "RECONCILED",
+        })
+        self._mutate_state(task_id, lambda current: (
+            current.update({
+                "status": "DIRECT_COMPLETED",
+                "updated_at": completed_at,
+                "heartbeat_at": completed_at,
+                "canonical_action": action,
+                "direct_receipt": receipt,
+                "commit_sha": commit_sha,
+                "candidate_tree_sha": tree_sha,
+                "reconciliation_required": False,
+                "terminal_status": "DIRECT_COMPLETED",
+            }),
+            current.setdefault("status_history", []).append({"status": "DIRECT_COMPLETED", "at": completed_at}),
+        ))
+        return receipt
+
+    def _complete_direct_canonical_physical(
         self,
         request: Mapping[str, Any],
         *,
@@ -2092,13 +2413,15 @@ class SelfHostedTaskService:
     ) -> dict[str, Any]:
         """Verify a primary-agent commit already made on the canonical checkout.
 
-        This surface never creates lifecycle state, a Candidate, or a Target. It
-        is deliberately a post-commit gate: the primary agent performs the
-        scoped edit/commit, then this method proves the commit and verifiers.
+        This is the physical post-commit gate. The public wrapper records the
+        durable action state before and after this method; this helper only
+        proves the commit and verifiers.
         """
+        current_task_id = str(request.get("task_id") or "")
         active = sum(
             1
             for state in self._workspace_task_states().values()
+            if state.get("task_id") != current_task_id
             if state.get("status") not in TERMINAL_STATUSES
             and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
         )
@@ -2213,36 +2536,27 @@ class SelfHostedTaskService:
         return receipt
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        active_mutations = sum(
-            1 for state in self._workspace_task_states().values()
-            if state.get("status") not in TERMINAL_STATUSES
-            and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
-        )
-        lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
+        task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
         idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or "")
         action_request_hash = str(request.get("action_request_hash") or action.get("request_hash") or "")
-        if str(request.get("execution_lane", "DIRECT_CANONICAL")).strip().upper() == "DIRECT_CANONICAL" and lane["eligible"]:
-            task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
-            return {
-                "schema": "nexus.self_hosted_direct_handoff.v1",
-                "task_id": task_id,
-                "status": "DIRECT_CANONICAL_READY",
-                "execution_lane": "DIRECT_CANONICAL",
-                "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
-                "controller_branch": CANONICAL_SOURCE_BRANCH,
-                "target_created": False,
-                "state_created": False,
-                "action_id": action_id or None,
-                "attempt_id": attempt_id_hint or None,
-                "idempotency_key": idempotency_key or None,
-                "action_request_hash": action_request_hash or None,
-                "next_action": "run_direct_canonical_completion",
-                "required_surface": "nexus_self_hosted_direct_complete",
-                "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
-            }
+        states = self._workspace_task_states()
+        active_mutations = sum(
+            1 for state in states.values()
+            if state.get("task_id") != task_id
+            if not idempotency_key or str(state.get("idempotency_key") or "") != idempotency_key
+            if state.get("status") not in TERMINAL_STATUSES
+            and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
+        )
+        lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
+        requested_lane = str(request.get("execution_lane") or "").strip().upper()
+        if requested_lane in {"", "DIRECT_CANONICAL"}:
+            if lane["eligible"]:
+                return self._submit_direct_canonical(request, task_id)
+            if requested_lane == "DIRECT_CANONICAL" and str(request.get("worker", "primary")).strip().lower() in {"", "primary", "codex"}:
+                raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
         contract = self.build_contract(request)
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
