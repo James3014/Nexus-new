@@ -50,7 +50,7 @@ validation seam.
 ## Verification receipt
 
 - candidate_commit: `256c4f2e30f79c915d9255a5a3769f0944babdf3`
-- canonical_verification_head: `b8f505e06f2a62c8f10af7ce8ec66c076559f7ae`
+- canonical_verification_head: `c45a44ec8829dc8c561984fd7f937298e2d338ba`
 - exact_focused_suite: `170 passed, 1 warning` (loopback permission granted)
 - diff_check: `PASS`
 - tracked_task_card_binding: `PASS`

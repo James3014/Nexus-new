@@ -35,7 +35,7 @@ Owner review of the exact scoped commit.
 
 ## Verification receipt
 
-- scoped commits: `3eac7488c`, `14b49c305`
+- scoped commits: `3eac7488c`, `14b49c305`, `14bcca1c6`, `c45a44ec8`
 - focused Gateway suite: `40 passed, 1 warning`
 - real Cline binary: `3.0.48` (direct binary; wrapper path still crashes)
 - real stdout fixture: `tests/fixtures/cline/glm_52_real_stdout.ndjson`
