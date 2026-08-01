@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_PENDING_OWNER_REVIEW
 task_id: memory-learning-lineage
 commit_forbidden: false
 commit_required: true
@@ -61,6 +61,21 @@ git diff --name-status --diff-filter=D
 Bind the receipt to the scoped commit SHA and this card hash. Claim only
 `MEMORY_LEARNING_LINEAGE_VERIFIED`; no provider, live connector, approval, or
 production closure is implied.
+
+## Verification receipt
+
+- implementation commit: `c78f268da`
+- focused suite: `32 passed`
+- storage: existing `.nexus/memory/outcome_history.jsonl` and
+  `.nexus/reports/learn/learning_closure.jsonl` only; no database added
+- lineage: task/attempt/action/idempotency persisted in episode and handoff
+  records
+- fail-closed: parked/uncertain outcomes set `auto_replay_allowed: false` and
+  require reconcile/owner review before resume
+- lesson attribution: retrieved and applied IDs are separate; terminal
+  outcomes emit reinforce/contradict/retire disposition
+- `git diff --check`: pass; tracked deletion audit: empty
+- claim ceiling: `MEMORY_LEARNING_LINEAGE_VERIFIED` only
 
 ## Block semantics
 

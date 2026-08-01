@@ -28,6 +28,8 @@ contract without changing Nexus runtime authority or adding a second router.
 
 - `00-lifecycle-contract-overlay.md` — verified machine-local overlay; commit
   `a9cead19c` (external Skills intentionally not committed)
+- `01-memory-learning-lineage.md` — verified pending owner review; commit
+  `c78f268da`
 
 ## Exit gate
 
