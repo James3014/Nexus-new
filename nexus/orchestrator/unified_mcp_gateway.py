@@ -275,6 +275,9 @@ class UnifiedMCPGateway:
         with self._assist_lock:
             process = self._assist_processes.get(task_id)
         returncode = process.poll() if process is not None else None
+        if process is not None and returncode is not None:
+            job["durable_exit_marker"] = True
+            job["durable_exit_code"] = returncode
         if process is None and job.get("pid"):
             try:
                 os.kill(int(job["pid"]), 0)
@@ -283,7 +286,7 @@ class UnifiedMCPGateway:
                 # A restarted Gateway may retain artifacts but no durable exit
                 # marker.  Output alone is not completion evidence: fail closed
                 # and require an explicit reconciliation decision.
-                if job.get("exit_code") is None:
+                if not job.get("durable_exit_marker"):
                     job.update({
                         "status": "UNKNOWN_REQUIRES_RECONCILE",
                         "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
@@ -385,6 +388,11 @@ class UnifiedMCPGateway:
             "last_stderr_at": job.get("last_stderr_at"),
             "stdout_sha256": job.get("stdout_sha256"),
             "stderr_sha256": job.get("stderr_sha256"),
+            "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
+            "reconciliation_required": bool(job.get("reconciliation_required", False)),
+            "context_arm": job.get("context_arm"),
+            "context_arm_applied": bool(job.get("context_arm_applied", False)),
+            "context_arm_semantics": job.get("context_arm_semantics", "record_only_not_applied"),
             "result": job.get("result") if status == "COMPLETED" else None,
             "blocker": job.get("blocker"),
             "provider_error": job.get("provider_error", ""),
@@ -540,7 +548,16 @@ class UnifiedMCPGateway:
         job = self._assist_refresh(task_id)
         if job is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        if job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"}:
+        if job.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
+            job.update({
+                "status": "CANCELLED",
+                "finished_at": self._utc_now(),
+                "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
+                "process_killed": False,
+            })
+            self._cleanup_assist_workspace(job)
+            self._assist_write(job)
+        elif job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
             pid = int(job.get("pid") or 0)
             process = None
             with self._assist_lock:
@@ -807,6 +824,7 @@ class UnifiedMCPGateway:
             card_hash = hashed.stdout.strip()
             if hashed.returncode != 0 or not _SHA_RE.fullmatch(card_hash):
                 raise RuntimeError("TASK_CARD_CREATE_HASH_FAILED")
+            card_sha256 = hashlib.sha256(card.encode("utf-8")).hexdigest()
             if campaign_root.exists():
                 raise GatewayInputError("TASK_CARD_CREATE_WOULD_OVERWRITE")
             os.replace(temporary_root, campaign_root)
@@ -822,7 +840,8 @@ class UnifiedMCPGateway:
             "task_id": task_id,
             "index_path": str(index_path.relative_to(CANONICAL_SOURCE_ROOT)),
             "card_path": str(card_path.relative_to(CANONICAL_SOURCE_ROOT)),
-            "card_hash": card_hash,
+            "card_hash": card_sha256,
+            "git_blob_sha": card_hash,
             "exact_card_diff": "".join(diff_lines),
             "exact_index_diff": "".join(index_diff_lines),
             "successor_execution": "NOT_STARTED",
@@ -880,6 +899,8 @@ class UnifiedMCPGateway:
             "provider": provider,
             "model": model,
             "context_arm": arguments.get("context_arm"),
+            "context_arm_applied": False,
+            "context_arm_semantics": "record_only_not_applied",
             "requested_tools_policy": list(arguments.get("tools_allowed") or []),
             "workspace_mode": workspace_mode,
             "workspace_root": str(workspace_root),
@@ -1147,7 +1168,7 @@ class UnifiedMCPGateway:
                         "output_schema": {"type": "object"},
                         "tools_allowed": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "Requested policy only; provider-specific enforcement is not claimed."},
                         "workspace_mode": {"type": "string", "enum": ["isolated"], "default": "isolated"},
-                        "context_arm": {"type": "string", "enum": ["bare", "nexus_bounded", "nexus_full"]},
+                        "context_arm": {"type": "string", "enum": ["bare", "nexus_bounded", "nexus_full"], "description": "Recorded for future calibration only; not applied to the probe prompt in this version."},
                     },
                 },
             },
@@ -1277,7 +1298,7 @@ class UnifiedMCPGateway:
                 job = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if not isinstance(job, Mapping) or job.get("status") not in {"FAILED", "CANCELLED"}:
+            if not isinstance(job, Mapping) or job.get("status") not in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"}:
                 continue
             tasks.append(self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list"))
         return {
@@ -1291,7 +1312,23 @@ class UnifiedMCPGateway:
         task_id = _text(arguments.get("task_id"), "task_id")
         assisted = self._assist_read(task_id)
         if assisted is not None:
-            return self._assist_response(self._assist_refresh(task_id) or assisted, operation="reconcile")
+            current = self._assist_refresh(task_id) or assisted
+            if current.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
+                # No durable exit marker means the provider outcome is not
+                # recoverable from output alone.  Reconciliation deliberately
+                # converges to a retryable process-loss failure and performs
+                # isolated-workspace cleanup; it never upgrades to success.
+                current.update({
+                    "status": "FAILED",
+                    "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
+                    "reconciliation_required": False,
+                    "reconciled_from": "UNKNOWN_REQUIRES_RECONCILE",
+                    "reconciled_at": self._utc_now(),
+                    "finished_at": current.get("finished_at") or self._utc_now(),
+                })
+                self._cleanup_assist_workspace(current)
+                current = self._assist_write(current)
+            return self._assist_response(current, operation="reconcile")
         result = self.service.reconcile_task(task_id)
         if result is None:
             raise KeyError(f"unknown task_id: {task_id}")

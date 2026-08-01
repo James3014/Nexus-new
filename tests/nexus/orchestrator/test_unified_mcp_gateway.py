@@ -521,7 +521,8 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
     response = gateway.handle({"jsonrpc": "2.0", "id": 704, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": arguments}})
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "CREATED_PENDING_COMMIT"
-    assert payload["card_hash"] == "f" * 40
+    assert len(payload["card_hash"]) == 64
+    assert payload["git_blob_sha"] == "f" * 40
     assert (tmp_path / "tasks/chatgpt-bootstrap/INDEX.md").exists()
     assert (tmp_path / "tasks/chatgpt-bootstrap/00-first-card.md").exists()
     second = gateway.handle({"jsonrpc": "2.0", "id": 705, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": arguments}})
@@ -564,6 +565,9 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
     assert first["status"] == "RUNNING"
     assert first["job_kind"] == "model_probe"
     assert first["workspace_mode"] == "isolated"
+    assert first["context_arm"] == "bare"
+    assert first["context_arm_applied"] is False
+    assert first["context_arm_semantics"] == "record_only_not_applied"
     waited = gateway.handle({"jsonrpc": "2.0", "id": 707, "method": "nexus/noop", "params": {}})
     assert waited["error"]["code"] == -32601
     result = gateway.handle({"jsonrpc": "2.0", "id": 708, "method": "tools/call", "params": {"name": "nexus_model_probe_result", "arguments": {"task_id": "probe-cline-1"}}})
@@ -580,6 +584,9 @@ def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path):
     service = FakeService()
     service.state_dir = tmp_path
     gateway = UnifiedMCPGateway(service=service)
+    workspace = tmp_path / "missing-workspace"
+    workspace.mkdir()
+    (workspace / "partial.txt").write_text("partial", encoding="utf-8")
     job = {
         "task_id": "lost-provider-1",
         "job_id": "assist-lost",
@@ -591,7 +598,7 @@ def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path):
         "pgid": 999999,
         "exit_code": None,
         "workspace_mode": "isolated",
-        "workspace_root": str(tmp_path / "missing-workspace"),
+        "workspace_root": str(workspace),
         "filesystem_before": {},
         "attempt_history": [],
     }
@@ -601,6 +608,13 @@ def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path):
     assert payload["status"] == "UNKNOWN_REQUIRES_RECONCILE"
     assert payload["blocker"] == "ASSIST_PROVIDER_PROCESS_LOST"
     assert payload["next_action"] == "nexus_task_reconcile"
+    reconciled = gateway.handle({"jsonrpc": "2.0", "id": 712, "method": "tools/call", "params": {"name": "nexus_task_reconcile", "arguments": {"task_id": "lost-provider-1"}}})
+    reconciled_payload = reconciled["result"]["structuredContent"]
+    assert reconciled_payload["status"] == "FAILED"
+    assert reconciled_payload["blocker"] == "ASSIST_PROVIDER_PROCESS_LOST"
+    assert reconciled_payload["next_action"] == "nexus_task_retry"
+    assert reconciled_payload["process_cleanup"] is True
+    assert not workspace.exists()
 
 
 def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
