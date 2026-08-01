@@ -95,12 +95,13 @@ npm --prefix /Users/jameschen/Workspace/nexus-devspace-mcp pack --json
 - `npm run test`: passed (including proxy/config tests and the existing 52
   assertions); `npm run typecheck`: passed; `npm run build`: passed.
 - Local artifact: `nexus-local-devspace-1.0.1-nexus.3.tgz`; postpack SHA-256:
-  `f3caf9f7f027b6668bd842183176b277a53b7e8dab124753d2dab251d47eeead`.
+  `701bdda8b8279b94e2e0c3613748b18ce033242bc150cc79fe829173716baa18`.
 - Build identity binds package/source plus gateway `nexus-mcp-gateway@0.1.0`,
-  canonical commit `73f9c119b3edc7a8bb149e3b481f430012ca3abb`, lifecycle commit,
-  and gateway tool manifest revision
+  the exact canonical gateway/lifecycle commit at build time, and gateway tool
+  manifest revision
   `ceb7c35080e403bba9b0014e28ae8b0bdae298ec009eb015edf644b9854914c4` (10
-  tools).
+  tools). The resulting build manifest SHA-256 is
+  `9d6062bd76ff7049529aec1e0ad3d1b50ddc4c205f92284e664de5b4195a84e3`.
 - Installed local package reports `@nexus-local/devspace@1.0.1-nexus.3`.
 - Two clean loopback starts returned identical `/healthz` proxy identity; an
   in-memory MCP client listed exactly the 10 gateway tools, and a live proxy
