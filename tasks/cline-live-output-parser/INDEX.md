@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: active, governed and sequential
+status: integrated pending live replay
 AUTO_CHAIN: false
 
 ## Objective
@@ -13,4 +13,4 @@ Align the Cline JSON event-stream adapter with real stdout, extracting only the 
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `cline-live-output-parser-20260801` | `00-cline-live-output-parser-20260801.md` | ACTIVE | Owner confirmation |
+| 0 | `cline-live-output-parser-20260801` | `00-cline-live-output-parser-20260801.md` | INTEGRATED_PENDING_LIVE_REPLAY | Canonical 90c8b9a; live replay pending |

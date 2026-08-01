@@ -3,7 +3,11 @@
 artifact_authority: current
 task_id: `cline-live-output-parser-20260801`
 owner: James Chen
-status: ACTIVE
+status: INTEGRATED_PENDING_LIVE_REPLAY
+candidate_commit: 026d4e12bc3517c3746137286fcafe057cbc196f
+integration_commit: 90c8b9acd993e4db037f42a601cee2dbc042bdf3
+live_cline_replay: NOT_YET_RUN
+integration_note: Canonical HEAD contains the equivalent parser fix in commit 90c8b9a; candidate 026d4e12 is retained as provenance but is not an ancestor.
 commit_required: true
 candidate_required: true
 worker_may_commit: true
@@ -30,7 +34,9 @@ git diff --check
 
 ## Exit criteria
 
-Owner review of the exact scoped commit.
+Canonical integration is recorded at `90c8b9acd`; live Cline stdout replay
+remains outstanding. The detached parser worktree must be retained until its
+candidate ancestry/unique-work and process-owner checks are satisfied.
 
 ## Block classification
 
