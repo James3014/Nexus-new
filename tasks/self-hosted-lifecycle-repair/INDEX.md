@@ -1,8 +1,9 @@
 # Campaign Index: Self-hosted Lifecycle Repair
 
-artifact_authority: current
+artifact_authority: historical
 owner: James Chen
 status: completed
+superseded_by: lifecycle-two-lane-canonical-closure
 source_revision: 1425848c7f5e720275bd635ba294f0006a901d51
 AUTO_CHAIN: false
 
@@ -14,7 +15,7 @@ Self-hosted Lifecycle 核心硬化與 recovery 能力收斂專案。修復範圍
 2. [01-self-hosted-lifecycle-core-hardening.md](01-self-hosted-lifecycle-core-hardening.md) - `self-hosted-lifecycle-core-hardening`
 3. [02-self-hosted-lifecycle-recovery-surfaces.md](02-self-hosted-lifecycle-recovery-surfaces.md) - `self-hosted-lifecycle-recovery-surfaces`
 
-## Current Frontier
+## Historical Frontier
 None — campaign completed
 
 ## Completed Cards

@@ -42,8 +42,8 @@ No filesystem cleanup; no `git worktree remove`, `git clean`, `git reset`, `git 
 ## Verification commands
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/engine/nexus_cli.py self-hosted workspace-inventory --controller-root /Users/jameschen/Workspace/nexus-worktrees/integration-main --state-dir /Users/jameschen/Workspace/nexus-self-hosted-state
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/engine/nexus_cli.py self-hosted workspace-plan --controller-root /Users/jameschen/Workspace/nexus-worktrees/integration-main --state-dir /Users/jameschen/Workspace/nexus-self-hosted-state
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/engine/nexus_cli.py self-hosted workspace-inventory --controller-root /Users/jameschen/Workspace/nexus --state-dir /Users/jameschen/Workspace/nexus-self-hosted-state
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/engine/nexus_cli.py self-hosted workspace-plan --controller-root /Users/jameschen/Workspace/nexus --state-dir /Users/jameschen/Workspace/nexus-self-hosted-state
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/engine/nexus_cli.py self-hosted list-actionable --state-dir /Users/jameschen/Workspace/nexus-self-hosted-state
 ```
 

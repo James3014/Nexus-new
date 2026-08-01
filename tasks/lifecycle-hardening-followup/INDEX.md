@@ -1,8 +1,9 @@
 # Campaign Index: Lifecycle Hardening Follow-up
 
-artifact_authority: current
+artifact_authority: historical
 owner: James Chen
-status: active
+status: superseded
+superseded_by: lifecycle-two-lane-canonical-closure
 source_specification: owner-authorized continuation of the lifecycle/workspace cleanup decision
 AUTO_CHAIN: false
 
@@ -17,9 +18,9 @@ Close the verified lifecycle gaps before applying workspace cleanup: startup mus
 3. [03-authorized-deletion-contract.md](03-authorized-deletion-contract.md) - `authorized-deletion-contract`
 4. [04-retained-clean-target-closure.md](04-retained-clean-target-closure.md) - `retained-clean-target-closure`
 
-## Current Frontier
+## Historical Frontier
 
-`retained-clean-target-closure`
+`retained-clean-target-closure` is preserved as historical evidence. The current lifecycle authority is `lifecycle-two-lane-canonical-closure`.
 
 ## Ready Cards
 
@@ -45,4 +46,4 @@ Close the verified lifecycle gaps before applying workspace cleanup: startup mus
 
 ## Downstream Gate
 
-The workspace cleanup apply packet remains separate and must bind to a newly generated inventory and plan hash after these cards' evidence is accepted.
+The workspace cleanup apply packet is historical evidence; new lifecycle work must bind to the current canonical closure campaign and a fresh inventory/plan hash.

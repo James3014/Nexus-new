@@ -1,8 +1,9 @@
 # Campaign Index: Lifecycle P6 Completion
 
-artifact_authority: current
+artifact_authority: historical
 owner: James Chen
-status: active
+status: superseded
+superseded_by: lifecycle-two-lane-canonical-closure
 source_specification: owner-authorized execution of the P0-P6 lifecycle and workspace improvement plan; explicit request to complete through P6
 AUTO_CHAIN: false
 
@@ -17,11 +18,9 @@ Close the remaining lifecycle friction without mutating the dirty canonical root
 3. [03-p5-cutover-rehearsal.md](03-p5-cutover-rehearsal.md) - `lifecycle-p5-cutover-rehearsal` (rehearsal evidence)
 4. [04-p6-final-gate.md](04-p6-final-gate.md) - `lifecycle-p6-final-gate`
 
-## Current Frontier
+## Historical Frontier
 
-`lifecycle-p3-allocator-p6-operator-surfaces`
-
-Current frontier card hash (sha256): `35c4acc5e945b17c996372116c5f047b2ac4bea66e0bcd84f0d520a544037849`
+`lifecycle-p3-allocator-p6-operator-surfaces` is preserved as historical evidence. The current lifecycle authority is `lifecycle-two-lane-canonical-closure`.
 
 ## Completed Evidence
 
@@ -40,4 +39,4 @@ Current frontier card hash (sha256): `35c4acc5e945b17c996372116c5f047b2ac4bea66e
 
 ## Downstream Gate
 
-P6 is complete only after operator action envelopes, lock-free read paths, timeout/heartbeat behavior, deterministic cleanup dry-run, and bounded performance evidence pass on the isolated stack. The stack remains a Candidate until owner approval and integration.
+This campaign is superseded. No Candidate or isolated stack from this historical campaign is a current execution authority; use the current canonical closure campaign for fresh evidence.
