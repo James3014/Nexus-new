@@ -3500,6 +3500,7 @@ nexus.add_command(self_hosted_group, name="self-hosted")
 @click.option("--authorized-deletions", help="Comma-separated list of exact files allowed to be deleted.")
 @click.option("--verifier-commands", help="Comma-separated list of verifier commands.")
 @click.option("--protected-contracts", help="Comma-separated list of protected contracts.")
+@click.option("--execution-lane", type=click.Choice(["DIRECT_CANONICAL", "ISOLATED_TARGET"]), default=None, help="Execution lane; ordinary primary work defaults to Direct Canonical.")
 @click.option("--worker", default=None, help="Worker provider (e.g. codex, auto).")
 @click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
 @translate_action_exceptions
@@ -3518,6 +3519,7 @@ def self_hosted_submit(
     authorized_deletions: str | None,
     verifier_commands: str | None,
     protected_contracts: str | None,
+    execution_lane: str | None,
     worker: str | None,
     state_dir: str | None,
 ) -> None:
@@ -3545,6 +3547,8 @@ def self_hosted_submit(
         request_data["target_worktree_root"] = target_worktree_root
     if worker is not None:
         request_data["worker"] = worker
+    if execution_lane is not None:
+        request_data["execution_lane"] = execution_lane
 
     def _split_csv(val: str | None) -> list[str] | None:
         if val is None:

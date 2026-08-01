@@ -144,6 +144,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     assert "agy" in submit_properties["worker"]["enum"]
     assert "agy" in submit_properties["worker_order"]["items"]["enum"]
     assert "agy" in submit_properties["fallback_worker"]["enum"]
+    assert submit_properties["execution_lane"]["enum"] == ["DIRECT_CANONICAL", "ISOLATED_TARGET"]
     assert "agy" in compete_properties["workers"]["items"]["enum"]
     assert "agy" in campaign_properties["workers"]["items"]["enum"]
 

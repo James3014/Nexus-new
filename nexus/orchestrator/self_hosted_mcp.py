@@ -37,6 +37,7 @@ class NexusSelfHostedMCPServer:
             "authorized_deletions": {"type": "array", "items": {"type": "string"}},
             "verifier_commands": {"type": "array", "items": {"type": "string"}},
             "protected_contracts": {"type": "array", "items": {"type": "string"}},
+            "execution_lane": {"type": "string", "enum": ["DIRECT_CANONICAL", "ISOLATED_TARGET"]},
             "worker": {"type": "string", "enum": ["auto", *WORKER_ENUM]},
             "worker_order": {"type": "array", "items": {"type": "string", "enum": WORKER_ENUM}, "uniqueItems": True},
             "fallback_worker": {"type": "string", "enum": WORKER_ENUM},
