@@ -36,10 +36,11 @@ one explicit executable next action.
 8. `07-p7-telemetry.md` - `single-mcp-three-lane-p7-telemetry`
 9. `08-p8-soak-gate.md` - `single-mcp-three-lane-p8-soak-gate`
 10. `09-p9-external-connector-cutover.md` - `single-mcp-three-lane-p9-external-connector-cutover`
+11. `10-p10-compatibility-adapter-cutover.md` - `single-mcp-three-lane-p10-compatibility-adapter-cutover`
 
 ## Current Frontier
 
-`single-mcp-three-lane-p9-external-connector-cutover`
+`single-mcp-three-lane-p10-compatibility-adapter-cutover`
 
 ## Completed Cards
 
@@ -60,6 +61,8 @@ the existing lifecycle closure and P1. P6 depends on P1-P5. P7 depends on
 P2-P6. P8 depends on every implementation card and fresh runtime inventory.
 P9 requires an owner-authorized external artifact refresh and connector
 registration; it is not executable under the current campaign forbidden scope.
+P10 is a corrective compatibility-adapter card: it closes the stale P0 wrapper
+behavior without mutating the external DevSpace repository.
 
 ## Global Forbidden Scope
 
