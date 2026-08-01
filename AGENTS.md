@@ -4,6 +4,23 @@
 # Task execution authority: the active Git-tracked Task Card under ./tasks/<campaign-id>/.
 # Response/domain overlay: ./MUSE_PROTO.md
 
+## Canonical Workspace Authority
+
+- Nexus 唯一日常工作目錄是 `/Users/jameschen/Workspace/nexus`。
+- Canonical branch 是 `nexus/integration/main`；不要把固定 HEAD 寫死，開工前重新查詢目前 HEAD。
+- `/Users/jameschen/Workspace/nexus-worktrees` 已停用，不得作為日常入口，也不得自行在其中建立 checkout。
+- 每個 task 開始前必須確認：
+  ```bash
+  git rev-parse --show-toplevel
+  git branch --show-current
+  git status --short --branch
+  git worktree list --porcelain
+  ```
+- 預設所有讀取、診斷與小型修改都從 canonical root 開始。
+- 需要隔離 Target 時，只能依 active Task Card 與正式 lifecycle surface 建立；不得手動另開平行 workspace。
+- 若目前不在 canonical root，先停止修改並重新 anchor 到 `/Users/jameschen/Workspace/nexus`。
+- 舊 worktree、salvage archive、Candidate refs 只能作為 evidence，不是目前 source of truth。
+
 ## 🎯 Semantic Completion Criteria
 - **Behavioral Integrity**: The requested functionality is verified through empirical testing.
 - **Structural Soundness**: Changes adhere to the local codebase conventions and architectural patterns.
