@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: VERIFIED_PENDING_OWNER_REVIEW
 task_id: lifecycle-workflow-p3-fast-three-lane-dispatch
 commit_required: true
 candidate_required: true
@@ -40,6 +40,18 @@ git diff --check
 
 Read/status and bounded Direct fixture runs create zero Target; Assisted
 defaults to proposal-only; no second route authority is introduced.
+
+## Verified evidence
+
+- Current HEAD `d596bb7f7948fa1cf1060a6fa04f637c1c74641b` was clean.
+- Revision-bound manifest `/tmp/nexus-p3-gate.json` reported
+  `nexus.fresh_suite_manifest.v1`, `PASS`, 23 passed, 0 failed, 0 skipped.
+- The focused Gateway tests include the 10 Direct, 20 Assisted, and 10
+  isolated routing soak cases, plus the single-`nexus/` regression and
+  proposal-only default checks.
+
+Promotion remains owner-gated; no approval, integration, push, or cleanup was
+performed by the implementing Worker.
 
 ## Block classification
 

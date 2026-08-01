@@ -32,9 +32,9 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 0 | `lifecycle-workflow-p0-authority-baseline` | `00-authority-and-baseline.md` | COMPLETED | none |
 | 1 | `lifecycle-workflow-p1-action-envelope` | `01-lifecycle-action-envelope.md` | COMPLETED | `4cd6da508` |
 | 1b | `lifecycle-workflow-p1b-fresh-suite-evidence-gate` | `01b-fresh-suite-evidence-gate.md` | COMPLETED_PENDING_OWNER_REVIEW | P1 `4cd6da508` + bootstrap-authority-convergence current frontier |
-| 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | PENDING | P1b + bootstrap-authority-convergence owner review |
-| 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | PENDING | P2 integrated |
-| 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | PENDING | P3 integrated |
+| 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | VERIFIED_PENDING_OWNER_REVIEW | P1b + bootstrap-authority-convergence owner review |
+| 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | VERIFIED_PENDING_OWNER_REVIEW | P2 implementation verified |
+| 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | PENDING | P3 owner review |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
 | 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | PENDING | P5 integrated |
 | 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | PENDING | P6 integrated |
@@ -52,9 +52,8 @@ at P1 through the formal lifecycle surface and the current frontier card.
 ## Current frontier
 
 `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
-remains the required pre-P2 implementation gate. After its owner review,
-`01b-fresh-suite-evidence-gate.md` supplies the revision-bound fresh evidence
-needed to revalidate the runtime controls. The lifecycle P2 card remains
-PENDING until both gates are explicitly accepted. No P2 successor may start
-until it then receives a scoped commit, verification evidence, and explicit
-promotion through the formal lifecycle surface.
+remains the required pre-P2 implementation gate. `01b-fresh-suite-evidence-gate.md`
+and the P2/P3 cards now have current verification evidence, but remain
+`VERIFIED_PENDING_OWNER_REVIEW`. P4 cannot start until the Owner explicitly
+accepts the bootstrap, P1b, P2, and P3 gates through the formal lifecycle
+surface.
