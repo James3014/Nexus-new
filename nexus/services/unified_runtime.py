@@ -42,6 +42,7 @@ from nexus.evidence.receipt_base import (
     build_execution_attempt_id,
     validate_receipt_base,
 )
+from nexus.contracts.unified_runtime_receipt import attach_failure_diagnostics
 
 REQUEST_SCHEMA = "nexus.unified_runtime.request.v1"
 RECEIPT_SCHEMA = "nexus.unified_runtime.receipt.v1"
@@ -3003,7 +3004,7 @@ class UnifiedRuntime:
                         json.dumps(terminal_receipt, indent=2, ensure_ascii=False),
                         encoding="utf-8",
                     )
-                return terminal_receipt
+                return attach_failure_diagnostics(terminal_receipt)
 
         capability_results: dict[str, dict[str, Any]] = {}
         postflight_names = {
@@ -3274,7 +3275,7 @@ class UnifiedRuntime:
                     json.dumps(blocked_receipt, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
-            return blocked_receipt
+            return attach_failure_diagnostics(blocked_receipt)
 
         # Full read-only consumer view — same root bundle_hash for Local and Online.
         # seal_verify is never written into the sealed body.
@@ -4148,6 +4149,7 @@ class UnifiedRuntime:
             receipt["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
             receipt["local_model_invocation_authority"] = local_model_invocation_authority
+        attach_failure_diagnostics(receipt)
         # RC-1: additive JSON-safe receipt_base + acyclic run_anchor hash DAG
         attach_r3_receipt_base(receipt)
         if receipt_path is not None:
@@ -4305,6 +4307,7 @@ class UnifiedRuntime:
 
         finalized["claim_boundary"] = claim_boundary
         finalized["finalization"] = {"verifier": "observed_payload", "learning": "observed_payload"}
+        attach_failure_diagnostics(finalized)
         # RC-1: recompute receipt_base after finalization mutations (still acyclic)
         attach_r3_receipt_base(finalized)
 

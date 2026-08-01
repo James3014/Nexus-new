@@ -42,6 +42,7 @@ from nexus.services.unified_runtime import (
     resolve_online_transport_binding,
     resolve_registered_online_cli_spec,
 )
+from nexus.contracts.unified_runtime_receipt import validate_failure_diagnostics
 
 
 @dataclass
@@ -181,6 +182,8 @@ def test_runtime_calls_one_planner_and_emits_one_receipt() -> None:
         for item in receipt["capabilities"]
     )
     assert receipt["capability_coverage"]["coverage_ok"] is True
+    assert receipt["failure_class"] == "capability_skipped"
+    assert validate_failure_diagnostics(receipt) == []
 
 
 def test_runtime_is_fail_closed_without_online_invoker() -> None:
@@ -190,6 +193,8 @@ def test_runtime_is_fail_closed_without_online_invoker() -> None:
     assert receipt["online"]["status"] == "NOT_RUN"
     assert receipt["receipt_complete"] is False
     assert receipt["claim_boundary"]["receipt_complete"] is False
+    assert receipt["failure_class"] == "provider_unavailable"
+    assert validate_failure_diagnostics(receipt) == []
 
 
 def test_runtime_rejects_mismatched_local_task_identity() -> None:

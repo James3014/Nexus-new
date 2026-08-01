@@ -83,6 +83,13 @@ from nexus.contracts.optimization_report import (
     report_contract_readout,
     validate_optimization_report_contract,
 )
+from nexus.contracts.unified_runtime_receipt import (
+    FAILURE_CLASSES,
+    FAILURE_DIAGNOSTICS_SCHEMA,
+    attach_failure_diagnostics,
+    build_failure_diagnostics,
+    validate_failure_diagnostics,
+)
 
 __all__ = [
     "RLMBudget",
@@ -146,4 +153,9 @@ __all__ = [
     "validate_retrieval_receipt",
     "validate_route_context_seam_freeze",
     "validate_sqlite_write_guard",
+    "FAILURE_CLASSES",
+    "FAILURE_DIAGNOSTICS_SCHEMA",
+    "attach_failure_diagnostics",
+    "build_failure_diagnostics",
+    "validate_failure_diagnostics",
 ]
