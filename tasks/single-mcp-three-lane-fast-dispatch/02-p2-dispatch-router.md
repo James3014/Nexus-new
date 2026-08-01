@@ -30,6 +30,7 @@
 ## Allowed Files
 
 - `nexus/orchestrator/unified_mcp_gateway.py`
+- `scripts/ops/nexus_mcp_gateway.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
 
 ## Required Behavior
@@ -39,6 +40,9 @@
 3. Use `CapabilityPlanner` as the only route authority and return route, rationale, task ID, base revision, and next action.
 4. Direct requests must use the existing Direct handoff; isolated requests must use existing governed lifecycle submission.
 5. `ASSISTED_CANONICAL` must be fail-closed as not yet implemented until P3 lands; it must never silently allocate a Target.
+
+Scope correction: the launcher self-test assertion is part of the P2 router
+contract and is therefore explicitly included above.
 
 ## Verification Commands
 
