@@ -1755,7 +1755,7 @@ class SelfHostedTaskService:
         """Read-only inventory of registered worktrees and lifecycle ownership."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"), create_root=False)
         inventory = manager.get_workspace_inventory(
             controller_root=root,
             task_states=states,
@@ -1802,7 +1802,12 @@ class SelfHostedTaskService:
         by_task: dict[str, list[dict[str, Any]]] = {}
         for entry in entries:
             by_task.setdefault(str(entry["task_id"]), []).append(entry)
-        conflicts = sorted(task_id for task_id, values in by_task.items() if len(values) > 1)
+        canonical_authority_counts = {
+            task_id: sum(1 for value in values if value["authority"] == "CANONICAL_AUTHORITY")
+            for task_id, values in by_task.items()
+        }
+        conflicts = sorted(task_id for task_id, count in canonical_authority_counts.items() if count > 1)
+        evidence_duplicates = sorted(task_id for task_id, values in by_task.items() if len(values) > 1 and task_id not in conflicts)
         return {
             "schema": "nexus.lifecycle_state_root_inventory.v1",
             "canonical_state_root": str(canonical),
@@ -1810,6 +1815,7 @@ class SelfHostedTaskService:
             "task_count": len(by_task),
             "conflict_task_ids": conflicts,
             "authority_conflict": bool(conflicts),
+            "evidence_duplicate_task_ids": evidence_duplicates,
             "entries": entries,
             "inventory_sha256": hashlib.sha256(
                 json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1825,7 +1831,7 @@ class SelfHostedTaskService:
         """Build a stable dry-run plan; no state or workspace mutation occurs."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"), create_root=False)
         inventory = manager.get_workspace_inventory(
             controller_root=root,
             task_states=states,
@@ -1844,7 +1850,7 @@ class SelfHostedTaskService:
         """Read-only reusable-slot readiness check."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"), create_root=False)
         status = manager.get_reusable_slot_status(
             campaign_id=campaign_id,
             slot_index=slot_index,

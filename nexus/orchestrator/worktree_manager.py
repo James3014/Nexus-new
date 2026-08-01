@@ -179,9 +179,11 @@ class WorktreeManager:
         root_dir: str = ".nexus/worktrees",
         *,
         process_checker: Optional[Callable[[Path], bool]] = None,
+        create_root: bool = True,
     ):
         self.root_dir = Path(root_dir)
-        self.root_dir.mkdir(parents=True, exist_ok=True)
+        if create_root:
+            self.root_dir.mkdir(parents=True, exist_ok=True)
         self.process_checker = process_checker or self._path_has_process
 
     def _run_git(

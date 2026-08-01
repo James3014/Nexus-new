@@ -162,8 +162,9 @@ def test_state_root_inventory_classifies_nested_receipts_and_conflicts(tmp_path,
 
     inventory = service.state_root_inventory()
 
-    assert inventory["authority_conflict"] is True
-    assert inventory["conflict_task_ids"] == ["task-a"]
+    assert inventory["authority_conflict"] is False
+    assert inventory["conflict_task_ids"] == []
+    assert inventory["evidence_duplicate_task_ids"] == ["task-a"]
     assert {entry["authority"] for entry in inventory["entries"]} == {
         "CANONICAL_AUTHORITY", "REHEARSAL_EVIDENCE",
     }
@@ -1211,6 +1212,23 @@ def test_workspace_inventory_plan_and_slot_status_are_read_only(tmp_path):
     assert slot["status"] in {"READY", "BLOCKED"}
     assert Path(lease.target_worktree).exists()
     assert sorted(path.name for path in (tmp_path / "state").iterdir()) == before
+
+
+def test_workspace_read_only_calls_do_not_create_missing_target_root(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    subprocess.run(["git", "init", "-q", str(controller)], check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "-C", str(controller), "commit", "--allow-empty", "-m", "init"], check=True, capture_output=True)
+    missing_root = tmp_path / "missing-target-root"
+    assert not missing_root.exists()
+
+    service.workspace_inventory(controller_root=controller)
+    service.workspace_convergence_plan(controller_root=controller)
+    service.workspace_slot_status(campaign_id="read-only", controller_root=controller)
+
+    assert not missing_root.exists()
+    assert not (controller.parent / "runtime-targets").exists()
 
 
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):
