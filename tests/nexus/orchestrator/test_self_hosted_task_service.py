@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -1705,7 +1706,7 @@ def test_final_block_clean_no_candidate_recommends_same_task_retry(tmp_path):
 def test_duplicate_task_card_hash_returns_existing_task_and_retry_action(tmp_path):
     card = tmp_path / "card.md"
     card.write_text("task_id: logical-new\n", encoding="utf-8")
-    card_hash = subprocess.run(["git", "hash-object", str(card)], check=True, capture_output=True, text=True).stdout.strip()
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("logical-old", {"task_id": "logical-old", "status": "FINAL_BLOCK", "task_card_hash": card_hash})
     request = _request(tmp_path, task_id="logical-new", task_card_path=str(card), allow_unbound_test_identity=True)
