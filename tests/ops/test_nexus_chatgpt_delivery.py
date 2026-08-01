@@ -116,7 +116,7 @@ def test_stable_task_id_rejects_version_suffix_retry_pattern():
         stable_task_id("Do work", ["a.py"], explicit="do-work-v2")
 
 
-def test_build_request_uses_managed_target_root_and_exact_head(tmp_path: Path):
+def test_build_request_defaults_to_direct_without_retired_target_fields(tmp_path: Path):
     repo = _repo(tmp_path)
     target_root = tmp_path / "self-hosted-lifecycle-targets"
     request = build_request(
@@ -132,9 +132,11 @@ def test_build_request_uses_managed_target_root_and_exact_head(tmp_path: Path):
     assert request["controller_revision"] == head
     assert request["target_base_revision"] == head
     assert request["controller_repo_root"] == str(repo.resolve())
-    assert request["target_worktree_root"] == str(target_root.resolve())
-    assert request["target_repo_root"] == str((target_root / "chatgpt-delivery-cutover").resolve())
-    assert request["direct_delivery_allowed"] is False
+    assert request["execution_lane"] == "DIRECT_CANONICAL"
+    assert request["primary_agent"] is True
+    assert "target_worktree_root" not in request
+    assert "target_repo_root" not in request
+    assert "direct_delivery_allowed" not in request
     assert request["delivery_channel"] == "chatgpt_connector_nexus_bash"
 
 
@@ -149,13 +151,14 @@ def test_launch_surfaces_existing_approval_before_new_submission(tmp_path: Path)
         target_worktree_root=tmp_path / "targets",
         allowed_files=["scripts/ops/nexus_chatgpt_delivery.py"],
         verifier_commands=["git diff --check"],
+        worker="agy",
         service=service,
     )
 
     assert payload["status"] == "ACTION_REQUIRED"
     assert payload["submission_blocked"] is True
     assert payload["connector_tool"] == "nexus.bash"
-    assert payload["direct_delivery_allowed"] is False
+    assert payload["execution_lane"] == "ISOLATED_TARGET"
     assert service.submitted_requests == []
     command = payload["actionable"]["next_commands"][0]
     assert command["connector_tool"] == "nexus.bash"
@@ -193,6 +196,7 @@ def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
         target_worktree_root=tmp_path / "targets",
         allowed_files=["scripts/ops/nexus_chatgpt_delivery.py"],
         verifier_commands=["git diff --check"],
+        worker="agy",
         service=service,
     )
 
@@ -200,13 +204,34 @@ def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
     assert service.waited == ["chatgpt-delivery-cutover"]
     assert len(service.submitted_requests) == 1
     request = service.submitted_requests[0]
-    assert request["target_worktree_root"] == str((tmp_path / "targets").resolve())
-    assert request["target_repo_root"] == str((tmp_path / "targets" / "chatgpt-delivery-cutover").resolve())
+    assert request["target_worktree_root"] == str((tmp_path / "nexus-runtime-targets").resolve())
+    assert request["target_repo_root"] == str((tmp_path / "nexus-runtime-targets" / "chatgpt-delivery-cutover").resolve())
     command = payload["actionable"]["next_commands"][0]["command"]
     assert command == (
         f"{sys.executable} -m scripts.engine.nexus_cli self-hosted integrate --task-id chatgpt-delivery-cutover "
         f"--integration-branch {DEFAULT_INTEGRATION_BRANCH}"
     )
+
+
+def test_default_delivery_returns_direct_finish_action_without_wait(tmp_path: Path):
+    repo = _repo(tmp_path)
+    service = FakeSelfHostedService()
+    payload = run_delivery_cutover(
+        what="Fix one bounded README typo",
+        why="Small canonical task",
+        task_id="chatgpt-direct-small-task",
+        controller_repo_root=repo,
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        service=service,
+    )
+
+    assert payload["execution_lane"] == "DIRECT_CANONICAL"
+    assert payload["completion_surface"] == "nexus_task_finish"
+    assert payload["next_action"] == "edit_canonical_checkout"
+    assert service.waited == []
+    assert "direct_delivery_allowed" not in payload
+    assert "managed_target" not in payload
 
 
 def test_action_command_reports_missing_approval_binding():

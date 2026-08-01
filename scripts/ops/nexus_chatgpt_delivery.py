@@ -97,10 +97,7 @@ def stable_task_id(what: str, allowed_files: Sequence[str], explicit: str | None
 
 
 def default_target_worktree_root(controller_repo_root: Path) -> Path:
-    parent = controller_repo_root.resolve().parent
-    if parent.name == "self-hosted-lifecycle-targets":
-        return parent
-    return parent / "self-hosted-lifecycle-targets"
+    return controller_repo_root.resolve().parent / "nexus-runtime-targets"
 
 
 def connector_tool_policy(tool_name: str) -> dict[str, Any]:
@@ -232,7 +229,8 @@ def build_request(
     task_id: str | None = None,
     target_worktree_root: Path | None = None,
     forbidden_files: Sequence[str] | None = None,
-    worker: str = "codex",
+    worker: str = "auto",
+    execution_preference: str = "auto",
 ) -> dict[str, Any]:
     if not what.strip() or not why.strip():
         raise ChatGPTDeliveryCutoverError("what and why are required")
@@ -245,24 +243,44 @@ def build_request(
     controller = controller_repo_root.resolve()
     revision = _run_git(controller, "rev-parse", "HEAD")
     normalized_task_id = stable_task_id(what, allowed, explicit=task_id)
-    target_root = (target_worktree_root or default_target_worktree_root(controller)).resolve()
-    target_repo_root = target_root / normalized_task_id
-    return {
+    requested_preference = str(execution_preference or "auto").strip().upper()
+    if requested_preference == "AUTO":
+        requested_preference = "auto"
+    if requested_preference not in {"auto", "DIRECT_CANONICAL", "ISOLATED_TARGET"}:
+        raise ChatGPTDeliveryCutoverError("execution_preference is unsupported")
+    normalized_worker = str(worker or "auto").strip().lower() or "auto"
+    if normalized_worker not in {"auto", "codex", "primary", "agy", "gemini", "opencode", "mimo", "ollama"}:
+        raise ChatGPTDeliveryCutoverError("worker is unsupported")
+    direct = (
+        requested_preference == "DIRECT_CANONICAL"
+        or requested_preference == "auto" and normalized_worker in {"auto", "codex", "primary"}
+    )
+    execution_lane = "DIRECT_CANONICAL" if direct else "ISOLATED_TARGET"
+    # The service owns Target derivation.  Keep this compatibility field only
+    # for the governed isolated request and always derive the canonical root.
+    target_root = default_target_worktree_root(controller).resolve()
+    request = {
         "task_id": normalized_task_id,
         "what": what.strip(),
         "why": why.strip(),
         "controller_revision": revision,
         "target_base_revision": revision,
         "controller_repo_root": str(controller),
-        "target_repo_root": str(target_repo_root),
-        "target_worktree_root": str(target_root),
         "allowed_files": allowed,
         "forbidden_files": normalize_path_list(forbidden_files, name="forbidden_files"),
         "verifier_commands": verifiers,
-        "worker": worker,
+        "worker": "codex" if direct else normalized_worker,
+        "execution_lane": execution_lane,
+        "primary_agent": direct,
         "delivery_channel": "chatgpt_connector_nexus_bash",
-        "direct_delivery_allowed": False,
+        "execution_preference": requested_preference,
     }
+    if not direct:
+        request.update({
+            "target_repo_root": str(target_root / normalized_task_id),
+            "target_worktree_root": str(target_root),
+        })
+    return request
 
 
 def run_delivery_cutover(
@@ -276,26 +294,13 @@ def run_delivery_cutover(
     controller_repo_root: Path | None = None,
     target_worktree_root: Path | None = None,
     state_dir: str | Path | None = None,
-    worker: str = "codex",
+    worker: str = "auto",
+    execution_preference: str = "auto",
     timeout_seconds: float = 10.0,
     poll_interval_seconds: float = 0.25,
     service: Any | None = None,
 ) -> dict[str, Any]:
     service_obj = service or get_self_hosted_service(state_dir=state_dir)
-    before = run_self_hosted_list_actionable(state_dir=state_dir, service=service_obj)
-    actionable_before = summarize_actionable(before, state_dir=state_dir)
-    if actionable_before["actionable_count"] > 0:
-        return {
-            "schema": "nexus.chatgpt_delivery_cutover.v1",
-            "status": "ACTION_REQUIRED",
-            "submitted": False,
-            "submission_blocked": True,
-            "blocker": "existing_actionable_self_hosted_work",
-            "connector_tool": CONNECTOR_BASH_TOOL,
-            "direct_delivery_allowed": False,
-            "actionable": actionable_before,
-        }
-
     controller = (controller_repo_root or discover_repo_root()).resolve()
     request = build_request(
         what=what,
@@ -307,8 +312,38 @@ def run_delivery_cutover(
         task_id=task_id,
         target_worktree_root=target_worktree_root,
         worker=worker,
+        execution_preference=execution_preference,
     )
+    direct = request["execution_lane"] == "DIRECT_CANONICAL"
+    if not direct:
+        before = run_self_hosted_list_actionable(state_dir=state_dir, service=service_obj)
+        actionable_before = summarize_actionable(before, state_dir=state_dir)
+        if actionable_before["actionable_count"] > 0:
+            return {
+                "schema": "nexus.chatgpt_delivery_cutover.v1",
+                "status": "ACTION_REQUIRED",
+                "submitted": False,
+                "submission_blocked": True,
+                "blocker": "existing_actionable_self_hosted_work",
+                "connector_tool": CONNECTOR_BASH_TOOL,
+                "execution_lane": request["execution_lane"],
+                "actionable": actionable_before,
+            }
     submitted = run_self_hosted_submit(request, state_dir=state_dir, service=service_obj)
+    if direct:
+        return {
+            "schema": "nexus.chatgpt_delivery_cutover.v1",
+            "status": submitted.get("status", "DIRECT_CANONICAL_READY"),
+            "submitted": True,
+            "submission_blocked": False,
+            "connector_tool": CONNECTOR_BASH_TOOL,
+            "execution_lane": "DIRECT_CANONICAL",
+            "completion_surface": "nexus_task_finish",
+            "next_action": "edit_canonical_checkout",
+            "request": request,
+            "submitted_state": submitted,
+            "actionable": {"actionable_count": 0, "tasks": []},
+        }
     waited = run_self_hosted_wait(
         request["task_id"],
         timeout_seconds=timeout_seconds,
@@ -323,7 +358,7 @@ def run_delivery_cutover(
         "submitted": True,
         "submission_blocked": False,
         "connector_tool": CONNECTOR_BASH_TOOL,
-        "direct_delivery_allowed": False,
+        "execution_lane": request["execution_lane"],
         "managed_target": {
             "target_worktree_root": request["target_worktree_root"],
             "target_repo_root": request["target_repo_root"],
@@ -359,7 +394,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     launch.add_argument("--controller-repo-root")
     launch.add_argument("--target-worktree-root")
     launch.add_argument("--state-dir")
-    launch.add_argument("--worker", default="codex")
+    launch.add_argument("--worker", default="auto")
+    launch.add_argument("--execution-preference", choices=["auto", "DIRECT_CANONICAL", "ISOLATED_TARGET"], default="auto")
     launch.add_argument("--timeout", type=float, default=10.0)
     launch.add_argument("--poll-interval", type=float, default=0.25)
     return parser.parse_args(list(argv))
@@ -388,6 +424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target_worktree_root=Path(args.target_worktree_root).resolve() if args.target_worktree_root else None,
                 state_dir=args.state_dir,
                 worker=args.worker,
+                execution_preference=args.execution_preference,
                 timeout_seconds=args.timeout,
                 poll_interval_seconds=args.poll_interval,
             )
