@@ -50,12 +50,12 @@ validation seam.
 ## Verification receipt
 
 - candidate_commit: `256c4f2e30f79c915d9255a5a3769f0944babdf3`
-- focused_gateway_service: `162 passed, 1 warning`
-- focused_http: `5 passed, 1 warning` (loopback permission granted)
+- canonical_verification_head: `ab291635dd7ae9edb18c42906e02c8426405c516`
+- exact_focused_suite: `170 passed, 1 warning` (loopback permission granted)
 - diff_check: `PASS`
 - tracked_task_card_binding: `PASS`
-- owner_inline_binding_and_tamper_rejection: `PASS`
-- approval_consume_once_and_reconnect_drift: `PASS`
+- owner_inline_approve_integrate_and_tamper_rejection: `PASS`
+- approval_consume_once_and_reconnect_definition_drift: `PASS`
 - cline_live_execution: separate downstream Gate; not claimed here
 
 ## Exit criteria
