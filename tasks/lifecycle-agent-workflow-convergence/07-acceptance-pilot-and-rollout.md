@@ -66,9 +66,13 @@ next_action, protected main is unchanged, push is false, and one live
 - temporary_loopback_health: `tool_count=24`,
   `tool_manifest_revision=6c1b0339…`, `reload_required=false` at commit
   `04fc0d959`; this is local Gateway evidence, not GPT connector evidence
-- live_nexus01_smoke: `NOT_RUN`
+- external_proxy_commit: `2d1efff955a9013dfb016deca775f88cf8cdd605`
+- external_proxy_tests_and_typecheck: `PASS`
+- external_proxy_artifact_sha256: `7155a3b777d8d04fffe3c56536eb8dcb97244edd2b0ae25c0f9ea7d769b3f3a0`
+- public_synthetic_tools_list: `PASS (24 tools, approval.v2 schema visible)`
+- live_nexus01_smoke: `NOT_PROVEN_AFTER_24_TOOL_RELOAD`
 - claim_ceiling: `LOCAL_GATEWAY_ACCEPTANCE_PASS`
-- remaining_blocker: `GPT_TO_NEXUS_LIFECYCLE_WORKFLOW_ACCEPTANCE_PASS requires live nexus01 read/Direct/Candidate smoke`
+- remaining_blocker: `GPT_TO_NEXUS_LIFECYCLE_WORKFLOW_ACCEPTANCE_PASS requires fresh nexus01 reconnect plus read/Direct/Candidate smoke`
 
 ## Block classification
 
