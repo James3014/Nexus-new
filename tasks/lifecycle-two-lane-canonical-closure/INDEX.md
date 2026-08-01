@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: completed
+status: active_revalidation
 campaign_id: lifecycle-two-lane-canonical-closure
 source_specification: owner-authorized lifecycle diagnosis and two-lane canonical closure plan from 2026-08-01
 AUTO_CHAIN: false
@@ -28,10 +28,11 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 5. `04-p4-same-task-retry.md` - `lifecycle-two-lane-p4-same-task-retry`
 6. `05-p5-target-root-and-telemetry.md` - `lifecycle-two-lane-p5-target-root-and-telemetry`
 7. `06-p6-cutover-gate.md` - `lifecycle-two-lane-p6-cutover-gate`
+8. `07-lifecycle-two-lane-gate-revalidation.md` - `lifecycle-two-lane-gate-revalidation`
 
 ## Current Frontier
 
-none (completed)
+`lifecycle-two-lane-gate-revalidation`
 
 ## Completed Cards
 
@@ -48,6 +49,8 @@ none (completed)
 The P6 cutover gate is complete. `AUTO_CHAIN=false`; owner review remains required for any future promotion, integration, push, branch/ref cleanup, or external workspace cleanup.
 
 P6 gate evidence: 30-task matrix passed; combined lifecycle regression passed `213/213`; canonical checkout is clean with one registered worktree.
+
+P7 revalidation is owner-authorized because the prior matrix covered lane selection but did not prove 15 Direct commits, 10 real isolated success/cleanup cycles, 5 fault/retry cycles, SLOs, or owner-finish archive closure.
 
 ## Dependencies
 
