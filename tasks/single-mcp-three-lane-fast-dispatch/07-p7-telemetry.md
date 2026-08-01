@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p7-telemetry`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Attach bounded route, context, provider, patch-validation, commit, cleanup, and total wall-time telemetry to every gateway dispatch result.
 - read_only: false
@@ -44,3 +44,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/
 - Failed Assisted paths remain fail-closed with telemetry.
 - Scoped commit and Direct receipt exist.
 - No external connector cutover is claimed by this card.
+
+## Completion Evidence
+
+- Runtime commit: `b05c3730c9eef4f750e8e62c651138b95523cbdd`
+- Direct receipt: `31fc2111469a136275990d2e7bfe8e5782675f5108e0cf4cb5e80be7c144b057`
+- Verification: 11 gateway tests passed; gateway self-test passed; `git diff --check` passed.
