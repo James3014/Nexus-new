@@ -35,7 +35,8 @@ Owner review of the exact scoped commit.
 
 ## Verification receipt
 
-- scoped commits: `3eac7488c`, `14b49c305`, `14bcca1c6`, `c45a44ec8`
+- scoped commits: `3eac7488c`, `14b49c305`, `14bcca1c6`, `c45a44ec8`,
+  `cb9e42ae3`
 - focused Gateway suite: `40 passed, 1 warning`
 - real Cline binary: `3.0.48` (direct binary; wrapper path still crashes)
 - real stdout fixture: `tests/fixtures/cline/glm_52_real_stdout.ndjson`
@@ -45,6 +46,9 @@ Owner review of the exact scoped commit.
   contains provider error events and no candidate patch
 - permission mode: Gateway now uses Cline `--plan --auto-approve false`; the
   receipt explicitly records `allowlist_not_enforced`
+- provider command now carries an explicit bounded `--timeout 60`; this limits
+  non-interactive tool-call hangs but does not create physical tool policy
+  enforcement
 - timeout/cancel distinction: poll timeout remains non-destructive; explicit
   cancel retains SIGTERM/SIGKILL bounded cleanup and isolated workspace receipt
 - cancel receipts now hash and size flushed stdout/stderr after bounded process
