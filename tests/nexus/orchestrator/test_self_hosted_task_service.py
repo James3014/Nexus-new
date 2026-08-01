@@ -17,7 +17,11 @@ import pytest
 
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
-from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService, resolve_execution_lane
+from nexus.orchestrator.self_hosted_task_service import (
+    SelfHostedTaskService,
+    resolve_canonical_target_roots,
+    resolve_execution_lane,
+)
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
@@ -1228,7 +1232,7 @@ def test_workspace_read_only_calls_do_not_create_missing_target_root(tmp_path):
     service.workspace_slot_status(campaign_id="read-only", controller_root=controller)
 
     assert not missing_root.exists()
-    assert not (controller.parent / "runtime-targets").exists()
+    assert not (controller.parent / "nexus-runtime-targets").exists()
 
 
 def test_direct_canonical_lane_returns_handoff_without_state_or_target(tmp_path, monkeypatch):
@@ -1258,7 +1262,7 @@ def test_direct_canonical_lane_returns_handoff_without_state_or_target(tmp_path,
     assert result["execution_lane"] == "DIRECT_CANONICAL"
     assert result["state_created"] is False
     assert not (tmp_path / "state").exists()
-    assert not (tmp_path / "runtime-targets").exists()
+    assert not (tmp_path / "nexus-runtime-targets").exists()
 
 
 def test_direct_canonical_lane_fails_closed_to_isolated_for_delegated_worker(tmp_path, monkeypatch):
@@ -1351,6 +1355,30 @@ def test_duplicate_task_card_hash_is_rejected(tmp_path):
 
     with pytest.raises(RuntimeError, match="DUPLICATE_LOGICAL_TASK"):
         service.submit_task(request)
+
+
+def test_receipt_exposes_numeric_telemetry(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("telemetry-task", {
+        "task_id": "telemetry-task",
+        "status": "FINAL_BLOCK",
+        "submitted_at": "2026-01-01T00:00:00+00:00",
+        "telemetry": {"wall_time_ms": 12, "overhead_ms": 4},
+    })
+
+    receipt = service.get_receipt("telemetry-task")
+
+    assert receipt["telemetry"]["wall_time_ms"] == 12
+    assert receipt["telemetry"]["overhead_ms"] == 4
+
+
+def test_default_production_target_root_is_outside_disabled_worktree_namespace(monkeypatch):
+    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+
+    root, target = resolve_canonical_target_roots("root-test")
+
+    assert str(root) == "/Users/jameschen/Workspace/nexus-runtime-targets"
+    assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
 
 
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):

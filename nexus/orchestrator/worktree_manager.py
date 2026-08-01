@@ -145,11 +145,13 @@ def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
         hooks_dir = Path(override).expanduser().resolve()
     else:
         root = (base_path.resolve() if base_path else Path.cwd().resolve())
-        if "nexus-worktrees" in root.parts:
-            idx = root.parts.index("nexus-worktrees")
-            hooks_root = Path(*root.parts[:idx + 1]) / "runtime-targets"
+        if "nexus-runtime-targets" in root.parts:
+            idx = root.parts.index("nexus-runtime-targets")
+            hooks_root = Path(*root.parts[:idx + 1])
+        elif root == Path("/Users/jameschen/Workspace/nexus"):
+            hooks_root = Path("/Users/jameschen/Workspace/nexus-runtime-targets")
         else:
-            hooks_root = root / "nexus-worktrees" / "runtime-targets"
+            hooks_root = root.parent / "nexus-runtime-targets"
         hooks_dir = hooks_root / ".nexus_git_hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     if not hooks_dir.is_dir():

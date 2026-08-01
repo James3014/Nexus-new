@@ -100,11 +100,13 @@ def resolve_canonical_target_roots(
         base_worktree_root = Path(requested_target_worktree_root).expanduser().resolve()
     else:
         workspace_root = Path.cwd().resolve()
-        if "nexus-worktrees" in workspace_root.parts:
-            idx = workspace_root.parts.index("nexus-worktrees")
-            base_worktree_root = Path(*workspace_root.parts[:idx + 1]) / "runtime-targets"
+        if workspace_root == CANONICAL_SOURCE_ROOT:
+            base_worktree_root = Path("/Users/jameschen/Workspace/nexus-runtime-targets")
+        elif "nexus-runtime-targets" in workspace_root.parts:
+            idx = workspace_root.parts.index("nexus-runtime-targets")
+            base_worktree_root = Path(*workspace_root.parts[:idx + 1])
         else:
-            base_worktree_root = workspace_root / "nexus-worktrees" / "runtime-targets"
+            base_worktree_root = workspace_root.parent / "nexus-runtime-targets"
         if campaign_id:
             base_worktree_root = base_worktree_root / campaign_id
 
@@ -635,6 +637,16 @@ class SelfHostedTaskService:
             if previous != status:
                 history.append({"status": status, "at": now})
             state["status_history"] = history
+            submitted_at = _parse_time(state.get("submitted_at"))
+            started_at = _parse_time(state.get("worker_started_at"))
+            if submitted_at is not None:
+                wall_time_ms = max(0, int((time.time() - submitted_at) * 1000))
+                worker_wall_time_ms = max(0, int((time.time() - started_at) * 1000)) if started_at is not None else 0
+                state["telemetry"] = {
+                    "wall_time_ms": wall_time_ms,
+                    "worker_wall_time_ms": worker_wall_time_ms,
+                    "overhead_ms": max(0, wall_time_ms - worker_wall_time_ms),
+                }
             if status in TERMINAL_STATUSES:
                 state["worker_finished_at"] = now
                 state["worker_child_pgid"] = None
@@ -1816,7 +1828,7 @@ class SelfHostedTaskService:
         """Read-only inventory of registered worktrees and lifecycle ownership."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"), create_root=False)
+        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False)
         inventory = manager.get_workspace_inventory(
             controller_root=root,
             task_states=states,
@@ -1892,7 +1904,7 @@ class SelfHostedTaskService:
         """Build a stable dry-run plan; no state or workspace mutation occurs."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"), create_root=False)
+        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False)
         inventory = manager.get_workspace_inventory(
             controller_root=root,
             task_states=states,
@@ -1911,7 +1923,7 @@ class SelfHostedTaskService:
         """Read-only reusable-slot readiness check."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"), create_root=False)
+        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False)
         status = manager.get_reusable_slot_status(
             campaign_id=campaign_id,
             slot_index=slot_index,
@@ -1955,7 +1967,7 @@ class SelfHostedTaskService:
         """
         root = Path(controller_root or Path.cwd()).resolve()
         states = self._workspace_task_states()
-        manager = WorktreeManager(root_dir=str(root.parent / "runtime-targets"))
+        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"))
         inventory = manager.get_workspace_inventory(controller_root=root, task_states=states)
         if inventory.controller_head != expected_controller_revision:
             raise RuntimeError(
@@ -2878,6 +2890,7 @@ class SelfHostedTaskService:
             "attempt_id": state.get("attempt_id"),
             "status": state.get("status"),
             "submitted_at": state.get("submitted_at"),
+            "telemetry": state.get("telemetry") or {"wall_time_ms": 0, "overhead_ms": 0},
             "contract_hash": state.get("contract_hash"),
             "controller_worktree": state.get("controller_worktree") or contract.get("controller_repo_root"),
             "controller_revision": state.get("controller_revision") or contract.get("controller_revision"),
