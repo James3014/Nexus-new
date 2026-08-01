@@ -286,3 +286,24 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
     assert result["provider"] == "cline"
     assert result["patch"].startswith("diff --git")
     assert captured["command"][captured["command"].index("--model") + 1] == "cline-pass/glm-5.2"
+
+
+def test_grok_runner_uses_positional_prompt(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"patch": "diff --git a/a b/a"}), stderr="")
+
+    monkeypatch.setenv("NEXUS_GROK_BIN", "/Users/jameschen/.grok/bin/grok")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    result = UnifiedMCPGateway._run_agy_plan(
+        prompt="Return a patch",
+        allowed_files=["a"],
+        provider="grok",
+        model="grok-4.5",
+    )
+
+    assert result["provider"] == "grok"
+    assert captured["command"][-1] == "Return a patch"
+    assert "--prompt" not in captured["command"]

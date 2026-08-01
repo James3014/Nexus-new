@@ -605,6 +605,8 @@ class UnifiedMCPGateway:
             command = [executable, "run", "--model", selected_model, prompt]
         elif requested == "ollama":
             command = [executable, "run", selected_model, prompt]
+        elif requested == "grok":
+            command = [executable, "--model", selected_model, prompt]
         else:
             command = [executable, "--model", selected_model, "--prompt", prompt]
         provider_timeout = 90 if requested == "cline" else 30
