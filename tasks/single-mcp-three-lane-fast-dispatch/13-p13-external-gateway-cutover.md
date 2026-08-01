@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p13-external-gateway-cutover`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - authorization: owner-approved in active continuation on 2026-08-01
 - objective: Make the externally registered DevSpace runtime expose only the canonical Nexus gateway, then prove immutable identity, auth scope, two clean starts, and one GPT-visible registration.
@@ -106,7 +106,20 @@ npm --prefix /Users/jameschen/Workspace/nexus-devspace-mcp pack --json
 - Two clean loopback starts returned identical `/healthz` proxy identity; an
   in-memory MCP client listed exactly the 10 gateway tools, and a live proxy
   call reached the canonical gateway and returned `nexus.mcp_gateway_status.v1`.
-- Remaining gate: no GPT/ChatGPT owner-surface connector registration is
-  observable from the local shell; the manual owner/app registration must be
-  performed and then checked for exactly one Nexus gateway entry. No second
-  registration was created by this task.
+
+## Closure Evidence (2026-08-01)
+
+- Owner-surface connection `nexus01` completed a live readonly MCP test against
+  `https://jamesmacbook-pro-356.tail7657b6.ts.net/mcp` and reported the exact
+  `nexus-mcp-gateway@0.1.0` identity, 10-tool surface, canonical root/branch/
+  HEAD, clean checkout, zero tasks, zero Targets, `CapabilityPlanner`, and all
+  three execution lanes.
+- DevSpace logs show one fresh dynamic ChatGPT registration event followed by
+  OAuth approval and five fresh MCP sessions in the 07:10-07:14 window. All
+  authenticated MCP POSTs returned 200 or 202; no 5xx occurred.
+- The observed public registration used the Nexus redirect URI
+  `https://chatgpt.com/connector/oauth/OKJfDgDY_EZ8` and resource
+  `https://jamesmacbook-pro-356.tail7657b6.ts.net/mcp`.
+- Live gateway status and workspace snapshot match this card's canonical
+  identity; canonical worktree count is 1 and actionable/active lifecycle
+  counts are 0.

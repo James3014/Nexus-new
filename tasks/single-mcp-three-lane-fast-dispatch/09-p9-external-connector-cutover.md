@@ -5,7 +5,8 @@
 - task_id: `single-mcp-three-lane-p9-external-connector-cutover`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: SUPERSEDED
+- superseded_by: single-mcp-three-lane-p13-external-gateway-cutover
 - owner: James Chen
 - objective: Replace the stale external DevSpace MCP surface with the canonical Nexus gateway and prove fresh artifact identity across two clean starts before claiming one GPT-visible MCP registration.
 - read_only: true

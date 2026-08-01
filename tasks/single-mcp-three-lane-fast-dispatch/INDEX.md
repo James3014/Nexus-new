@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: active
+status: completed
 campaign_id: single-mcp-three-lane-fast-dispatch
 source_specification: owner-authorized single-MCP gateway and three-lane implementation plan from 2026-08-01
 AUTO_CHAIN: false
@@ -43,7 +43,7 @@ one explicit executable next action.
 
 ## Current Frontier
 
-`single-mcp-three-lane-p13-external-gateway-cutover`
+`none` (P13 external gateway cutover and owner-surface verification complete)
 
 ## Completed Cards
 
@@ -59,6 +59,12 @@ one explicit executable next action.
 - `single-mcp-three-lane-p10-compatibility-adapter-cutover`: runtime committed `4c8604928`; Direct receipt `3ef82182e7dd13dec3470594f2c08d1bbbe863c7a26ddf1519f8455d7209ef7c`
 - `single-mcp-three-lane-p11-gateway-contract-hardening`: runtime committed `727c8b592`; Direct receipt `ffa75a97df0bf08b02226c92ef94cd42de1b309ece98ace7a8743dd83fed011a`
 - `single-mcp-three-lane-p12-finish-contract-alias`: runtime committed `7ecb408c5`; Direct receipt `bb87ecb23066c48f7a5914f82453a9f5ea03a0171f61e0ace4e0651fb561ae87`
+- `single-mcp-three-lane-p13-external-gateway-cutover`: external source `b89ce89ca`; owner-surface `nexus01` verified
+
+## Superseded Cards
+
+- `single-mcp-three-lane-p9-external-connector-cutover`: superseded by
+  `single-mcp-three-lane-p13-external-gateway-cutover`
 
 ## Dependencies
 
@@ -76,6 +82,17 @@ P12 closes the public Direct finish contract using the gateway's `base_sha`
 alias; it is canonical-only and does not alter external registration.
 P13 is owner-authorized on 2026-08-01 to update the external DevSpace source,
 build/install its immutable artifact, and perform the two-start connector gate.
+
+## Closure Evidence (2026-08-01)
+
+- `nexus01` performed a live readonly connection and exposed the unified
+  `nexus-mcp-gateway` 10-tool surface; no second public Nexus MCP was created
+  by the cutover.
+- Public OAuth/MCP requests from the owner surface reached the Funnel and
+  completed authenticated sessions; local and public identity probes agree on
+  the canonical gateway before this closure commit.
+- The external artifact must be rebuilt after this closure commit so its
+  embedded gateway commit remains exact.
 
 ## Global Forbidden Scope
 
