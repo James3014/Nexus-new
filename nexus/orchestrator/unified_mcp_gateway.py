@@ -606,7 +606,8 @@ class UnifiedMCPGateway:
             command = [executable, "run", selected_model, prompt]
         else:
             command = [executable, "--model", selected_model, "--prompt", prompt]
-        result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
+        provider_timeout = 60 if requested == "cline" else 30
+        result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=provider_timeout, check=False)
         if result.returncode != 0:
             return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
         def decode_object(text: str) -> dict[str, Any] | None:
