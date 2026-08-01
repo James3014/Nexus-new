@@ -21,6 +21,9 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 - Workers may commit within a card; they may not approve, integrate, push, or clean up their own Candidate.
 - `AUTO_CHAIN=false`; every successor requires a fresh Owner gate.
 - This campaign does not alter `model-workforce-v21-runtime-closure` or the AGY account-pool campaign.
+- Pre-P2 bootstrap/context optimization is owned by the existing
+  `tasks/bootstrap-authority-convergence/` campaign. Do not duplicate its
+  cards or bypass its current frontier.
 
 ## Ordered cards
 
@@ -28,7 +31,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 |---:|---|---|---|---|
 | 0 | `lifecycle-workflow-p0-authority-baseline` | `00-authority-and-baseline.md` | COMPLETED | none |
 | 1 | `lifecycle-workflow-p1-action-envelope` | `01-lifecycle-action-envelope.md` | COMPLETED | `4cd6da508` |
-| 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | IN_PROGRESS | P1 `4cd6da508` |
+| 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | PENDING | P1 `4cd6da508` + bootstrap-authority-convergence current frontier |
 | 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | PENDING | P2 integrated |
 | 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | PENDING | P3 integrated |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
@@ -47,6 +50,9 @@ at P1 through the formal lifecycle surface and the current frontier card.
 
 ## Current frontier
 
-`lifecycle-workflow-p2-durable-canonical-actions` is the only executable card. No
-successor may start until it receives a scoped commit, verification evidence,
-and explicit promotion through the formal lifecycle surface.
+`tasks/bootstrap-authority-convergence/08-orphan-workspace-reconciliation.md`
+is the required pre-P2 gate. The lifecycle P2 card remains PENDING until that
+campaign's current frontier is owner-reviewed and its read-only inventory/
+context-budget findings are accepted. No P2 successor may start until it then
+receives a scoped commit, verification evidence, and explicit promotion through
+the formal lifecycle surface.

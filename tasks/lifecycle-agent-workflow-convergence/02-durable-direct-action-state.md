@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: IN_PROGRESS
+status: PENDING
 task_id: lifecycle-workflow-p2-durable-canonical-actions
 commit_required: true
 candidate_required: true
@@ -21,6 +21,8 @@ reconciliation in the existing lifecycle state service.
 ## Dependencies
 
 - `lifecycle-workflow-p1-action-envelope` integrated.
+- `tasks/bootstrap-authority-convergence/08-orphan-workspace-reconciliation.md`
+  and its pre-P2 bootstrap/context optimization gate owner-reviewed.
 
 ## Allowed files
 
