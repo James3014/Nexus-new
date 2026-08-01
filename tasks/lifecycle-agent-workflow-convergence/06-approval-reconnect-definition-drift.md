@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_PENDING_OWNER_REVIEW
 task_id: lifecycle-workflow-p6-approval-reconnect-drift
 commit_required: true
 candidate_required: true
@@ -46,6 +46,17 @@ continuation request. Cline live execution remains a separate downstream gate.
 Owner Inline approval is part of this card's generic authorization binding; the
 guard module is therefore explicitly in scope for the contract-kind/hash
 validation seam.
+
+## Verification receipt
+
+- candidate_commit: `256c4f2e30f79c915d9255a5a3769f0944babdf3`
+- focused_gateway_service: `162 passed, 1 warning`
+- focused_http: `5 passed, 1 warning` (loopback permission granted)
+- diff_check: `PASS`
+- tracked_task_card_binding: `PASS`
+- owner_inline_binding_and_tamper_rejection: `PASS`
+- approval_consume_once_and_reconnect_drift: `PASS`
+- cline_live_execution: separate downstream Gate; not claimed here
 
 ## Exit criteria
 
