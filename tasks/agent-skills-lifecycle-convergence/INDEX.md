@@ -22,7 +22,12 @@ contract without changing Nexus runtime authority or adding a second router.
 
 ## Active card
 
-`00-lifecycle-contract-overlay.md`
+`01-memory-learning-lineage.md`
+
+## Completed cards
+
+- `00-lifecycle-contract-overlay.md` — verified machine-local overlay; commit
+  `a9cead19c` (external Skills intentionally not committed)
 
 ## Exit gate
 

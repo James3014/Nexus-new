@@ -31,6 +31,12 @@ class HandoffRequest:
     decision_id: str = ""
     agent_history: Optional[List[str]] = None
     state_variables: Optional[Dict[str, Any]] = None
+    attempt_id: str = ""
+    action_id: str = ""
+    idempotency_key: str = ""
+    last_successful_action: str = ""
+    uncertain_mutation: bool = False
+    resume_gate: str = ""
 
 @dataclass
 class HandoffRetentionPolicy:
@@ -55,6 +61,12 @@ class HandoffBundle:
     workspace_diff: str = ""
     timestamp: str = ""
     retention_policy: Dict[str, Any] = field(default_factory=dict)
+    attempt_id: str = ""
+    action_id: str = ""
+    idempotency_key: str = ""
+    last_successful_action: str = ""
+    uncertain_mutation: bool = False
+    resume_gate: str = "RECONCILE_REQUIRED"
 
 class HandoffBundleWriter:
     """
@@ -97,6 +109,15 @@ class HandoffBundleWriter:
                 "compress": self.policy.compress,
                 "max_bundles": self.policy.max_bundles,
             },
+            attempt_id=request.attempt_id,
+            action_id=request.action_id,
+            idempotency_key=request.idempotency_key,
+            last_successful_action=request.last_successful_action,
+            uncertain_mutation=bool(request.uncertain_mutation),
+            resume_gate=(
+                str(request.resume_gate or "").strip()
+                or ("RECONCILE_REQUIRED" if request.uncertain_mutation else "OWNER_REVIEW_REQUIRED")
+            ),
         )
 
         ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

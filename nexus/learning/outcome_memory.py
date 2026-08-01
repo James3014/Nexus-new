@@ -11,6 +11,8 @@ from typing import Any, Iterable, Mapping
 
 OUTCOME_MEMORY_SCHEMA = "nexus_outcome_memory_episode.v1"
 DYNAMIC_LEARNING_POLICY_SCHEMA = "nexus_dynamic_learning_policy.v1"
+TERMINAL_OUTCOMES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "PROCESS_LOST", "PARKED", "RETIRED"})
+QUALIFIED_TERMINAL_OUTCOMES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,15 @@ class EpisodeOutcomeRecord:
     ab_lift_value: float = 0.0
     created_at: str = ""
     schema_version: str = OUTCOME_MEMORY_SCHEMA
+    attempt_id: str = ""
+    action_id: str = ""
+    idempotency_key: str = ""
+    terminal_outcome: str = "PARKED"
+    auto_replay_allowed: bool = False
+    qualification_status: str = "UNQUALIFIED"
+    retrieved_lesson_ids: list[str] = field(default_factory=list)
+    applied_lesson_ids: list[str] = field(default_factory=list)
+    lesson_updates: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_task(
@@ -41,7 +52,19 @@ class EpisodeOutcomeRecord:
         receipts: Iterable[Mapping[str, Any]] = (),
         ab_lift_value: float = 0.0,
         created_at: str | None = None,
+        attempt_id: str = "",
+        action_id: str = "",
+        idempotency_key: str = "",
+        terminal_outcome: str | None = None,
+        auto_replay_allowed: bool = False,
+        retrieved_lesson_ids: Iterable[str] = (),
+        applied_lesson_ids: Iterable[str] = (),
+        lesson_updates: Iterable[Mapping[str, Any]] = (),
     ) -> "EpisodeOutcomeRecord":
+        normalized_terminal = str(terminal_outcome or ("SUCCEEDED" if solved else "PARKED")).upper()
+        if normalized_terminal not in TERMINAL_OUTCOMES:
+            normalized_terminal = "PARKED"
+        qualified = normalized_terminal in QUALIFIED_TERMINAL_OUTCOMES and not bool(trust_mismatch)
         return cls(
             task_id=str(task_id or "unknown"),
             task_type=str(task_type or "unknown"),
@@ -53,6 +76,15 @@ class EpisodeOutcomeRecord:
             receipts=[dict(receipt) for receipt in receipts if isinstance(receipt, Mapping)],
             ab_lift_value=float(ab_lift_value or 0.0),
             created_at=created_at or datetime.now(timezone.utc).isoformat(),
+            attempt_id=str(attempt_id or ""),
+            action_id=str(action_id or ""),
+            idempotency_key=str(idempotency_key or ""),
+            terminal_outcome=normalized_terminal,
+            auto_replay_allowed=bool(auto_replay_allowed) and qualified,
+            qualification_status="QUALIFIED" if qualified else "UNQUALIFIED",
+            retrieved_lesson_ids=[str(item) for item in retrieved_lesson_ids if str(item)],
+            applied_lesson_ids=[str(item) for item in applied_lesson_ids if str(item)],
+            lesson_updates=[dict(item) for item in lesson_updates if isinstance(item, Mapping)],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,6 +100,15 @@ class EpisodeOutcomeRecord:
             "receipts": [dict(receipt) for receipt in self.receipts],
             "ab_lift_value": self.ab_lift_value,
             "created_at": self.created_at,
+            "attempt_id": self.attempt_id,
+            "action_id": self.action_id,
+            "idempotency_key": self.idempotency_key,
+            "terminal_outcome": self.terminal_outcome,
+            "auto_replay_allowed": self.auto_replay_allowed,
+            "qualification_status": self.qualification_status,
+            "retrieved_lesson_ids": list(self.retrieved_lesson_ids),
+            "applied_lesson_ids": list(self.applied_lesson_ids),
+            "lesson_updates": [dict(item) for item in self.lesson_updates],
         }
 
 
@@ -109,7 +150,13 @@ class OutcomeMemoryManager:
     @classmethod
     def run_dynamic_autotune_sync(cls, *, project_root: Path | None = None) -> dict[str, Any]:
         records = cls.load_recent_records(project_root=project_root, limit=cls.RECENT_LIMIT)
-        eligible_records = [record for record in records if not bool(record.get("trust_mismatch", False))]
+        eligible_records = [
+            record
+            for record in records
+            if not bool(record.get("trust_mismatch", False))
+            and str(record.get("qualification_status") or "QUALIFIED").upper() == "QUALIFIED"
+            and not bool(record.get("auto_replay_allowed", False))
+        ]
         promoted_scores: dict[str, float] = {}
         penalized_scores: dict[str, float] = {}
         weights = _recency_weights(len(eligible_records), minimum=cls.MIN_RECENCY_WEIGHT)
@@ -240,6 +287,12 @@ def build_episode_from_receipts(
     task_desc: str = "",
     plan: Any = None,
     receipts: list[Any] | None = None,
+    attempt_id: str = "",
+    action_id: str = "",
+    idempotency_key: str = "",
+    terminal_outcome: str | None = None,
+    retrieved_lesson_ids: Iterable[str] = (),
+    applied_lesson_ids: Iterable[str] = (),
 ) -> EpisodeOutcomeRecord:
     solved = all(
         getattr(r, "gate_passed", False) for r in (receipts or []) if hasattr(r, "gate_passed")
@@ -271,6 +324,12 @@ def build_episode_from_receipts(
         total_tokens_used=total_tokens_used,
         trust_mismatch=trust_mismatch,
         receipts=receipt_dicts,
+        attempt_id=attempt_id,
+        action_id=action_id,
+        idempotency_key=idempotency_key,
+        terminal_outcome=terminal_outcome,
+        retrieved_lesson_ids=retrieved_lesson_ids,
+        applied_lesson_ids=applied_lesson_ids,
     )
 
 

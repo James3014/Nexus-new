@@ -71,3 +71,39 @@ class TestOutcomeMemoryWorkerWrite:
         storage = tmp_path / ".nexus" / "memory" / "outcome_history.jsonl"
         lines = storage.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 5
+
+    def test_episode_lineage_is_qualified_only_at_terminal_boundary(self, tmp_path: Path):
+        from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
+
+        parked = EpisodeOutcomeRecord.from_task(
+            task_id="t-parked",
+            task_type="repair",
+            task_desc="uncertain",
+            solved=False,
+            wall_duration_sec=1,
+            total_tokens_used=2,
+            trust_mismatch=False,
+            attempt_id="a1",
+            action_id="act1",
+            idempotency_key="idem1",
+            terminal_outcome="PROCESS_LOST",
+        )
+        assert parked.qualification_status == "UNQUALIFIED"
+        assert parked.auto_replay_allowed is False
+        OutcomeMemoryManager.save_episode_and_tune_sync(parked, project_root=tmp_path)
+        payload = json.loads((tmp_path / ".nexus/memory/outcome_history.jsonl").read_text().splitlines()[0])
+        assert payload["attempt_id"] == "a1"
+        assert payload["terminal_outcome"] == "PROCESS_LOST"
+        assert payload["auto_replay_allowed"] is False
+
+        done = EpisodeOutcomeRecord.from_task(
+            task_id="t-done",
+            task_type="repair",
+            task_desc="done",
+            solved=True,
+            wall_duration_sec=1,
+            total_tokens_used=2,
+            trust_mismatch=False,
+            terminal_outcome="SUCCEEDED",
+        )
+        assert done.qualification_status == "QUALIFIED"

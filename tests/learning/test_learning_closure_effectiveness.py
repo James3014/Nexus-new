@@ -62,3 +62,60 @@ def test_generate_effectiveness_report(tmp_path: Path):
     content = out.read_text()
     assert "improved" in content.lower()
     assert "degraded" in content.lower()
+
+
+def test_learning_closure_tracks_retrieved_applied_lessons_and_terminal_disposition(tmp_path: Path):
+    from types import SimpleNamespace
+    from nexus.services.local_heal.learning_closure_bridge import LearningClosureBridge
+
+    op = SimpleNamespace(
+        instance_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        idempotency_key="idem-1",
+        solve_eligible=True,
+        failure_reason="",
+        final_patch="diff --git a/x b/x",
+        receipt_path="receipt://1",
+        retrieved_lesson_ids=["lesson-old"],
+        applied_lesson_ids=["lesson-old"],
+        terminal_outcome="SUCCEEDED",
+        uncertain_mutation=False,
+    )
+    ctx = SimpleNamespace(op=op)
+    result = LearningClosureBridge(path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False).write_lesson(ctx)
+    assert result["attempt_id"] == "attempt-1"
+    assert result["retrieved_lesson_ids"] == ["lesson-old"]
+    assert result["applied_lesson_ids"] == ["lesson-old"]
+    assert result["lesson_disposition"] == "reinforce"
+    assert result["auto_replay_allowed"] is False
+
+
+def test_failed_without_terminal_decision_is_parked(tmp_path: Path):
+    from types import SimpleNamespace
+    from nexus.services.local_heal.learning_closure_bridge import LearningClosureBridge
+
+    op = SimpleNamespace(instance_id="task-park", failure_reason="provider failed", final_patch="")
+    result = LearningClosureBridge(path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False).write_lesson(
+        SimpleNamespace(op=op)
+    )
+    assert result["terminal_outcome"] == "PARKED"
+    assert result["qualification_status"] == "UNQUALIFIED"
+    assert result["auto_replay_allowed"] is False
+
+
+def test_terminal_outcomes_can_contradict_or_retire_applied_lessons(tmp_path: Path):
+    from types import SimpleNamespace
+    from nexus.services.local_heal.learning_closure_bridge import LearningClosureBridge
+
+    bridge = LearningClosureBridge(path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False)
+    for terminal, expected in (("FAILED", "contradict"), ("RETIRED", "retire")):
+        op = SimpleNamespace(
+            instance_id=f"task-{terminal.lower()}",
+            failure_reason="" if terminal == "RETIRED" else "verifier failed",
+            final_patch="diff --git a/x b/x",
+            terminal_outcome=terminal,
+            applied_lesson_ids=["lesson-1"],
+        )
+        result = bridge.write_lesson(SimpleNamespace(op=op))
+        assert result["lesson_disposition"] == expected

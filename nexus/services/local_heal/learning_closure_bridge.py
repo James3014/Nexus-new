@@ -64,6 +64,49 @@ def classify_learning_outcome(ctx: Any) -> str:
     return "correct_abstain" if not getattr(op, "final_patch", "") else "verifier_gap"
 
 
+def _lineage(op: Any) -> dict[str, Any]:
+    terminal = str(getattr(op, "terminal_outcome", "") or "").upper()
+    if not terminal:
+        if getattr(op, "solve_eligible", False) and not getattr(op, "failure_reason", ""):
+            terminal = "SUCCEEDED"
+        elif getattr(op, "failure_reason", ""):
+            # A failure without an explicit terminal lifecycle decision is
+            # parked for owner/reconcile handling; it is never auto-replayed.
+            terminal = "PARKED"
+        else:
+            terminal = "PARKED"
+    uncertain = bool(getattr(op, "uncertain_mutation", False))
+    qualified = terminal in {"SUCCEEDED", "FAILED", "CANCELLED"} and not uncertain
+    retrieved = [str(item) for item in (getattr(op, "retrieved_lesson_ids", None) or []) if str(item)]
+    if not retrieved:
+        trace = getattr(op, "_memory_influence_trace", None)
+        if isinstance(trace, MemoryTrace):
+            retrieved = [str(item) for item in (trace.memory_evidence_ids or []) if str(item)]
+    applied = [str(item) for item in (getattr(op, "applied_lesson_ids", None) or []) if str(item)]
+    explicit_disposition = str(getattr(op, "lesson_disposition", "") or "").lower()
+    disposition = explicit_disposition if explicit_disposition in {"reinforce", "contradict", "retire"} else "none"
+    if disposition == "none" and applied:
+        if terminal == "SUCCEEDED":
+            disposition = "reinforce"
+        elif terminal == "FAILED":
+            disposition = "contradict"
+        elif terminal in {"CANCELLED", "PROCESS_LOST", "RETIRED"}:
+            disposition = "retire"
+    return {
+        "task_id": str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown"),
+        "attempt_id": str(getattr(op, "attempt_id", "") or ""),
+        "action_id": str(getattr(op, "action_id", "") or ""),
+        "idempotency_key": str(getattr(op, "idempotency_key", "") or ""),
+        "terminal_outcome": terminal,
+        "uncertain_mutation": uncertain,
+        "auto_replay_allowed": False,
+        "qualification_status": "QUALIFIED" if qualified else "UNQUALIFIED",
+        "retrieved_lesson_ids": retrieved,
+        "applied_lesson_ids": applied,
+        "lesson_disposition": disposition,
+    }
+
+
 class LearningClosureBridge:
     def __init__(
         self,
@@ -157,6 +200,7 @@ class LearningClosureBridge:
         if classification not in INTERNAL_CLASSIFICATIONS:
             classification = "verifier_gap"
         memory_trace = self._extract_memory_trace(ctx)
+        lineage = _lineage(op)
         lesson = {
             "lesson_id": f"lh-{uuid.uuid4().hex[:12]}",
             "task_id": str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown"),
@@ -168,6 +212,7 @@ class LearningClosureBridge:
             "internal_only": True,
             "memory_trace_status": memory_trace.get("trace_status", "TRACE_MISSING"),
             "retrieved_memory_ids": list(memory_trace.get("memory_evidence_ids") or []),
+            **lineage,
         }
         lesson.update(self._write_findings_card(lesson, memory_trace))
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +234,7 @@ class LearningClosureBridge:
                 candidate_id=envelope.candidate_id,
             )
         op = ctx.op if hasattr(ctx, "op") else ctx
+        lineage = _lineage(op)
         
         failure_class = "none"
         if not selected:
@@ -210,6 +256,7 @@ class LearningClosureBridge:
             "future_weight_delta": 1.0 if (selected and verifier_result == "pass") else -0.5 if (selected and verifier_result == "fail") else 0.0,
             "training_export_allowed": False,
             "internal_only": True,
+            **lineage,
         }
         
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,6 +301,7 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
             pass
         return result
     op = ctx.op if hasattr(ctx, "op") else ctx
+    lineage = _lineage(op)
     try:
         lesson = (bridge or LearningClosureBridge()).write_lesson(ctx)
         result = {"schema": "nexus.local_heal.learning_closure.v1", "writeback_status": "ok", "lesson": lesson}
@@ -281,6 +329,20 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
                 total_tokens_used=0,
                 trust_mismatch=False,
                 receipts=[],
+                attempt_id=lineage["attempt_id"],
+                action_id=lineage["action_id"],
+                idempotency_key=lineage["idempotency_key"],
+                terminal_outcome=lineage["terminal_outcome"],
+                retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
+                applied_lesson_ids=lineage["applied_lesson_ids"],
+                lesson_updates=(
+                    [
+                        {"lesson_id": lesson_id, "disposition": lineage["lesson_disposition"]}
+                        for lesson_id in lineage["applied_lesson_ids"]
+                    ]
+                    if lineage["lesson_disposition"] != "none"
+                    else []
+                ),
             ),
             project_root=Path(__file__).resolve().parents[3],
         )

@@ -51,3 +51,22 @@ def test_handoff_bundle_filename_format(writer):
     bundle_path = writer.create(req)
     # 應包含 task_id 且以 handoff_ 開頭
     assert "handoff_T999" in bundle_path.name
+
+
+def test_handoff_persists_lineage_and_fail_closed_resume_gate(writer):
+    req = HandoffRequest(
+        triggering_phase="assist",
+        reason="disconnect",
+        task_id="T-lineage",
+        attempt_id="A1",
+        action_id="ACT1",
+        idempotency_key="ID1",
+        last_successful_action="nexus_task_submit",
+        uncertain_mutation=True,
+    )
+    data = json.loads(writer.create(req).read_text())
+    assert data["attempt_id"] == "A1"
+    assert data["action_id"] == "ACT1"
+    assert data["last_successful_action"] == "nexus_task_submit"
+    assert data["uncertain_mutation"] is True
+    assert data["resume_gate"] == "RECONCILE_REQUIRED"
