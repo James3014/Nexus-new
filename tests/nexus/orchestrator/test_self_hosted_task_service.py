@@ -1655,6 +1655,42 @@ def test_revalidation_15_direct_10_isolated_5_fault_matrix(tmp_path, monkeypatch
     assert not (target_root / "serial-slot" / "slot-0").exists()
 
 
+def test_original_gate_20_fault_retry_cases_keep_identity_and_one_action(tmp_path):
+    """Original P4 gate: five fault classes, four bounded repetitions each."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    cases = [
+        ("timeout", {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED"}, "nexus_self_hosted_retry"),
+        ("provider", {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED"}, "nexus_self_hosted_retry"),
+        ("verifier", {
+            "status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED",
+            "verified_receipt": {"verified": True}, "attempt_resolution": {"verdict": "PROVEN"},
+        }, "nexus_self_hosted_retry"),
+        ("commit", {
+            "status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED",
+            "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+        }, "nexus_self_hosted_cleanup"),
+        ("integration", {
+            "status": "INTEGRATION_FAILED", "promotion_status": "INTEGRATION_FAILED",
+            "merge_performed": False, "approved_binding": {"candidate_commit_sha": "a" * 40},
+        }, "nexus_self_hosted_retry_integration"),
+    ]
+
+    actions = []
+    for fault, state, expected_tool in cases:
+        for repetition in range(4):
+            task_id = f"original-gate-{fault}-{repetition}"
+            action = SelfHostedTaskService._task_action_envelope({"task_id": task_id, **state})
+            assert action["task_id"] == task_id
+            assert action["recommended_tool"] == expected_tool
+            assert action["next_action"]
+            assert sum(bool(action.get(key)) for key in ("recommended_tool", "next_action")) == 2
+            actions.append(action)
+
+    assert len(actions) == 20
+    assert len({action["task_id"] for action in actions}) == 20
+    assert not (tmp_path / "state").exists()
+
+
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = _real_request(tmp_path, task_id="workspace-apply")

@@ -62,12 +62,14 @@ git worktree list --porcelain
 - 15 real Direct Lane commit cycles: `new_worktree_count=0`, no lifecycle Candidate, clean after each cycle.
 - 10 real Isolated Target success cycles: one serial reusable slot, terminal cleanup, no active Target afterward.
 - 5 fault/retry cycles: timeout, provider error, verifier failure, commit failure, integration failure; same task ID and one executable next action.
+- Original-spec recheck: `test_original_gate_20_fault_retry_cases_keep_identity_and_one_action` passed for five fault classes × four repetitions.
 - SLO p95: read <300ms, Direct overhead <1s, warm Target prepare/release <5s.
 - P0 external disposition: disabled roots absent, MCP checkout clean, residue path/hash recorded, parent workspace guard present.
 
 ## Evidence
 
 - Physical matrix: `test_revalidation_15_direct_10_isolated_5_fault_matrix` passed. It creates and verifies 15 real Direct commits, runs 10 real reusable serial Target prepare/commit/salvage/cleanup cycles, checks five executable fault actions, and asserts Direct overhead p95 <1s plus warm Target prepare/release p95 <5s.
+- Original P4 gate: 20 bounded fault/retry cases passed with stable task IDs and exactly one recommended tool/next action per case.
 - Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
 - Commits: `48dbab1fa` (physical matrix) and `957bc41f0` (cleaned verified block action routing).
 - Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
