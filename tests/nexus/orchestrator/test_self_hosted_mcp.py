@@ -109,6 +109,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     names = {item["name"] for item in response["result"]["tools"]}
     assert {
         "nexus_self_hosted_submit_task",
+        "nexus_self_hosted_direct_complete",
         "nexus_self_hosted_compete_task",
         "nexus_self_hosted_get_competition",
         "nexus_self_hosted_integrate_competition",
@@ -129,6 +130,7 @@ def test_tools_list_exposes_governed_self_hosted_surface():
         "nexus_self_hosted_cleanup",
         "nexus_self_hosted_archive_state",
         "nexus_self_hosted_integrate_approved",
+        "nexus_self_hosted_retry_integration",
         "nexus_self_hosted_dispose_candidate",
         "nexus_self_hosted_close_retained_without_candidate",
         "nexus_self_hosted_close_without_candidate",

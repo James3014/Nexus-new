@@ -241,6 +241,11 @@ class NexusSelfHostedMCPServer:
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string", "default": "nexus/integration"}}},
             },
             {
+                "name": "nexus_self_hosted_retry_integration",
+                "description": "Retry only a failed integration with the same task and approved binding; never reruns the Worker or pushes.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string"}}},
+            },
+            {
                 "name": "nexus_self_hosted_owner_finish",
                 "description": "Owner-only atomic approval and integration of an exact candidate binding; never pushes.",
                 "inputSchema": {
@@ -423,6 +428,11 @@ class NexusSelfHostedMCPServer:
             return self.service.integrate_approved(
                 task_id,
                 integration_branch=str(arguments.get("integration_branch", "nexus/integration")),
+            )
+        if name == "nexus_self_hosted_retry_integration":
+            return self.service.retry_integration(
+                task_id,
+                integration_branch=arguments.get("integration_branch"),
             )
         if name == "nexus_self_hosted_owner_finish":
             return self.service.owner_finish(

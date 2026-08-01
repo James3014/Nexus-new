@@ -1397,7 +1397,7 @@ def test_final_block_clean_no_candidate_recommends_same_task_retry(tmp_path):
     assert action["recommended_tool"] == "nexus_self_hosted_retry"
 
 
-def test_duplicate_task_card_hash_is_rejected(tmp_path):
+def test_duplicate_task_card_hash_returns_existing_task_and_retry_action(tmp_path):
     card = tmp_path / "card.md"
     card.write_text("task_id: logical-new\n", encoding="utf-8")
     card_hash = subprocess.run(["git", "hash-object", str(card)], check=True, capture_output=True, text=True).stdout.strip()
@@ -1405,8 +1405,12 @@ def test_duplicate_task_card_hash_is_rejected(tmp_path):
     service._write_state("logical-old", {"task_id": "logical-old", "status": "FINAL_BLOCK", "task_card_hash": card_hash})
     request = _request(tmp_path, task_id="logical-new", task_card_path=str(card), allow_unbound_test_identity=True)
 
-    with pytest.raises(RuntimeError, match="DUPLICATE_LOGICAL_TASK"):
-        service.submit_task(request)
+    result = service.submit_task(request)
+
+    assert result["task_id"] == "logical-old"
+    assert result["duplicate"]["code"] == "DUPLICATE_LOGICAL_TASK"
+    assert result["duplicate"]["existing_task_id"] == "logical-old"
+    assert result["duplicate"]["recommended_tool"] == "nexus_self_hosted_get_receipt"
 
 
 def test_receipt_exposes_numeric_telemetry(tmp_path):
@@ -1422,6 +1426,50 @@ def test_receipt_exposes_numeric_telemetry(tmp_path):
 
     assert receipt["telemetry"]["wall_time_ms"] == 12
     assert receipt["telemetry"]["overhead_ms"] == 4
+
+
+def test_failure_action_envelope_exposes_one_precise_recovery_surface():
+    assert SelfHostedTaskService._task_action_envelope({
+        "task_id": "integration-failure",
+        "status": "INTEGRATION_FAILED",
+        "promotion_status": "INTEGRATION_FAILED",
+        "merge_performed": False,
+    })["recommended_tool"] == "nexus_self_hosted_retry_integration"
+    assert SelfHostedTaskService._task_action_envelope({
+        "task_id": "verified-uncommitted",
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "verified_receipt": {"verified": True},
+        "attempt_resolution": {"verdict": "PROVEN"},
+    })["recommended_tool"] == "nexus_self_hosted_recover_verified_uncommitted_candidate"
+    assert SelfHostedTaskService._task_action_envelope({
+        "task_id": "dirty-retained",
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+    })["recommended_tool"] == "nexus_self_hosted_cleanup"
+
+
+def test_retry_integration_reuses_approved_binding_without_worker_retry(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("integration-retry", {
+        "task_id": "integration-retry",
+        "status": "INTEGRATION_FAILED",
+        "promotion_status": "INTEGRATION_FAILED",
+        "merge_performed": False,
+        "approved_binding": {"candidate_commit_sha": "a" * 40},
+        "attempt_id": "attempt-1",
+        "attempts": [{"attempt_id": "attempt-1"}],
+        "request": {"what": "x", "why": "y"},
+    })
+    monkeypatch.setattr(service, "integrate_approved", lambda task_id, *, integration_branch: {"task_id": task_id, "status": "INTEGRATED", "integration_branch": integration_branch})
+
+    result = service.retry_integration("integration-retry")
+
+    assert result["status"] == "INTEGRATED"
+    state = service._read_state("integration-retry")
+    assert state["status"] == "INTEGRATING"
+    assert state["integration_retry"] is True
 
 
 def test_default_production_target_root_is_outside_disabled_worktree_namespace(monkeypatch):

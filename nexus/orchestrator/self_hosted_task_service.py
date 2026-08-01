@@ -408,7 +408,21 @@ class SelfHostedTaskService:
             action_state = "FINAL_BLOCK"
             attention_required = True
             cleanup_removed = state.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
-            if status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"} and not candidate_commit and promotion_status == "NOT_CREATED" and cleanup_removed:
+            verified_uncommitted = bool(
+                (state.get("verified_receipt") or {}).get("verified")
+                and (state.get("attempt_resolution") or {}).get("verdict") == "PROVEN"
+                and not candidate_commit
+            )
+            if status == "INTEGRATION_FAILED" and not state.get("merge_performed"):
+                next_action = "retry_integration_same_task"
+                recommended_tool = "nexus_self_hosted_retry_integration"
+            elif verified_uncommitted:
+                next_action = "recover_verified_candidate"
+                recommended_tool = "nexus_self_hosted_recover_verified_uncommitted_candidate"
+            elif status == "RETAINED_FOR_REVIEW" and state.get("cleanup_decision") == "BLOCKED_BY_UNSAVED_CHANGES":
+                next_action = "salvage_or_dispose_retained_target"
+                recommended_tool = "nexus_self_hosted_cleanup"
+            elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"} and not candidate_commit and promotion_status == "NOT_CREATED" and cleanup_removed:
                 next_action = "retry_same_task"
                 recommended_tool = "nexus_self_hosted_retry"
             else:
@@ -2202,10 +2216,16 @@ class SelfHostedTaskService:
                 and current.get("task_card_hash") == identity["task_card_hash"]
                 and current.get("status") not in {"SUPERSEDED", "CANCELLED"}
             ):
-                raise RuntimeError(
-                    "DUPLICATE_LOGICAL_TASK: Task Card hash is already bound to "
-                    f"task_id '{current.get('task_id')}'; retry that task_id instead of resubmitting"
-                )
+                existing = self._with_task_action(current)
+                return {
+                    **existing,
+                    "duplicate": {
+                        "code": "DUPLICATE_LOGICAL_TASK",
+                        "existing_task_id": current.get("task_id"),
+                        "next_action": (existing.get("task_action") or {}).get("next_action"),
+                        "recommended_tool": (existing.get("task_action") or {}).get("recommended_tool"),
+                    },
+                }
             if current.get("status") in TERMINAL_STATUSES:
                 continue
             current_controller = (current.get("contract") or {}).get("controller_repo_root")
@@ -3746,6 +3766,24 @@ class SelfHostedTaskService:
             )
             raise
         return self._record_integration(receipt, task_id=task_id)
+
+    def retry_integration(self, task_id: str, *, integration_branch: Optional[str] = None) -> dict[str, Any]:
+        """Retry only the integration phase after a non-merge integration failure."""
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("status") != "INTEGRATION_FAILED" or state.get("merge_performed"):
+            raise RuntimeError("integration retry requires INTEGRATION_FAILED before any merge")
+        if state.get("promotion_status") != "INTEGRATION_FAILED" or not state.get("approved_binding"):
+            raise RuntimeError("integration retry requires the original approved binding")
+        branch = integration_branch or state.get("integration_branch") or "nexus/integration/main"
+        self._checkpoint(
+            task_id,
+            "INTEGRATING",
+            {"integration_branch": branch, "integration_retry": True, "push_performed": False},
+            attempt_id=state.get("attempt_id"),
+        )
+        return self.integrate_approved(task_id, integration_branch=str(branch))
 
     def _record_integration(
         self,
