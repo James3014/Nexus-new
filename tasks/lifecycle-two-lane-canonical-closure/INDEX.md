@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: active_revalidation
+status: completed_revalidation
 campaign_id: lifecycle-two-lane-canonical-closure
 source_specification: owner-authorized lifecycle diagnosis and two-lane canonical closure plan from 2026-08-01
 AUTO_CHAIN: false
@@ -32,7 +32,7 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 
 ## Current Frontier
 
-`lifecycle-two-lane-gate-revalidation`
+`none` (P7 revalidation complete; owner review remains explicit for retained canonical state)
 
 ## Completed Cards
 
@@ -43,14 +43,15 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 - `lifecycle-two-lane-p4-same-task-retry`: committed `b752fc72e`
 - `lifecycle-two-lane-p5-target-root-and-telemetry`: committed `23db1ad53`
 - `lifecycle-two-lane-p6-cutover-gate`: committed `190955e2d`
+- `lifecycle-two-lane-gate-revalidation`: committed `48dbab1fa`, `957bc41f0`, card closure commit follows
 
 ## Current Gate
 
-The P6 cutover gate is complete. `AUTO_CHAIN=false`; owner review remains required for any future promotion, integration, push, branch/ref cleanup, or external workspace cleanup.
+The P7 revalidation gate is complete. `AUTO_CHAIN=false`; owner review remains required for any future promotion, integration, push, branch/ref cleanup, or external workspace cleanup.
 
 P6 gate evidence: 30-task matrix passed; combined lifecycle regression passed `213/213`; canonical checkout is clean with one registered worktree.
 
-P7 revalidation is owner-authorized because the prior matrix covered lane selection but did not prove 15 Direct commits, 10 real isolated success/cleanup cycles, 5 fault/retry cycles, SLOs, or owner-finish archive closure.
+P7 revalidation evidence is recorded in card 07. The remaining canonical retained task is visible, terminally retained, and exposes one same-task retry surface; no state mutation is authorized without the owner decision represented by that surface.
 
 ## Dependencies
 
@@ -62,4 +63,4 @@ No direct lifecycle JSON edits; no push, protected rewrite, automatic approval, 
 
 ## Completion ceiling
 
-Complete only when the P6 30-task matrix proves zero unwanted worktree creation, zero duplicate logical tasks, zero abandoned active Targets, zero stale current authority, and a clean canonical checkout.
+P7 closes the lifecycle implementation/revalidation objective: zero unwanted worktree creation in the physical matrix, zero duplicate logical task creation for duplicate card hashes, zero abandoned active Targets after the isolated cycles, explicit fault recovery surfaces, and a clean canonical checkout. Retained canonical state remains evidence/owner review, not an automatic cleanup target.

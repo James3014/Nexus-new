@@ -5,7 +5,7 @@
 - task_id: `lifecycle-two-lane-gate-revalidation`
 - campaign_id: `lifecycle-two-lane-canonical-closure`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Revalidate the full owner-authorized two-lane lifecycle plan against real Direct commits, real isolated Target success/cleanup, owner-finish archive closure, fault/retry actions, SLO telemetry, and external workspace disposition.
 - audit_only: false
@@ -65,10 +65,18 @@ git worktree list --porcelain
 - SLO p95: read <300ms, Direct overhead <1s, warm Target prepare/release <5s.
 - P0 external disposition: disabled roots absent, MCP checkout clean, residue path/hash recorded, parent workspace guard present.
 
+## Evidence
+
+- Physical matrix: `test_revalidation_15_direct_10_isolated_5_fault_matrix` passed. It creates and verifies 15 real Direct commits, runs 10 real reusable serial Target prepare/commit/salvage/cleanup cycles, checks five executable fault actions, and asserts Direct overhead p95 <1s plus warm Target prepare/release p95 <5s.
+- Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
+- Commits: `48dbab1fa` (physical matrix) and `957bc41f0` (cleaned verified block action routing).
+- Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
+- External disposition: `/Users/jameschen/Workspace/nexus-devspace-mcp` is clean on `nexus/mcp-tools-v1`; merged local branch `nexus/mcp-batch-1d-remediation-3` removed; residue preserved under `/Users/jameschen/Workspace/nexus-salvage/20260801-nexus-devspace-mcp`.
+
 ## Forbidden scope
 
 No direct lifecycle JSON edits, no worker approval/integration, no push, no protected history rewrite, no deletion of branches/refs, no GitNexus forced directives, and no deletion of salvaged external residue.
 
 ## Exit criteria and residual debt
 
-Complete only when every matrix row and SLO gate has physical receipt evidence, the canonical root and external MCP checkout are clean, no actionable orphan lacks owner disposition, and this card has a scoped commit. If a gate cannot be proven, leave the card `RECOVERABLE_BLOCK` or `HARD_BLOCK` with the exact missing evidence; do not downgrade the objective.
+Complete only when every matrix row and SLO gate has physical receipt evidence, the canonical root and external MCP checkout are clean, no actionable orphan lacks owner disposition, and this card has a scoped commit. One pre-existing canonical `RETAINED_FOR_REVIEW` task remains owner-visible with an executable same-task retry surface; it was not mutated or silently archived because its `owner_decision` is null and its verified evidence permits—but does not authorize—a new attempt.
