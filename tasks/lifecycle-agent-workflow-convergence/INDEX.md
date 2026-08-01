@@ -56,12 +56,14 @@ at P1 through the formal lifecycle surface and the current frontier card.
 ## Current frontier
 
 `tasks/lifecycle-agent-workflow-convergence/07-acceptance-pilot-and-rollout.md`
-is locally verified pending Owner review and live connector smoke; P6 is verified pending Owner review
-under an explicit owner-authorized canonical exception. `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
-and P4 owner review remain required evidence dependencies; this exception does
-not promote them. `01b-fresh-suite-evidence-gate.md`
-and the P2/P3 cards now have current verification evidence, but remain
+is locally verified pending Owner review and live connector smoke. P5 and P6
+have current implementation and regression evidence, but remain
+`*_PENDING_OWNER_REVIEW`; the fresh P6 suite is bound to the latest canonical
+receipt. `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
+and the earlier P4 owner review remain required evidence dependencies; local
+verification does not promote them. `01b-fresh-suite-evidence-gate.md` and the
+P2/P3 cards retain current verification evidence but remain
 `VERIFIED_PENDING_OWNER_REVIEW`. The P1c diagnostics card is verified and
-pending owner review; it does not alter P2 runtime semantics. P4 implementation is also verified but
-remains owner-gated. P5 cannot start until the Owner explicitly accepts the
-bootstrap, P1b, P2, P3, and P4 gates through the formal lifecycle surface.
+pending owner review; it does not alter P2 runtime semantics. The remaining
+Campaign A claim gate is the fresh GPT `nexus01` read/Direct/Candidate smoke;
+without it the claim ceiling remains `LOCAL_GATEWAY_ACCEPTANCE_PASS`.
