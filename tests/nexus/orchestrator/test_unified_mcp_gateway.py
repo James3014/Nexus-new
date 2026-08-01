@@ -541,6 +541,20 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
     assert result["provider"] == "cline"
     assert result["patch"].startswith("diff --git")
     assert captured["command"][captured["command"].index("--model") + 1] == "cline-pass/glm-5.2"
+    assert "--plan" in captured["command"]
+    assert captured["command"][captured["command"].index("--auto-approve") + 1] == "false"
+    assert "--yolo" not in captured["command"]
+
+
+def test_cline_runner_timeout_fails_closed(monkeypatch):
+    def timeout_run(command, **kwargs):
+        raise __import__("subprocess").TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/Users/jameschen/.npm-global/lib/node_modules/cline/bin/.cline")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", timeout_run)
+    result = UnifiedMCPGateway._run_agy_plan(prompt="Return a patch", allowed_files=["README.md"], provider="cline", model="glm-5.2")
+    assert result["blocker"] == "ASSIST_PROVIDER_TIMEOUT"
+    assert result["tool_policy_enforcement"].startswith("cline_plan_auto_approve_false")
 
 
 def test_grok_runner_uses_positional_prompt(monkeypatch):
@@ -749,7 +763,16 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
     assert payload["process_cleanup"] is True
     assert payload["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
     assert payload["schema_validation_level"] == "bounded_subset"
-    assert payload["tool_policy_enforcement"] == "not_enforced"
+    assert payload["tool_policy_enforcement"] == "cline_plan_auto_approve_false_allowlist_not_enforced"
+
+
+def test_cline_real_stdout_fixture_preserves_error_event_and_fails_closed():
+    fixture = Path(__file__).resolve().parents[2] / "fixtures" / "cline" / "glm_52_real_stdout.ndjson"
+    raw = fixture.read_text(encoding="utf-8")
+    assert '"type":"run_start"' in raw
+    assert '"type":"run_result"' in raw
+    assert '"model":{"id":"cline-pass/glm-5.2"' in raw
+    assert UnifiedMCPGateway._decode_assist_payload(raw, "cline", require_patch=True) is None
 
 
 def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path):

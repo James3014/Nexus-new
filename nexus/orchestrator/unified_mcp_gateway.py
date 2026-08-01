@@ -176,7 +176,7 @@ class UnifiedMCPGateway:
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
-            return [executable, "--json", "--yolo", "--thinking", "none", "--model", selected, prompt]
+            return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--model", selected, prompt]
         if provider == "agy":
             return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--print-timeout", "25s", "--prompt", prompt]
         if provider == "gemini":
@@ -443,7 +443,7 @@ class UnifiedMCPGateway:
             "schema_error": job.get("schema_error", ""),
             "schema_validation_level": job.get("schema_validation_level", "bounded_subset"),
             "requested_tools_policy": job.get("requested_tools_policy", []),
-            "tool_policy_enforcement": "not_enforced",
+            "tool_policy_enforcement": job.get("tool_policy_enforcement", "not_enforced"),
             "filesystem_delta": job.get("filesystem_delta", {"created": [], "removed": [], "changed": []}),
             "process_cleanup": job.get("process_cleanup", False),
             "process_killed": bool(job.get("process_killed", False)),
@@ -946,6 +946,7 @@ class UnifiedMCPGateway:
             "context_arm_applied": False,
             "context_arm_semantics": "record_only_not_applied",
             "requested_tools_policy": list(arguments.get("tools_allowed") or []),
+            "tool_policy_enforcement": "cline_plan_auto_approve_false_allowlist_not_enforced",
             "workspace_mode": workspace_mode,
             "workspace_root": str(workspace_root),
             "filesystem_before": self._snapshot_workspace(workspace_root),
@@ -2179,7 +2180,7 @@ class UnifiedMCPGateway:
             cline_model = selected_model or "glm-5.2"
             if "/" not in cline_model:
                 cline_model = f"cline-pass/{cline_model}"
-            command = [executable, "--json", "--yolo", "--thinking", "none", "--model", cline_model, prompt]
+            command = [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--model", cline_model, prompt]
         elif requested == "gemini":
             command = [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", selected_model, "-p", prompt, "--output-format", "json"]
         elif requested == "opencode":
@@ -2195,7 +2196,17 @@ class UnifiedMCPGateway:
         else:
             command = [executable, "--model", selected_model, "--prompt", prompt]
         provider_timeout = 90 if requested == "cline" else 30
-        result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=provider_timeout, check=False)
+        try:
+            result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=provider_timeout, check=False)
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "provider": requested,
+                "model": selected_model,
+                "blocker": "ASSIST_PROVIDER_TIMEOUT",
+                "timeout_seconds": provider_timeout,
+                "error": str(exc),
+                "tool_policy_enforcement": "cline_plan_auto_approve_false_allowlist_not_enforced" if requested == "cline" else "provider_specific",
+            }
         if result.returncode != 0:
             return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
         def decode_object(text: str) -> dict[str, Any] | None:
@@ -2245,6 +2256,8 @@ class UnifiedMCPGateway:
             return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
         payload["provider"] = requested
         payload["model"] = selected_model
+        if requested == "cline":
+            payload["tool_policy_enforcement"] = "cline_plan_auto_approve_false_allowlist_not_enforced"
         return payload
 
     @staticmethod
