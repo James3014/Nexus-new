@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
 
 GATEWAY_NAME = "nexus-mcp-gateway"
@@ -29,6 +30,7 @@ PUBLIC_TOOL_NAMES = (
     "nexus_read",
     "nexus_search",
     "nexus_git_diff",
+    "nexus_task_run",
     "nexus_task_status",
     "nexus_task_finish",
     "nexus_task_cancel",
@@ -142,6 +144,25 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_task_run",
+                "description": "Route one bounded task through CapabilityPlanner and the governed lifecycle.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["what", "why", "allowed_files"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "what": {"type": "string"},
+                        "why": {"type": "string"},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}},
+                        "execution_preference": {"type": "string", "enum": ["auto", "DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"], "default": "auto"},
+                        "preferred_worker": {"type": "string", "default": "auto"},
+                        "task_card_path": {"type": "string"},
+                        "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_task_status",
                 "description": "Read one durable task's status and next action.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
@@ -251,6 +272,98 @@ class UnifiedMCPGateway:
         output = _bounded_text(_git(*args), "git diff")
         return {"schema": "nexus.workspace_diff.v1", "base_revision": base, "staged": bool(arguments.get("staged", False)), "diff": output}
 
+    @staticmethod
+    def _task_id(arguments: Mapping[str, Any], what: str, why: str, allowed: list[str]) -> str:
+        explicit = str(arguments.get("task_id") or "").strip()
+        if explicit:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", explicit):
+                raise GatewayInputError("task_id must be a stable bounded slug")
+            return explicit
+        seed = json.dumps([what, why, sorted(allowed)], ensure_ascii=False, separators=(",", ":"))
+        return "dispatch-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+    def _plan_route(self, *, what: str, allowed: list[str], preference: str, worker: str) -> dict[str, Any]:
+        cross_module = len(allowed) > 4 or any("/" in path and path.split("/", 1)[0] in {"nexus", "scripts", "tests"} for path in allowed)
+        plan = CapabilityPlanner().plan(
+            task_desc=what,
+            task_type="code",
+            route={
+                "recommended_flow": "execute",
+                "mutation_requested": True,
+                "route_features": {"impact_complexity": 0.8 if cross_module else 0.1, "is_cross_module_task": cross_module},
+            },
+        )
+        planner_snapshot = plan.signal_snapshot
+        if preference != "auto":
+            lane = preference
+            reason = "caller_explicit_preference"
+        elif worker not in {"", "auto", "primary", "codex"}:
+            lane = "ISOLATED_TARGET"
+            reason = "delegated_worker_requires_target"
+        elif plan.execution_depth == "LIGHT":
+            lane = "DIRECT_CANONICAL"
+            reason = "CapabilityPlanner_light_execution_depth"
+        else:
+            lane = "ISOLATED_TARGET"
+            reason = "CapabilityPlanner_non_light_execution_depth"
+        return {
+            "execution_lane": lane,
+            "route_reason": reason,
+            "route_authority": "CapabilityPlanner",
+            "planner_execution_depth": plan.execution_depth,
+            "planner_routing_tier": planner_snapshot.get("routing_tier"),
+            "planner_decision_id": hashlib.sha256(json.dumps(planner_snapshot, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16],
+        }
+
+    def _task_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        what = _text(arguments.get("what"), "what")
+        why = _text(arguments.get("why"), "why")
+        allowed = [str(path).strip() for path in (arguments.get("allowed_files") or []) if str(path).strip()]
+        if not allowed or len(allowed) > 4:
+            raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
+        for path in allowed:
+            _safe_relative_path(path, "allowed_files")
+        preference = str(arguments.get("execution_preference", "auto")).strip().upper()
+        if preference == "AUTO":
+            preference = "auto"
+        if preference not in {"auto", "DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"}:
+            raise GatewayInputError("execution_preference is unsupported")
+        worker = str(arguments.get("preferred_worker", "auto")).strip().lower() or "auto"
+        task_id = self._task_id(arguments, what, why, allowed)
+        route = self._plan_route(what=what, allowed=allowed, preference=preference, worker=worker)
+        base = _git("rev-parse", "HEAD").strip()
+        envelope = {
+            "schema": "nexus.task_dispatch.v1",
+            "task_id": task_id,
+            "what": what,
+            "why": why,
+            "controller_revision": base,
+            "allowed_files": allowed,
+            **route,
+        }
+        if route["execution_lane"] == "ASSISTED_CANONICAL":
+            return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSISTED_CANONICAL_NOT_IMPLEMENTED", "next_action": "implement_assisted_canonical"}
+        request = {
+            "task_id": task_id,
+            "what": what,
+            "why": why,
+            "controller_revision": base,
+            "target_base_revision": base,
+            "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
+            "target_repo_root": f"/Users/jameschen/Workspace/nexus-runtime-targets/{task_id}",
+            "target_worktree_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
+            "allowed_files": allowed,
+            "verifier_commands": list(arguments.get("verifier_commands") or ["git diff --check"]),
+            "execution_lane": route["execution_lane"],
+        }
+        if route["execution_lane"] == "DIRECT_CANONICAL":
+            request.update({"primary_agent": True, "worker": "primary"})
+            return {**envelope, "status": "DIRECT_CANONICAL_READY", "next_action": "edit_canonical_then_nexus_task_finish", "handoff": self.service.submit_task(request)}
+        if not arguments.get("task_card_path") or not arguments.get("task_card_hash"):
+            return {**envelope, "status": "FINAL_BLOCK", "blocker": "TASK_CARD_BINDING_REQUIRED", "next_action": "provide_task_card_path_and_hash"}
+        request.update({"worker": worker if worker != "auto" else "codex", "task_card_path": arguments["task_card_path"], "task_card_hash": arguments["task_card_hash"]})
+        return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "next_action": "wait_for_task", "handoff": self.service.submit_task(request)}
+
     def _finish(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()
         if lane == "DIRECT_CANONICAL":
@@ -277,6 +390,8 @@ class UnifiedMCPGateway:
             return self._search(arguments)
         if name == "nexus_git_diff":
             return self._diff(arguments)
+        if name == "nexus_task_run":
+            return self._task_run(arguments)
         if name == "nexus_task_status":
             task_id = _text(arguments.get("task_id"), "task_id")
             return self.service.get_task(task_id)

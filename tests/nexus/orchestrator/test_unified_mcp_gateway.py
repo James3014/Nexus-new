@@ -16,6 +16,9 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
 
 
 class FakeService:
+    def __init__(self):
+        self.submitted = []
+
     def lifecycle_status(self):
         return {"active_targets": 0, "actionable_count": 0}
 
@@ -34,6 +37,10 @@ class FakeService:
     def cancel_task(self, task_id):
         return {"status": "CANCELLED", "task_id": task_id}
 
+    def submit_task(self, request):
+        self.submitted.append(request)
+        return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"]}
+
 
 def test_gateway_has_one_identity_and_bounded_public_surface():
     gateway = UnifiedMCPGateway(service=FakeService())
@@ -42,8 +49,8 @@ def test_gateway_has_one_identity_and_bounded_public_surface():
 
     assert initialized["result"]["serverInfo"]["name"] == GATEWAY_NAME
     assert initialized["result"]["serverInfo"]["toolManifestRevision"] == TOOL_MANIFEST_REVISION
-    assert len(listed["result"]["tools"]) == 8
-    assert {tool["name"] for tool in listed["result"]["tools"]} == set(UnifiedMCPGateway.tool_specs()[i]["name"] for i in range(8))
+    assert len(listed["result"]["tools"]) == 9
+    assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in UnifiedMCPGateway.tool_specs()}
 
 
 def test_gateway_read_and_snapshot_are_bounded():
@@ -71,6 +78,38 @@ def test_gateway_forwards_high_level_lifecycle_actions():
     assert status["result"]["structuredContent"]["status"] == "TERMINAL"
     assert finish["result"]["structuredContent"]["status"] == "DIRECT_CANONICAL_COMPLETED"
     assert cancel["result"]["structuredContent"]["status"] == "CANCELLED"
+
+
+def test_task_run_routes_small_request_direct_without_target_fields():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({"jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Fix a bounded README typo", "why": "Small canonical edit", "allowed_files": ["README.md"]}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["execution_lane"] == "DIRECT_CANONICAL"
+    assert payload["route_authority"] == "CapabilityPlanner"
+    assert payload["status"] == "DIRECT_CANONICAL_READY"
+    assert service.submitted[0]["target_worktree_root"] == "/Users/jameschen/Workspace/nexus-runtime-targets"
+    assert service.submitted[0]["primary_agent"] is True
+
+
+def test_task_run_assisted_is_fail_closed_without_side_effect():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({"jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "FINAL_BLOCK"
+    assert payload["blocker"] == "ASSISTED_CANONICAL_NOT_IMPLEMENTED"
+    assert service.submitted == []
+
+
+def test_task_run_isolated_requires_task_card_binding():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({"jsonrpc": "2.0", "id": 13, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Implement a cross-module runtime change", "why": "Needs isolated worker", "allowed_files": ["nexus/a.py", "tests/a.py"], "execution_preference": "ISOLATED_TARGET", "preferred_worker": "agy"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["execution_lane"] == "ISOLATED_TARGET"
+    assert payload["blocker"] == "TASK_CARD_BINDING_REQUIRED"
+    assert service.submitted == []
 
 
 def test_gateway_stdio_round_trip():
