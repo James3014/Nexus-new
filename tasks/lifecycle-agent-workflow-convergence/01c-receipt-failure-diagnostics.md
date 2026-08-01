@@ -68,9 +68,9 @@ git diff --check
 - `tests/contracts/test_unified_runtime_receipt.py` plus
   `tests/services/test_unified_runtime.py`: `144 passed`.
 - Revision-bound fresh-suite manifest at
-  `/tmp/nexus-fresh-suite-1fa8062c.json`: `PASS`, 5 passed, 0 failed, 0 skipped,
-  clean HEAD `1fa8062c79ad48ae499020c37a979902a2d19b5f`.
-- Six-control manifest at `/tmp/nexus-control-gate-1fa8062c.json`: `PASS`,
+  `/tmp/nexus-fresh-suite-9ec7a8aae.json`: `PASS`, 5 passed, 0 failed, 0 skipped,
+  clean HEAD `9ec7a8aae57879d7346cb175d929b3418c0e1a6b`.
+- Six-control manifest at `/tmp/nexus-control-gate-9ec7a8aae.json`: `PASS`,
   6 passed, 0 failed, 0 skipped, clean checkout.
 - Equivalent normalized provider failures share a root id while task and
   attempt identity remain excluded from the root hash.
