@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p1-authority`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Establish the bounded card and scope for one GPT-visible Nexus MCP Gateway that composes canonical workspace reads with lifecycle status/finish actions.
 - read_only: false
@@ -57,6 +57,13 @@ git worktree list --porcelain
 - Gateway tests prove protocol identity, tool count, path containment, and lifecycle forwarding.
 - No Target, Candidate, or lifecycle state is created by read-only gateway calls.
 - A scoped commit exists and the Direct receipt verifies it.
+
+## Completion Evidence
+
+- Runtime commit: `77ea9c314d58c0553c314442424b072ac51b47bd`
+- Direct receipt: `896357ffe63f7f6106849beeea04254c7bae2706aab13681c6bcca0846234b6d`
+- Verification: 5 gateway tests passed; gateway self-test passed; `git diff --check` passed.
+- Side effects: `candidate_created=false`, `target_created=false`, `state_created=false`.
 
 ## Forbidden Scope
 
