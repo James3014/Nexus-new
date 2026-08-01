@@ -88,3 +88,24 @@ npm --prefix /Users/jameschen/Workspace/nexus-devspace-mcp pack --json
 - Two fresh runtime starts produce byte-identical gateway identity.
 - Connector owner surface shows exactly one Nexus gateway registration.
 - Canonical Nexus remains clean, one worktree, zero actionable tasks.
+
+## Evidence (2026-08-01)
+
+- External implementation commit: `b89ce89ca58cb5ca9bae87f5401725d4aa736ced`.
+- `npm run test`: passed (including proxy/config tests and the existing 52
+  assertions); `npm run typecheck`: passed; `npm run build`: passed.
+- Local artifact: `nexus-local-devspace-1.0.1-nexus.3.tgz`; postpack SHA-256:
+  `f3caf9f7f027b6668bd842183176b277a53b7e8dab124753d2dab251d47eeead`.
+- Build identity binds package/source plus gateway `nexus-mcp-gateway@0.1.0`,
+  canonical commit `73f9c119b3edc7a8bb149e3b481f430012ca3abb`, lifecycle commit,
+  and gateway tool manifest revision
+  `ceb7c35080e403bba9b0014e28ae8b0bdae298ec009eb015edf644b9854914c4` (10
+  tools).
+- Installed local package reports `@nexus-local/devspace@1.0.1-nexus.3`.
+- Two clean loopback starts returned identical `/healthz` proxy identity; an
+  in-memory MCP client listed exactly the 10 gateway tools, and a live proxy
+  call reached the canonical gateway and returned `nexus.mcp_gateway_status.v1`.
+- Remaining gate: no GPT/ChatGPT owner-surface connector registration is
+  observable from the local shell; the manual owner/app registration must be
+  performed and then checked for exactly one Nexus gateway entry. No second
+  registration was created by this task.
