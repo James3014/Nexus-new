@@ -43,6 +43,17 @@ class ApprovalScope(str, Enum):
     REJECT = "REJECT"
 
 
+class MutationDomain(str, Enum):
+    """What durable surface an action is allowed to mutate."""
+
+    NONE = "NONE"
+    REPOSITORY = "REPOSITORY"
+    LIFECYCLE_STATE = "LIFECYCLE_STATE"
+    TARGET = "TARGET"
+    CANDIDATE_REF = "CANDIDATE_REF"
+    INTEGRATION = "INTEGRATION"
+
+
 def canonical_request_hash(payload: Mapping[str, Any]) -> str:
     """Hash the request without relying on caller key order or formatting."""
     encoded = json.dumps(dict(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -81,6 +92,7 @@ class LifecycleActionEnvelope(BaseModel):
     allowed_paths: tuple[str, ...] = ()
     permission_profile: PermissionProfile = PermissionProfile.OBSERVE
     approval_scope: ApprovalScope = ApprovalScope.ALLOW_ACTION_ONCE
+    mutation_domain: MutationDomain = MutationDomain.NONE
     tool_manifest_hash: str
     request_hash: str
     mutation: bool = False
@@ -130,8 +142,14 @@ class LifecycleActionEnvelope(BaseModel):
                 raise ValueError("mutation actions require expected_head")
             if self.permission_profile not in {PermissionProfile.MUTATE_BOUNDED, PermissionProfile.CANDIDATE, PermissionProfile.INTEGRATE}:
                 raise ValueError("mutation actions require a mutation permission profile")
-            if not self.allowed_paths:
-                raise ValueError("mutation actions require allowed_paths")
+            if self.mutation_domain == MutationDomain.NONE:
+                raise ValueError("mutation actions require mutation_domain")
+            if self.mutation_domain in {MutationDomain.REPOSITORY, MutationDomain.INTEGRATION} and not self.allowed_paths:
+                raise ValueError("repository mutation actions require allowed_paths")
+        elif self.mutation_domain != MutationDomain.NONE:
+            raise ValueError("non-mutation actions must use mutation_domain=NONE")
+        if bool(self.task_card_path) != bool(self.task_card_hash):
+            raise ValueError("task_card_path and task_card_hash must be supplied together")
         return self
 
     def verify_request(self, payload: Mapping[str, Any]) -> bool:
@@ -154,6 +172,7 @@ def build_action_envelope(
     idempotency_key: Optional[str] = None,
     permission_profile: PermissionProfile = PermissionProfile.MUTATE_BOUNDED,
     approval_scope: ApprovalScope = ApprovalScope.ALLOW_ACTION_ONCE,
+    mutation_domain: Optional[MutationDomain] = None,
 ) -> LifecycleActionEnvelope:
     canonical = dict(request)
     return LifecycleActionEnvelope(
@@ -168,6 +187,7 @@ def build_action_envelope(
         allowed_paths=tuple(allowed_paths),
         permission_profile=permission_profile,
         approval_scope=approval_scope,
+        mutation_domain=mutation_domain or (MutationDomain.REPOSITORY if mutation else MutationDomain.NONE),
         tool_manifest_hash=tool_manifest_hash,
         request_hash=canonical_request_hash(canonical),
         mutation=mutation,

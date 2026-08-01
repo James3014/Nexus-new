@@ -12,6 +12,8 @@ def cleanup_bus():
     """每個測試後清理 EventBus 狀態。"""
     NexusEventBus._subscribers = {}
     NexusEventBus._signal_queue = []
+    NexusEventBus._observer_error_count = 0
+    NexusEventBus._last_observer_error = None
 
 def test_event_bus_publish_subscribe():
     """驗證基本的發布與訂閱流程。"""
@@ -25,6 +27,19 @@ def test_event_bus_publish_subscribe():
     args = mock_handler.call_args[0][0]
     assert args["data"] == 123
     assert "_trace_id" in args
+
+
+def test_observer_failure_is_fail_open_but_telemetry_is_recorded():
+    def broken(_payload):
+        raise RuntimeError("observer boom")
+
+    NexusEventBus.subscribe("test_event", broken)
+    NexusEventBus.publish("test_event", {"data": 123})
+    telemetry = NexusEventBus.observer_telemetry()
+    assert telemetry["observer_only"] is True
+    assert telemetry["enforcement_authority"] == "synchronous_lifecycle_guards"
+    assert telemetry["observer_error_count"] == 1
+    assert telemetry["last_observer_error"]["observer"] == "subscriber"
 
 def test_event_bus_persistence(tmp_path):
     """驗證事件是否能正確持久化到 JSONL。"""

@@ -42,9 +42,12 @@ class NexusEventBus:
     _remote_broadcaster: Optional[Callable[[str, Dict[str, Any]], None]] = None
     _sequence_lock = threading.RLock()
     _subs_lock = threading.Lock()
+    _observer_lock = threading.RLock()
     _global_seq = 0
     _log_store = JsonlEventLogStore()
     _signal_queue_svc = SignalQueueService()
+    _observer_error_count = 0
+    _last_observer_error: Optional[Dict[str, Any]] = None
 
     @classmethod
     def set_remote_broadcaster(cls, broadcaster: Callable[[str, Dict[str, Any]], None]) -> None:
@@ -98,15 +101,40 @@ class NexusEventBus:
         for handler in handlers:
             try:
                 handler(local_payload)
-            except Exception:
-                pass
+            except Exception as exc:
+                cls._record_observer_error(event_type, "subscriber", exc)
 
         # 遠端廣播
         if cls._remote_broadcaster:
             try:
                 cls._remote_broadcaster(event_type, local_payload)
             except Exception as e:
-                logger.error("Remote broadcast error for %s: %s", event_type, e)
+                cls._record_observer_error(event_type, "remote_broadcaster", e)
+
+    @classmethod
+    def _record_observer_error(cls, event_type: str, observer: str, error: Exception) -> None:
+        """Record observer failures without changing route or enforcement state."""
+        with cls._observer_lock:
+            cls._observer_error_count += 1
+            cls._last_observer_error = {
+                "event_type": event_type,
+                "observer": observer,
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "observer_only": True,
+            }
+        logger.exception("Observer error for %s (%s)", event_type, observer)
+
+    @classmethod
+    def observer_telemetry(cls) -> Dict[str, Any]:
+        with cls._observer_lock:
+            return {
+                "schema": "nexus.event_observer_telemetry.v1",
+                "observer_error_count": cls._observer_error_count,
+                "last_observer_error": dict(cls._last_observer_error or {}),
+                "enforcement_authority": "synchronous_lifecycle_guards",
+                "observer_only": True,
+            }
 
     @classmethod
     def emit_audit_failure(cls, *, task_id: str, reason: str, evidence_id: str = "") -> None:

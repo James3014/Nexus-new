@@ -39,7 +39,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 4b | `lifecycle-workflow-p4b-direct-reconcile-closure` | `04b-direct-reconcile-closure.md` | COMPLETED_PENDING_OWNER_REVIEW | P4 recovery surface evidence |
 | 4c | `lifecycle-workflow-mcp-assisted-async-closure` | `04c-mcp-assisted-async-closure.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP execution closure |
 | 4d | `lifecycle-workflow-mcp-closure-complete` | `04d-mcp-closure-complete.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP closure completion |
-| 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
+| 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | COMPLETED_PENDING_OWNER_REVIEW | Owner-authorized canonical exception; P4 owner review remains pending |
 | 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | PENDING | P5 integrated |
 | 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | PENDING | P6 integrated |
 
@@ -55,8 +55,11 @@ at P1 through the formal lifecycle surface and the current frontier card.
 
 ## Current frontier
 
-`tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
-remains the required pre-P2 implementation gate. `01b-fresh-suite-evidence-gate.md`
+`tasks/lifecycle-agent-workflow-convergence/06-approval-reconnect-definition-drift.md`
+is the next pending implementation card; P5 is complete pending owner review
+under an explicit owner-authorized canonical exception. `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
+and P4 owner review remain required evidence dependencies; this exception does
+not promote them. `01b-fresh-suite-evidence-gate.md`
 and the P2/P3 cards now have current verification evidence, but remain
 `VERIFIED_PENDING_OWNER_REVIEW`. The P1c diagnostics card is verified and
 pending owner review; it does not alter P2 runtime semantics. P4 implementation is also verified but

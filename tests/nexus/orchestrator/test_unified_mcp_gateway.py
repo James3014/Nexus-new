@@ -31,6 +31,21 @@ class FakeService:
     def get_task(self, task_id):
         return {"task_id": task_id, "status": "TERMINAL"}
 
+    def get_task_snapshot(self, task_id, *, include_details=False):
+        return {
+            "task_id": task_id,
+            "status": "PENDING_HUMAN_APPROVAL",
+            "attempt_id": "attempt-recovery",
+            "controller_revision": "a" * 40,
+            "contract": {"allowed_files": ["README.md"]},
+            "promotion_packet": {
+                "candidate_commit_sha": "a" * 40,
+                "candidate_tree_sha": "a" * 40,
+                "candidate_state_hash": "b" * 64,
+                "verified_receipt_hash": "b" * 64,
+            },
+        }
+
     def wait_task(self, task_id, **kwargs):
         return {"task_id": task_id, "status": "PENDING_HUMAN_APPROVAL", "task_action": {"action_state": "ACTION_REQUIRED", "next_action": "owner_finish"}, "wait": kwargs}
 

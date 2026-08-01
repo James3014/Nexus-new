@@ -3,6 +3,7 @@ import pytest
 from nexus.contracts.lifecycle_action import (
     ApprovalScope,
     LifecycleActionType,
+    MutationDomain,
     PermissionProfile,
     build_action_envelope,
     canonical_request_hash,
@@ -89,3 +90,34 @@ def test_same_idempotency_key_with_different_request_hash_is_detectable():
     assert first.idempotency_key == second.idempotency_key
     assert first.request_hash != second.request_hash
     assert not first.verify_request({"value": 2})
+
+
+def test_mutation_domain_separates_repository_and_lifecycle_state():
+    state_action = build_action_envelope(
+        task_id="task-state",
+        action_type=LifecycleActionType.CANDIDATE_APPROVE,
+        request={"task_id": "task-state"},
+        tool_manifest_hash=MANIFEST,
+        expected_head=HEAD,
+        allowed_paths=[],
+        mutation=True,
+        mutation_domain=MutationDomain.LIFECYCLE_STATE,
+        permission_profile=PermissionProfile.CANDIDATE,
+    )
+    assert state_action.mutation_domain == MutationDomain.LIFECYCLE_STATE
+
+
+@pytest.mark.parametrize("kwargs", [{"task_card_path": "tasks/card.md"}, {"task_card_hash": MANIFEST}])
+def test_task_card_binding_pair_is_required(kwargs):
+    with pytest.raises(ValueError, match="task_card_path and task_card_hash"):
+        build_action_envelope(
+            task_id="task-pair",
+            action_type=LifecycleActionType.TASK_RUN,
+            request={"value": 1},
+            tool_manifest_hash=MANIFEST,
+            expected_head=HEAD,
+            allowed_paths=["README.md"],
+            mutation=True,
+            permission_profile=PermissionProfile.MUTATE_BOUNDED,
+            **kwargs,
+        )

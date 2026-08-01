@@ -28,12 +28,14 @@ from uuid import uuid4
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.contracts.lifecycle_action import (
     LifecycleActionType,
+    MutationDomain,
     PermissionProfile,
     build_action_envelope,
 )
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
+from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, configure_runtime_manifest_hash, pre_action_guard, post_action_receipt_formatter
 
 GATEWAY_NAME = "nexus-mcp-gateway"
 GATEWAY_VERSION = "0.1.0"
@@ -1211,7 +1213,7 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def _error(request_id: Any, error: Exception | str) -> dict[str, Any]:
-        payload = {"schema": "nexus.mcp_gateway_error.v1", "error": str(error)}
+        payload = error.as_dict() if isinstance(error, LifecycleGuardError) else {"schema": "nexus.mcp_gateway_error.v1", "error": str(error)}
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}], "structuredContent": payload, "isError": True}}
 
     def _gateway_status(self) -> dict[str, Any]:
@@ -1361,22 +1363,84 @@ class UnifiedMCPGateway:
 
     def _candidate_approve(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
+        candidate_commit_sha = self._exact_hash(arguments.get("candidate_commit_sha"), "candidate_commit_sha", 40)
+        candidate_tree_sha = self._exact_hash(arguments.get("candidate_tree_sha"), "candidate_tree_sha", 40)
+        candidate_state_hash = self._exact_hash(arguments.get("candidate_state_hash"), "candidate_state_hash", 64)
+        verified_receipt_hash = self._exact_hash(arguments.get("verified_receipt_hash"), "verified_receipt_hash", 64)
+        state = self.service.get_task_snapshot(task_id, include_details=True)
+        if not isinstance(state, Mapping):
+            raise GatewayInputError("CANDIDATE_TASK_STATE_REQUIRED")
+        base = str(state.get("controller_revision") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
+            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
+            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),
+            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),
+        }}
+        action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.CANDIDATE_APPROVE,
+            request=action_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=base,
+            allowed_paths=[],
+            mutation=True,
+            permission_profile=PermissionProfile.CANDIDATE,
+            mutation_domain=MutationDomain.LIFECYCLE_STATE,
+        )
+        guard_receipt = pre_action_guard(action, request={}, current_head=base, tool_manifest_hash=TOOL_MANIFEST_REVISION)
         result = self.service.approve_promotion(
             task_id,
-            candidate_commit_sha=self._exact_hash(arguments.get("candidate_commit_sha"), "candidate_commit_sha", 40),
-            candidate_tree_sha=self._exact_hash(arguments.get("candidate_tree_sha"), "candidate_tree_sha", 40),
-            candidate_state_hash=self._exact_hash(arguments.get("candidate_state_hash"), "candidate_state_hash", 64),
-            verified_receipt_hash=self._exact_hash(arguments.get("verified_receipt_hash"), "verified_receipt_hash", 64),
+            candidate_commit_sha=candidate_commit_sha,
+            candidate_tree_sha=candidate_tree_sha,
+            candidate_state_hash=candidate_state_hash,
+            verified_receipt_hash=verified_receipt_hash,
         )
-        return self._recovery_payload(result, operation="candidate_approve", include_state=True)
+        payload = self._recovery_payload(result, operation="candidate_approve", include_state=True)
+        payload["guard_receipt"] = guard_receipt
+        return payload
 
     def _candidate_integrate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
         branch = str(arguments.get("integration_branch") or "nexus/integration/main").strip()
         if not branch or branch.startswith("-") or any(char in branch for char in "\n\r"):
             raise GatewayInputError("integration_branch is invalid")
+        state = self.service.get_task_snapshot(task_id, include_details=True)
+        if not isinstance(state, Mapping):
+            raise GatewayInputError("CANDIDATE_TASK_STATE_REQUIRED")
+        base = str(state.get("controller_revision") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
+        allowed_files = [str(path) for path in contract.get("allowed_files") or [] if str(path).strip()]
+        if not allowed_files:
+            raise GatewayInputError("CANDIDATE_ALLOWED_PATHS_REQUIRED")
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        action_request = {**dict(arguments), "allowed_files": allowed_files, "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
+            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
+            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),
+            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),
+        }}
+        action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.CANDIDATE_INTEGRATE,
+            request=action_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=base,
+            allowed_paths=allowed_files,
+            mutation=True,
+            permission_profile=PermissionProfile.INTEGRATE,
+            mutation_domain=MutationDomain.INTEGRATION,
+        )
+        guard_receipt = pre_action_guard(action, request={"allowed_files": allowed_files}, current_head=base, tool_manifest_hash=TOOL_MANIFEST_REVISION)
         result = self.service.integrate_approved(task_id, integration_branch=branch)
-        return self._recovery_payload(result, operation="candidate_integrate", include_state=True)
+        payload = self._recovery_payload(result, operation="candidate_integrate", include_state=True)
+        payload["guard_receipt"] = guard_receipt
+        return payload
 
     def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
@@ -1386,8 +1450,35 @@ class UnifiedMCPGateway:
         superseded_by = str(arguments.get("superseded_by") or "").strip() or None
         if disposition == "SUPERSEDED" and not superseded_by:
             raise GatewayInputError("superseded_by is required for SUPERSEDED")
+        state = self.service.get_task_snapshot(task_id, include_details=True)
+        if not isinstance(state, Mapping):
+            raise GatewayInputError("CANDIDATE_TASK_STATE_REQUIRED")
+        base = str(state.get("controller_revision") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
+            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
+            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),
+            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),
+        }}
+        action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.CANDIDATE_DISPOSE,
+            request=action_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=base,
+            allowed_paths=[],
+            mutation=True,
+            permission_profile=PermissionProfile.CANDIDATE,
+            mutation_domain=MutationDomain.CANDIDATE_REF,
+        )
+        guard_receipt = pre_action_guard(action, request={}, current_head=base, tool_manifest_hash=TOOL_MANIFEST_REVISION)
         result = self.service.dispose_candidate(task_id, disposition=disposition, superseded_by=superseded_by)
-        return self._recovery_payload(result, operation="candidate_dispose", include_state=True)
+        payload = self._recovery_payload(result, operation="candidate_dispose", include_state=True)
+        payload["guard_receipt"] = guard_receipt
+        return payload
 
     def _workspace_snapshot(self) -> dict[str, Any]:
         status = _git("status", "--porcelain=v1")
@@ -1547,6 +1638,14 @@ class UnifiedMCPGateway:
             task_card_hash=arguments.get("task_card_hash"),
             idempotency_key=arguments.get("idempotency_key"),
             permission_profile=PermissionProfile.VERIFY if assisted_candidate_only else PermissionProfile.MUTATE_BOUNDED,
+            mutation_domain=MutationDomain.NONE if assisted_candidate_only else MutationDomain.REPOSITORY,
+        )
+        guard_receipt = pre_action_guard(
+            action,
+            request=action_request,
+            canonical_root=CANONICAL_SOURCE_ROOT,
+            current_head=base,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
         )
         envelope = {
             "schema": "nexus.task_dispatch.v1",
@@ -1556,6 +1655,7 @@ class UnifiedMCPGateway:
             "controller_revision": base,
             "allowed_files": allowed,
             "action": action.model_dump(mode="json"),
+            "guard_receipt": guard_receipt,
             **route,
         }
         def telemetry(**values: int) -> dict[str, int]:
@@ -1892,7 +1992,16 @@ class UnifiedMCPGateway:
             request.setdefault("execution_lane", "DIRECT_CANONICAL")
             request.setdefault("primary_agent", True)
             request.setdefault("worker", "primary")
-            return self.service.complete_direct_canonical(request, expected_commit_sha=arguments.get("expected_commit_sha"))
+            result = self.service.complete_direct_canonical(request, expected_commit_sha=arguments.get("expected_commit_sha"))
+            action_payload = request.get("action") if isinstance(request.get("action"), Mapping) else None
+            if action_payload is not None:
+                result["guard_receipt"] = post_action_receipt_formatter(
+                    action=action_payload,
+                    status="COMPLETED",
+                    commit_sha=result.get("commit_sha"),
+                    receipt=result,
+                )
+            return result
         if lane == "ISOLATED_TARGET":
             task_id = _text(arguments.get("task_id"), "task_id")
             fields = ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")
@@ -2012,3 +2121,4 @@ PUBLIC_TOOL_NAMES = tuple(spec["name"] for spec in UnifiedMCPGateway.tool_specs(
 TOOL_MANIFEST_REVISION = hashlib.sha256(
     json.dumps(PUBLIC_TOOL_NAMES, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
+configure_runtime_manifest_hash(TOOL_MANIFEST_REVISION)

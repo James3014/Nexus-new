@@ -43,6 +43,7 @@ from nexus.orchestrator.task_contract import (
 )
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
@@ -2670,6 +2671,19 @@ class SelfHostedTaskService:
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
+        if action and not self.ephemeral:
+            # The service remains lifecycle authority; this synchronous guard
+            # only validates the caller's already-built envelope before any
+            # state, Target, or worker mutation is allowed.
+            trusted_manifest = trusted_runtime_manifest_hash()
+            if trusted_manifest is None:
+                raise RuntimeError("TOOL_MANIFEST_UNAVAILABLE: service cannot accept an unbound runtime manifest")
+            pre_action_guard(
+                action,
+                request=request,
+                canonical_root=CANONICAL_SOURCE_ROOT,
+                tool_manifest_hash=trusted_manifest,
+            )
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
         idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or "")
