@@ -2029,7 +2029,10 @@ class SelfHostedTaskService:
         """
         root = Path(controller_root or Path.cwd()).resolve()
         states = self._workspace_task_states()
-        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"))
+        manager = WorktreeManager(
+            root_dir=str(root.parent / "nexus-runtime-targets"),
+            create_root=False,
+        )
         inventory = manager.get_workspace_inventory(controller_root=root, task_states=states)
         if inventory.controller_head != expected_controller_revision:
             raise RuntimeError(
