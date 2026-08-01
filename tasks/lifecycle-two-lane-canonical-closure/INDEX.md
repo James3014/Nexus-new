@@ -43,7 +43,7 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 - `lifecycle-two-lane-p4-same-task-retry`: committed `b752fc72e`
 - `lifecycle-two-lane-p5-target-root-and-telemetry`: committed `23db1ad53`
 - `lifecycle-two-lane-p6-cutover-gate`: committed `190955e2d`
-- `lifecycle-two-lane-gate-revalidation`: committed `48dbab1fa`, `957bc41f0`, `68b85f49c`
+- `lifecycle-two-lane-gate-revalidation`: committed `48dbab1fa`, `957bc41f0`, `68b85f49c`, `bf57dcb54`, `816aa5874`, `5d98bffeb`, `c41bcb00f`, `11c07b897`, `44439c614`
 
 ## Current Gate
 
@@ -52,6 +52,8 @@ The P7 revalidation gate is complete. `AUTO_CHAIN=false`; owner review remains r
 P6 gate evidence: 30-task matrix passed; combined lifecycle regression passed `213/213`; canonical checkout is clean with one registered worktree.
 
 P7 revalidation evidence is recorded in card 07. The remaining canonical retained task is visible, terminally retained, and exposes one same-task retry surface; no state mutation is authorized without the owner decision represented by that surface.
+
+P0 authority reclassification is committed at `534e72bb4`; active lifecycle indexes no longer point to the retired Controller path.
 
 ## Dependencies
 
