@@ -3,7 +3,7 @@
 artifact_authority: current
 task_id: `lifecycle-workflow-mcp-assisted-async-closure`
 owner: James Chen
-status: ACTIVE
+status: COMPLETED_PENDING_OWNER_REVIEW
 source_specification: `/Users/jameschen/.codex/attachments/d3c92354-8ddc-4ab7-b405-6cfef8369695/pasted-text.txt`
 commit_required: true
 candidate_required: true
