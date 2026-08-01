@@ -1726,6 +1726,22 @@ def test_original_gate_20_fault_retry_cases_keep_identity_and_one_action(tmp_pat
     assert not (tmp_path / "state").exists()
 
 
+def test_original_gate_read_p95_stays_below_300ms_without_side_effects(tmp_path, monkeypatch):
+    state_root = tmp_path / "state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(state_root))
+    service = SelfHostedTaskService(state_dir=state_root, auto_reconcile=False)
+    samples = []
+
+    for _ in range(20):
+        started = time.perf_counter()
+        service.list_actionable_tasks()
+        service.state_root_inventory()
+        samples.append((time.perf_counter() - started) * 1000)
+
+    assert sorted(samples)[int(len(samples) * 0.95) - 1] < 300
+    assert not state_root.exists()
+
+
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = _real_request(tmp_path, task_id="workspace-apply")
