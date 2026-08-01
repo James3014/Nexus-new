@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: IN_PROGRESS
 task_id: lifecycle-workflow-p2-durable-canonical-actions
 commit_required: true
 candidate_required: true

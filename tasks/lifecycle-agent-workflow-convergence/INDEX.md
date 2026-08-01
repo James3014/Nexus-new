@@ -27,8 +27,8 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
 | 0 | `lifecycle-workflow-p0-authority-baseline` | `00-authority-and-baseline.md` | COMPLETED | none |
-| 1 | `lifecycle-workflow-p1-action-envelope` | `01-lifecycle-action-envelope.md` | IN_PROGRESS | P0 commit `eb41555f5` |
-| 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | PENDING | P1 integrated |
+| 1 | `lifecycle-workflow-p1-action-envelope` | `01-lifecycle-action-envelope.md` | COMPLETED | `4cd6da508` |
+| 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | IN_PROGRESS | P1 `4cd6da508` |
 | 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | PENDING | P2 integrated |
 | 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | PENDING | P3 integrated |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
@@ -47,6 +47,6 @@ at P1 through the formal lifecycle surface and the current frontier card.
 
 ## Current frontier
 
-`lifecycle-workflow-p1-action-envelope` is the only executable card. No
+`lifecycle-workflow-p2-durable-canonical-actions` is the only executable card. No
 successor may start until it receives a scoped commit, verification evidence,
 and explicit promotion through the formal lifecycle surface.
