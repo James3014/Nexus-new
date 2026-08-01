@@ -1650,7 +1650,8 @@ class UnifiedMCPGateway:
         )
 
     def _resolve_contract_binding(
-        self, *, task_id: str, what: str, allowed: list[str], verifiers: list[str], base: str, arguments: Mapping[str, Any], worker: str
+        self, *, task_id: str, what: str, allowed: list[str], verifiers: list[str], base: str, arguments: Mapping[str, Any], worker: str,
+        defer_required_error: bool = False,
     ) -> dict[str, Any]:
         card_path = str(arguments.get("task_card_path") or "").strip() or None
         card_hash = str(arguments.get("task_card_hash") or "").strip() or None
@@ -1687,7 +1688,7 @@ class UnifiedMCPGateway:
             }
         else:
             kind = ContractKind.NONE
-        if (delegated or high_risk or cross_module) and kind != ContractKind.TRACKED_TASK_CARD:
+        if (delegated or high_risk or cross_module) and kind != ContractKind.TRACKED_TASK_CARD and not defer_required_error:
             raise GatewayInputError("TASK_CARD_BINDING_REQUIRED")
         return {
             "contract_kind": kind.value,
@@ -1731,6 +1732,7 @@ class UnifiedMCPGateway:
         verifiers = list(arguments.get("verifier_commands") or ["git diff --check"])
         binding = self._resolve_contract_binding(
             task_id=task_id, what=what, allowed=allowed, verifiers=verifiers, base=base, arguments=arguments, worker=worker,
+            defer_required_error=preference in {"ASSISTED_CANONICAL", "ISOLATED_TARGET"},
         )
         dirty_paths = self._dirty_paths()
         overlapping_paths = self._dirty_overlap(dirty_paths, allowed)
