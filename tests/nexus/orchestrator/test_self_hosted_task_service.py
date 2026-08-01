@@ -1639,7 +1639,7 @@ def test_revalidation_15_direct_10_isolated_5_fault_matrix(tmp_path, monkeypatch
     fault_cases = [
         {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED"},
         {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "error": "provider"},
-        {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "error": "verifier"},
+        {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "error": "verifier", "verified_receipt": {"verified": True}, "attempt_resolution": {"verdict": "PROVEN"}},
         {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES", "error": "commit"},
         {"status": "INTEGRATION_FAILED", "promotion_status": "INTEGRATION_FAILED", "merge_performed": False, "approved_binding": {"candidate_commit_sha": "a" * 40}},
     ]

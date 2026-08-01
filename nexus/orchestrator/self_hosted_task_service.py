@@ -415,6 +415,7 @@ class SelfHostedTaskService:
                 (state.get("verified_receipt") or {}).get("verified")
                 and (state.get("attempt_resolution") or {}).get("verdict") == "PROVEN"
                 and not candidate_commit
+                and not cleanup_removed
             )
             if status == "INTEGRATION_FAILED" and not state.get("merge_performed"):
                 next_action = "retry_integration_same_task"
