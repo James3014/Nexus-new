@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 repo_root = str(Path(__file__).resolve().parents[3])
 if repo_root in sys.path:
     sys.path.remove(repo_root)
@@ -94,6 +96,17 @@ class FakeService:
     def submit_task(self, request):
         self.submitted.append(request)
         return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"], "target_created": False, "state_created": False}
+
+
+@pytest.fixture(autouse=True)
+def isolate_gateway_repository_state(monkeypatch):
+    """Keep ordinary gateway tests independent of the developer checkout.
+
+    Tests that exercise dirty-path policy explicitly replace this seam with
+    their synthetic snapshot. Production continues to read the real
+    canonical checkout through ``UnifiedMCPGateway._dirty_paths``.
+    """
+    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: []))
 
 
 def test_gateway_has_one_identity_and_bounded_public_surface():
