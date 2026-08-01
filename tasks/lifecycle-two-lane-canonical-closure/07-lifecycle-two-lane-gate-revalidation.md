@@ -75,7 +75,8 @@ git worktree list --porcelain
 - Read SLO regression: `test_original_gate_read_p95_stays_below_300ms_without_side_effects` passed across 20 in-process read samples with no state-root creation.
 - Owner-finish matrix: `test_owner_finish_ten_candidate_matrix_archives_each_terminal` passed; each of 10 exact bindings completed through one approve → integrate → archive operation.
 - Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
-- Commits: `48dbab1fa` (physical matrix), `957bc41f0` (cleaned verified block action routing), `bf57dcb54` (20 fault gate), `816aa5874` (Direct-by-default), `5d98bffeb` (CLI/MCP lane exposure), `c41bcb00f` (read p95 gate), `11c07b897` (10 owner-finish archives), and `534e72bb4` (P0 authority retirement).
+- Full service regression: `tests/nexus/orchestrator/test_self_hosted_task_service.py` passed `118 passed`; the exact-plan preview regression confirms `apply=False` does not create the disabled/runtime Target root or alter the read-only plan hash.
+- Commits: `48dbab1fa` (physical matrix), `957bc41f0` (cleaned verified block action routing), `bf57dcb54` (20 fault gate), `816aa5874` (Direct-by-default), `5d98bffeb` (CLI/MCP lane exposure), `c41bcb00f` (read p95 gate), `11c07b897` (10 owner-finish archives), `534e72bb4` (P0 authority retirement), and `319ee23d5` (read-only convergence preview).
 - Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
 - External disposition: `/Users/jameschen/Workspace/nexus-devspace-mcp` is clean on `nexus/mcp-tools-v1`; merged local branch `nexus/mcp-batch-1d-remediation-3` removed; residue preserved under `/Users/jameschen/Workspace/nexus-salvage/20260801-nexus-devspace-mcp`.
 

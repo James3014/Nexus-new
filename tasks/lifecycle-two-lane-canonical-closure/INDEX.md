@@ -43,7 +43,7 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 - `lifecycle-two-lane-p4-same-task-retry`: committed `b752fc72e`
 - `lifecycle-two-lane-p5-target-root-and-telemetry`: committed `23db1ad53`
 - `lifecycle-two-lane-p6-cutover-gate`: committed `190955e2d`
-- `lifecycle-two-lane-gate-revalidation`: committed `48dbab1fa`, `957bc41f0`, `68b85f49c`, `bf57dcb54`, `816aa5874`, `5d98bffeb`, `c41bcb00f`, `11c07b897`, `44439c614`
+- `lifecycle-two-lane-gate-revalidation`: committed `48dbab1fa`, `957bc41f0`, `68b85f49c`, `bf57dcb54`, `816aa5874`, `5d98bffeb`, `c41bcb00f`, `11c07b897`, `44439c614`, `319ee23d5`
 
 ## Current Gate
 
