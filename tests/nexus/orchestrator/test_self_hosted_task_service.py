@@ -17,7 +17,7 @@ import pytest
 
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
-from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService, resolve_execution_lane
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
@@ -1229,6 +1229,57 @@ def test_workspace_read_only_calls_do_not_create_missing_target_root(tmp_path):
 
     assert not missing_root.exists()
     assert not (controller.parent / "runtime-targets").exists()
+
+
+def test_direct_canonical_lane_returns_handoff_without_state_or_target(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    subprocess.run(["git", "init", "-q", str(controller)], check=True)
+    subprocess.run(["git", "-C", str(controller), "branch", "-M", "nexus/integration/main"], check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "-C", str(controller), "commit", "--allow-empty", "-m", "init"], check=True, capture_output=True)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+
+    request = {
+        "task_id": "direct-canary",
+        "what": "bounded direct canary",
+        "why": "prove ordinary work does not allocate a Target",
+        "controller_repo_root": str(controller),
+        "allowed_files": ["src/one.py"],
+        "verifier_commands": ["true"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+
+    result = service.submit_task(request)
+
+    assert result["status"] == "DIRECT_CANONICAL_READY"
+    assert result["execution_lane"] == "DIRECT_CANONICAL"
+    assert result["state_created"] is False
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "runtime-targets").exists()
+
+
+def test_direct_canonical_lane_fails_closed_to_isolated_for_delegated_worker(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    subprocess.run(["git", "init", "-q", str(controller)], check=True)
+    subprocess.run(["git", "-C", str(controller), "branch", "-M", "nexus/integration/main"], check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "-C", str(controller), "commit", "--allow-empty", "-m", "init"], check=True, capture_output=True)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+
+    lane = resolve_execution_lane({
+        "controller_repo_root": str(controller),
+        "allowed_files": ["src/one.py"],
+        "primary_agent": False,
+        "worker": "agy",
+        "execution_lane": "DIRECT_CANONICAL",
+    })
+
+    assert lane["execution_lane"] == "ISOLATED_TARGET"
+    assert "primary_agent_attestation_required" in lane["blockers"]
+    assert "delegated_worker_forbidden" in lane["blockers"]
 
 
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):

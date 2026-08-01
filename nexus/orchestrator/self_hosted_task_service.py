@@ -240,6 +240,62 @@ def check_fast_lane_eligible(contract: ArchitectTaskContract, request: Optional[
     return True
 
 
+CANONICAL_SOURCE_ROOT = Path("/Users/jameschen/Workspace/nexus")
+CANONICAL_SOURCE_BRANCH = "nexus/integration/main"
+
+
+def resolve_execution_lane(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Classify ordinary primary-agent work without allocating a Target."""
+    requested = str(request.get("execution_lane", "ISOLATED_TARGET")).strip().upper()
+    if requested not in {"DIRECT_CANONICAL", "ISOLATED_TARGET"}:
+        raise ValueError("execution_lane must be DIRECT_CANONICAL or ISOLATED_TARGET")
+    if requested == "ISOLATED_TARGET":
+        return {
+            "execution_lane": "ISOLATED_TARGET",
+            "eligible": True,
+            "blockers": [],
+            "next_action": "prepare_governed_target",
+        }
+
+    blockers: list[str] = []
+    controller = Path(str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
+    if controller != CANONICAL_SOURCE_ROOT:
+        blockers.append("controller_is_not_canonical_source")
+    if request.get("primary_agent") is not True:
+        blockers.append("primary_agent_attestation_required")
+    worker = str(request.get("worker", "primary")).strip().lower()
+    if worker not in {"", "primary", "codex"}:
+        blockers.append("delegated_worker_forbidden")
+    try:
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if branch != CANONICAL_SOURCE_BRANCH:
+            blockers.append("canonical_branch_mismatch")
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain=v1"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if dirty:
+            blockers.append("canonical_checkout_dirty")
+    except OSError:
+        blockers.append("canonical_git_probe_failed")
+    if len(request.get("allowed_files") or []) > 4:
+        blockers.append("allowed_file_limit_exceeded")
+    if request.get("authorized_deletions"):
+        blockers.append("deletions_forbidden")
+    for flag in ("migration_authority", "schema_authority", "route_authority_mutation", "security_policy_weakening", "public_claim_allowed", "production_ready"):
+        if request.get(flag):
+            blockers.append(f"{flag}_forbidden")
+    return {
+        "execution_lane": "DIRECT_CANONICAL" if not blockers else "ISOLATED_TARGET",
+        "eligible": not blockers,
+        "blockers": blockers,
+        "next_action": "edit_canonical_checkout" if not blockers else "prepare_governed_target",
+    }
+
+
 class SelfHostedTaskService:
     @staticmethod
     def canonical_state_dir() -> Path:
@@ -1947,6 +2003,20 @@ class SelfHostedTaskService:
         }
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        lane = resolve_execution_lane(request)
+        if str(request.get("execution_lane", "ISOLATED_TARGET")).strip().upper() == "DIRECT_CANONICAL" and lane["eligible"]:
+            task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
+            return {
+                "schema": "nexus.self_hosted_direct_handoff.v1",
+                "task_id": task_id,
+                "status": "DIRECT_CANONICAL_READY",
+                "execution_lane": "DIRECT_CANONICAL",
+                "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
+                "controller_branch": CANONICAL_SOURCE_BRANCH,
+                "target_created": False,
+                "state_created": False,
+                "next_action": lane["next_action"],
+            }
         contract = self.build_contract(request)
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
@@ -1991,6 +2061,8 @@ class SelfHostedTaskService:
             "target_branch": f"nexus/task/{contract.task_id}",
             "target_created_at": None,
             "worker_provider": contract.preferred_provider,
+            "execution_lane": lane["execution_lane"],
+            "execution_lane_blockers": lane["blockers"],
             "worker_selection_mode": str(
                 request.get(
                     "worker_selection_mode",
