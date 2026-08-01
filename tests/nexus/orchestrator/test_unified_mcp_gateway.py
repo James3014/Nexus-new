@@ -305,5 +305,6 @@ def test_grok_runner_uses_positional_prompt(monkeypatch):
     )
 
     assert result["provider"] == "grok"
-    assert captured["command"][-1] == "Return a patch"
+    assert captured["command"][captured["command"].index("--single") + 1] == "Return a patch"
     assert "--prompt" not in captured["command"]
+    assert "--output-format" in captured["command"]
