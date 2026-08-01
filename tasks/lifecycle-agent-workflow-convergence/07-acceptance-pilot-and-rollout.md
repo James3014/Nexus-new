@@ -53,8 +53,8 @@ next_action, protected main is unchanged, push is false, and one live
 - candidate_commit: `5e290d095`
 - local_matrix: `PASS`
 - matrix_counts: `read=20, direct=10, assisted=5, isolated=5, duplicate=5, reconcile=3, dispose=3`
-- route_decision_p95_ms: `1.182`
-- status_snapshot_p95_ms: `0.175`
+- route_decision_p95_ms: `0.944`
+- status_snapshot_p95_ms: `0.167`
 - target_created: `5` (isolated lane only), `active_targets=0`
 - max_active_targets: `1`
 - duplicate_commits: `0`
@@ -70,7 +70,8 @@ next_action, protected main is unchanged, push is false, and one live
 - external_proxy_tests_and_typecheck: `PASS`
 - external_proxy_artifact_sha256: `7155a3b777d8d04fffe3c56536eb8dcb97244edd2b0ae25c0f9ea7d769b3f3a0`
 - public_synthetic_tools_list: `PASS (24 tools, approval.v2 schema visible)`
-- live_nexus01_smoke: `NOT_PROVEN_AFTER_24_TOOL_RELOAD`
+- live_nexus01_smoke: `NOT_PROVEN_AFTER_24_TOOL_RELOAD` (acceptance harness
+  rerun reports `NOT_RUN`; public synthetic OAuth proof is separate)
 - claim_ceiling: `LOCAL_GATEWAY_ACCEPTANCE_PASS`
 - remaining_blocker: `GPT_TO_NEXUS_LIFECYCLE_WORKFLOW_ACCEPTANCE_PASS requires fresh nexus01 reconnect plus read/Direct/Candidate smoke`
 
