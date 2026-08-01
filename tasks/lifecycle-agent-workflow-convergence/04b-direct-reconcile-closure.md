@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED_PENDING_OWNER_REVIEW
 task_id: lifecycle-workflow-p4b-direct-reconcile-closure
 commit_required: true
 candidate_required: true
@@ -53,6 +53,18 @@ git diff --check
 - Unsafe/ambiguous evidence remains `DIRECT_RECONCILE_REQUIRED` with a review
   action and no mutation.
 - Same `task_id` retry creates a new attempt rather than a duplicate task.
+
+## Verified evidence
+
+- `tests/nexus/orchestrator/test_self_hosted_task_service.py`: `121 passed`.
+- Live Gateway reloaded at commit
+  `8880320dc593d4bbf020016a89d34f604e49d566` with 17 public tools.
+- Formal `nexus_task_reconcile` was called for 10 stale provider/transport
+  receipts; all closed as `FINAL_BLOCK` with
+  `NO_MUTATION_OBSERVED`, `reconciliation_required=false`, no Target, and
+  `next_action=retry_same_task`.
+- Live snapshot: canonical branch `nexus/integration/main`, clean, one
+  registered worktree, zero active tasks, zero active Targets.
 
 ## Block classification
 
