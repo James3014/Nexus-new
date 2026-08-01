@@ -32,7 +32,7 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 
 ## Current Frontier
 
-`none` (P7 revalidation complete; owner review remains explicit for retained canonical state)
+`none` (P7 revalidation and stale no-Candidate receipt closure complete; rehearsal evidence remains non-authoritative)
 
 ## Completed Cards
 
@@ -51,7 +51,7 @@ The P7 revalidation gate is complete. `AUTO_CHAIN=false`; owner review remains r
 
 P6 gate evidence: 30-task matrix passed; combined lifecycle regression passed `213/213`; canonical checkout is clean with one registered worktree.
 
-P7 revalidation evidence is recorded in card 07. The remaining canonical retained task is visible, terminally retained, and exposes one same-task retry surface; no state mutation is authorized without the owner decision represented by that surface.
+P7 revalidation evidence is recorded in card 07. The stale canonical retained receipt was formally superseded and archived through `close-without-candidate` plus `archive_states`; canonical actionable count is now zero. Rehearsal duplicates remain evidence-only.
 
 P0 authority reclassification is committed at `534e72bb4`; active lifecycle indexes no longer point to the retired Controller path.
 
@@ -65,4 +65,4 @@ No direct lifecycle JSON edits; no push, protected rewrite, automatic approval, 
 
 ## Completion ceiling
 
-P7 closes the lifecycle implementation/revalidation objective: zero unwanted worktree creation in the physical matrix, zero duplicate logical task creation for duplicate card hashes, zero abandoned active Targets after the isolated cycles, explicit fault recovery surfaces, and a clean canonical checkout. Retained canonical state remains evidence/owner review, not an automatic cleanup target.
+P7 closes the lifecycle implementation/revalidation objective: zero unwanted worktree creation in the physical matrix, zero duplicate logical task creation for duplicate card hashes, zero abandoned active Targets after the isolated cycles, explicit fault recovery surfaces, zero canonical actionable tasks, and a clean canonical checkout. Rehearsal state remains evidence-only and is not a second authority.

@@ -77,7 +77,8 @@ git worktree list --porcelain
 - Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
 - Full service regression: `tests/nexus/orchestrator/test_self_hosted_task_service.py` passed `118 passed`; the exact-plan preview regression confirms `apply=False` does not create the disabled/runtime Target root or alter the read-only plan hash.
 - Commits: `48dbab1fa` (physical matrix), `957bc41f0` (cleaned verified block action routing), `bf57dcb54` (20 fault gate), `816aa5874` (Direct-by-default), `5d98bffeb` (CLI/MCP lane exposure), `c41bcb00f` (read p95 gate), `11c07b897` (10 owner-finish archives), `534e72bb4` (P0 authority retirement), and `319ee23d5` (read-only convergence preview).
-- Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
+- Stale receipt disposition: owner-approved formal `close-without-candidate` superseded `exact-authorized-deletion-contract-bootstrap` by `lifecycle-two-lane-canonical-closure`; archive API moved the terminal receipt with receipt hash `22f312b6d0941cf17b56390a1263bdcff3e74f5583170cc21a38e9b93ccd1af9` and manifest hash `3e747d6b3918c3134c5cac02eea7dcc098114bbaecde49ed0370192d0a8e8cd7`.
+- Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root absent; actionable task count `0`; rehearsal duplicates remain evidence-only and do not create canonical authority conflicts.
 - External disposition: `/Users/jameschen/Workspace/nexus-devspace-mcp` is clean on `nexus/mcp-tools-v1`; merged local branch `nexus/mcp-batch-1d-remediation-3` removed; residue preserved under `/Users/jameschen/Workspace/nexus-salvage/20260801-nexus-devspace-mcp`.
 
 ## Forbidden scope
@@ -86,4 +87,4 @@ No direct lifecycle JSON edits, no worker approval/integration, no push, no prot
 
 ## Exit criteria and residual debt
 
-Complete only when every matrix row and SLO gate has physical receipt evidence, the canonical root and external MCP checkout are clean, no actionable orphan lacks owner disposition, and this card has a scoped commit. One pre-existing canonical `RETAINED_FOR_REVIEW` task remains owner-visible with an executable same-task retry surface; it was not mutated or silently archived because its `owner_decision` is null and its verified evidence permits—but does not authorize—a new attempt.
+Complete only when every matrix row and SLO gate has physical receipt evidence, the canonical root and external MCP checkout are clean, no actionable orphan remains without owner disposition, and this card has a scoped commit. The former canonical `RETAINED_FOR_REVIEW` receipt was formally superseded and archived through the lifecycle API; rehearsal duplicates remain evidence-only.
