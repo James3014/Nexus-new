@@ -200,7 +200,7 @@ class UnifiedMCPGateway:
                         "task_card_path": {"type": "string"},
                         "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "idempotency_key": {"type": "string", "maxLength": 256},
-                        "apply": {"type": "boolean", "default": True},
+                        "apply": {"type": "boolean", "default": False},
                     },
                 },
             },
@@ -342,7 +342,10 @@ class UnifiedMCPGateway:
         return "dispatch-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
     def _plan_route(self, *, what: str, allowed: list[str], preference: str, worker: str) -> dict[str, Any]:
-        cross_module = len(allowed) > 4 or any("/" in path and path.split("/", 1)[0] in {"nexus", "scripts", "tests"} for path in allowed)
+        top_level_paths = {path.split("/", 1)[0] for path in allowed}
+        cross_module = len(allowed) > 1 and (
+            len(top_level_paths) > 1 or any(path.startswith("nexus/") for path in allowed)
+        )
         plan = CapabilityPlanner().plan(
             task_desc=what,
             task_type="code",
@@ -507,7 +510,7 @@ class UnifiedMCPGateway:
                     recorder(task_id, "ASSIST_PATCH_REJECTED", str(exc))
                 return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PATCH_REJECTED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "handoff": self.service.get_task(task_id) if hasattr(self.service, "get_task") else handoff, "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
             patch_validation_ms = max(0, int((time.perf_counter() - patch_validation_started) * 1000))
-            if not bool(arguments.get("apply", True)):
+            if not bool(arguments.get("apply", False)):
                 return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "patch": str(proposal["patch"]), "changed_files": changed, "handoff": handoff, "next_action": "apply_assisted_candidate"}
             try:
                 applied = self._apply_runner(patch=str(proposal["patch"]), request=request, provider=str(proposal.get("provider") or "agy"), provider_time_ms=provider_time_ms)

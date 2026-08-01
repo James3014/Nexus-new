@@ -146,6 +146,32 @@ def test_task_run_routes_small_request_direct_without_target_fields():
     assert payload["mutation_lease"]["type"] == "canonical_mutation_lock"
 
 
+def test_task_run_routes_single_nexus_file_direct_without_target():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({"jsonrpc": "2.0", "id": 19, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Fix one bounded source typo", "why": "Single-file canonical edit", "allowed_files": ["nexus/example.py"]}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["execution_lane"] == "DIRECT_CANONICAL"
+    assert payload["status"] == "DIRECT_CANONICAL_READY"
+    assert payload["handoff"]["target_created"] is False
+
+
+def test_assisted_defaults_to_proposal_only():
+    service = FakeService()
+    applied = []
+    gateway = UnifiedMCPGateway(
+        service=service,
+        model_runner=lambda **_: {"provider": "agy", "patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@\n"},
+        apply_runner=lambda **kwargs: applied.append(kwargs),
+    )
+    gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
+    response = gateway.handle({"jsonrpc": "2.0", "id": 20, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest one bounded README fix", "why": "Proposal-only default", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "ASSISTED_CANONICAL_PROPOSAL_READY"
+    assert payload["next_action"] == "apply_assisted_candidate"
+    assert applied == []
+
+
 def test_task_run_returns_typed_action_identity_and_forwards_it():
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
@@ -197,7 +223,7 @@ def test_task_run_assisted_applies_injected_bounded_patch_without_target():
         apply_runner=lambda **kwargs: applied.append(kwargs) or {"status": "DIRECT_CANONICAL_COMPLETED", "target_created": False, "state_created": False},
     )
     gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
-    response = gateway.handle({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
+    response = gateway.handle({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL", "apply": True}}})
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
     assert payload["route_authority"] == "CapabilityPlanner"
@@ -236,7 +262,7 @@ def test_bounded_soak_matrix_keeps_direct_and_assisted_off_targets():
     )
     assisted_gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
     for index in range(20):
-        response = assisted_gateway.handle({"jsonrpc": "2.0", "id": 200 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-assisted-{index}", "what": "Propose one bounded README typo fix", "why": "Synthetic Assisted soak", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
+        response = assisted_gateway.handle({"jsonrpc": "2.0", "id": 200 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-assisted-{index}", "what": "Propose one bounded README typo fix", "why": "Synthetic Assisted soak", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL", "apply": True}}})
         payload = response["result"]["structuredContent"]
         assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
         assert payload["receipt"]["target_created"] is False
