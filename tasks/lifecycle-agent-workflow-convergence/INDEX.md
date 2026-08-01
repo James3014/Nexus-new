@@ -41,7 +41,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 4d | `lifecycle-workflow-mcp-closure-complete` | `04d-mcp-closure-complete.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP closure completion |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | COMPLETED_PENDING_OWNER_REVIEW | Owner-authorized canonical exception; P4 owner review remains pending |
 | 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | VERIFIED_PENDING_OWNER_REVIEW | P5 implementation verified; generic contract binding and drift tests pass |
-| 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | ACTIVE | P6 verified; acceptance implementation active |
+| 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | VERIFIED_PENDING_OWNER_REVIEW | Local acceptance pass; live nexus01 smoke remains |
 
 ## Residual campaigns
 
@@ -56,7 +56,7 @@ at P1 through the formal lifecycle surface and the current frontier card.
 ## Current frontier
 
 `tasks/lifecycle-agent-workflow-convergence/07-acceptance-pilot-and-rollout.md`
-is the active acceptance implementation card; P6 is verified pending Owner review
+is locally verified pending Owner review and live connector smoke; P6 is verified pending Owner review
 under an explicit owner-authorized canonical exception. `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
 and P4 owner review remain required evidence dependencies; this exception does
 not promote them. `01b-fresh-suite-evidence-gate.md`

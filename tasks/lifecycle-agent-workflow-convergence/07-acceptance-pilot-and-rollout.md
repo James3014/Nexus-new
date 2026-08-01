@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_PENDING_OWNER_REVIEW
 task_id: lifecycle-workflow-p7-acceptance-rollout
 commit_required: true
 candidate_required: true
@@ -47,6 +47,24 @@ git diff --check
 `active_targets=0`, `duplicate_commits=0`, all non-terminal tasks have one
 next_action, protected main is unchanged, push is false, and one live
 `nexus01` smoke covers read, Direct, and Candidate disposition.
+
+## Verification receipt
+
+- candidate_commit: `5e290d095`
+- local_matrix: `PASS`
+- matrix_counts: `read=20, direct=10, assisted=5, isolated=5, duplicate=5, reconcile=3, dispose=3`
+- route_decision_p95_ms: `1.182`
+- status_snapshot_p95_ms: `0.175`
+- target_created: `5` (isolated lane only), `active_targets=0`
+- max_active_targets: `1`
+- duplicate_commits: `0`
+- unknown_nonterminal_next_actions: `0`
+- unmapped_worktrees: `0` (the retained parser checkout is classified external-active)
+- gateway_workflow_tests: `61 passed, 1 warning`
+- gateway_http_tests: `5 passed, 1 warning`
+- live_nexus01_smoke: `NOT_RUN`
+- claim_ceiling: `LOCAL_GATEWAY_ACCEPTANCE_PASS`
+- remaining_blocker: `GPT_TO_NEXUS_LIFECYCLE_WORKFLOW_ACCEPTANCE_PASS requires live nexus01 read/Direct/Candidate smoke`
 
 ## Block classification
 
