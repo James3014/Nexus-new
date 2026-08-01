@@ -41,6 +41,7 @@ none (completed)
 - `lifecycle-two-lane-p3-owner-finish`: committed `55e31423b`
 - `lifecycle-two-lane-p4-same-task-retry`: committed `b752fc72e`
 - `lifecycle-two-lane-p5-target-root-and-telemetry`: committed `23db1ad53`
+- `lifecycle-two-lane-p6-cutover-gate`: committed `190955e2d`
 
 ## Current Gate
 
