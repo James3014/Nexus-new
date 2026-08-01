@@ -2219,6 +2219,11 @@ class SelfHostedTaskService:
             and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
         )
         lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
+        action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
+        action_id = str(request.get("action_id") or action.get("action_id") or "")
+        attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
+        idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or "")
+        action_request_hash = str(request.get("action_request_hash") or action.get("request_hash") or "")
         if str(request.get("execution_lane", "DIRECT_CANONICAL")).strip().upper() == "DIRECT_CANONICAL" and lane["eligible"]:
             task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
             return {
@@ -2230,6 +2235,10 @@ class SelfHostedTaskService:
                 "controller_branch": CANONICAL_SOURCE_BRANCH,
                 "target_created": False,
                 "state_created": False,
+                "action_id": action_id or None,
+                "attempt_id": attempt_id_hint or None,
+                "idempotency_key": idempotency_key or None,
+                "action_request_hash": action_request_hash or None,
                 "next_action": "run_direct_canonical_completion",
                 "required_surface": "nexus_self_hosted_direct_complete",
                 "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
@@ -2242,6 +2251,17 @@ class SelfHostedTaskService:
             for path in sorted(self.state_dir.glob("*.json"))
         ] if self.state_dir.exists() else []
         for current in existing_states:
+            current_key = str(current.get("idempotency_key") or "")
+            if idempotency_key and current_key == idempotency_key:
+                current_hash = str(current.get("action_request_hash") or "")
+                if current_hash and action_request_hash and current_hash != action_request_hash:
+                    raise ValueError("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")
+                return {
+                    **self._with_task_action(current),
+                    "duplicate": True,
+                    "duplicate_action_id": current.get("action_id"),
+                    "idempotency_key": idempotency_key,
+                }
             if (
                 current.get("task_id") != contract.task_id
                 and identity.get("task_card_hash")
@@ -2284,6 +2304,11 @@ class SelfHostedTaskService:
             "task_card_hash": identity["task_card_hash"],
             "status_history": [{"status": "SUBMITTED", "at": now}],
             "request": _jsonable(dict(request)),
+            "action": _jsonable(dict(action)) if action else None,
+            "action_id": action_id or None,
+            "attempt_id_hint": attempt_id_hint or None,
+            "idempotency_key": idempotency_key or None,
+            "action_request_hash": action_request_hash or None,
             "contract": contract.model_dump(mode="json"),
             "contract_hash": contract.contract_hash,
             "controller_worktree": contract.controller_repo_root,

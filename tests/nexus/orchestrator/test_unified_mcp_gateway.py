@@ -145,6 +145,35 @@ def test_task_run_routes_small_request_direct_without_target_fields():
     assert payload["mutation_lease"]["type"] == "canonical_mutation_lock"
 
 
+def test_task_run_returns_typed_action_identity_and_forwards_it():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_run",
+            "arguments": {
+                "task_id": "action-envelope-1",
+                "what": "Fix one bounded README typo",
+                "why": "Exercise action identity",
+                "allowed_files": ["README.md"],
+                "idempotency_key": "action-envelope-key",
+            },
+        },
+    })
+    payload = response["result"]["structuredContent"]
+    action = payload["action"]
+    assert action["schema"] == "nexus.lifecycle_action.v1"
+    assert action["task_id"] == "action-envelope-1"
+    assert action["idempotency_key"] == "action-envelope-key"
+    assert action["expected_head"] == payload["base_sha"]
+    assert action["request_hash"]
+    assert service.submitted[0]["action_id"] == action["action_id"]
+    assert service.submitted[0]["action_request_hash"] == action["request_hash"]
+
+
 def test_task_run_assisted_is_fail_closed_without_side_effect():
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service, model_runner=lambda **_: {"provider": "agy", "blocker": "ASSIST_PROVIDER_UNAVAILABLE"})

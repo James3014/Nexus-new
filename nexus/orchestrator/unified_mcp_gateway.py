@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.contracts.lifecycle_action import (
+    LifecycleActionType,
+    PermissionProfile,
+    build_action_envelope,
+)
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
 
 GATEWAY_NAME = "nexus-mcp-gateway"
@@ -167,6 +172,7 @@ class UnifiedMCPGateway:
                         "preferred_worker": {"type": "string", "default": "auto"},
                         "task_card_path": {"type": "string"},
                         "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "idempotency_key": {"type": "string", "maxLength": 256},
                         "apply": {"type": "boolean", "default": True},
                     },
                 },
@@ -361,6 +367,30 @@ class UnifiedMCPGateway:
         route = self._plan_route(what=what, allowed=allowed, preference=preference, worker=worker)
         route_decision_ms = max(0, int((time.perf_counter() - route_started) * 1000))
         base = _git("rev-parse", "HEAD").strip()
+        action_request = {
+            "task_id": task_id,
+            "what": what,
+            "why": why,
+            "allowed_files": allowed,
+            "verifier_commands": list(arguments.get("verifier_commands") or ["git diff --check"]),
+            "execution_preference": preference,
+            "preferred_worker": worker,
+            "task_card_path": arguments.get("task_card_path"),
+            "task_card_hash": arguments.get("task_card_hash"),
+        }
+        action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.TASK_RUN,
+            request=action_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=base,
+            allowed_paths=allowed,
+            mutation=True,
+            task_card_path=arguments.get("task_card_path"),
+            task_card_hash=arguments.get("task_card_hash"),
+            idempotency_key=arguments.get("idempotency_key"),
+            permission_profile=PermissionProfile.MUTATE_BOUNDED,
+        )
         envelope = {
             "schema": "nexus.task_dispatch.v1",
             "task_id": task_id,
@@ -368,6 +398,7 @@ class UnifiedMCPGateway:
             "why": why,
             "controller_revision": base,
             "allowed_files": allowed,
+            "action": action.model_dump(mode="json"),
             **route,
         }
         def telemetry(**values: int) -> dict[str, int]:
@@ -410,7 +441,7 @@ class UnifiedMCPGateway:
             patch_validation_ms = max(0, int((time.perf_counter() - patch_validation_started) * 1000))
             if not bool(arguments.get("apply", True)):
                 return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "patch": str(proposal["patch"]), "changed_files": changed, "next_action": "apply_assisted_candidate"}
-            request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base)
+            request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base, action=action.model_dump(mode="json"))
             try:
                 applied = self._apply_runner(patch=str(proposal["patch"]), request=request, provider=str(proposal.get("provider") or "agy"), provider_time_ms=provider_time_ms)
             except Exception as exc:
@@ -418,7 +449,7 @@ class UnifiedMCPGateway:
             applied_telemetry = dict(applied.get("telemetry") or {}) if isinstance(applied, Mapping) else {}
             applied_telemetry.update(telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms, verifier_time_ms=int(applied_telemetry.get("verifier_time_ms", 0) or 0), commit_time_ms=int(applied_telemetry.get("commit_time_ms", 0) or 0), worktree_time_ms=int(applied_telemetry.get("worktree_time_ms", 0) or 0), cleanup_time_ms=int(applied_telemetry.get("cleanup_time_ms", 0) or 0)))
             return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "telemetry": applied_telemetry, "changed_files": changed, "receipt": applied, "next_action": "none"}
-        request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base)
+        request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base, action=action.model_dump(mode="json"))
         request.update({"execution_lane": route["execution_lane"]})
         if route["execution_lane"] == "DIRECT_CANONICAL":
             request.update({"primary_agent": True, "worker": "primary"})
@@ -429,8 +460,8 @@ class UnifiedMCPGateway:
         return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "telemetry": telemetry(), "next_action": "wait_for_task", "handoff": self.service.submit_task(request)}
 
     @staticmethod
-    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str) -> dict[str, Any]:
-        return {
+    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        request = {
             "task_id": task_id, "what": what, "why": why,
             "controller_revision": base, "target_base_revision": base,
             "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
@@ -438,6 +469,13 @@ class UnifiedMCPGateway:
             "target_worktree_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
             "allowed_files": allowed, "verifier_commands": verifiers,
         }
+        if action:
+            request["action"] = dict(action)
+            request["action_id"] = action.get("action_id")
+            request["attempt_id"] = action.get("attempt_id")
+            request["idempotency_key"] = action.get("idempotency_key")
+            request["action_request_hash"] = action.get("request_hash")
+        return request
 
     @staticmethod
     def _assist_prompt(what: str, why: str, allowed: list[str], verifiers: list[str]) -> str:
