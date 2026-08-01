@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: ACTIVE
 task_id: lifecycle-workflow-p6-approval-reconnect-drift
 commit_required: true
 candidate_required: true
@@ -37,6 +37,11 @@ definition drift, and recover reconnects without replaying mutations.
 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/tmp/nexus-p6-pycache uv run pytest -q tests/nexus/orchestrator/test_unified_mcp_gateway_http.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/nexus/orchestrator/test_self_hosted_task_service.py
 git diff --check
 ```
+
+## Current evidence
+
+Implementation is active on the canonical branch under the Owner's explicit
+continuation request. Cline live execution remains a separate downstream gate.
 
 ## Exit criteria
 

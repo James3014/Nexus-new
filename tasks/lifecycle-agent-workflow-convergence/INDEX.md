@@ -40,7 +40,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 4c | `lifecycle-workflow-mcp-assisted-async-closure` | `04c-mcp-assisted-async-closure.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP execution closure |
 | 4d | `lifecycle-workflow-mcp-closure-complete` | `04d-mcp-closure-complete.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP closure completion |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | COMPLETED_PENDING_OWNER_REVIEW | Owner-authorized canonical exception; P4 owner review remains pending |
-| 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | PENDING | P5 integrated |
+| 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | ACTIVE | P5 implementation verified; Owner continuation active |
 | 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | PENDING | P6 integrated |
 
 ## Residual campaigns
@@ -56,7 +56,7 @@ at P1 through the formal lifecycle surface and the current frontier card.
 ## Current frontier
 
 `tasks/lifecycle-agent-workflow-convergence/06-approval-reconnect-definition-drift.md`
-is the next pending implementation card; P5 is complete pending owner review
+is the active implementation card; P5 is complete pending owner review
 under an explicit owner-authorized canonical exception. `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
 and P4 owner review remain required evidence dependencies; this exception does
 not promote them. `01b-fresh-suite-evidence-gate.md`
