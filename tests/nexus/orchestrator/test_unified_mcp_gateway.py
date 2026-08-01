@@ -627,6 +627,34 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     assert result["artifacts"]["stdout"]
 
 
+def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspace(monkeypatch, tmp_path):
+    class HangingPopen:
+        pid = 54100
+        returncode = None
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self.command = command
+
+        def poll(self):
+            return None
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", HangingPopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway.handle({"jsonrpc": "2.0", "id": 7010, "method": "tools/call", "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "async-cline-timeout", "what": "Bounded probe", "why": "Poll timeout distinction", "allowed_files": ["README.md"]}}})
+    waited = gateway.handle({"jsonrpc": "2.0", "id": 7011, "method": "tools/call", "params": {"name": "nexus_task_wait", "arguments": {"task_id": "async-cline-timeout", "timeout_seconds": 0}}})
+    assert waited["result"]["structuredContent"]["status"] == "RUNNING"
+    cancelled = gateway.handle({"jsonrpc": "2.0", "id": 7012, "method": "tools/call", "params": {"name": "nexus_assist_cancel", "arguments": {"task_id": "async-cline-timeout"}}})
+    receipt = cancelled["result"]["structuredContent"]
+    assert receipt["status"] == "CANCELLED"
+    assert receipt["process_killed"] is True
+    assert receipt["process_cleanup"] is True
+    assert not Path(receipt["workspace_root"]).exists()
+
+
 def test_cline_task_run_returns_async_assisted_action_with_verify_envelope(monkeypatch, tmp_path):
     import subprocess as real_subprocess
     real_popen = real_subprocess.Popen
