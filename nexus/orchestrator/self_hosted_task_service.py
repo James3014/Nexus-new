@@ -255,7 +255,9 @@ def resolve_execution_lane(
     active_mutation_tasks: int = 0,
 ) -> dict[str, Any]:
     """Classify ordinary primary-agent work without allocating a Target."""
-    requested = str(request.get("execution_lane", "ISOLATED_TARGET")).strip().upper()
+    # Ordinary primary-agent work is Direct by default; callers opt into an
+    # isolated Target when they need delegation, parallelism, or risk fencing.
+    requested = str(request.get("execution_lane", "DIRECT_CANONICAL")).strip().upper()
     if requested not in {"DIRECT_CANONICAL", "ISOLATED_TARGET"}:
         raise ValueError("execution_lane must be DIRECT_CANONICAL or ISOLATED_TARGET")
     if requested == "ISOLATED_TARGET":
@@ -2214,7 +2216,7 @@ class SelfHostedTaskService:
             and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
         )
         lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
-        if str(request.get("execution_lane", "ISOLATED_TARGET")).strip().upper() == "DIRECT_CANONICAL" and lane["eligible"]:
+        if str(request.get("execution_lane", "DIRECT_CANONICAL")).strip().upper() == "DIRECT_CANONICAL" and lane["eligible"]:
             task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
             return {
                 "schema": "nexus.self_hosted_direct_handoff.v1",

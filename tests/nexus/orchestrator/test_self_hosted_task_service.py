@@ -1262,6 +1262,41 @@ def test_direct_canonical_lane_returns_handoff_without_state_or_target(tmp_path,
     assert result["execution_lane"] == "DIRECT_CANONICAL"
     assert result["state_created"] is False
     assert not (tmp_path / "state").exists()
+
+
+def test_ordinary_primary_request_defaults_to_direct_canonical(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "branch", "-M", "nexus/integration/main")
+    _git(controller, "commit", "--allow-empty", "-m", "init")
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+
+    lane = resolve_execution_lane({
+        "controller_repo_root": str(controller),
+        "allowed_files": ["src/ordinary.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+    })
+
+    assert lane["execution_lane"] == "DIRECT_CANONICAL"
+    assert lane["eligible"] is True
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    handoff = service.submit_task({
+        "task_id": "ordinary-default-direct",
+        "what": "ordinary bounded edit",
+        "why": "prove the default lane does not allocate a Target",
+        "controller_repo_root": str(controller),
+        "allowed_files": ["src/ordinary.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+    })
+    assert handoff["execution_lane"] == "DIRECT_CANONICAL"
+    assert handoff["target_created"] is False
+    assert handoff["state_created"] is False
     assert not (tmp_path / "nexus-runtime-targets").exists()
 
 

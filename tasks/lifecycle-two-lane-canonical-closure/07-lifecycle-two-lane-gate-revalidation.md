@@ -40,10 +40,11 @@
 ## Required behavior
 
 1. Direct lane rejects lockfiles, generated/large changes, authority-sensitive flags, delegated workers, dirty roots, wrong branch, and concurrent mutation tasks; eligible Direct completion has an explicit preflight, scoped verification, staged-diff gate, and commit-bound receipt without Candidate/Target creation.
-2. Isolated lane rejects the disabled root, uses only `/Users/jameschen/Workspace/nexus-runtime-targets`, serializes one active slot, and preserves lazy read-only behavior.
-3. `owner_finish` verifies binding, integrates, and archives the terminal receipt; mismatch or branch/verifier drift leaves approval and integration unmodified.
-4. Integration failures expose a callable same-task integration retry; verified-uncommitted and dirty-retained cases expose one precise next action; duplicate Task Card hashes return the existing task and retry action without a second logical task.
-5. Receipts expose separate provider, verifier, worktree, commit/hook, cleanup, wall, and overhead timing fields sufficient to calculate p95 SLOs.
+2. Ordinary primary-agent requests default to `DIRECT_CANONICAL`; callers must explicitly request `ISOLATED_TARGET` for governed Target execution.
+3. Isolated lane rejects the disabled root, uses only `/Users/jameschen/Workspace/nexus-runtime-targets`, serializes one active slot, and preserves lazy read-only behavior.
+4. `owner_finish` verifies binding, integrates, and archives the terminal receipt; mismatch or branch/verifier drift leaves approval and integration unmodified.
+5. Integration failures expose a callable same-task integration retry; verified-uncommitted and dirty-retained cases expose one precise next action; duplicate Task Card hashes return the existing task and retry action without a second logical task.
+6. Receipts expose separate provider, verifier, worktree, commit/hook, cleanup, wall, and overhead timing fields sufficient to calculate p95 SLOs.
 
 ## Verification commands
 
@@ -70,6 +71,7 @@ git worktree list --porcelain
 
 - Physical matrix: `test_revalidation_15_direct_10_isolated_5_fault_matrix` passed. It creates and verifies 15 real Direct commits, runs 10 real reusable serial Target prepare/commit/salvage/cleanup cycles, checks five executable fault actions, and asserts Direct overhead p95 <1s plus warm Target prepare/release p95 <5s.
 - Original P4 gate: 20 bounded fault/retry cases passed with stable task IDs and exactly one recommended tool/next action per case.
+- Default route regression: `test_ordinary_primary_request_defaults_to_direct_canonical` passed; an ordinary primary request returned a Direct handoff with no state or Target.
 - Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
 - Commits: `48dbab1fa` (physical matrix) and `957bc41f0` (cleaned verified block action routing).
 - Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
