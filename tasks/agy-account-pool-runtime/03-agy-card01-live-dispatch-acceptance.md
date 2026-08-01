@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: BLOCKED_BY_STRUCTURED_RESULT_RUNTIME
+status: IMPLEMENTED_PENDING_CARD_04_SECOND_ACCOUNT_CANARY
 task_id: agy-card01-live-dispatch-acceptance
 campaign_id: agy-account-pool-runtime
 verifies:
