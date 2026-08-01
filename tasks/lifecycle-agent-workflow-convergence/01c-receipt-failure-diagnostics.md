@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED_PENDING_OWNER_REVIEW
 task_id: lifecycle-workflow-p1c-receipt-failure-diagnostics
 commit_required: true
 candidate_required: true
@@ -62,6 +62,18 @@ git diff --check
   attempt changes do not change it.
 - Success remains `receipt_complete`/claim semantics identical to baseline.
 - Contract validator fails closed on malformed or mismatched diagnostics.
+
+## Verified evidence
+
+- `tests/contracts/test_unified_runtime_receipt.py` plus
+  `tests/services/test_unified_runtime.py`: `144 passed`.
+- Revision-bound fresh-suite manifest at
+  `/tmp/nexus-fresh-suite-1fa8062c.json`: `PASS`, 5 passed, 0 failed, 0 skipped,
+  clean HEAD `1fa8062c79ad48ae499020c37a979902a2d19b5f`.
+- Six-control manifest at `/tmp/nexus-control-gate-1fa8062c.json`: `PASS`,
+  6 passed, 0 failed, 0 skipped, clean checkout.
+- Equivalent normalized provider failures share a root id while task and
+  attempt identity remain excluded from the root hash.
 
 ## Block classification
 

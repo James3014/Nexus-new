@@ -32,7 +32,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 0 | `lifecycle-workflow-p0-authority-baseline` | `00-authority-and-baseline.md` | COMPLETED | none |
 | 1 | `lifecycle-workflow-p1-action-envelope` | `01-lifecycle-action-envelope.md` | COMPLETED | `4cd6da508` |
 | 1b | `lifecycle-workflow-p1b-fresh-suite-evidence-gate` | `01b-fresh-suite-evidence-gate.md` | COMPLETED_PENDING_OWNER_REVIEW | P1 `4cd6da508` + bootstrap-authority-convergence current frontier |
-| 1c | `lifecycle-workflow-p1c-receipt-failure-diagnostics` | `01c-receipt-failure-diagnostics.md` | ACTIVE | P1b evidence gate |
+| 1c | `lifecycle-workflow-p1c-receipt-failure-diagnostics` | `01c-receipt-failure-diagnostics.md` | COMPLETED_PENDING_OWNER_REVIEW | P1b evidence gate |
 | 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | VERIFIED_PENDING_OWNER_REVIEW | P1b + bootstrap-authority-convergence owner review |
 | 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | VERIFIED_PENDING_OWNER_REVIEW | P2 implementation verified |
 | 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | VERIFIED_PENDING_OWNER_REVIEW | P3 owner review |
@@ -55,8 +55,7 @@ at P1 through the formal lifecycle surface and the current frontier card.
 `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
 remains the required pre-P2 implementation gate. `01b-fresh-suite-evidence-gate.md`
 and the P2/P3 cards now have current verification evidence, but remain
-`VERIFIED_PENDING_OWNER_REVIEW`. The P1c diagnostics card is the current
-bounded additive observability frontier; it does not alter P2 runtime
-semantics. P4 implementation is also verified but
+`VERIFIED_PENDING_OWNER_REVIEW`. The P1c diagnostics card is verified and
+pending owner review; it does not alter P2 runtime semantics. P4 implementation is also verified but
 remains owner-gated. P5 cannot start until the Owner explicitly accepts the
 bootstrap, P1b, P2, P3, and P4 gates through the formal lifecycle surface.
