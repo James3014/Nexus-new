@@ -1,8 +1,11 @@
 # Campaign Index: Self-hosted Operator Workflow
 
-artifact_authority: current
+artifact_authority: historical
 owner: James Chen
-status: active
+status: superseded
+campaign_id: self-hosted-operator-workflow
+superseded_by: lifecycle-two-lane-canonical-closure
+current_frontier: none (superseded; runtime revalidation delegated to P1-P4)
 AUTO_CHAIN: false
 
 ## Campaign Overview
@@ -15,8 +18,8 @@ AUTO_CHAIN: false
 4. [00d-self-hosted-terminal-closeout-trigger.md](00d-self-hosted-terminal-closeout-trigger.md) - `self-hosted-terminal-closeout-trigger`
 5. [00b-self-hosted-verification-entrypoint-opencode-recovery.md](00b-self-hosted-verification-entrypoint-opencode-recovery.md) - `self-hosted-verification-entrypoint-opencode-recovery`
 
-## Current Frontier
-`self-hosted-terminal-closeout-trigger`
+## Historical Frontier
+`self-hosted-terminal-closeout-trigger` is preserved as historical evidence. No card in this campaign is a current execution authority.
 
 ## Completed Cards
 - `self-hosted-retained-target-auto-closeout`: INTEGRATED at `17cf433ef218ea709d2e06ac1d3fcd2e85b90144`; retained Targets can now be salvaged/protected and released without promotion

@@ -1,18 +1,19 @@
 # Campaign Index: Workspace Control Convergence
 
-artifact_authority: current
+artifact_authority: historical
 owner: James Chen
-status: active_p6_owner_approved
+status: superseded_historical_cutover_evidence
 source_specification: owner-authorized conversation on 2026-07-31
+superseded_by: lifecycle-two-lane-canonical-closure
 AUTO_CHAIN: false
 
 ## Campaign Overview
 Converge Nexus workspace authority onto the clean integration controller and add one reusable, fail-closed execution slot without deleting evidence, rewriting history, or granting workers integration authority. P1-P5 and P7 implementation evidence is on `nexus/integration/main`; terminal lifecycle receipts are now archived through the formal archive API. On 2026-08-01 the owner explicitly approved worktree reconciliation, required valuable changes to be integrated, required redundant worktrees to be removed, and required `/Users/jameschen/Workspace/nexus` to become the sole daily entrypoint.
 
-## Live Authority Reconciliation (2026-07-31)
+## Historical Authority Reconciliation (2026-07-31)
 
-- Controller: `/Users/jameschen/Workspace/nexus-worktrees/integration-main`, branch `nexus/integration/main`, HEAD `ba1fe9b6d59d9e47600d9a06babdd2f5a06a9fad`.
-- Canonical root: `/Users/jameschen/Workspace/nexus`, branch `feature/full-capability-closure-20260718`, HEAD `a2185edb0e67e3fc9d6ed7169593d9d80bb1c03a`; it remains protected and is not a mutation Target.
+- Former Controller: `/Users/jameschen/Workspace/nexus-worktrees/integration-main`, branch `nexus/integration/main`, HEAD `ba1fe9b6d59d9e47600d9a06babdd2f5a06a9fad`; historical evidence only.
+- Current daily source and registered Nexus worktree: `/Users/jameschen/Workspace/nexus`, branch `nexus/integration/main`; this campaign no longer governs it.
 - Current workspace inventory hash: `795ad3bd4832e4592e899888ef316419106879882f3ccf35765756b16259ec48`.
 - Current convergence plan hash: `a285fd2045b352162d903ab1d73f4e2a7d2c3783a5cc9c546b811425bcf2e646`; `deletion_count: 0`; `AUTO_CHAIN: false`.
 - Controller versus canonical divergence is 266 controller-only commits and 4 canonical-only commits; P6 remains a separate owner gate.
@@ -62,8 +63,8 @@ Converge Nexus workspace authority onto the clean integration controller and add
 5. [04-workspace-convergence-cli-surface.md](04-workspace-convergence-cli-surface.md) - `workspace-convergence-cli-surface`
 6. [05-live-worktree-convergence-and-canonical-cutover.md](05-live-worktree-convergence-and-canonical-cutover.md) - `live-worktree-convergence-and-canonical-cutover`
 
-## Current Frontier
-`live-worktree-convergence-and-canonical-cutover`
+## Historical Frontier
+`live-worktree-convergence-and-canonical-cutover` is historical cutover evidence. The current execution authority is `lifecycle-two-lane-canonical-closure`.
 
 ## Ready Cards
 - `live-worktree-convergence-and-canonical-cutover`: owner approved on 2026-08-01.
