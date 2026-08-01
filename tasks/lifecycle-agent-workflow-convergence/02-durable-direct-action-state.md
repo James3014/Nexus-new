@@ -46,7 +46,7 @@ disconnect/unknown action requires reconcile before retry.
 
 ## Verified evidence
 
-- Current HEAD `d596bb7f7948fa1cf1060a6fa04f637c1c74641b` was clean.
+- Verification HEAD `d596bb7f7948fa1cf1060a6fa04f637c1c74641b` was clean.
 - Revision-bound manifest `/tmp/nexus-p2-gate-d596.json` reported
   `nexus.fresh_suite_manifest.v1`, `PASS`, 163 passed, 0 failed, 0 skipped.
 - The exact verification command in this card was covered by the fresh-suite

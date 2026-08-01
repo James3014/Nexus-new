@@ -43,7 +43,7 @@ defaults to proposal-only; no second route authority is introduced.
 
 ## Verified evidence
 
-- Current HEAD `d596bb7f7948fa1cf1060a6fa04f637c1c74641b` was clean.
+- Verification HEAD `d596bb7f7948fa1cf1060a6fa04f637c1c74641b` was clean.
 - Revision-bound manifest `/tmp/nexus-p3-gate.json` reported
   `nexus.fresh_suite_manifest.v1`, `PASS`, 23 passed, 0 failed, 0 skipped.
 - The focused Gateway tests include the 10 Direct, 20 Assisted, and 10
