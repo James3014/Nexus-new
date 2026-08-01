@@ -12,12 +12,16 @@ import json
 import fcntl
 import os
 import re
+import signal
 import shlex
 import shutil
 import subprocess
+import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from uuid import uuid4
 
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.contracts.lifecycle_action import (
@@ -51,6 +55,9 @@ PUBLIC_TOOL_NAMES = (
     "nexus_task_reconcile",
     "nexus_task_retry",
     "nexus_task_resume",
+    "nexus_assist_submit",
+    "nexus_assist_result",
+    "nexus_assist_cancel",
     "nexus_candidate_approve",
     "nexus_candidate_integrate",
     "nexus_candidate_dispose",
@@ -116,6 +123,297 @@ class UnifiedMCPGateway:
         self._model_runner = model_runner or self._run_agy_plan
         self._apply_runner = apply_runner or self._apply_assisted_patch
         self._workforce_loader = WorkforcePolicyLoader()
+        self._assist_processes: dict[str, subprocess.Popen[str]] = {}
+        self._assist_lock = threading.RLock()
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _assist_root(self) -> Path:
+        configured = getattr(self.service, "state_dir", None)
+        root = Path(configured).expanduser().resolve() if configured else Path("/tmp/nexus-mcp-gateway-assist-jobs")
+        root = root / "assisted_provider_jobs"
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _assist_path(self, task_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", str(task_id)):
+            raise GatewayInputError("task_id must be a stable bounded slug")
+        return self._assist_root() / f"{task_id}.json"
+
+    def _assist_read(self, task_id: str) -> Optional[dict[str, Any]]:
+        path = self._assist_path(task_id)
+        if not path.exists():
+            return None
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _assist_write(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = _text(value.get("task_id"), "task_id")
+        path = self._assist_path(task_id)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(dict(value), sort_keys=True, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+        return dict(value)
+
+    @staticmethod
+    def _assist_command(*, executable: str, provider: str, model: str, prompt: str) -> list[str]:
+        if provider == "cline":
+            selected = model or "glm-5.2"
+            if "/" not in selected:
+                selected = f"cline-pass/{selected}"
+            return [executable, "--json", "--yolo", "--thinking", "none", "--model", selected, prompt]
+        if provider == "agy":
+            return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--print-timeout", "25s", "--prompt", prompt]
+        raise GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
+
+    @staticmethod
+    def _decode_assist_payload(text: str, provider: str) -> Optional[dict[str, Any]]:
+        candidates = [text.strip()]
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match and match.group(0) not in candidates:
+            candidates.append(match.group(0))
+        for candidate_text in candidates:
+            try:
+                candidate = json.loads(candidate_text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                if provider == "cline" and "patch" not in candidate:
+                    nested_texts = [str(candidate.get("text") or "")]
+                    event = candidate.get("event")
+                    if isinstance(event, dict):
+                        nested_texts.append(str(event.get("text") or ""))
+                    for nested_text in nested_texts:
+                        if nested_text:
+                            nested_payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider)
+                            if nested_payload is not None:
+                                return nested_payload
+                    continue
+                return candidate
+        for line in reversed(text.splitlines()):
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(candidate, dict):
+                continue
+            nested = [str(candidate.get("text") or "")]
+            event = candidate.get("event")
+            if isinstance(event, dict):
+                nested.append(str(event.get("text") or ""))
+            for nested_text in nested:
+                if nested_text:
+                    payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider)
+                    if payload is not None:
+                        return payload
+            if provider != "cline":
+                return candidate
+        return None
+
+    def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
+        job = self._assist_read(task_id)
+        if job is None:
+            return None
+        if job.get("status") in {"COMPLETED", "FAILED", "CANCELLED"}:
+            return job
+        with self._assist_lock:
+            process = self._assist_processes.get(task_id)
+        returncode = process.poll() if process is not None else None
+        if process is None and job.get("pid"):
+            try:
+                os.kill(int(job["pid"]), 0)
+                return job
+            except (OSError, ValueError):
+                # A restarted Gateway no longer owns the child handle.  The
+                # durable artifacts are still authoritative; infer completion
+                # from their parsed result and keep the failure gate closed.
+                returncode = job.get("exit_code") if job.get("exit_code") is not None else 0
+        if returncode is None:
+            job["status"] = "RUNNING"
+            job["last_polled_at"] = self._utc_now()
+            return self._assist_write(job)
+        stdout_path = Path(str(job.get("stdout_artifact") or ""))
+        stderr_path = Path(str(job.get("stderr_artifact") or ""))
+        stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
+        stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        parsed = self._decode_assist_payload(stdout, str(job.get("provider") or ""))
+        started_at = job.get("started_at")
+        provider_time_ms = 0
+        if started_at:
+            try:
+                provider_time_ms = max(0, int((time.time() - datetime.fromisoformat(str(started_at)).timestamp()) * 1000))
+            except (TypeError, ValueError):
+                provider_time_ms = 0
+        job.update({
+            "status": "COMPLETED" if returncode == 0 and parsed is not None else "FAILED",
+            "finished_at": self._utc_now(),
+            "exit_code": returncode,
+            "stdout_sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
+            "stderr_sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
+            "stdout_bytes": len(stdout.encode("utf-8")),
+            "stderr_bytes": len(stderr.encode("utf-8")),
+            "result": parsed,
+            "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and parsed is None else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None),
+            "provider_error": stderr[-1000:] if returncode != 0 else "",
+            "provider_time_ms": provider_time_ms,
+        })
+        with self._assist_lock:
+            self._assist_processes.pop(task_id, None)
+        return self._assist_write(job)
+
+    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+        status = str(job.get("status") or "UNKNOWN")
+        terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
+        next_action = "nexus_assist_result" if not terminal else ("none" if status == "COMPLETED" else "nexus_task_retry")
+        return {
+            "schema": "nexus.assisted_provider_job.v1",
+            "operation": operation,
+            "task_id": job.get("task_id"),
+            "job_id": job.get("job_id"),
+            "action_id": job.get("action_id"),
+            "attempt_id": job.get("attempt_id"),
+            "status": status,
+            "execution_lane": "ASSISTED_CANONICAL",
+            "candidate_only": True,
+            "apply_requested": bool(job.get("apply_requested")),
+            "provider": job.get("provider"),
+            "model": job.get("model"),
+            "command_hash": job.get("command_hash"),
+            "pid": job.get("pid"),
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "exit_code": job.get("exit_code"),
+            "provider_time_ms": job.get("provider_time_ms", 0),
+            "stdout_sha256": job.get("stdout_sha256"),
+            "stderr_sha256": job.get("stderr_sha256"),
+            "result": job.get("result") if status == "COMPLETED" else None,
+            "blocker": job.get("blocker"),
+            "provider_error": job.get("provider_error", ""),
+            "artifacts": {"stdout": job.get("stdout_artifact"), "stderr": job.get("stderr_artifact")},
+            "attention_required": status in {"FAILED", "CANCELLED"},
+            "next_action": next_action,
+            "recommended_tool": next_action,
+        }
+
+    def _assist_submit(self, arguments: Mapping[str, Any], *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        task_id = self._task_id(arguments, str(arguments.get("what") or "assist"), str(arguments.get("why") or "assist"), [str(path) for path in arguments.get("allowed_files") or []])
+        existing = self._assist_read(task_id)
+        if existing is not None:
+            return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        provider = str(arguments.get("provider") or arguments.get("preferred_worker") or "cline").strip().lower()
+        model = str(arguments.get("model") or arguments.get("preferred_model") or "glm-5.2").strip()
+        if provider != "cline":
+            raise GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
+        metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)
+        if metadata is None:
+            raise GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
+        binary_env = metadata.get("binary_env", "")
+        configured = os.environ.get(binary_env, "").strip() if binary_env else ""
+        executable = configured or shutil.which(metadata.get("binary_name", provider))
+        if not executable or not Path(executable).is_file():
+            raise GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
+        allowed = [str(path).strip() for path in arguments.get("allowed_files") or [] if str(path).strip()]
+        if not allowed or len(allowed) > 4:
+            raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
+        for path in allowed:
+            _safe_relative_path(path, "allowed_files")
+        prompt = self._assist_prompt(str(arguments.get("what") or "assist"), str(arguments.get("why") or "assist"), allowed, list(arguments.get("verifier_commands") or ["git diff --check"]))
+        command = self._assist_command(executable=executable, provider=provider, model=model, prompt=prompt)
+        job_id = f"assist-{uuid4().hex}"
+        root = self._assist_root()
+        stdout_path = root / f"{job_id}.stdout"
+        stderr_path = root / f"{job_id}.stderr"
+        action_value = dict(action or {})
+        if not action_value:
+            base = _git("rev-parse", "HEAD").strip()
+            action_value = build_action_envelope(
+                task_id=task_id,
+                action_type=LifecycleActionType.TASK_RUN,
+                request={
+                    "task_id": task_id,
+                    "what": str(arguments.get("what") or "assist"),
+                    "why": str(arguments.get("why") or "assist"),
+                    "allowed_files": allowed,
+                    "apply": False,
+                },
+                tool_manifest_hash=TOOL_MANIFEST_REVISION,
+                expected_head=base,
+                allowed_paths=allowed,
+                mutation=False,
+                permission_profile=PermissionProfile.VERIFY,
+            ).model_dump(mode="json")
+        now = self._utc_now()
+        job: dict[str, Any] = {
+            "schema": "nexus.assisted_provider_job.v1",
+            "task_id": task_id,
+            "job_id": job_id,
+            "action_id": action_value.get("action_id") or f"action-{uuid4().hex}",
+            "attempt_id": action_value.get("attempt_id") or f"attempt-{uuid4().hex}",
+            "status": "SUBMITTED",
+            "execution_lane": "ASSISTED_CANONICAL",
+            "candidate_only": True,
+            "apply_requested": bool(arguments.get("apply", False)),
+            "provider": provider,
+            "model": model if "/" in model else f"cline-pass/{model}",
+            "command_hash": hashlib.sha256(json.dumps(command, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "submitted_at": now,
+            "started_at": None,
+            "finished_at": None,
+            "provider_time_ms": 0,
+            "stdout_artifact": str(stdout_path),
+            "stderr_artifact": str(stderr_path),
+            "action": action_value,
+        }
+        self._assist_write(job)
+        started = time.perf_counter()
+        stdout_handle = stdout_path.open("w", encoding="utf-8")
+        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        try:
+            process = subprocess.Popen(command, cwd=CANONICAL_SOURCE_ROOT, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+        except Exception:
+            stdout_handle.close()
+            stderr_handle.close()
+            job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+            return self._assist_response(self._assist_write(job), operation="submit")
+        stdout_handle.close()
+        stderr_handle.close()
+        job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now(), "provider_start_ms": max(0, int((time.perf_counter() - started) * 1000))})
+        with self._assist_lock:
+            self._assist_processes[task_id] = process
+        return self._assist_response(self._assist_write(job), operation="submit")
+
+    def _assist_wait(self, task_id: str, *, timeout_seconds: float = 10.0, poll_interval_seconds: float = 0.25) -> dict[str, Any]:
+        deadline = time.monotonic() + max(0.0, min(60.0, timeout_seconds))
+        while True:
+            job = self._assist_refresh(task_id)
+            if job is None:
+                raise KeyError(f"unknown task_id: {task_id}")
+            response = self._assist_response(job, operation="wait")
+            if response["status"] in {"COMPLETED", "FAILED", "CANCELLED"} or time.monotonic() >= deadline:
+                return response
+            time.sleep(max(0.01, min(5.0, poll_interval_seconds)))
+
+    def _assist_cancel(self, task_id: str) -> dict[str, Any]:
+        job = self._assist_refresh(task_id)
+        if job is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
+            pid = int(job.get("pid") or 0)
+            if pid:
+                try:
+                    os.killpg(int(job.get("pgid") or pid), signal.SIGTERM)
+                except OSError:
+                    pass
+            job.update({"status": "CANCELLED", "finished_at": self._utc_now(), "blocker": "ASSIST_CANCELLED"})
+            with self._assist_lock:
+                self._assist_processes.pop(task_id, None)
+            self._assist_write(job)
+        return self._assist_response(job, operation="cancel")
 
     def _resolve_assisted_worker(self, requested: str, requested_model: str) -> tuple[str, str, str | None]:
         """Resolve provider, exact model, and policy worker ID from one request."""
@@ -277,6 +575,34 @@ class UnifiedMCPGateway:
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
             },
             {
+                "name": "nexus_assist_submit",
+                "description": "Submit a durable Assisted Cline provider job and return immediately.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["what", "why", "allowed_files"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "what": {"type": "string"},
+                        "why": {"type": "string"},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}},
+                        "provider": {"type": "string", "enum": ["cline"], "default": "cline"},
+                        "model": {"type": "string", "default": "glm-5.2"},
+                        "apply": {"type": "boolean", "default": False},
+                    },
+                },
+            },
+            {
+                "name": "nexus_assist_result",
+                "description": "Read the durable Assisted provider result for one task after disconnect or timeout.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_assist_cancel",
+                "description": "Cancel one running Assisted provider job without applying a candidate.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
                 "name": "nexus_candidate_approve",
                 "description": "Approve an exact Candidate binding; approval does not integrate or push.",
                 "inputSchema": {
@@ -354,6 +680,14 @@ class UnifiedMCPGateway:
             action_id = state["action"].get("action_id")
         if not action_id and isinstance(state.get("request"), Mapping) and isinstance(state["request"].get("action"), Mapping):
             action_id = state["request"]["action"].get("action_id")
+        recommended = action.get("recommended_tool") or next_action
+        if recommended not in PUBLIC_TOOL_NAMES:
+            if status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or state.get("reconciliation_required"):
+                recommended = "nexus_task_reconcile"
+            elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
+                recommended = "nexus_task_status"
+            else:
+                recommended = "nexus_task_wait"
         result: dict[str, Any] = {
             "schema": "nexus.lifecycle_recovery.v1",
             "operation": operation,
@@ -363,7 +697,7 @@ class UnifiedMCPGateway:
             "status": status,
             "attention_required": bool(action.get("attention_required", not terminal)),
             "next_action": next_action,
-            "recommended_tool": action.get("recommended_tool") or next_action,
+            "recommended_tool": recommended,
             "candidate_binding": {
                 "candidate_commit_sha": state.get("candidate_commit_sha") or candidate.get("candidate_commit_sha"),
                 "candidate_tree_sha": state.get("candidate_tree_sha") or candidate.get("candidate_tree_sha"),
@@ -382,6 +716,14 @@ class UnifiedMCPGateway:
         include_details = bool(arguments.get("include_details", False))
         raw = self.service.list_actionable_tasks(include_details=include_details)
         tasks = [self._recovery_payload(item, operation="list", include_state=include_details) for item in raw.get("tasks", []) if isinstance(item, Mapping)]
+        for path in sorted(self._assist_root().glob("*.json")):
+            try:
+                job = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(job, Mapping) or job.get("status") not in {"FAILED", "CANCELLED"}:
+                continue
+            tasks.append(self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list"))
         return {
             "schema": "nexus.task_actionable_list.v1",
             "actionable_count": len(tasks),
@@ -391,6 +733,9 @@ class UnifiedMCPGateway:
 
     def _task_reconcile(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
+        assisted = self._assist_read(task_id)
+        if assisted is not None:
+            return self._assist_response(self._assist_refresh(task_id) or assisted, operation="reconcile")
         result = self.service.reconcile_task(task_id)
         if result is None:
             raise KeyError(f"unknown task_id: {task_id}")
@@ -402,6 +747,9 @@ class UnifiedMCPGateway:
 
     def _task_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
+        assisted = self._assist_read(task_id)
+        if assisted is not None:
+            return self._assist_wait(task_id, timeout_seconds=0.0)
         result = self.service.resume_task(task_id)
         if result is None:
             raise KeyError(f"unknown task_id: {task_id}")
@@ -576,6 +924,8 @@ class UnifiedMCPGateway:
             route["resolved_worker_id"] = resolved_worker_id
         route_decision_ms = max(0, int((time.perf_counter() - route_started) * 1000))
         base = _git("rev-parse", "HEAD").strip()
+        apply_requested = bool(arguments.get("apply", False))
+        assisted_candidate_only = route["execution_lane"] == "ASSISTED_CANONICAL" and not apply_requested
         action_request = {
             "task_id": task_id,
             "what": what,
@@ -587,6 +937,7 @@ class UnifiedMCPGateway:
             "preferred_model": requested_model,
             "task_card_path": arguments.get("task_card_path"),
             "task_card_hash": arguments.get("task_card_hash"),
+            "apply": apply_requested,
         }
         action = build_action_envelope(
             task_id=task_id,
@@ -595,11 +946,11 @@ class UnifiedMCPGateway:
             tool_manifest_hash=TOOL_MANIFEST_REVISION,
             expected_head=base,
             allowed_paths=allowed,
-            mutation=True,
+            mutation=not assisted_candidate_only,
             task_card_path=arguments.get("task_card_path"),
             task_card_hash=arguments.get("task_card_hash"),
             idempotency_key=arguments.get("idempotency_key"),
-            permission_profile=PermissionProfile.MUTATE_BOUNDED,
+            permission_profile=PermissionProfile.VERIFY if assisted_candidate_only else PermissionProfile.MUTATE_BOUNDED,
         )
         envelope = {
             "schema": "nexus.task_dispatch.v1",
@@ -630,6 +981,22 @@ class UnifiedMCPGateway:
             defaults["control_plane_ms"] = max(0, defaults["total_wall_time_ms"] - defaults["provider_time_ms"])
             return defaults
         if route["execution_lane"] == "ASSISTED_CANONICAL":
+            if resolved_provider == "cline":
+                if apply_requested:
+                    return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_APPLY_REQUIRES_EXPLICIT_FINISH", "provider": resolved_provider, "next_action": "nexus_assist_result", "telemetry": telemetry()}
+                async_arguments = dict(arguments)
+                async_arguments.update({
+                    "task_id": task_id,
+                    "provider": resolved_provider,
+                    "model": resolved_model or "glm-5.2",
+                    "what": what,
+                    "why": why,
+                    "allowed_files": allowed,
+                    "verifier_commands": list(arguments.get("verifier_commands") or ["git diff --check"]),
+                    "apply": False,
+                })
+                submitted = self._assist_submit(async_arguments, action=action.model_dump(mode="json"))
+                return {**envelope, **submitted, "status": "ASSISTED_PROVIDER_SUBMITTED", "execution_lane": "ASSISTED_CANONICAL", "provider": resolved_provider, "model": resolved_model or "glm-5.2", "next_action": "nexus_assist_result", "recommended_tool": "nexus_assist_result", "telemetry": telemetry(provider_start_ms=0)}
             request = self._canonical_request(
                 task_id,
                 what,
@@ -639,7 +1006,10 @@ class UnifiedMCPGateway:
                 base,
                 action=action.model_dump(mode="json"),
             )
-            request.update({"execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary"})
+            # Legacy synchronous non-Cline adapters still use the existing
+            # service handoff; the Cline path above is the durable Assisted
+            # provider surface and retains its lane identity.
+            request.update({"execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary", "provider": resolved_provider, "model": resolved_model, "candidate_only": not apply_requested, "apply_requested": apply_requested})
             try:
                 handoff = self.service.submit_task(request)
             except Exception as exc:
@@ -949,16 +1319,23 @@ class UnifiedMCPGateway:
             return self._task_run(arguments)
         if name == "nexus_task_status":
             task_id = _text(arguments.get("task_id"), "task_id")
+            assisted = self._assist_read(task_id)
+            if assisted is not None:
+                return self._assist_response(self._assist_refresh(task_id) or assisted, operation="status")
             return self.service.get_task(task_id)
         if name == "nexus_task_wait":
             task_id = _text(arguments.get("task_id"), "task_id")
             timeout = min(60.0, max(0.0, float(arguments.get("timeout_seconds", 10.0))))
             poll = min(5.0, max(0.01, float(arguments.get("poll_interval_seconds", 0.25))))
+            if self._assist_read(task_id) is not None:
+                return self._assist_wait(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
             return self.service.wait_task(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
         if name == "nexus_task_finish":
             return self._finish(arguments)
         if name == "nexus_task_cancel":
             task_id = _text(arguments.get("task_id"), "task_id")
+            if self._assist_read(task_id) is not None:
+                return self._assist_cancel(task_id)
             return self.service.cancel_task(task_id)
         if name == "nexus_task_list_actionable":
             return self._task_list_actionable(arguments)
@@ -968,6 +1345,16 @@ class UnifiedMCPGateway:
             return self._task_retry(arguments)
         if name == "nexus_task_resume":
             return self._task_resume(arguments)
+        if name == "nexus_assist_submit":
+            return self._assist_submit(arguments)
+        if name == "nexus_assist_result":
+            task_id = _text(arguments.get("task_id"), "task_id")
+            job = self._assist_read(task_id)
+            if job is None:
+                raise KeyError(f"unknown task_id: {task_id}")
+            return self._assist_response(self._assist_refresh(task_id) or job, operation="result")
+        if name == "nexus_assist_cancel":
+            return self._assist_cancel(_text(arguments.get("task_id"), "task_id"))
         if name == "nexus_candidate_approve":
             return self._candidate_approve(arguments)
         if name == "nexus_candidate_integrate":

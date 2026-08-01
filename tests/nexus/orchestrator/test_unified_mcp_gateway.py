@@ -73,7 +73,7 @@ def test_gateway_has_one_identity_and_bounded_public_surface():
 
     assert initialized["result"]["serverInfo"]["name"] == GATEWAY_NAME
     assert initialized["result"]["serverInfo"]["toolManifestRevision"] == TOOL_MANIFEST_REVISION
-    assert len(listed["result"]["tools"]) == 17
+    assert len(listed["result"]["tools"]) == len(UnifiedMCPGateway.tool_specs())
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in UnifiedMCPGateway.tool_specs()}
 
 
@@ -381,3 +381,89 @@ def test_grok_runner_uses_positional_prompt(monkeypatch):
     assert captured["command"][captured["command"].index("--single") + 1] == "Return a patch"
     assert "--prompt" not in captured["command"]
     assert "--output-format" in captured["command"]
+
+
+def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+    real_popen = real_subprocess.Popen
+
+    class FakePopen:
+        _next_pid = 54001
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            if isinstance(stdout, int):
+                self._delegate = real_popen(command, stdout=stdout, stderr=stderr, **kwargs)
+                self.pid = self._delegate.pid
+                return
+            self.pid = FakePopen._next_pid
+            FakePopen._next_pid += 1
+            self._returncode = 0
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md"})}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            if hasattr(self, "_delegate"):
+                return self._delegate.poll()
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    submitted = gateway.handle({"jsonrpc": "2.0", "id": 700, "method": "tools/call", "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "async-cline-1", "what": "Suggest a README patch", "why": "Async provider smoke", "allowed_files": ["README.md"], "model": "glm-5.2"}}})
+    first = submitted["result"]["structuredContent"]
+    assert first["status"] == "RUNNING"
+    assert first["execution_lane"] == "ASSISTED_CANONICAL"
+    assert first["candidate_only"] is True
+    assert first["next_action"] == "nexus_assist_result"
+    job_state = json.loads((tmp_path / "assisted_provider_jobs" / "async-cline-1.json").read_text(encoding="utf-8"))
+    assert job_state["action"]["mutation"] is False
+    assert job_state["action"]["permission_profile"] == "VERIFY"
+
+    waited = gateway.handle({"jsonrpc": "2.0", "id": 701, "method": "tools/call", "params": {"name": "nexus_task_wait", "arguments": {"task_id": "async-cline-1", "timeout_seconds": 1}}})
+    result = waited["result"]["structuredContent"]
+    assert result["status"] == "COMPLETED"
+    assert result["result"]["patch"].startswith("diff --git")
+    assert result["exit_code"] == 0
+    assert result["stdout_sha256"]
+    assert result["artifacts"]["stdout"]
+
+
+def test_cline_task_run_returns_async_assisted_action_with_verify_envelope(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+    real_popen = real_subprocess.Popen
+
+    class FakePopen:
+        pid = 54002
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            if isinstance(stdout, int):
+                self._delegate = real_popen(command, stdout=stdout, stderr=stderr, **kwargs)
+                self.pid = self._delegate.pid
+                return
+            self._returncode = 0
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md"})}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            if hasattr(self, "_delegate"):
+                return self._delegate.poll()
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({"jsonrpc": "2.0", "id": 702, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": "async-cline-run", "what": "Suggest a README patch", "why": "Async provider task", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL", "preferred_worker": "cline", "preferred_model": "glm-5.2", "apply": False}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "ASSISTED_PROVIDER_SUBMITTED"
+    assert payload["execution_lane"] == "ASSISTED_CANONICAL"
+    assert payload["provider"] == "cline"
+    assert payload["next_action"] == "nexus_assist_result"
+    assert payload["action"]["mutation"] is False
+    assert payload["action"]["permission_profile"] == "VERIFY"
+    assert service.submitted == []
