@@ -102,6 +102,21 @@ def test_manifest_status_and_recommended_tools_share_tools_list_truth():
     assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
 
 
+def test_cline_parser_extracts_final_patch_from_json_event_array():
+    events = json.dumps([
+        {"type": "system", "content": "started"},
+        {"type": "assistant", "message": {"content": "not a candidate"}},
+        {"type": "assistant", "content": json.dumps({"patch": "diff --git a/README.md b/README.md", "tests": []})},
+    ])
+    parsed = UnifiedMCPGateway._decode_assist_payload(events, "cline", require_patch=True)
+    assert parsed == {"patch": "diff --git a/README.md b/README.md", "tests": []}
+
+
+def test_cline_parser_does_not_join_unrelated_json_objects():
+    stdout = '{"type":"system","content":"started"}\n{"type":"assistant","message":{"content":"plain answer"}}'
+    assert UnifiedMCPGateway._decode_assist_payload(stdout, "cline", require_patch=True) is None
+
+
 def test_gateway_read_and_snapshot_are_bounded():
     gateway = UnifiedMCPGateway(service=FakeService())
     snapshot = gateway.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nexus_workspace_snapshot", "arguments": {}}})

@@ -170,47 +170,64 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def _decode_assist_payload(text: str, provider: str, *, require_patch: bool = False) -> Optional[dict[str, Any]]:
-        candidates = [text.strip()]
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match and match.group(0) not in candidates:
-            candidates.append(match.group(0))
-        for candidate_text in candidates:
+        decoder = json.JSONDecoder()
+        candidates: list[Any] = []
+        stripped = text.strip()
+        if stripped:
             try:
-                candidate = json.loads(candidate_text)
+                candidates.append(json.loads(stripped))
             except json.JSONDecodeError:
-                continue
-            if isinstance(candidate, dict):
-                if provider == "cline" and "patch" not in candidate and (require_patch or "text" in candidate or "event" in candidate):
-                    nested_texts = [str(candidate.get("text") or "")]
-                    event = candidate.get("event")
-                    if isinstance(event, dict):
-                        nested_texts.append(str(event.get("text") or ""))
-                    for nested_text in nested_texts:
-                        if nested_text:
-                            nested_payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider, require_patch=require_patch)
-                            if nested_payload is not None:
-                                return nested_payload
-                    if require_patch:
-                        continue
-                return candidate
+                pass
         for line in reversed(text.splitlines()):
             try:
-                candidate = json.loads(line)
+                candidates.append(json.loads(line))
             except json.JSONDecodeError:
-                continue
-            if not isinstance(candidate, dict):
-                continue
-            nested = [str(candidate.get("text") or "")]
-            event = candidate.get("event")
-            if isinstance(event, dict):
-                nested.append(str(event.get("text") or ""))
-            for nested_text in nested:
-                if nested_text:
-                    payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider, require_patch=require_patch)
-                    if payload is not None:
-                        return payload
-            if provider != "cline":
-                return candidate
+                pass
+
+        # Cline emits JSON events, and some versions wrap the event stream in
+        # an array.  Extract complete JSON values instead of using a greedy
+        # object regex, which can join unrelated log objects together.
+        if provider == "cline":
+            for index, char in enumerate(text):
+                if char not in "[{":
+                    continue
+                try:
+                    value, _ = decoder.raw_decode(text[index:])
+                except json.JSONDecodeError:
+                    continue
+                candidates.append(value)
+
+        def visit(value: Any) -> Optional[dict[str, Any]]:
+            if isinstance(value, dict):
+                if "patch" in value:
+                    return value
+                if not require_patch:
+                    return value
+                # These are the documented/observed Cline envelope fields.
+                # Preserve event order and inspect the final content first.
+                nested_values: list[Any] = []
+                for key in ("text", "content", "message", "result", "output", "data", "event", "payload"):
+                    if key in value:
+                        nested_values.append(value[key])
+                for nested in reversed(nested_values):
+                    if isinstance(nested, str) and nested.strip():
+                        found = UnifiedMCPGateway._decode_assist_payload(nested, provider, require_patch=require_patch)
+                    else:
+                        found = visit(nested)
+                    if found is not None:
+                        return found
+                return None if require_patch or provider == "cline" else value
+            if isinstance(value, list):
+                for item in reversed(value):
+                    found = visit(item)
+                    if found is not None:
+                        return found
+            return None
+
+        for candidate in candidates:
+            found = visit(candidate)
+            if found is not None:
+                return found
         return None
 
     @staticmethod
