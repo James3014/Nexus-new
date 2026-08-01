@@ -35,8 +35,8 @@ Owner review of the exact scoped commit.
 
 ## Verification receipt
 
-- scoped commit: `3eac7488c`
-- focused Gateway suite: `39 passed, 1 warning`
+- scoped commits: `3eac7488c`, `14b49c305`
+- focused Gateway suite: `40 passed, 1 warning`
 - real Cline binary: `3.0.48` (direct binary; wrapper path still crashes)
 - real stdout fixture: `tests/fixtures/cline/glm_52_real_stdout.ndjson`
 - fixture source: isolated direct Cline run with `--json --plan
