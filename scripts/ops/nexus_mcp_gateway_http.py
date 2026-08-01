@@ -18,9 +18,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     CANONICAL_SOURCE_ROOT,
+    FULL_TOOL_SCHEMA_HASH,
     GATEWAY_NAME,
     GATEWAY_VERSION,
+    LIFECYCLE_REVISION,
+    LIFECYCLE_STATE_SCHEMA_REVISION,
+    PERMISSION_POLICY_HASH,
+    PERMISSION_POLICY_REVISION,
     PUBLIC_APP_NAME,
+    SERVER_INSTANCE_ID,
+    SERVER_REPO_HEAD_AT_START,
+    SERVER_STARTED_AT,
+    TASK_CONTRACT_REVISION,
     TOOL_MANIFEST_REVISION,
     UnifiedMCPGateway,
 )
@@ -58,7 +67,8 @@ def _git_head() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def runtime_identity() -> dict[str, Any]:
+def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]:
+    current_head = _git_head()
     return {
         "status": "ok",
         "server": GATEWAY_NAME,
@@ -67,7 +77,21 @@ def runtime_identity() -> dict[str, Any]:
         "version": GATEWAY_VERSION,
         "transport": "streamable_http",
         "repo_root": str(CANONICAL_SOURCE_ROOT),
-        "git_head": _git_head(),
+        "git_head": current_head,
+        "server_instance_id": SERVER_INSTANCE_ID,
+        "server_started_at": SERVER_STARTED_AT,
+        "repo_head_at_start": SERVER_REPO_HEAD_AT_START,
+        "repo_head_current": current_head,
+        "reload_required": bool(SERVER_REPO_HEAD_AT_START not in {"", "unknown"} and current_head != SERVER_REPO_HEAD_AT_START),
+        "lifecycle_revision": LIFECYCLE_REVISION,
+        "lifecycle_state_schema_revision": LIFECYCLE_STATE_SCHEMA_REVISION,
+        "task_contract_revision": TASK_CONTRACT_REVISION,
+        "permission_policy_revision": PERMISSION_POLICY_REVISION,
+        "permission_policy_hash": PERMISSION_POLICY_HASH,
+        "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+        "session_tracking": "unsupported",
+        "active_sessions": None,
+        "pending_actions": None if gateway is None else gateway._gateway_status().get("pending_actions"),
         "tool_manifest_revision": TOOL_MANIFEST_REVISION,
         "tool_count": len(UnifiedMCPGateway.tool_specs()),
     }
@@ -95,7 +119,7 @@ def build_handler(gateway: UnifiedMCPGateway, *, token: str, max_body_bytes: int
 
         def do_GET(self) -> None:
             if urlsplit(self.path).path == "/health":
-                self._send_json(200, runtime_identity())
+                self._send_json(200, runtime_identity(gateway))
             else:
                 self._send_json(404, {"error": "not found"})
 

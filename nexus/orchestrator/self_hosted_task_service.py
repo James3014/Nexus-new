@@ -231,9 +231,7 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
     card_path_res = str(card_path.resolve()) if card_path and card_path.exists() else None
     card_hash = None
     if card_path and card_path.exists():
-        card_hash = subprocess.run(
-            ["git", "hash-object", str(card_path)], capture_output=True, text=True
-        ).stdout.strip()
+        card_hash = hashlib.sha256(card_path.read_bytes()).hexdigest()
 
     if not allow_unbound:
         if not current_rev or not card_path_res or not card_hash or not contract.controller_revision:
@@ -4111,6 +4109,7 @@ class SelfHostedTaskService:
         candidate_tree_sha: str,
         candidate_state_hash: str,
         verified_receipt_hash: str,
+        approval_context: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
         state = self._read_state(task_id)
         if state is None:
@@ -4130,14 +4129,53 @@ class SelfHostedTaskService:
 
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
-        return self._checkpoint(task_id, status, {
-            "promotion_status": status,
-            "candidate_status": status,
-            "approved_binding": expected if valid else None,
-            "approval_error": None if valid else "promotion binding does not match candidate packet",
-            "merge_performed": False,
-            "push_performed": False,
-        }, attempt_id=state.get("attempt_id")) or state
+        grant = dict(approval_context or {}) if approval_context is not None else None
+        if grant is not None:
+            if str(grant.get("schema") or "") != "nexus.approval.v2":
+                raise RuntimeError("APPROVAL_LEGACY_BINDING_INVALIDATED")
+            if grant.get("consumed_at"):
+                raise RuntimeError("APPROVAL_ALREADY_CONSUMED")
+            if str(grant.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
+                raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
+        now = _utc_now()
+        duplicate = False
+
+        def mutate(current: dict[str, Any]) -> None:
+            nonlocal duplicate
+            if current.get("attempt_id") != state.get("attempt_id"):
+                raise RuntimeError("task attempt ownership changed")
+            existing = current.get("approved_binding") if isinstance(current.get("approved_binding"), Mapping) else {}
+            existing_grant = existing.get("approval_grant") if isinstance(existing.get("approval_grant"), Mapping) else None
+            if grant is not None and current.get("promotion_status") == "APPROVED" and existing_grant:
+                same_request = (
+                    str(existing_grant.get("approval_id")) == str(grant.get("approval_id"))
+                    and all(existing.get(key) == value for key, value in expected.items())
+                )
+                if same_request:
+                    duplicate = True
+                    return
+                raise RuntimeError("APPROVAL_ALREADY_CONSUMED")
+            consumed = dict(grant) if valid and grant is not None else None
+            if consumed is not None:
+                consumed["approval_scope"] = "ALLOW_ACTION_ONCE"
+                consumed["consumed_at"] = now
+            current.update({
+                "status": status,
+                "promotion_status": status,
+                "candidate_status": status,
+                "approved_binding": ({**expected, "approval_grant": consumed} if valid else None),
+                "approval_error": None if valid else "promotion binding does not match candidate packet",
+                "merge_performed": False,
+                "push_performed": False,
+                "updated_at": now,
+            })
+            current.setdefault("status_history", []).append({"status": status, "at": now})
+
+        result = self._mutate_state(task_id, mutate) or state
+        if duplicate:
+            result = dict(result)
+            result["duplicate"] = True
+        return result
 
     def owner_finish(
         self,
@@ -4270,6 +4308,7 @@ class SelfHostedTaskService:
         task_id: str,
         *,
         integration_branch: str = "nexus/integration/main",
+        runtime_identity: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
         state = self._read_state(task_id)
         if state is None:
@@ -4289,6 +4328,31 @@ class SelfHostedTaskService:
                 "exact approved binding is required before integration; "
                 f"task status must be APPROVED or INTEGRATING to integrate, got {state.get('status')}"
             )
+
+        if runtime_identity is not None:
+            approved = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+            grant = approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None
+            if not grant or not grant.get("consumed_at"):
+                raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: persisted approval grant is missing consume evidence")
+            expected_identity = {
+                "task_card_hash": state.get("task_card_hash"),
+                "tool_manifest_hash": runtime_identity.get("tool_manifest_hash"),
+                "full_tool_schema_hash": runtime_identity.get("full_tool_schema_hash"),
+                "permission_policy_hash": runtime_identity.get("permission_policy_hash"),
+                "lifecycle_revision": runtime_identity.get("lifecycle_revision"),
+                "server_instance_id": runtime_identity.get("server_instance_id"),
+            }
+            drift = {
+                key: {"expected": value, "received": grant.get(key)}
+                for key, value in expected_identity.items()
+                if str(grant.get(key)) != str(value)
+            }
+            if drift:
+                raise RuntimeError(f"APPROVAL_DEFINITION_DRIFT: {json.dumps(drift, sort_keys=True)}")
+            packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+            binding_fields = ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")
+            if any(approved.get(field) != packet.get(field) for field in binding_fields):
+                raise RuntimeError("APPROVAL_CANDIDATE_BINDING_DRIFT")
 
         self._checkpoint(
             task_id,

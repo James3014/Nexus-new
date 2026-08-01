@@ -380,6 +380,87 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["push_performed"] is False
 
 
+def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempotent(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "approval-once"
+    packet = {
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "attempt_id": "attempt-1",
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "promotion_packet": packet,
+    })
+    grant = {
+        "schema": "nexus.approval.v2",
+        "approval_id": "approval-once-id",
+        "approved_by": "James",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "approval_scope": "ALLOW_ACTION_ONCE",
+    }
+    first = service.approve_promotion(task_id, **packet, approval_context=grant)
+    consumed_at = first["approved_binding"]["approval_grant"]["consumed_at"]
+    assert consumed_at
+    replay = service.approve_promotion(task_id, **packet, approval_context=grant)
+    assert replay["duplicate"] is True
+    assert replay["approved_binding"]["approval_grant"]["consumed_at"] == consumed_at
+
+
+def test_integrate_revalidates_persisted_approval_definition_identity(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    packet = {
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    grant = {
+        "schema": "nexus.approval.v2",
+        "approval_id": "p6-drift-approval",
+        "approved_by": "James",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "bound_task_id": "p6-drift",
+        "bound_attempt_id": "attempt-1",
+        "bound_action_type": "CANDIDATE_APPROVE",
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "task_card_hash": "a" * 64,
+        "tool_manifest_hash": "b" * 64,
+        "full_tool_schema_hash": "c" * 64,
+        "permission_policy_hash": "d" * 64,
+        "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+        "server_instance_id": "old-instance",
+        "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    service._write_state("p6-drift", {
+        "task_id": "p6-drift",
+        "attempt_id": "attempt-1",
+        "status": "APPROVED",
+        "promotion_status": "APPROVED",
+        "task_card_hash": "a" * 64,
+        "promotion_packet": packet,
+        "approved_binding": {**packet, "approval_grant": grant},
+    })
+    with pytest.raises(RuntimeError, match="APPROVAL_DEFINITION_DRIFT"):
+        service.integrate_approved(
+            "p6-drift",
+            runtime_identity={
+                "task_card_hash": "a" * 64,
+                "tool_manifest_hash": "b" * 64,
+                "full_tool_schema_hash": "c" * 64,
+                "permission_policy_hash": "d" * 64,
+                "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+                "server_instance_id": "new-instance",
+            },
+        )
+
+
 def test_owner_inline_contract_is_persisted_and_hash_tampering_fails_closed(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     now = datetime.now(timezone.utc)

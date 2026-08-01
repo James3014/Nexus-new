@@ -37,11 +37,32 @@ from nexus.contracts.lifecycle_action import (
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
 from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
-from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, configure_runtime_manifest_hash, pre_action_guard, post_action_receipt_formatter
+from nexus.orchestrator.lifecycle_guards import (
+    LifecycleGuardError,
+    configure_runtime_manifest_hash,
+    post_action_receipt_formatter,
+    pre_action_guard,
+    validate_approval_grant,
+)
 
 GATEWAY_NAME = "nexus-mcp-gateway"
 GATEWAY_VERSION = "0.1.0"
 PUBLIC_APP_NAME = "Nexus"
+SERVER_INSTANCE_ID = uuid4().hex
+SERVER_STARTED_AT = datetime.now(timezone.utc).isoformat()
+LIFECYCLE_REVISION = "nexus.lifecycle.gateway.v2"
+LIFECYCLE_STATE_SCHEMA_REVISION = "nexus.self_hosted_task_state.v1"
+TASK_CONTRACT_REVISION = "nexus.task_contract.v1"
+PERMISSION_POLICY_REVISION = "nexus.permission.policy.v1"
+PERMISSION_POLICY = {
+    "revision": PERMISSION_POLICY_REVISION,
+    "profiles": ["DISCOVERY", "OBSERVE", "VERIFY", "MUTATE_BOUNDED", "CANDIDATE", "INTEGRATE"],
+    "approval_scopes": ["ALLOW_ACTION_ONCE", "ALLOW_TASK_ATTEMPT", "REJECT"],
+    "always_allow": False,
+}
+PERMISSION_POLICY_HASH = hashlib.sha256(
+    json.dumps(PERMISSION_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")
+).hexdigest()
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
@@ -52,6 +73,8 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # and the MCP initialize revision all consume this derived tuple.
 PUBLIC_TOOL_NAMES: tuple[str, ...]
 TOOL_MANIFEST_REVISION: str
+FULL_TOOL_SCHEMA_HASH: str
+SERVER_REPO_HEAD_AT_START: str
 
 
 class GatewayInputError(ValueError):
@@ -1206,13 +1229,42 @@ class UnifiedMCPGateway:
                 "description": "Approve an exact Candidate binding; approval does not integrate or push.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["task_id", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash"],
+                    "required": ["task_id", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash", "approval"],
                     "properties": {
                         "task_id": {"type": "string"},
                         "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "candidate_state_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "verified_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "approval": {
+                            "type": "object",
+                            "description": "Versioned, expiring approval bound to the persisted task attempt and runtime identity.",
+                            "required": [
+                                "schema", "approval_id", "approved_by", "issued_at", "expires_at",
+                                "bound_task_id", "bound_attempt_id", "bound_action_type", "task_card_hash",
+                                "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash",
+                                "lifecycle_revision", "server_instance_id",
+                            ],
+                            "properties": {
+                                "schema": {"type": "string", "const": "nexus.approval.v2"},
+                                "approval_id": {"type": "string"},
+                                "approved_by": {"type": "string"},
+                                "issued_at": {"type": "string", "format": "date-time"},
+                                "expires_at": {"type": "string", "format": "date-time"},
+                                "bound_task_id": {"type": "string"},
+                                "bound_attempt_id": {"type": "string"},
+                                "bound_action_type": {"type": "string", "const": "CANDIDATE_APPROVE"},
+                                "approval_scope": {"type": "string", "const": "ALLOW_ACTION_ONCE", "default": "ALLOW_ACTION_ONCE"},
+                                "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "full_tool_schema_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "permission_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "lifecycle_revision": {"type": "string"},
+                                "server_instance_id": {"type": "string"},
+                                "consumed_at": {"type": ["string", "null"], "format": "date-time"},
+                            },
+                            "additionalProperties": False,
+                        },
                     },
                 },
             },
@@ -1240,6 +1292,16 @@ class UnifiedMCPGateway:
 
     def _gateway_status(self) -> dict[str, Any]:
         lifecycle = self.service.lifecycle_status()
+        current_head = _git("rev-parse", "HEAD").strip()
+        formal_actionable = self.service.list_actionable_tasks()
+        pending_actions = int(formal_actionable.get("actionable_count", 0) or 0)
+        for job_path in self._assist_root().glob("*.json"):
+            try:
+                job = json.loads(job_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(job, Mapping) and job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
+                pending_actions += 1
         return {
             "schema": "nexus.mcp_gateway_status.v1",
             "public_app_name": PUBLIC_APP_NAME,
@@ -1247,6 +1309,20 @@ class UnifiedMCPGateway:
             "server": GATEWAY_NAME,
             "version": GATEWAY_VERSION,
             "tool_manifest_revision": TOOL_MANIFEST_REVISION,
+            "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH,
+            "permission_policy_revision": PERMISSION_POLICY_REVISION,
+            "task_contract_revision": TASK_CONTRACT_REVISION,
+            "lifecycle_revision": LIFECYCLE_REVISION,
+            "lifecycle_state_schema_revision": LIFECYCLE_STATE_SCHEMA_REVISION,
+            "server_instance_id": SERVER_INSTANCE_ID,
+            "server_started_at": SERVER_STARTED_AT,
+            "repo_head_at_start": SERVER_REPO_HEAD_AT_START,
+            "repo_head_current": current_head,
+            "reload_required": bool(SERVER_REPO_HEAD_AT_START not in {"", "unknown"} and current_head != SERVER_REPO_HEAD_AT_START),
+            "session_tracking": "unsupported",
+            "active_sessions": None,
+            "pending_actions": pending_actions,
             "tool_count": len(PUBLIC_TOOL_NAMES),
             "route_authority": "CapabilityPlanner",
             "execution_lanes": ["DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"],
@@ -1396,6 +1472,21 @@ class UnifiedMCPGateway:
         if not re.fullmatch(r"[0-9a-f]{40}", base):
             raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        task_card_hash = str(state.get("task_card_hash") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", task_card_hash):
+            raise GatewayInputError("CANDIDATE_TASK_CARD_HASH_REQUIRED")
+        approval_receipt = validate_approval_grant(
+            arguments.get("approval"),
+            task_id=task_id,
+            attempt_id=str(state.get("attempt_id") or ""),
+            action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
+            task_card_hash=task_card_hash,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            full_tool_schema_hash=FULL_TOOL_SCHEMA_HASH,
+            permission_policy_hash=PERMISSION_POLICY_HASH,
+            lifecycle_revision=LIFECYCLE_REVISION,
+            server_instance_id=SERVER_INSTANCE_ID,
+        )
         action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
             "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
             "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
@@ -1420,9 +1511,11 @@ class UnifiedMCPGateway:
             candidate_tree_sha=candidate_tree_sha,
             candidate_state_hash=candidate_state_hash,
             verified_receipt_hash=verified_receipt_hash,
+            approval_context={**dict(arguments.get("approval") or {}), "validation_receipt": approval_receipt},
         )
         payload = self._recovery_payload(result, operation="candidate_approve", include_state=True)
         payload["guard_receipt"] = guard_receipt
+        payload["approval_receipt"] = approval_receipt
         return payload
 
     def _candidate_integrate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -1441,6 +1534,24 @@ class UnifiedMCPGateway:
         if not allowed_files:
             raise GatewayInputError("CANDIDATE_ALLOWED_PATHS_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        task_card_hash = str(state.get("task_card_hash") or "").strip()
+        binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        approval_grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
+        if not re.fullmatch(r"[0-9a-f]{64}", task_card_hash) or not approval_grant:
+            raise LifecycleGuardError("APPROVAL_REVALIDATION_REQUIRED", "integration requires a persisted versioned approval binding")
+        approval_receipt = validate_approval_grant(
+            approval_grant,
+            task_id=task_id,
+            attempt_id=str(state.get("attempt_id") or ""),
+            action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
+            task_card_hash=task_card_hash,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            full_tool_schema_hash=FULL_TOOL_SCHEMA_HASH,
+            permission_policy_hash=PERMISSION_POLICY_HASH,
+            lifecycle_revision=LIFECYCLE_REVISION,
+            server_instance_id=SERVER_INSTANCE_ID,
+            allow_consumed=True,
+        )
         action_request = {**dict(arguments), "allowed_files": allowed_files, "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
             "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
             "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
@@ -1459,9 +1570,21 @@ class UnifiedMCPGateway:
             mutation_domain=MutationDomain.INTEGRATION,
         )
         guard_receipt = pre_action_guard(action, request={"allowed_files": allowed_files}, current_head=base, tool_manifest_hash=TOOL_MANIFEST_REVISION)
-        result = self.service.integrate_approved(task_id, integration_branch=branch)
+        result = self.service.integrate_approved(
+            task_id,
+            integration_branch=branch,
+            runtime_identity={
+                "task_card_hash": task_card_hash,
+                "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+                "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+                "permission_policy_hash": PERMISSION_POLICY_HASH,
+                "lifecycle_revision": LIFECYCLE_REVISION,
+                "server_instance_id": SERVER_INSTANCE_ID,
+            },
+        )
         payload = self._recovery_payload(result, operation="candidate_integrate", include_state=True)
         payload["guard_receipt"] = guard_receipt
+        payload["approval_revalidation"] = approval_receipt
         return payload
 
     def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -2292,7 +2415,18 @@ class UnifiedMCPGateway:
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": GATEWAY_NAME, "title": PUBLIC_APP_NAME, "version": GATEWAY_VERSION, "toolManifestRevision": TOOL_MANIFEST_REVISION},
+                    "serverInfo": {
+                        "name": GATEWAY_NAME,
+                        "title": PUBLIC_APP_NAME,
+                        "version": GATEWAY_VERSION,
+                        "toolManifestRevision": TOOL_MANIFEST_REVISION,
+                        "fullToolSchemaHash": FULL_TOOL_SCHEMA_HASH,
+                        "permissionPolicyHash": PERMISSION_POLICY_HASH,
+                        "taskContractRevision": TASK_CONTRACT_REVISION,
+                        "lifecycleRevision": LIFECYCLE_REVISION,
+                        "serverInstanceId": SERVER_INSTANCE_ID,
+                        "serverStartedAt": SERVER_STARTED_AT,
+                    },
                 },
             }
         if method == "tools/list":
@@ -2322,4 +2456,11 @@ PUBLIC_TOOL_NAMES = tuple(spec["name"] for spec in UnifiedMCPGateway.tool_specs(
 TOOL_MANIFEST_REVISION = hashlib.sha256(
     json.dumps(PUBLIC_TOOL_NAMES, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
+FULL_TOOL_SCHEMA_HASH = hashlib.sha256(
+    json.dumps(UnifiedMCPGateway.tool_specs(), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+).hexdigest()
+try:
+    SERVER_REPO_HEAD_AT_START = _git("rev-parse", "HEAD").strip() or "unknown"
+except Exception:
+    SERVER_REPO_HEAD_AT_START = "unknown"
 configure_runtime_manifest_hash(TOOL_MANIFEST_REVISION)

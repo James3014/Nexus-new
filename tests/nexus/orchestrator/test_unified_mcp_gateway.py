@@ -1,6 +1,7 @@
 import io
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +12,11 @@ sys.path.insert(0, repo_root)
 
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     GATEWAY_NAME,
+    FULL_TOOL_SCHEMA_HASH,
+    LIFECYCLE_REVISION,
+    PERMISSION_POLICY_HASH,
     PUBLIC_TOOL_NAMES,
+    SERVER_INSTANCE_ID,
     TOOL_MANIFEST_REVISION,
     UnifiedMCPGateway,
 )
@@ -21,6 +26,7 @@ class FakeService:
     def __init__(self):
         self.submitted = []
         self.completed = []
+        self.approved_binding = None
 
     def lifecycle_status(self):
         return {"active_targets": 0, "actionable_count": 0}
@@ -34,9 +40,12 @@ class FakeService:
     def get_task_snapshot(self, task_id, *, include_details=False):
         return {
             "task_id": task_id,
-            "status": "PENDING_HUMAN_APPROVAL",
+            "status": "APPROVED" if self.approved_binding else "PENDING_HUMAN_APPROVAL",
+            "promotion_status": "APPROVED" if self.approved_binding else "PENDING_HUMAN_APPROVAL",
             "attempt_id": "attempt-recovery",
             "controller_revision": "a" * 40,
+            "task_card_hash": "c" * 64,
+            "approved_binding": self.approved_binding,
             "contract": {"allowed_files": ["README.md"]},
             "promotion_packet": {
                 "candidate_commit_sha": "a" * 40,
@@ -69,7 +78,10 @@ class FakeService:
         return self.reconcile_task(task_id)
 
     def approve_promotion(self, task_id, **kwargs):
-        return {"task_id": task_id, "status": "APPROVED", "promotion_status": "APPROVED", "approved_binding": kwargs, "task_action": {"task_id": task_id, "task_status": "APPROVED", "attention_required": True, "next_action": "nexus_candidate_integrate", "recommended_tool": "nexus_candidate_integrate"}}
+        binding = {key: kwargs.get(key) for key in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}
+        binding["approval_grant"] = {**(kwargs.get("approval_context") or {}), "consumed_at": (kwargs.get("approval_context") or {}).get("consumed_at") or datetime.now(timezone.utc).isoformat()}
+        self.approved_binding = binding
+        return {"task_id": task_id, "status": "APPROVED", "promotion_status": "APPROVED", "approved_binding": binding, "task_action": {"task_id": task_id, "task_status": "APPROVED", "attention_required": True, "next_action": "nexus_candidate_integrate", "recommended_tool": "nexus_candidate_integrate"}}
 
     def integrate_approved(self, task_id, **kwargs):
         return {"task_id": task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED", "task_action": {"task_id": task_id, "task_status": "INTEGRATED", "attention_required": False, "next_action": "none", "recommended_tool": "none"}}
@@ -100,6 +112,36 @@ def test_manifest_status_and_recommended_tools_share_tools_list_truth():
     assert gateway.handle({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "nexus_gateway_status", "arguments": {}}})["result"]["structuredContent"]["tool_count"] == len(names)
     assert TOOL_MANIFEST_REVISION
     assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
+
+
+def test_public_candidate_approve_schema_requires_versioned_approval():
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_candidate_approve")
+    schema = spec["inputSchema"]
+    assert "approval" in schema["required"]
+    approval = schema["properties"]["approval"]
+    assert approval["properties"]["schema"]["const"] == "nexus.approval.v2"
+    assert approval["properties"]["approval_scope"]["const"] == "ALLOW_ACTION_ONCE"
+    assert approval["additionalProperties"] is False
+
+
+def _approval(task_id="recover-1", attempt_id="attempt-recovery"):
+    return {
+        "schema": "nexus.approval.v2",
+        "approval_id": "approval-recovery",
+        "approved_by": "James",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "bound_task_id": task_id,
+        "bound_attempt_id": attempt_id,
+        "bound_action_type": "CANDIDATE_APPROVE",
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "task_card_hash": "c" * 64,
+        "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+        "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+        "permission_policy_hash": PERMISSION_POLICY_HASH,
+        "lifecycle_revision": LIFECYCLE_REVISION,
+        "server_instance_id": SERVER_INSTANCE_ID,
+    }
 
 
 def test_owner_inline_clean_routes_direct_without_task_card(monkeypatch):
@@ -364,7 +406,7 @@ def test_public_recovery_surface_has_one_actionable_contract():
         ("nexus_task_reconcile", {"task_id": "recover-1"}),
         ("nexus_task_retry", {"task_id": "recover-1"}),
         ("nexus_task_resume", {"task_id": "recover-1"}),
-        ("nexus_candidate_approve", {"task_id": "recover-1", "candidate_commit_sha": base40, "candidate_tree_sha": base40, "candidate_state_hash": base64, "verified_receipt_hash": base64}),
+        ("nexus_candidate_approve", {"task_id": "recover-1", "candidate_commit_sha": base40, "candidate_tree_sha": base40, "candidate_state_hash": base64, "verified_receipt_hash": base64, "approval": _approval()}),
         ("nexus_candidate_integrate", {"task_id": "recover-1"}),
         ("nexus_candidate_dispose", {"task_id": "recover-1", "disposition": "REJECTED"}),
     ]

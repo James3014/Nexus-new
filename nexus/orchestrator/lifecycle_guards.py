@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -54,6 +55,97 @@ class LifecycleGuardError(RuntimeError):
             "details": dict(self.details),
             "mutation_permitted": False,
         }
+
+
+def validate_approval_grant(
+    approval: Any,
+    *,
+    task_id: str,
+    attempt_id: str,
+    action_type: str,
+    task_card_hash: str,
+    tool_manifest_hash: str,
+    full_tool_schema_hash: str,
+    permission_policy_hash: str,
+    lifecycle_revision: str,
+    server_instance_id: str,
+    allow_consumed: bool = False,
+) -> dict[str, Any]:
+    """Validate the versioned approval binding before candidate mutation."""
+    if not isinstance(approval, Mapping):
+        raise LifecycleGuardError(
+            "APPROVAL_LEGACY_BINDING_INVALIDATED",
+            "approval v2 is required for candidate approval",
+            details={"required_schema": "nexus.approval.v2"},
+        )
+    required = (
+        "schema", "approval_id", "approved_by", "issued_at", "expires_at",
+        "bound_task_id", "bound_attempt_id", "bound_action_type", "task_card_hash",
+        "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash",
+        "lifecycle_revision", "server_instance_id",
+    )
+    missing = [field for field in required if not str(approval.get(field) or "").strip()]
+    if str(approval.get("schema") or "") != "nexus.approval.v2":
+        missing.append("schema=nexus.approval.v2")
+    if missing:
+        raise LifecycleGuardError(
+            "APPROVAL_BINDING_INCOMPLETE",
+            "approval grant is missing versioned identity fields",
+            details={"missing": missing},
+        )
+    if str(approval.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
+        raise LifecycleGuardError("APPROVAL_SCOPE_UNSUPPORTED", "only ALLOW_ACTION_ONCE is supported")
+    if (
+        str(approval.get("bound_task_id")) != task_id
+        or str(approval.get("bound_attempt_id")) != attempt_id
+        or str(approval.get("bound_action_type")) != action_type
+    ):
+        raise LifecycleGuardError("APPROVAL_BINDING_MISMATCH", "approval is bound to a different task attempt or action")
+    expected = {
+        "task_card_hash": task_card_hash,
+        "tool_manifest_hash": tool_manifest_hash,
+        "full_tool_schema_hash": full_tool_schema_hash,
+        "permission_policy_hash": permission_policy_hash,
+        "lifecycle_revision": lifecycle_revision,
+        "server_instance_id": server_instance_id,
+    }
+    mismatches = {
+        key: {"expected": value, "received": approval.get(key)}
+        for key, value in expected.items()
+        if str(approval.get(key)) != str(value)
+    }
+    if mismatches:
+        raise LifecycleGuardError(
+            "APPROVAL_DEFINITION_DRIFT",
+            "approval identity does not match current runtime",
+            details={"mismatches": mismatches},
+        )
+    try:
+        issued = datetime.fromisoformat(str(approval["issued_at"]).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(approval["expires_at"]).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise LifecycleGuardError("APPROVAL_EXPIRY_INVALID", "approval timestamps are not ISO timestamps") from exc
+    if issued.tzinfo is None or expires.tzinfo is None or expires <= issued:
+        raise LifecycleGuardError("APPROVAL_EXPIRY_INVALID", "approval expiry must be after issuance")
+    if expires <= datetime.now(timezone.utc):
+        raise LifecycleGuardError("APPROVAL_EXPIRED", "approval grant has expired")
+    if approval.get("consumed_at") and not allow_consumed:
+        raise LifecycleGuardError("APPROVAL_ALREADY_CONSUMED", "approval grant was already consumed")
+    if allow_consumed and not approval.get("consumed_at"):
+        raise LifecycleGuardError("APPROVAL_NOT_CONSUMED", "persisted approval binding has no consume marker")
+    return {
+        "schema": "nexus.approval.v2",
+        "approval_id": str(approval["approval_id"]),
+        "approved_by": str(approval["approved_by"]),
+        "issued_at": str(approval["issued_at"]),
+        "expires_at": str(approval["expires_at"]),
+        "bound_task_id": task_id,
+        "bound_attempt_id": attempt_id,
+        "bound_action_type": action_type,
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "consumed": bool(approval.get("consumed_at")),
+        "consumed_at": approval.get("consumed_at"),
+    }
 
 
 def _repo_relative(path: str, *, root: Path) -> Path:

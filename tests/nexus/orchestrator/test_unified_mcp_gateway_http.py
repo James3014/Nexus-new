@@ -62,6 +62,10 @@ def test_health_exposes_one_gateway_identity():
         assert payload["server"] == "nexus-mcp-gateway"
         assert payload["tool_count"] == len(UnifiedMCPGateway.tool_specs())
         assert payload["git_head"]
+        assert payload["server_instance_id"]
+        assert payload["full_tool_schema_hash"]
+        assert payload["permission_policy_hash"]
+        assert "pending_actions" in payload
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=3)
 
