@@ -149,7 +149,7 @@ def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypa
     detailed = service.get_task_snapshot(task_id, include_details=True)
 
     assert compact["schema"] == "nexus.self_hosted_task_status.v1"
-    assert compact["task_action"]["next_action"] == "inspect_blocker_and_retry_or_dispose"
+    assert compact["task_action"]["next_action"] == "inspect_receipt_and_candidate"
     assert "attempts" not in compact
     assert detailed["attempts"] == [{"attempt_id": "a"}]
 
@@ -1379,6 +1379,40 @@ def test_default_production_target_root_is_outside_disabled_worktree_namespace(m
 
     assert str(root) == "/Users/jameschen/Workspace/nexus-runtime-targets"
     assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
+
+
+def test_thirty_task_cutover_matrix_uses_one_of_two_explicit_lanes(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    subprocess.run(["git", "init", "-q", str(controller)], check=True)
+    subprocess.run(["git", "-C", str(controller), "branch", "-M", "nexus/integration/main"], check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "-C", str(controller), "commit", "--allow-empty", "-m", "init"], check=True, capture_output=True)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+
+    direct_results = []
+    isolated_results = []
+    for index in range(30):
+        direct = service.submit_task({
+            "task_id": f"matrix-direct-{index}",
+            "what": "matrix direct canary",
+            "why": "prove no Target allocation",
+            "controller_repo_root": str(controller),
+            "allowed_files": ["src/canary.py"],
+            "verifier_commands": ["true"],
+            "primary_agent": True,
+            "worker": "primary",
+            "execution_lane": "DIRECT_CANONICAL",
+        })
+        direct_results.append(direct)
+        isolated_results.append(resolve_execution_lane({"execution_lane": "ISOLATED_TARGET"}))
+
+    assert len(direct_results) == 30
+    assert {result["execution_lane"] for result in direct_results} == {"DIRECT_CANONICAL"}
+    assert all(result["state_created"] is False and result["target_created"] is False for result in direct_results)
+    assert all(result["execution_lane"] == "ISOLATED_TARGET" for result in isolated_results)
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "nexus-runtime-targets").exists()
 
 
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):

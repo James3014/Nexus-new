@@ -184,6 +184,7 @@ class WorktreeManager:
         create_root: bool = True,
     ):
         self.root_dir = Path(root_dir)
+        self._ensure_hooks = create_root
         if create_root:
             self.root_dir.mkdir(parents=True, exist_ok=True)
         self.process_checker = process_checker or self._path_has_process
@@ -199,7 +200,7 @@ class WorktreeManager:
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
         if not any("core.hooksPath" in a for a in args):
-            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir)
+            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir) if self._ensure_hooks else Path("/dev/null")
             git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             ["git", *git_args],
@@ -225,7 +226,7 @@ class WorktreeManager:
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
         if not any("core.hooksPath" in a for a in args):
-            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir)
+            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir) if self._ensure_hooks else Path("/dev/null")
             git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             ["git", *git_args],
