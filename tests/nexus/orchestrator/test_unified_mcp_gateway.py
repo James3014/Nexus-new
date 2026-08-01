@@ -2,6 +2,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 repo_root = str(Path(__file__).resolve().parents[3])
 if repo_root in sys.path:
@@ -260,3 +261,28 @@ def test_gateway_stdio_round_trip():
     gateway.serve(input_stream, output_stream)
     response = json.loads(output_stream.getvalue())
     assert response["result"]["tools"][0]["name"] == "nexus_gateway_status"
+
+
+def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        event = {
+            "type": "run_result",
+            "text": json.dumps({"patch": "diff --git a/nexus/__cli_preflight__.txt b/nexus/__cli_preflight__.txt"}),
+        }
+        return SimpleNamespace(returncode=0, stdout=json.dumps(event) + "\n", stderr="")
+
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/Users/jameschen/.npm-global/lib/node_modules/cline/bin/.cline")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    result = UnifiedMCPGateway._run_agy_plan(
+        prompt="Return a patch",
+        allowed_files=["nexus/__cli_preflight__.txt"],
+        provider="cline",
+        model="glm-5.2",
+    )
+
+    assert result["provider"] == "cline"
+    assert result["patch"].startswith("diff --git")
+    assert captured["command"][captured["command"].index("--model") + 1] == "cline-pass/glm-5.2"

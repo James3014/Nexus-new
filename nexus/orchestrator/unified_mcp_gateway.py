@@ -590,7 +590,10 @@ class UnifiedMCPGateway:
         elif requested == "cline":
             # Cline's JSON mode is non-interactive; yolo is restricted to the
             # bounded canonical apply path or an isolated Target by the caller.
-            command = [executable, "--json", "--yolo", "--model", selected_model or "glm-5.2", prompt]
+            cline_model = selected_model or "glm-5.2"
+            if "/" not in cline_model:
+                cline_model = f"cline-pass/{cline_model}"
+            command = [executable, "--json", "--yolo", "--model", cline_model, prompt]
         elif requested == "gemini":
             command = [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", selected_model, "-p", prompt, "--output-format", "json"]
         elif requested == "opencode":
@@ -606,16 +609,43 @@ class UnifiedMCPGateway:
         result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
         if result.returncode != 0:
             return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError:
+        def decode_object(text: str) -> dict[str, Any] | None:
+            candidates = [text.strip()]
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match and match.group(0) not in candidates:
+                candidates.append(match.group(0))
+            for candidate_text in candidates:
+                try:
+                    candidate = json.loads(candidate_text)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    return candidate
+            return None
+
+        payload = decode_object(result.stdout)
+        if requested == "cline" and isinstance(payload, dict) and "patch" not in payload:
             payload = None
+        if payload is None:
             for line in reversed(result.stdout.splitlines()):
                 try:
                     candidate = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(candidate, dict):
+                if not isinstance(candidate, dict):
+                    continue
+                nested_texts = [str(candidate.get("text") or "")]
+                event = candidate.get("event")
+                if isinstance(event, dict):
+                    nested_texts.append(str(event.get("text") or ""))
+                for nested_text in nested_texts:
+                    if nested_text:
+                        payload = decode_object(nested_text)
+                        if payload is not None:
+                            break
+                if payload is not None:
+                    break
+                if requested != "cline":
                     payload = candidate
                     break
             if payload is None:
