@@ -3367,6 +3367,28 @@ class SelfHostedTaskService:
             "push_performed": False,
         }, attempt_id=state.get("attempt_id")) or state
 
+    def owner_finish(
+        self,
+        task_id: str,
+        *,
+        candidate_commit_sha: str,
+        candidate_tree_sha: str,
+        candidate_state_hash: str,
+        verified_receipt_hash: str,
+        integration_branch: str = "nexus/integration/main",
+    ) -> dict[str, Any]:
+        """Owner-only atomic finish surface: approve the exact packet, then integrate it."""
+        approved = self.approve_promotion(
+            task_id,
+            candidate_commit_sha=candidate_commit_sha,
+            candidate_tree_sha=candidate_tree_sha,
+            candidate_state_hash=candidate_state_hash,
+            verified_receipt_hash=verified_receipt_hash,
+        )
+        if approved.get("status") != "APPROVED" or approved.get("promotion_status") != "APPROVED":
+            raise RuntimeError("owner finish requires an exact approved candidate binding")
+        return self.integrate_approved(task_id, integration_branch=integration_branch)
+
     def recover_verified_uncommitted_candidate(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
         if state is None:

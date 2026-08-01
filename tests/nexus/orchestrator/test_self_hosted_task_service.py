@@ -1282,6 +1282,50 @@ def test_direct_canonical_lane_fails_closed_to_isolated_for_delegated_worker(tmp
     assert "delegated_worker_forbidden" in lane["blockers"]
 
 
+def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    calls: list[tuple[str, str]] = []
+
+    def approve(task_id, **kwargs):
+        calls.append(("approve", task_id))
+        assert kwargs["candidate_commit_sha"] == "a" * 40
+        return {"status": "APPROVED", "promotion_status": "APPROVED"}
+
+    def integrate(task_id, *, integration_branch):
+        calls.append(("integrate", integration_branch))
+        return {"status": "INTEGRATED", "promotion_status": "INTEGRATED"}
+
+    monkeypatch.setattr(service, "approve_promotion", approve)
+    monkeypatch.setattr(service, "integrate_approved", integrate)
+
+    result = service.owner_finish(
+        "owner-finish-canary",
+        candidate_commit_sha="a" * 40,
+        candidate_tree_sha="b" * 40,
+        candidate_state_hash="c" * 64,
+        verified_receipt_hash="d" * 64,
+    )
+
+    assert result["status"] == "INTEGRATED"
+    assert calls == [("approve", "owner-finish-canary"), ("integrate", "nexus/integration/main")]
+
+
+def test_owner_finish_does_not_integrate_invalid_binding(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    integrated = False
+    monkeypatch.setattr(service, "approve_promotion", lambda *_args, **_kwargs: {"status": "APPROVAL_INVALIDATED", "promotion_status": "APPROVAL_INVALIDATED"})
+    monkeypatch.setattr(service, "integrate_approved", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("integrated")))
+
+    with pytest.raises(RuntimeError, match="exact approved candidate binding"):
+        service.owner_finish(
+            "owner-finish-invalid",
+            candidate_commit_sha="a" * 40,
+            candidate_tree_sha="b" * 40,
+            candidate_state_hash="c" * 64,
+            verified_receipt_hash="d" * 64,
+        )
+
+
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = _real_request(tmp_path, task_id="workspace-apply")

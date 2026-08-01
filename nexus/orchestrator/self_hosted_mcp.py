@@ -229,6 +229,22 @@ class NexusSelfHostedMCPServer:
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string", "default": "nexus/integration"}}},
             },
             {
+                "name": "nexus_self_hosted_owner_finish",
+                "description": "Owner-only atomic approval and integration of an exact candidate binding; never pushes.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_state_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "verified_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "integration_branch": {"type": "string", "default": "nexus/integration/main"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_self_hosted_dispose_candidate",
                 "description": "Record REJECTED or SUPERSEDED candidate disposition while retaining its ref and receipt.",
                 "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
@@ -390,6 +406,15 @@ class NexusSelfHostedMCPServer:
             return self.service.integrate_approved(
                 task_id,
                 integration_branch=str(arguments.get("integration_branch", "nexus/integration")),
+            )
+        if name == "nexus_self_hosted_owner_finish":
+            return self.service.owner_finish(
+                task_id,
+                candidate_commit_sha=str(arguments["candidate_commit_sha"]),
+                candidate_tree_sha=str(arguments["candidate_tree_sha"]),
+                candidate_state_hash=str(arguments["candidate_state_hash"]),
+                verified_receipt_hash=str(arguments["verified_receipt_hash"]),
+                integration_branch=str(arguments.get("integration_branch", "nexus/integration/main")),
             )
         if name == "nexus_self_hosted_dispose_candidate":
             return self.service.dispose_candidate(

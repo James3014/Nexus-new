@@ -210,6 +210,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_cleanup,
     run_self_hosted_dispose,
     run_self_hosted_integrate,
+    run_self_hosted_owner_finish,
     run_self_hosted_list_actionable,
     run_self_hosted_recover_verified_uncommitted,
     run_self_hosted_retry,
@@ -3794,6 +3795,37 @@ def self_hosted_integrate(
     """Integrate an approved self-hosted candidate task into the integration branch."""
     res = run_self_hosted_integrate(
         task_id=task_id,
+        integration_branch=integration_branch,
+        state_dir=state_dir,
+    )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="owner-finish")
+@click.option("--task-id", required=True, help="Task ID to finish.")
+@click.option("--candidate-commit-sha", required=True, help="Exact candidate commit SHA.")
+@click.option("--candidate-tree-sha", required=True, help="Exact candidate tree SHA.")
+@click.option("--candidate-state-hash", required=True, help="Exact candidate state hash.")
+@click.option("--verified-receipt-hash", required=True, help="Exact verified receipt hash.")
+@click.option("--integration-branch", default="nexus/integration/main", show_default=True)
+@click.option("--state-dir", type=click.Path(), default=None)
+@translate_action_exceptions
+def self_hosted_owner_finish(
+    task_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+    candidate_state_hash: str,
+    verified_receipt_hash: str,
+    integration_branch: str,
+    state_dir: str | None,
+) -> None:
+    """Owner-only atomic approval and integration of an exact candidate binding."""
+    res = run_self_hosted_owner_finish(
+        task_id=task_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        candidate_state_hash=candidate_state_hash,
+        verified_receipt_hash=verified_receipt_hash,
         integration_branch=integration_branch,
         state_dir=state_dir,
     )
