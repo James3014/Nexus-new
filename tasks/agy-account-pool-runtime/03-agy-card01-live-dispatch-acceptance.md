@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE_LIVE_ACCEPTANCE
+status: BLOCKED_BY_STRUCTURED_RESULT_RUNTIME
 task_id: agy-card01-live-dispatch-acceptance
 campaign_id: agy-account-pool-runtime
 verifies:
