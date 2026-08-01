@@ -80,6 +80,16 @@ def test_gateway_forwards_high_level_lifecycle_actions():
     assert cancel["result"]["structuredContent"]["status"] == "CANCELLED"
 
 
+def test_minimal_direct_finish_derives_canonical_target_fields():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    base = "a" * 40
+    response = gateway.handle({"jsonrpc": "2.0", "id": 15, "method": "tools/call", "params": {"name": "nexus_task_finish", "arguments": {"execution_lane": "DIRECT_CANONICAL", "task_id": "direct-1", "controller_revision": base, "allowed_files": ["README.md"]}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "DIRECT_CANONICAL_COMPLETED"
+    assert payload["task_id"] == "direct-1"
+
+
 def test_task_run_routes_small_request_direct_without_target_fields():
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)

@@ -184,6 +184,9 @@ class UnifiedMCPGateway:
                     "properties": {
                         "execution_lane": {"type": "string", "enum": ["DIRECT_CANONICAL", "ISOLATED_TARGET"]},
                         "request": {"type": "object"},
+                        "controller_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}},
                         "expected_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "task_id": {"type": "string"},
                         "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
@@ -500,6 +503,24 @@ class UnifiedMCPGateway:
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()
         if lane == "DIRECT_CANONICAL":
             request = dict(arguments.get("request") or {})
+            if not request:
+                task_id = _text(arguments.get("task_id"), "task_id")
+                base = arguments.get("controller_revision")
+                if not isinstance(base, str) or not _SHA_RE.fullmatch(base):
+                    raise GatewayInputError("controller_revision is required for minimal Direct finish")
+                allowed = [str(path).strip() for path in (arguments.get("allowed_files") or []) if str(path).strip()]
+                if not allowed or len(allowed) > 4:
+                    raise GatewayInputError("allowed_files is required for minimal Direct finish")
+                for path in allowed:
+                    _safe_relative_path(path, "allowed_files")
+                request = self._canonical_request(
+                    task_id,
+                    "Complete bounded canonical task",
+                    "Finish the prior gateway Direct handoff",
+                    allowed,
+                    list(arguments.get("verifier_commands") or ["git diff --check"]),
+                    base,
+                )
             request.setdefault("execution_lane", "DIRECT_CANONICAL")
             request.setdefault("primary_agent", True)
             request.setdefault("worker", "primary")
