@@ -13,6 +13,20 @@
 
 This file defines which model workers Nexus may assign, the context each worker may receive, its autonomy ceiling, and the conditions that require escalation. It does not replace CapabilityPlanner, HybridRouteDecision, execution authorization, Verifier, Receipt, Learning, Git safety, or account-pool policy.
 
+Provider selection is open across the registered adapter surface. `auto` and
+`agy` are defaults, not an allowlist. An explicit provider still requires a
+registered adapter, exact model identity, executable/authorization preflight,
+bounded scope, parser/verifier evidence, and a receipt. Unknown providers fail
+closed. Cline CLI / `glm-5.2` is registered as a conditional L1 bounded
+candidate; its registration does not grant route, approval, integration, push,
+or production-claim authority.
+
+The `workers` map in `nexus/config/model_workforce.yaml` is the single model
+identity source for OpenCode, MiMo, Grok, Ollama/local models, Cline, and the
+other registered providers. A request may use a worker ID, an exact model ID,
+or a provider default; blocked/disabled identities still fail closed under the
+existing workforce admission rules.
+
 ## 1. Interpretation rules
 
 A CLI being installed, a provider catalog listing a model, or a model producing one good answer does not make it an approved Nexus worker.
@@ -56,6 +70,7 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |
+| Cline — `glm-5.2` | Bounded code candidate | L1 | Bounded isolated prompt | Registered conditional; Cline CLI adapter and external-runtime authorization required |
 | Local Advisor — `qwen2.5-s2t-advisor:3b` | Classification, extraction, compression, compact diagnosis | L0.5 | **Nexus-bounded only** | Available; 9/11 → 11/11 → 10/11 |
 | Local Coder — `qwen2.5-coder:7b-instruct` | Small bounded code candidate | L1 | Bounded exact contract | Available; 10/11 on every arm; no measured Nexus uplift |
 | Local Qwen3 — `qwen3:8b` | Bounded reasoning/code shadow candidate, counterexample search | L1 shadow | **Nexus-bounded** | Available; 11/11 → 11/11 → 10/11; Full context caused schema drift |

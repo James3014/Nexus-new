@@ -696,12 +696,29 @@ def _mimo_args(prompt: str, model: str) -> tuple[str, ...]:
     return ("run", "--never-ask-questions", "--model", model, prompt)
 
 
+def _cline_args(prompt: str, model: str) -> tuple[str, ...]:
+    """Run Cline non-interactively against the isolated Target only."""
+    return ("--json", "--yolo", "--model", model, prompt)
+
+
+def _grok_args(prompt: str, model: str) -> tuple[str, ...]:
+    return ("--model", model, "--prompt", prompt)
+
+
 class WorkerRegistry:
     def __init__(self, adapters: dict[str, WorkerAdapter]):
         adapters = dict(adapters)
         missing = set(SUPPORTED_WORKER_PROVIDERS) - set(adapters)
-        if missing == {"agy"}:
-            adapters["agy"] = AgyWorkerAdapter()
+        if missing <= {"agy", "grok", "cline"}:
+            adapters.setdefault("agy", AgyWorkerAdapter())
+            adapters.setdefault(
+                "grok",
+                DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
+            )
+            adapters.setdefault(
+                "cline",
+                DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
+            )
             missing = set()
         unknown = set(adapters) - set(SUPPORTED_WORKER_PROVIDERS)
         if unknown:
@@ -718,8 +735,10 @@ class WorkerRegistry:
                 "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
                 "agy": AgyWorkerAdapter(),
                 "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
-                "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "mimo", _mimo_args),
+                "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
                 "ollama": OllamaPatchWorkerAdapter(),
+                "cline": DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
+                "grok": DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
             }
         )
 

@@ -6,6 +6,16 @@ authority_document: docs/arch/MODEL_WORKFORCE_POLICY.md
 benchmark_matrix: nexus/config/model_three_arm_matrix.yaml
 benchmark_harness: scripts/bench/experimental/model_workforce_three_arm.py
 route_authority: CapabilityPlanner
+provider_policy:
+  mode: REGISTERED_PROVIDER_OPEN
+  registered_providers: [codex, gemini, agy, grok, openai, opencode, mimo, ollama, cline]
+  model_identity_source: workers
+  local_models_are_selectable: true
+  configured_model_families: [opencode, mimo, grok, ollama, cline]
+  explicit_model_identity_required: true
+  unknown_provider_behavior: FAIL_CLOSED
+  adapter_preflight_required: true
+  verifier_and_receipt_required: true
 
 states:
   - PROVEN_MAINCHAIN
@@ -309,6 +319,17 @@ workers:
     cost_characteristic: subscription_free_but_high_fixed_input_tokens
     requires: [isolated_directory, bounded_context, json_event_receipt, parser, focused_tests, verifier]
     forbidden_actions: [route_authority, direct_workspace_mutation, production_ready_judgment]
+  cline_glm_52:
+    provider: cline
+    model: glm-5.2
+    state: REGISTERED_CONDITIONAL
+    availability: AVAILABLE
+    autonomy: L1
+    roles: [bounded_candidate_generation, compact_code_candidate]
+    preferred_context: nexus_bounded
+    current_assignment: explicit_provider_request
+    requires: [external_runtime_authorization, isolated_directory, bounded_context, parser, focused_tests, verifier, receipt]
+    forbidden_actions: [route_authority, direct_workspace_mutation, production_ready_judgment, approval, integration, push]
   local_advisor_3b:
     provider: ollama
     model: qwen2.5-s2t-advisor:3b
@@ -529,6 +550,7 @@ routing:
     complex_milestone: codex_luna_when_available
     free_remote_candidate_pool: [opencode_mimo_free, opencode_ling_free]
     free_remote_shadow_candidate: opencode_deepseek_v4_flash
+    cline_candidate: cline_glm_52
   mandatory_escalation_conditions:
     - architecture_or_authority_choice
     - ambiguous_product_behavior

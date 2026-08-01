@@ -28,6 +28,8 @@ def test_registry_recognizes_all_governed_provider_names():
         "opencode",
         "mimo",
         "ollama",
+        "grok",
+        "cline",
     )
     assert registry.providers == SUPPORTED_WORKER_PROVIDERS
 
@@ -178,6 +180,47 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
     assert receipt.commit_created is False
     assert receipt.merge_performed is False
     assert receipt.push_performed is False
+
+
+def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    executable = tmp_path / "bin" / "cline"
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.delenv("NEXUS_CLINE_WORKER_MODEL", raising=False)
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: str(executable))
+    captured = {}
+
+    def fake_worker(request, on_process_group=None):
+        captured["request"] = request
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"cline stdout",
+            stderr=b"",
+            wall_time_ms=11,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    registry = WorkerRegistry.default()
+
+    preflight = registry.preflight("cline")
+    receipt = registry.invoke(
+        "cline",
+        type("Contract", (), {"task_id": "cline-glm-52"})(),
+        type("Lease", (), {"target_worktree": str(target)})(),
+        prompt="bounded candidate",
+    )
+
+    assert preflight.ready is True
+    assert captured["request"].argv == ("--json", "--yolo", "--model", "glm-5.2", "bounded candidate")
+    assert captured["request"].cwd == str(target.resolve())
+    assert receipt.provider == "cline"
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert receipt.evidence_complete is True
 
 

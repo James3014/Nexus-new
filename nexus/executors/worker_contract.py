@@ -7,7 +7,16 @@ from enum import Enum
 from typing import Optional, Protocol, Any
 
 
-SUPPORTED_WORKER_PROVIDERS = ("codex", "gemini", "agy", "opencode", "mimo", "ollama")
+SUPPORTED_WORKER_PROVIDERS = (
+    "codex",
+    "gemini",
+    "agy",
+    "opencode",
+    "mimo",
+    "ollama",
+    "grok",
+    "cline",
+)
 
 
 class WorkerOutcome(str, Enum):

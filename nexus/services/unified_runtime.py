@@ -188,6 +188,7 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "command_env": "NEXUS_GEMINI_COMMAND",
         "binary_name": "gemini",
         "print_flag": "-p",
+        "default_model": "gemini-3.6-flash",
     },
     "agy": {
         "transport": "subprocess",
@@ -195,6 +196,7 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "command_env": "NEXUS_AGY_COMMAND",
         "binary_name": "agy",
         "print_flag": "-p",
+        "default_model": "gemini-3.6-flash-high",
     },
     "grok": {
         "transport": "subprocess",
@@ -202,6 +204,7 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "command_env": "NEXUS_GROK_COMMAND",
         "binary_name": "grok",
         "print_flag": "-p",
+        "default_model": "grok-4.5",
     },
     "codex": {
         "transport": "subprocess",
@@ -209,6 +212,7 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "command_env": "NEXUS_CODEX_COMMAND",
         "binary_name": "codex",
         "print_flag": "exec",
+        "default_model": "gpt-5.6-luna",
     },
     "openai": {
         "transport": "subprocess",
@@ -216,6 +220,7 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "command_env": "NEXUS_OPENAI_COMMAND",
         "binary_name": "openai",
         "print_flag": "",
+        "default_model": "gpt-5",
     },
     "opencode": {
         "transport": "subprocess",
@@ -224,6 +229,30 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "binary_name": "opencode",
         "print_flag": "",
         "default_model": "opencode/deepseek-v4-flash-free",
+    },
+    "cline": {
+        "transport": "subprocess",
+        "binary_env": "NEXUS_CLINE_BIN",
+        "command_env": "NEXUS_CLINE_COMMAND",
+        "binary_name": "cline",
+        "print_flag": "",
+        "default_model": "glm-5.2",
+    },
+    "mimo": {
+        "transport": "subprocess",
+        "binary_env": "NEXUS_MIMO_BIN",
+        "command_env": "NEXUS_MIMO_COMMAND",
+        "binary_name": "mimo",
+        "print_flag": "",
+        "default_model": "xiaomi/mimo-v2.5",
+    },
+    "ollama": {
+        "transport": "subprocess",
+        "binary_env": "NEXUS_OLLAMA_BIN",
+        "command_env": "NEXUS_OLLAMA_COMMAND",
+        "binary_name": "ollama",
+        "print_flag": "",
+        "default_model": "qwen2.5-s2t-advisor:3b",
     },
 }
 
@@ -237,6 +266,9 @@ REGISTERED_CLI_MODEL_BINDING_UNSUPPORTED_PROVIDERS: frozenset[str] = frozenset(
 REGISTERED_CLI_MODEL_BINDING_FLAGS: dict[str, tuple[str, str]] = {
     "codex": ("exec", "-m"),
     "opencode": ("run", "--model"),
+    "cline": ("", "--model"),
+    "mimo": ("run", "--model"),
+    "ollama": ("run", ""),
 }
 
 # Local-only providers may appear on Gateway defaults (auto-detect) but are not
@@ -1284,7 +1316,7 @@ def build_online_route(
     if explicit:
         provider = explicit
         source = source or SELECTION_EXPLICIT_REQUEST
-    elif gateway in ONLINE_CLI_SPEC_REGISTRY:
+    elif gateway in ONLINE_CLI_SPEC_REGISTRY and gateway not in LOCAL_ONLY_PROVIDERS:
         provider = gateway
         source = source or SELECTION_ENVIRONMENT_DEFAULT
     else:
@@ -1349,7 +1381,9 @@ def resolve_online_transport_binding(
             use_registered_cli=False,
         )
 
-    if requested and requested in ONLINE_CLI_SPEC_REGISTRY:
+    if requested and requested in ONLINE_CLI_SPEC_REGISTRY and not (
+        requested in LOCAL_ONLY_PROVIDERS and gateway == requested
+    ):
         # Gemini retains specialized Gateway CLI transport when the Gateway
         # itself is also configured for Gemini; other registered providers use
         # the provider-neutral registered CLI edge.
@@ -1665,12 +1699,23 @@ def build_subprocess_online_invoker(
             accepted_model_flags = {model_flag}
             if spec.provider == "codex":
                 accepted_model_flags.add("--model")
-            if (
-                len(argv) < 4
-                or argv[1] != subcommand
-                or argv[2] not in accepted_model_flags
-                or argv[3] != admitted_model
-            ):
+            if subcommand:
+                if model_flag:
+                    binding_shape_ok = (
+                        len(argv) >= 4
+                        and argv[1] == subcommand
+                        and argv[2] in accepted_model_flags
+                        and argv[3] == admitted_model
+                    )
+                else:
+                    binding_shape_ok = len(argv) >= 3 and argv[1] == subcommand and argv[2] == admitted_model
+            else:
+                binding_shape_ok = (
+                    len(argv) >= 3
+                    and argv[1] in accepted_model_flags
+                    and argv[2] == admitted_model
+                )
+            if not binding_shape_ok:
                 return normalize_online_invoker_payload(
                     provider=spec.provider,
                     task_id=task_id,
@@ -1695,7 +1740,11 @@ def build_subprocess_online_invoker(
         elif print_flag and len(argv) == 1:
             if model_binding and admitted_model:
                 subcommand, model_flag = model_binding
-                argv = [argv[0], subcommand, model_flag, admitted_model, stdin]
+                argv = (
+                    ([argv[0], subcommand, model_flag, admitted_model, stdin] if model_flag else [argv[0], subcommand, admitted_model, stdin])
+                    if subcommand
+                    else [argv[0], model_flag, admitted_model, stdin]
+                )
             elif spec.provider == "agy":
                 argv = [argv[0], "--dangerously-skip-permissions", print_flag, stdin]
             else:
@@ -1706,6 +1755,19 @@ def build_subprocess_online_invoker(
             subcommand, model_flag = REGISTERED_CLI_MODEL_BINDING_FLAGS["opencode"]
             model = admitted_model or str(meta.get("default_model", "") or "").strip()
             argv = [argv[0], subcommand, model_flag, model, stdin]
+            stdin_input = ""
+            prompt_transport = "argv"
+        elif spec.provider == "cline" and len(argv) == 1:
+            model = admitted_model or str(meta.get("default_model", "glm-5.2") or "glm-5.2").strip()
+            argv = [argv[0], "--json", "--yolo", "--model", model, stdin]
+            stdin_input = ""
+            prompt_transport = "argv"
+        elif spec.provider in {"mimo", "ollama"} and len(argv) == 1:
+            model = admitted_model or str(meta.get("default_model", "") or "").strip()
+            if spec.provider == "mimo":
+                argv = [argv[0], "run", "--model", model, stdin]
+            else:
+                argv = [argv[0], "run", model, stdin]
             stdin_input = ""
             prompt_transport = "argv"
         else:

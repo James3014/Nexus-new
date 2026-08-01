@@ -1410,11 +1410,40 @@ def test_extract_online_stage_payload_is_canonical() -> None:
 
 
 def test_provider_neutral_cli_registry_is_explicit_and_non_invoking() -> None:
-    assert set(ONLINE_CLI_SPEC_REGISTRY) == {"gemini", "agy", "grok", "codex", "openai", "opencode"}
+    assert set(ONLINE_CLI_SPEC_REGISTRY) == {
+        "gemini", "agy", "grok", "codex", "openai", "opencode", "cline", "mimo", "ollama",
+    }
     assert all(
         item["transport"] == "subprocess" and item["binary_env"] and item["binary_name"]
         for item in ONLINE_CLI_SPEC_REGISTRY.values()
     )
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    (
+        ("cline", "glm-5.2", ["cline", "--json", "--yolo", "--model", "glm-5.2", "bounded"]),
+        ("mimo", "xiaomi/mimo-v2.5", ["mimo", "run", "--model", "xiaomi/mimo-v2.5", "bounded"]),
+        ("ollama", "qwen3:8b", ["ollama", "run", "qwen3:8b", "bounded"]),
+    ),
+)
+def test_registered_local_and_cline_models_bind_exactly(provider, model, expected) -> None:
+    calls = []
+
+    class _Completed:
+        returncode = 0
+        stdout = "model-output"
+        stderr = ""
+
+    def _runner(command, **kwargs):
+        calls.append(list(command))
+        return _Completed()
+
+    invoker = build_registered_online_invoker(provider, command=(provider,), model_name=model, runner=_runner)
+    result = invoker({"task_id": f"{provider}-model", "task_statement": "bounded"})
+
+    assert result["provider"] == provider
+    assert calls == [expected]
 
 
 def test_opencode_registered_invoker_constructs_correct_argv() -> None:

@@ -26,6 +26,8 @@ from nexus.contracts.lifecycle_action import (
     build_action_envelope,
 )
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
+from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
+from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 
 GATEWAY_NAME = "nexus-mcp-gateway"
 GATEWAY_VERSION = "0.1.0"
@@ -106,6 +108,30 @@ class UnifiedMCPGateway:
         self.service = service or SelfHostedTaskService()
         self._model_runner = model_runner or self._run_agy_plan
         self._apply_runner = apply_runner or self._apply_assisted_patch
+        self._workforce_loader = WorkforcePolicyLoader()
+
+    def _resolve_assisted_worker(self, requested: str, requested_model: str) -> tuple[str, str, str | None]:
+        """Resolve provider, exact model, and policy worker ID from one request."""
+        key = str(requested or "auto").strip().lower() or "auto"
+        model = str(requested_model or "").strip()
+        if key == "auto":
+            provider = os.environ.get("NEXUS_ASSIST_PROVIDER", "agy").strip().lower() or "agy"
+            return provider, model, None
+        snapshot = self._workforce_loader.load()
+        worker = snapshot.workers.get(key)
+        if worker is None:
+            matches = [item for item in snapshot.workers.values() if item.model == key]
+            if len(matches) == 1:
+                worker = matches[0]
+            elif key not in ONLINE_CLI_SPEC_REGISTRY and key not in {"mimo", "ollama"}:
+                raise GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
+        if worker is not None:
+            if worker.state in NON_ADMISSIBLE_STATES:
+                raise GatewayInputError(f"ASSIST_MODEL_NOT_ADMISSIBLE:{worker.worker_id}")
+            if model and model != worker.model:
+                raise GatewayInputError("ASSIST_MODEL_IDENTITY_MISMATCH")
+            return worker.provider, worker.model, worker.worker_id
+        return key, model, None
 
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
@@ -170,6 +196,7 @@ class UnifiedMCPGateway:
                         "verifier_commands": {"type": "array", "items": {"type": "string"}},
                         "execution_preference": {"type": "string", "enum": ["auto", "DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"], "default": "auto"},
                         "preferred_worker": {"type": "string", "default": "auto"},
+                        "preferred_model": {"type": "string", "default": ""},
                         "task_card_path": {"type": "string"},
                         "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "idempotency_key": {"type": "string", "maxLength": 256},
@@ -362,9 +389,18 @@ class UnifiedMCPGateway:
         if preference not in {"auto", "DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"}:
             raise GatewayInputError("execution_preference is unsupported")
         worker = str(arguments.get("preferred_worker", "auto")).strip().lower() or "auto"
+        requested_model = str(arguments.get("preferred_model") or "").strip()
+        resolved_provider, resolved_model, resolved_worker_id = self._resolve_assisted_worker(worker, requested_model)
         task_id = self._task_id(arguments, what, why, allowed)
         route_started = time.perf_counter()
-        route = self._plan_route(what=what, allowed=allowed, preference=preference, worker=worker)
+        route_worker = worker if worker == "auto" else resolved_provider
+        route = self._plan_route(what=what, allowed=allowed, preference=preference, worker=route_worker)
+        route["requested_worker"] = worker
+        route["resolved_provider"] = resolved_provider
+        if resolved_model:
+            route["resolved_model"] = resolved_model
+        if resolved_worker_id:
+            route["resolved_worker_id"] = resolved_worker_id
         route_decision_ms = max(0, int((time.perf_counter() - route_started) * 1000))
         base = _git("rev-parse", "HEAD").strip()
         action_request = {
@@ -375,6 +411,7 @@ class UnifiedMCPGateway:
             "verifier_commands": list(arguments.get("verifier_commands") or ["git diff --check"]),
             "execution_preference": preference,
             "preferred_worker": worker,
+            "preferred_model": requested_model,
             "task_card_path": arguments.get("task_card_path"),
             "task_card_hash": arguments.get("task_card_hash"),
         }
@@ -426,7 +463,12 @@ class UnifiedMCPGateway:
             provider_start_ms = max(0, int((time.perf_counter() - dispatch_started) * 1000))
             started = time.perf_counter()
             try:
-                proposal = self._model_runner(prompt=prompt, allowed_files=allowed, provider=str(arguments.get("preferred_worker") or "agy"))
+                proposal = self._model_runner(
+                    prompt=prompt,
+                    allowed_files=allowed,
+                    provider=resolved_provider,
+                    model=resolved_model,
+                )
             except Exception as exc:
                 return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": str(exc), "telemetry": telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms), "next_action": "inspect_provider_or_retry_same_task"}
             provider_time_ms = max(0, int((time.perf_counter() - started) * 1000))
@@ -491,30 +533,71 @@ class UnifiedMCPGateway:
         )
 
     @staticmethod
-    def _run_agy_plan(*, prompt: str, allowed_files: list[str], provider: str) -> dict[str, Any]:
-        if provider not in {"", "auto", "agy"}:
-            return {"provider": provider, "blocker": "ASSIST_PROVIDER_NOT_AUTHORIZED"}
-        executable = shutil.which("agy") or "/Users/jameschen/.local/bin/agy"
-        if not Path(executable).is_file():
-            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_UNAVAILABLE"}
+    def _run_agy_plan(*, prompt: str, allowed_files: list[str], provider: str, model: str = "") -> dict[str, Any]:
+        """Run any registered assisted provider with one bounded JSON contract.
+
+        The historical name is retained for compatibility, but the provider
+        edge is no longer hard-coded to Agy. Unknown providers fail closed;
+        registered providers still require an installed executable and return
+        parser/transport failures as non-success receipts.
+        """
+        requested = str(provider or "auto").strip().lower() or "auto"
+        if requested == "auto":
+            requested = os.environ.get("NEXUS_ASSIST_PROVIDER", "agy").strip().lower() or "agy"
+        metadata = ONLINE_CLI_SPEC_REGISTRY.get(requested)
+        if metadata is None:
+            return {"provider": requested, "blocker": "ASSIST_PROVIDER_NOT_REGISTERED"}
+        binary_env = metadata.get("binary_env", "")
+        configured = os.environ.get(binary_env, "").strip() if binary_env else ""
+        executable = configured or shutil.which(metadata.get("binary_name", requested))
+        if not executable or not Path(executable).is_file():
+            return {"provider": requested, "blocker": "ASSIST_PROVIDER_UNAVAILABLE"}
         schema = json.dumps({"type": "object", "required": ["patch"], "properties": {"patch": {"type": "string"}, "summary": {"type": "string"}, "tests": {"type": "array", "items": {"type": "string"}}}}, separators=(",", ":"))
-        model = os.environ.get("NEXUS_ASSIST_MODEL", "")
-        command = [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--json-schema", schema, "--effort", "low"]
-        if model:
-            command.extend(["--model", model])
-        command.extend(["--print-timeout", "25s", "--prompt", prompt])
+        selected_model = str(model or os.environ.get("NEXUS_ASSIST_MODEL", "") or metadata.get("default_model", "")).strip()
+        if requested == "agy":
+            command = [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--json-schema", schema, "--effort", "low"]
+            if selected_model:
+                command.extend(["--model", selected_model])
+            command.extend(["--print-timeout", "25s", "--prompt", prompt])
+        elif requested == "cline":
+            # Cline's JSON mode is non-interactive; yolo is restricted to the
+            # bounded canonical apply path or an isolated Target by the caller.
+            command = [executable, "--json", "--yolo", "--model", selected_model or "glm-5.2", prompt]
+        elif requested == "gemini":
+            command = [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", selected_model, "-p", prompt, "--output-format", "json"]
+        elif requested == "opencode":
+            command = [executable, "run", "--model", selected_model, prompt]
+        elif requested == "codex":
+            command = [executable, "exec", "--json", "--full-auto", "-m", selected_model, prompt]
+        elif requested == "mimo":
+            command = [executable, "run", "--model", selected_model, prompt]
+        elif requested == "ollama":
+            command = [executable, "run", selected_model, prompt]
+        else:
+            command = [executable, "--model", selected_model, "--prompt", prompt]
         result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
         if result.returncode != 0:
-            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
+            return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
-            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
+            payload = None
+            for line in reversed(result.stdout.splitlines()):
+                try:
+                    candidate = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    payload = candidate
+                    break
+            if payload is None:
+                return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
         if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
             payload = payload["result"]
         if not isinstance(payload, dict):
-            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
-        payload["provider"] = "agy"
+            return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
+        payload["provider"] = requested
+        payload["model"] = selected_model
         return payload
 
     @staticmethod
