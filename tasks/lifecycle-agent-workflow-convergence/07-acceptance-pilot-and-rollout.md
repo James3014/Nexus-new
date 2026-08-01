@@ -60,8 +60,12 @@ next_action, protected main is unchanged, push is false, and one live
 - duplicate_commits: `0`
 - unknown_nonterminal_next_actions: `0`
 - unmapped_worktrees: `0` (the retained parser checkout is classified external-active)
-- gateway_workflow_tests: `61 passed, 1 warning`
+- gateway_workflow_tests: `69 passed, 1 warning` (current post-Cline suite)
 - gateway_http_tests: `5 passed, 1 warning`
+- gateway_stdio_self_test: `PASS (24 tools)` at commit `04fc0d959`
+- temporary_loopback_health: `tool_count=24`,
+  `tool_manifest_revision=6c1b0339…`, `reload_required=false` at commit
+  `04fc0d959`; this is local Gateway evidence, not GPT connector evidence
 - live_nexus01_smoke: `NOT_RUN`
 - claim_ceiling: `LOCAL_GATEWAY_ACCEPTANCE_PASS`
 - remaining_blocker: `GPT_TO_NEXUS_LIFECYCLE_WORKFLOW_ACCEPTANCE_PASS requires live nexus01 read/Direct/Candidate smoke`
