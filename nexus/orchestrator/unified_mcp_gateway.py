@@ -593,7 +593,7 @@ class UnifiedMCPGateway:
             cline_model = selected_model or "glm-5.2"
             if "/" not in cline_model:
                 cline_model = f"cline-pass/{cline_model}"
-            command = [executable, "--json", "--yolo", "--model", cline_model, prompt]
+            command = [executable, "--json", "--yolo", "--thinking", "none", "--model", cline_model, prompt]
         elif requested == "gemini":
             command = [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", selected_model, "-p", prompt, "--output-format", "json"]
         elif requested == "opencode":
@@ -606,7 +606,7 @@ class UnifiedMCPGateway:
             command = [executable, "run", selected_model, prompt]
         else:
             command = [executable, "--model", selected_model, "--prompt", prompt]
-        provider_timeout = 60 if requested == "cline" else 30
+        provider_timeout = 90 if requested == "cline" else 30
         result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=provider_timeout, check=False)
         if result.returncode != 0:
             return {"provider": requested, "model": selected_model, "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
