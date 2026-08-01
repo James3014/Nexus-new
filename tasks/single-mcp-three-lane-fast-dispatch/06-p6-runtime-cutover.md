@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p6-runtime-cutover`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Provide one authenticated loopback HTTP runtime for the unified gateway with health identity, deterministic manifest revision, and bounded request handling.
 - read_only: false
@@ -43,3 +43,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/tmp/nexus-gateway-pycache .venv/b
 - Auth, method, body-size, health identity, and JSON-RPC forwarding tests pass.
 - Scoped commit and Direct receipt exist.
 - No public connector cutover is claimed by this card.
+
+## Completion Evidence
+
+- Runtime commit: `595b83c957c2c365279471c132267f220650d22e`
+- Direct receipt: `a63177872d989fe16e792ebebbe8a5fc81e01edb58da00e48cfc84bfa9841996`
+- Verification: HTTP gateway tests passed 5/5 with loopback bind permission; `git diff --check` passed.
