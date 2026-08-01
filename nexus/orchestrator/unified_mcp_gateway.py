@@ -557,6 +557,7 @@ class UnifiedMCPGateway:
         return (
             "You are a bounded patch proposer. Use plan/read-only mode. Do not edit files, run tools, or commit. "
             "Return only JSON matching the requested schema, with a unified diff in patch. "
+            "The patch string must begin exactly with diff --git and must not use markdown fences. "
             f"WHAT: {what}\nWHY: {why}\nALLOWED FILES: {', '.join(allowed)}\nVERIFIERS: {verifiers}\n" + "\n".join(context)
         )
 
