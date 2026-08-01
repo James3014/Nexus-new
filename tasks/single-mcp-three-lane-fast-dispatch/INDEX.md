@@ -38,10 +38,11 @@ one explicit executable next action.
 10. `09-p9-external-connector-cutover.md` - `single-mcp-three-lane-p9-external-connector-cutover`
 11. `10-p10-compatibility-adapter-cutover.md` - `single-mcp-three-lane-p10-compatibility-adapter-cutover`
 12. `11-p11-gateway-contract-hardening.md` - `single-mcp-three-lane-p11-gateway-contract-hardening`
+13. `12-p12-finish-contract-alias.md` - `single-mcp-three-lane-p12-finish-contract-alias`
 
 ## Current Frontier
 
-`single-mcp-three-lane-p9-external-connector-cutover`
+`single-mcp-three-lane-p12-finish-contract-alias`
 
 ## Completed Cards
 
@@ -68,6 +69,8 @@ P10 is a corrective compatibility-adapter card: it closes the stale P0 wrapper
 behavior without mutating the external DevSpace repository.
 P11 hardens the canonical gateway receipt contract and does not authorize any
 external provider transmission or connector mutation.
+P12 closes the public Direct finish contract using the gateway's `base_sha`
+alias; it is canonical-only and does not alter external registration.
 
 ## Global Forbidden Scope
 
