@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: ACTIVE
 task_id: lifecycle-workflow-p7-acceptance-rollout
 commit_required: true
 candidate_required: true
@@ -20,6 +20,11 @@ prove cleanup/recovery, and validate the GPT connector smoke path.
 ## Dependencies
 
 - `lifecycle-workflow-p6-approval-reconnect-drift` integrated.
+
+P6 is verified on canonical HEAD with generic tracked/Owner Inline approval
+binding and exact focused suites. The Owner's continuing full-goal request
+activates this acceptance implementation card; Cline live execution remains a
+separate downstream provider gate.
 
 ## Allowed files
 
