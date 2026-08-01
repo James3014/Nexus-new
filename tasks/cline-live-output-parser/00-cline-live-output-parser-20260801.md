@@ -6,7 +6,7 @@ owner: James Chen
 status: INTEGRATED_PENDING_LIVE_REPLAY
 candidate_commit: 026d4e12bc3517c3746137286fcafe057cbc196f
 integration_commit: 90c8b9acd993e4db037f42a601cee2dbc042bdf3
-live_cline_replay: NOT_YET_RUN
+live_cline_replay: RECOVERABLE_BLOCK_PROVIDER_ENDPOINT
 integration_note: Canonical HEAD contains the equivalent parser fix in commit 90c8b9a; candidate 026d4e12 is retained as provenance but is not an ancestor.
 commit_required: true
 candidate_required: true
@@ -37,6 +37,9 @@ git diff --check
 Canonical integration is recorded at `90c8b9acd`; live Cline stdout replay
 remains outstanding. The detached parser worktree must be retained until its
 candidate ancestry/unique-work and process-owner checks are satisfied.
+
+The real stdout error stream is now preserved by the separate permission
+closure card; it does not prove a successful candidate replay.
 
 ## Block classification
 
