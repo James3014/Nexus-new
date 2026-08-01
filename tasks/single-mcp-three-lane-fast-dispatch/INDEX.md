@@ -38,13 +38,14 @@ one explicit executable next action.
 
 ## Current Frontier
 
-`single-mcp-three-lane-p3-assisted-canonical`
+`single-mcp-three-lane-p4-direct-completion`
 
 ## Completed Cards
 
 - `single-mcp-three-lane-p0-authority`: committed `d5a4547d2`; Direct receipt `cb5c9c358c3062777e69c1a92e54719a5b60ba02f635cfaf5e6a5a3e450e11f5`
 - `single-mcp-three-lane-p1-authority`: card committed `1cd87459f`; runtime committed `77ea9c314`; Direct receipt `896357ffe63f7f6106849beeea04254c7bae2706aab13681c6bcca0846234b6d`
 - `single-mcp-three-lane-p2-dispatch-router`: runtime/scope committed `940a6796d`; Direct receipt `f3550ff6ce91b8ff3a5361343612344e1b3b2907643d3dd610f1bfbb934235c1`
+- `single-mcp-three-lane-p3-assisted-canonical`: runtime committed `e556d507a`; Direct receipt `96685865b699117ab7e8825d3a721336006dcb964e34c171bd4dd3697b314e7a`
 
 ## Dependencies
 
