@@ -31,7 +31,20 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 
 ## Current Frontier
 
-`lifecycle-two-lane-p0-authority-convergence`
+`lifecycle-two-lane-p6-cutover-gate`
+
+## Completed Cards
+
+- `lifecycle-two-lane-p0-authority-convergence`: committed `dc0292b12`
+- `lifecycle-two-lane-p1-read-only-zero-side-effects`: committed `3cc8249c3`
+- `lifecycle-two-lane-p2-direct-canonical-lane`: committed `aeb2e6426`
+- `lifecycle-two-lane-p3-owner-finish`: committed `55e31423b`
+- `lifecycle-two-lane-p4-same-task-retry`: committed `b752fc72e`
+- `lifecycle-two-lane-p5-target-root-and-telemetry`: committed `23db1ad53`
+
+## Current Gate
+
+`lifecycle-two-lane-p6-cutover-gate` is the only current frontier. `AUTO_CHAIN=false`; owner review remains required for any promotion, integration, push, branch/ref cleanup, or external workspace cleanup.
 
 ## Dependencies
 

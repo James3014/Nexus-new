@@ -5,7 +5,7 @@
 - task_id: `lifecycle-two-lane-p5-target-root-and-telemetry`
 - campaign_id: `lifecycle-two-lane-canonical-closure`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - audit_only: false
 - commit_required: true
