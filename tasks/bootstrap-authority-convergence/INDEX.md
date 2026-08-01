@@ -20,14 +20,15 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 6. [06-briefing-overlay-reduction.md](06-briefing-overlay-reduction.md) - `briefing-overlay-reduction`
 7. [07-workspace-retry-and-permission-gate.md](07-workspace-retry-and-permission-gate.md) - `workspace-retry-and-permission-gate`
 8. [08-orphan-workspace-reconciliation.md](08-orphan-workspace-reconciliation.md) - `orphan-workspace-reconciliation`
+9. [09-context-budget-and-overlay-gates.md](09-context-budget-and-overlay-gates.md) - `context-budget-and-overlay-gates`
 
 ## Current Frontier
 
-`orphan-workspace-reconciliation`
+`context-budget-and-overlay-gates`
 
 ## Ready Cards
 
-- `orphan-workspace-reconciliation`: planned; current live inventory shows dirty/unmapped worktrees that must remain protected until exact owner-approved plan/hash cleanup.
+- `context-budget-and-overlay-gates`: ready after orphan inventory evidence; required pre-P2 implementation frontier.
 
 ## Completed Cards
 
@@ -38,6 +39,7 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 - `workforce-compact-surface`: INTEGRATED_WITH_OWNER_REVIEW at `cd9894707`; 2 focused tests passed, policy hash and route authority are exposed, and mutation authority is explicitly false.
 - `briefing-overlay-reduction`: INTEGRATED_WITH_OWNER_REVIEW at `e25902e30`; 10 focused tests passed, compact output is task-aware, and legacy output requires explicit opt-in.
 - `workspace-retry-and-permission-gate`: INTEGRATED_WITH_OWNER_REVIEW at `86c197690`; 27 focused lifecycle/CLI tests passed and live retry returned a structured retained-review block without state mutation.
+- `orphan-workspace-reconciliation`: read-only inventory, plan, and actionable-task checks passed on clean canonical HEAD `900701af1`; inventory hash `6672e6457e1ab5335a20b70c114b487b7d888a504e7c7ea8df52f94afa463833`; plan hash `4b918437b967410cb2e7f89023f2caef6a75053ae44729bba3a63df3bf9e3be4`; no releasable or blocked paths and zero actionable tasks.
 
 ## Blocked Cards
 

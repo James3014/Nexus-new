@@ -5,7 +5,7 @@
 - task_id: `orphan-workspace-reconciliation`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: COMPLETED
 - owner: James Chen
 - depends_on: `workspace-retry-and-permission-gate` integrated
 - read_only: true
@@ -54,6 +54,14 @@ Read-only inventory, plan, and actionable receipts complete; exact blockers and 
 ## Residual debt
 
 Actual orphan cleanup and P6 canonical-root cutover remain explicitly outside this card.
+
+## Integrated evidence
+
+- live `workspace-inventory` passed on clean canonical HEAD `900701af1`;
+  inventory hash `6672e6457e1ab5335a20b70c114b487b7d888a504e7c7ea8df52f94afa463833`
+- live `workspace-plan` returned plan hash `4b918437b967410cb2e7f89023f2caef6a75053ae44729bba3a63df3bf9e3be4`,
+  with zero releasable paths and zero blocked paths
+- live `list-actionable` returned `actionable_count: 0`
 
 ## Block classification
 

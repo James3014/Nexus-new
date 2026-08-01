@@ -50,9 +50,9 @@ at P1 through the formal lifecycle surface and the current frontier card.
 
 ## Current frontier
 
-`tasks/bootstrap-authority-convergence/08-orphan-workspace-reconciliation.md`
-is the required pre-P2 gate. The lifecycle P2 card remains PENDING until that
-campaign's current frontier is owner-reviewed and its read-only inventory/
-context-budget findings are accepted. No P2 successor may start until it then
-receives a scoped commit, verification evidence, and explicit promotion through
-the formal lifecycle surface.
+`tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
+is the required pre-P2 implementation gate. The lifecycle P2 card remains
+PENDING until that card is integrated and its context-budget/overlay evidence
+is owner-reviewed. No P2 successor may start until it then receives a scoped
+commit, verification evidence, and explicit promotion through the formal
+lifecycle surface.

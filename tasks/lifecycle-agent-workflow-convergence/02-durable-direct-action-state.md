@@ -21,8 +21,8 @@ reconciliation in the existing lifecycle state service.
 ## Dependencies
 
 - `lifecycle-workflow-p1-action-envelope` integrated.
-- `tasks/bootstrap-authority-convergence/08-orphan-workspace-reconciliation.md`
-  and its pre-P2 bootstrap/context optimization gate owner-reviewed.
+- `tasks/bootstrap-authority-convergence/09-context-budget-and-overlay-gates.md`
+  integrated and owner-reviewed after the orphan inventory gate.
 
 ## Allowed files
 
