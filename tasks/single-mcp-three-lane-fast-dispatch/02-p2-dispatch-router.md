@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p2-dispatch-router`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Add one minimal `nexus_task_run` gateway contract that derives canonical revisions/roots and records CapabilityPlanner-backed lane selection without exposing internal Target fields.
 - read_only: false
@@ -59,6 +59,14 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/
 - CapabilityPlanner is cited as `route_authority` in every route envelope.
 - Direct/isolated routing tests pass and assisted requests fail closed without side effects.
 - Scoped commit and Direct receipt exist.
+
+## Completion Evidence
+
+- Runtime/scope commit: `940a6796d9e78174b2873f1e83e22d55e80aef82`
+- Direct receipt: `f3550ff6ce91b8ff3a5361343612344e1b3b2907643d3dd610f1bfbb934235c1`
+- Verification: 8 gateway tests passed; gateway self-test passed; `git diff --check` passed.
+- Scope correction: launcher self-test was explicitly added to Allowed Files before completion.
+- Side effects: `candidate_created=false`, `target_created=false`, `state_created=false`.
 
 ## Forbidden Scope
 
