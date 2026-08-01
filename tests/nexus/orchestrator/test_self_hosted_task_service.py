@@ -1348,6 +1348,8 @@ def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monk
         calls.append(("integrate", integration_branch))
         return {"status": "INTEGRATED", "promotion_status": "INTEGRATED"}
 
+    monkeypatch.setattr(service, "archive_states", lambda *, dry_run: {"dry_run": dry_run, "entries": [{"task_id": "owner-finish-canary"}]})
+
     monkeypatch.setattr(service, "approve_promotion", approve)
     monkeypatch.setattr(service, "integrate_approved", integrate)
 
@@ -1361,6 +1363,7 @@ def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monk
 
     assert result["status"] == "INTEGRATED"
     assert calls == [("approve", "owner-finish-canary"), ("integrate", "nexus/integration/main")]
+    assert result["owner_finish"]["archive"]["dry_run"] is False
 
 
 def test_owner_finish_does_not_integrate_invalid_binding(tmp_path, monkeypatch):

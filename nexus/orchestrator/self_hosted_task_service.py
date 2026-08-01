@@ -3569,7 +3569,16 @@ class SelfHostedTaskService:
         )
         if approved.get("status") != "APPROVED" or approved.get("promotion_status") != "APPROVED":
             raise RuntimeError("owner finish requires an exact approved candidate binding")
-        return self.integrate_approved(task_id, integration_branch=integration_branch)
+        integrated = self.integrate_approved(task_id, integration_branch=integration_branch)
+        archive = self.archive_states(dry_run=False)
+        return {
+            **integrated,
+            "owner_finish": {
+                "approval_status": "APPROVED",
+                "integration_status": integrated.get("status"),
+                "archive": archive,
+            },
+        }
 
     def recover_verified_uncommitted_candidate(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
