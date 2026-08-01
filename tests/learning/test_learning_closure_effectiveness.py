@@ -89,6 +89,7 @@ def test_learning_closure_tracks_retrieved_applied_lessons_and_terminal_disposit
     assert result["applied_lesson_ids"] == ["lesson-old"]
     assert result["lesson_disposition"] == "reinforce"
     assert result["auto_replay_allowed"] is False
+    assert result["qualification_evidence_present"] is True
 
 
 def test_failed_without_terminal_decision_is_parked(tmp_path: Path):
@@ -102,6 +103,7 @@ def test_failed_without_terminal_decision_is_parked(tmp_path: Path):
     assert result["terminal_outcome"] == "PARKED"
     assert result["qualification_status"] == "UNQUALIFIED"
     assert result["auto_replay_allowed"] is False
+    assert result["qualification_evidence_present"] is False
 
 
 def test_terminal_outcomes_can_contradict_or_retire_applied_lessons(tmp_path: Path):

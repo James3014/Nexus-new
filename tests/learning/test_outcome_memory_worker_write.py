@@ -105,5 +105,18 @@ class TestOutcomeMemoryWorkerWrite:
             total_tokens_used=2,
             trust_mismatch=False,
             terminal_outcome="SUCCEEDED",
+            qualification_evidence_present=True,
         )
         assert done.qualification_status == "QUALIFIED"
+
+        no_evidence = EpisodeOutcomeRecord.from_task(
+            task_id="t-no-evidence",
+            task_type="repair",
+            task_desc="unverified",
+            solved=True,
+            wall_duration_sec=1,
+            total_tokens_used=2,
+            trust_mismatch=False,
+            terminal_outcome="SUCCEEDED",
+        )
+        assert no_evidence.qualification_status == "UNQUALIFIED"

@@ -34,6 +34,7 @@ class EpisodeOutcomeRecord:
     terminal_outcome: str = "PARKED"
     auto_replay_allowed: bool = False
     qualification_status: str = "UNQUALIFIED"
+    qualification_evidence_present: bool = False
     retrieved_lesson_ids: list[str] = field(default_factory=list)
     applied_lesson_ids: list[str] = field(default_factory=list)
     lesson_updates: list[dict[str, Any]] = field(default_factory=list)
@@ -60,11 +61,16 @@ class EpisodeOutcomeRecord:
         retrieved_lesson_ids: Iterable[str] = (),
         applied_lesson_ids: Iterable[str] = (),
         lesson_updates: Iterable[Mapping[str, Any]] = (),
+        qualification_evidence_present: bool = False,
     ) -> "EpisodeOutcomeRecord":
         normalized_terminal = str(terminal_outcome or ("SUCCEEDED" if solved else "PARKED")).upper()
         if normalized_terminal not in TERMINAL_OUTCOMES:
             normalized_terminal = "PARKED"
-        qualified = normalized_terminal in QUALIFIED_TERMINAL_OUTCOMES and not bool(trust_mismatch)
+        qualified = (
+            normalized_terminal in QUALIFIED_TERMINAL_OUTCOMES
+            and not bool(trust_mismatch)
+            and bool(qualification_evidence_present)
+        )
         return cls(
             task_id=str(task_id or "unknown"),
             task_type=str(task_type or "unknown"),
@@ -82,6 +88,7 @@ class EpisodeOutcomeRecord:
             terminal_outcome=normalized_terminal,
             auto_replay_allowed=bool(auto_replay_allowed) and qualified,
             qualification_status="QUALIFIED" if qualified else "UNQUALIFIED",
+            qualification_evidence_present=bool(qualification_evidence_present),
             retrieved_lesson_ids=[str(item) for item in retrieved_lesson_ids if str(item)],
             applied_lesson_ids=[str(item) for item in applied_lesson_ids if str(item)],
             lesson_updates=[dict(item) for item in lesson_updates if isinstance(item, Mapping)],
@@ -106,6 +113,7 @@ class EpisodeOutcomeRecord:
             "terminal_outcome": self.terminal_outcome,
             "auto_replay_allowed": self.auto_replay_allowed,
             "qualification_status": self.qualification_status,
+            "qualification_evidence_present": self.qualification_evidence_present,
             "retrieved_lesson_ids": list(self.retrieved_lesson_ids),
             "applied_lesson_ids": list(self.applied_lesson_ids),
             "lesson_updates": [dict(item) for item in self.lesson_updates],
@@ -154,7 +162,8 @@ class OutcomeMemoryManager:
             record
             for record in records
             if not bool(record.get("trust_mismatch", False))
-            and str(record.get("qualification_status") or "QUALIFIED").upper() == "QUALIFIED"
+            and str(record.get("qualification_status") or "UNQUALIFIED").upper() == "QUALIFIED"
+            and bool(record.get("qualification_evidence_present", False))
             and not bool(record.get("auto_replay_allowed", False))
         ]
         promoted_scores: dict[str, float] = {}
@@ -292,7 +301,8 @@ def build_episode_from_receipts(
     idempotency_key: str = "",
     terminal_outcome: str | None = None,
     retrieved_lesson_ids: Iterable[str] = (),
-    applied_lesson_ids: Iterable[str] = (),
+        applied_lesson_ids: Iterable[str] = (),
+        qualification_evidence_present: bool | None = None,
 ) -> EpisodeOutcomeRecord:
     solved = all(
         getattr(r, "gate_passed", False) for r in (receipts or []) if hasattr(r, "gate_passed")
@@ -330,6 +340,7 @@ def build_episode_from_receipts(
         terminal_outcome=terminal_outcome,
         retrieved_lesson_ids=retrieved_lesson_ids,
         applied_lesson_ids=applied_lesson_ids,
+        qualification_evidence_present=(bool(receipt_dicts) if qualification_evidence_present is None else bool(qualification_evidence_present)),
     )
 
 

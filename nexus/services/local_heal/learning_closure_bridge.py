@@ -76,7 +76,13 @@ def _lineage(op: Any) -> dict[str, Any]:
         else:
             terminal = "PARKED"
     uncertain = bool(getattr(op, "uncertain_mutation", False))
-    qualified = terminal in {"SUCCEEDED", "FAILED", "CANCELLED"} and not uncertain
+    receipt_path = str(getattr(op, "receipt_path", "") or "").strip()
+    evidence_present = bool(
+        getattr(op, "terminal_evidence_present", False)
+        or getattr(op, "evidence_present", False)
+        or (receipt_path and receipt_path != "receipt:pending")
+    )
+    qualified = terminal in {"SUCCEEDED", "FAILED", "CANCELLED"} and not uncertain and evidence_present
     retrieved = [str(item) for item in (getattr(op, "retrieved_lesson_ids", None) or []) if str(item)]
     if not retrieved:
         trace = getattr(op, "_memory_influence_trace", None)
@@ -101,6 +107,7 @@ def _lineage(op: Any) -> dict[str, Any]:
         "uncertain_mutation": uncertain,
         "auto_replay_allowed": False,
         "qualification_status": "QUALIFIED" if qualified else "UNQUALIFIED",
+        "qualification_evidence_present": evidence_present,
         "retrieved_lesson_ids": retrieved,
         "applied_lesson_ids": applied,
         "lesson_disposition": disposition,
@@ -335,6 +342,7 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
                 terminal_outcome=lineage["terminal_outcome"],
                 retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
                 applied_lesson_ids=lineage["applied_lesson_ids"],
+                qualification_evidence_present=lineage["qualification_evidence_present"],
                 lesson_updates=(
                     [
                         {"lesson_id": lesson_id, "disposition": lineage["lesson_disposition"]}
