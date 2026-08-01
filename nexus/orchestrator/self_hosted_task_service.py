@@ -386,8 +386,13 @@ class SelfHostedTaskService:
         elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
             action_state = "FINAL_BLOCK"
             attention_required = True
-            next_action = "inspect_blocker_and_retry_or_dispose"
-            recommended_tool = "nexus_self_hosted_get_receipt"
+            cleanup_removed = state.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            if status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"} and not candidate_commit and promotion_status == "NOT_CREATED" and cleanup_removed:
+                next_action = "retry_same_task"
+                recommended_tool = "nexus_self_hosted_retry"
+            else:
+                next_action = "inspect_receipt_and_candidate"
+                recommended_tool = "nexus_self_hosted_get_receipt"
         elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
             action_state = "ACTION_REQUIRED"
             attention_required = True
@@ -2025,6 +2030,16 @@ class SelfHostedTaskService:
             for path in sorted(self.state_dir.glob("*.json"))
         ] if self.state_dir.exists() else []
         for current in existing_states:
+            if (
+                current.get("task_id") != contract.task_id
+                and identity.get("task_card_hash")
+                and current.get("task_card_hash") == identity["task_card_hash"]
+                and current.get("status") not in {"SUPERSEDED", "CANCELLED"}
+            ):
+                raise RuntimeError(
+                    "DUPLICATE_LOGICAL_TASK: Task Card hash is already bound to "
+                    f"task_id '{current.get('task_id')}'; retry that task_id instead of resubmitting"
+                )
             if current.get("status") in TERMINAL_STATUSES:
                 continue
             current_controller = (current.get("contract") or {}).get("controller_repo_root")

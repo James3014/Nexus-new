@@ -1326,6 +1326,33 @@ def test_owner_finish_does_not_integrate_invalid_binding(tmp_path, monkeypatch):
         )
 
 
+def test_final_block_clean_no_candidate_recommends_same_task_retry(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    state = {
+        "task_id": "retry-action",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "REMOVED",
+    }
+
+    action = service._task_action_envelope(state)
+
+    assert action["next_action"] == "retry_same_task"
+    assert action["recommended_tool"] == "nexus_self_hosted_retry"
+
+
+def test_duplicate_task_card_hash_is_rejected(tmp_path):
+    card = tmp_path / "card.md"
+    card.write_text("task_id: logical-new\n", encoding="utf-8")
+    card_hash = subprocess.run(["git", "hash-object", str(card)], check=True, capture_output=True, text=True).stdout.strip()
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("logical-old", {"task_id": "logical-old", "status": "FINAL_BLOCK", "task_card_hash": card_hash})
+    request = _request(tmp_path, task_id="logical-new", task_card_path=str(card), allow_unbound_test_identity=True)
+
+    with pytest.raises(RuntimeError, match="DUPLICATE_LOGICAL_TASK"):
+        service.submit_task(request)
+
+
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = _real_request(tmp_path, task_id="workspace-apply")

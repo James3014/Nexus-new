@@ -214,6 +214,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_list_actionable,
     run_self_hosted_recover_verified_uncommitted,
     run_self_hosted_retry,
+    run_self_hosted_receipt,
     run_self_hosted_status,
     run_self_hosted_submit,
     run_self_hosted_verify,
@@ -3575,6 +3576,16 @@ def self_hosted_submit(
 def self_hosted_retry(task_id: str, state_dir: str | None) -> None:
     """Retry a terminal task using its durable request and the same task ID."""
     res = run_self_hosted_retry(task_id, state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="receipt")
+@click.option("--task-id", required=True, help="Exact durable task ID to inspect.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_receipt(task_id: str, state_dir: str | None) -> None:
+    """Read the durable execution receipt for a self-hosted task."""
+    res = run_self_hosted_receipt(task_id, state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 
