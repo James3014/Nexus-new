@@ -114,16 +114,23 @@ def test_task_run_routes_small_request_direct_without_target_fields():
     assert service.submitted[0]["target_worktree_root"] == "/Users/jameschen/Workspace/nexus-runtime-targets"
     assert service.submitted[0]["primary_agent"] is True
     assert set((payload := response["result"]["structuredContent"])["telemetry"]) >= {
+        "control_plane_ms",
         "route_decision_ms",
         "context_build_ms",
+        "provider_start_ms",
         "provider_time_ms",
         "patch_validation_ms",
+        "verifier_time_ms",
         "commit_time_ms",
         "worktree_time_ms",
         "cleanup_time_ms",
         "total_wall_time_ms",
     }
     assert payload["telemetry"]["provider_time_ms"] == 0
+    assert payload["next_action"] == "edit_canonical_checkout"
+    assert payload["completion_surface"] == "nexus_task_finish"
+    assert payload["base_sha"]
+    assert payload["mutation_lease"]["type"] == "canonical_mutation_lock"
 
 
 def test_task_run_assisted_is_fail_closed_without_side_effect():
@@ -133,6 +140,8 @@ def test_task_run_assisted_is_fail_closed_without_side_effect():
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "FINAL_BLOCK"
     assert payload["blocker"] == "ASSIST_PROVIDER_UNAVAILABLE"
+    assert "provider_error" in payload
+    assert set(payload["telemetry"]) >= {"control_plane_ms", "provider_start_ms", "total_wall_time_ms"}
     assert service.submitted == []
 
 
