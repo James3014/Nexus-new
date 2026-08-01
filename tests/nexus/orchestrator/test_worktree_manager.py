@@ -1241,6 +1241,20 @@ def test_reusable_slot_preparation_and_idempotency(sh2_repo):
     assert second_lease.slot_path == slot_lease.slot_path
 
 
+def test_reusable_slot_is_one_physical_serial_slot_across_campaigns(sh2_repo):
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    first = manager.prepare_reusable_slot(_contract(sh2_repo, task_id="slot-shared-1"), campaign_id="campaign-one", slot_index=0)
+    second = manager.get_reusable_slot_status(
+        campaign_id="campaign-two",
+        slot_index=0,
+        controller_root=sh2_repo["controller"],
+        task_states={},
+    )
+
+    assert first.slot_path == second.slot_path
+    assert "/serial-slot/slot-0" in first.slot_path
+
+
 def test_different_base_slot_reuse_blocks_until_verified_release(sh2_repo):
     controller = sh2_repo["controller"]
     target_root = sh2_repo["target_root"]

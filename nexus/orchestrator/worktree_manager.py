@@ -184,6 +184,8 @@ class WorktreeManager:
         create_root: bool = True,
     ):
         self.root_dir = Path(root_dir)
+        if "nexus-worktrees" in self.root_dir.resolve().parts:
+            raise ValueError("DISABLED_TARGET_ROOT: nexus-worktrees is retired")
         self._ensure_hooks = create_root
         if create_root:
             self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -1470,7 +1472,9 @@ class WorktreeManager:
         )
 
     def get_reusable_slot_path(self, campaign_id: str = "default", slot_index: int = 0) -> Path:
-        return self.root_dir / campaign_id / f"slot-{slot_index}"
+        # One serial slot is shared across campaigns; campaign_id remains
+        # receipt metadata, never a second physical Target namespace.
+        return self.root_dir / "serial-slot" / f"slot-{slot_index}"
 
     def get_reusable_slot_status(
         self,

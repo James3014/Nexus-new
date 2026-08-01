@@ -1481,6 +1481,39 @@ def test_default_production_target_root_is_outside_disabled_worktree_namespace(m
     assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
 
 
+def test_disabled_target_root_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="DISABLED_TARGET_ROOT"):
+        resolve_canonical_target_roots(
+            "retired-root",
+            requested_target_worktree_root=str(tmp_path / "nexus-worktrees" / "runtime-targets"),
+        )
+
+
+def test_checkpoint_telemetry_separates_provider_verifier_and_control_plane(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("telemetry-breakdown", {
+        "task_id": "telemetry-breakdown",
+        "status": "WORKER_RUNNING",
+        "submitted_at": "2026-01-01T00:00:00+00:00",
+        "attempt_id": "a",
+        "attempts": [{"attempt_id": "a"}],
+        "execution": {"wall_time_ms": 17},
+        "executions": [{"wall_time_ms": 17}],
+        "verified_receipt": {"verifier_evidence": [{"wall_time_ms": 5}]},
+        "telemetry": {"worktree_time_ms": 3, "commit_hook_time_ms": 2, "cleanup_time_ms": 1},
+    })
+
+    result = service._checkpoint("telemetry-breakdown", "FINAL_BLOCK", attempt_id="a")
+
+    telemetry = result["telemetry"]
+    assert telemetry["provider_time_ms"] == 17
+    assert telemetry["verifier_time_ms"] == 5
+    assert telemetry["worktree_time_ms"] == 3
+    assert telemetry["commit_hook_time_ms"] == 2
+    assert telemetry["cleanup_time_ms"] == 1
+    assert telemetry["overhead_ms"] >= 0
+
+
 def test_thirty_task_cutover_matrix_uses_one_of_two_explicit_lanes(tmp_path, monkeypatch):
     controller = tmp_path / "canonical"
     controller.mkdir()

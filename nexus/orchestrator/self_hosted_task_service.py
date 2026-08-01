@@ -115,6 +115,9 @@ def resolve_canonical_target_roots(
     else:
         target_repo_root = base_worktree_root / task_id
 
+    disabled_parts = {"nexus-worktrees"}
+    if disabled_parts.intersection(base_worktree_root.parts) or disabled_parts.intersection(target_repo_root.parts):
+        raise ValueError("DISABLED_TARGET_ROOT: nexus-worktrees is retired; use /Users/jameschen/Workspace/nexus-runtime-targets")
     return base_worktree_root, target_repo_root
 
 
@@ -675,10 +678,24 @@ class SelfHostedTaskService:
             if submitted_at is not None:
                 wall_time_ms = max(0, int((time.time() - submitted_at) * 1000))
                 worker_wall_time_ms = max(0, int((time.time() - started_at) * 1000)) if started_at is not None else 0
+                previous_telemetry = state.get("telemetry") or {}
+                executions = state.get("executions") or ([state.get("execution")] if state.get("execution") else [])
+                provider_time_ms = sum(int(item.get("wall_time_ms") or 0) for item in executions if isinstance(item, Mapping))
+                verified = state.get("verified_receipt") or {}
+                verifier_time_ms = sum(int(item.get("wall_time_ms") or 0) for item in verified.get("verifier_evidence") or [] if isinstance(item, Mapping))
+                worktree_time_ms = int(previous_telemetry.get("worktree_time_ms") or 0)
+                commit_hook_time_ms = int(previous_telemetry.get("commit_hook_time_ms") or 0)
+                cleanup_time_ms = int(previous_telemetry.get("cleanup_time_ms") or 0)
+                measured_ms = provider_time_ms + verifier_time_ms + worktree_time_ms + commit_hook_time_ms + cleanup_time_ms
                 state["telemetry"] = {
                     "wall_time_ms": wall_time_ms,
                     "worker_wall_time_ms": worker_wall_time_ms,
-                    "overhead_ms": max(0, wall_time_ms - worker_wall_time_ms),
+                    "provider_time_ms": provider_time_ms,
+                    "verifier_time_ms": verifier_time_ms,
+                    "worktree_time_ms": worktree_time_ms,
+                    "commit_hook_time_ms": commit_hook_time_ms,
+                    "cleanup_time_ms": cleanup_time_ms,
+                    "overhead_ms": max(0, wall_time_ms - measured_ms),
                 }
             if status in TERMINAL_STATUSES:
                 state["worker_finished_at"] = now
@@ -1030,13 +1047,16 @@ class SelfHostedTaskService:
 
         if status == "SUBMITTED":
             provider, preflight = self._select_initial_provider(contract)
+            worktree_started = time.perf_counter()
             lease = controller.prepare_task(contract)
+            worktree_time_ms = max(0, int((time.perf_counter() - worktree_started) * 1000))
             update(
                 "TARGET_LEASED",
                 {
                     "lease": lease,
                     "worker_preflight": preflight,
                     "active_provider": provider,
+                    "telemetry": {"worktree_time_ms": worktree_time_ms},
                     **fast_lane_values,
                 },
             )
@@ -1222,7 +1242,9 @@ class SelfHostedTaskService:
                 "error": authority_error,
             }
 
+        commit_started = time.perf_counter()
         packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+        commit_hook_time_ms = max(0, int((time.perf_counter() - commit_started) * 1000))
         candidate_values = {
             "execution": execution,
             "candidate": candidate,
@@ -1235,6 +1257,7 @@ class SelfHostedTaskService:
             "production_ready": packet.production_ready,
             "merge_performed": packet.merge_performed,
             "push_performed": packet.push_performed,
+            "telemetry": {"commit_hook_time_ms": commit_hook_time_ms},
         }
         update("CANDIDATE_COMMITTED", candidate_values)
         try:
@@ -1250,12 +1273,14 @@ class SelfHostedTaskService:
                 "recovery_action": "recover_retained_candidate",
             })
             raise RuntimeError(f"candidate ref protection failed: {exc}")
+        cleanup_started = time.perf_counter()
         cleanup = manager.cleanup_terminal_target(
             contract,
             lease,
             candidate_commit=packet.candidate_commit_sha,
             candidate_ref=candidate_ref,
         )
+        cleanup_time_ms = max(0, int((time.perf_counter() - cleanup_started) * 1000))
         if cleanup.decision != "REMOVED":
             raise RuntimeError(f"candidate Target cleanup failed: {cleanup.decision}")
         update("TARGET_CLEANED", {
@@ -1264,6 +1289,7 @@ class SelfHostedTaskService:
             "cleanup_blocker": cleanup.blocker,
             "cleanup_performed": cleanup.performed,
             "cleanup_performed_at": _utc_now(),
+            "telemetry": {"cleanup_time_ms": cleanup_time_ms},
         })
         result = {
             **candidate_values,
