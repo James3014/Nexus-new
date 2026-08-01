@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: IMPLEMENTED_PENDING_CARD_01_LIVE_CLOSURE
+status: IMPLEMENTED_PENDING_CARD_03_LIVE_ACCEPTANCE
 task_id: agy-gateway-executable-authority-convergence
 campaign_id: agy-account-pool-runtime
 depends_on: agy-account-pool-real-manager-runtime-closure

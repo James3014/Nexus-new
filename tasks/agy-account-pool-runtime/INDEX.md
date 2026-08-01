@@ -8,16 +8,20 @@ ordered_cards:
   - 00-agy-account-pool-runtime-integration.md
   - 01-agy-account-pool-real-manager-runtime-closure.md
   - 02-agy-gateway-executable-authority-convergence.md
+  - 03-agy-card01-live-dispatch-acceptance.md
 dependencies: []
-current_frontier: 01-agy-account-pool-real-manager-runtime-closure.md
+current_frontier: 03-agy-card01-live-dispatch-acceptance.md
 completed_cards:
   - 00-agy-account-pool-runtime-integration.md
 card_01:
   path: 01-agy-account-pool-real-manager-runtime-closure.md
-  status: ACTIVE_LIVE_CLOSURE
+  status: IMPLEMENTED_PENDING_CARD_03_LIVE_ACCEPTANCE
 card_02:
   path: 02-agy-gateway-executable-authority-convergence.md
-  status: IMPLEMENTED_PENDING_CARD_01_LIVE_CLOSURE
+  status: IMPLEMENTED_PENDING_CARD_03_LIVE_ACCEPTANCE
+card_03:
+  path: 03-agy-card01-live-dispatch-acceptance.md
+  status: ACTIVE_LIVE_ACCEPTANCE
 blocked_cards: []
 superseded_cards: []
 retained_targets:

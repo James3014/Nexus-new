@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE_LIVE_CLOSURE
+status: IMPLEMENTED_PENDING_CARD_03_LIVE_ACCEPTANCE
 task_id: agy-account-pool-real-manager-runtime-closure
 campaign_id: agy-account-pool-runtime
 depends_on: candidate-commit-git-home-isolation-recovery integrated
