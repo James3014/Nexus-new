@@ -26,6 +26,7 @@ definition drift, and recover reconnects without replaying mutations.
 - `scripts/ops/nexus_mcp_gateway_http.py`
 - `nexus/orchestrator/unified_mcp_gateway.py`
 - `nexus/orchestrator/self_hosted_task_service.py`
+- `nexus/orchestrator/lifecycle_guards.py`
 - `nexus/contracts/lifecycle_action.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway_http.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
@@ -42,6 +43,9 @@ git diff --check
 
 Implementation is active on the canonical branch under the Owner's explicit
 continuation request. Cline live execution remains a separate downstream gate.
+Owner Inline approval is part of this card's generic authorization binding; the
+guard module is therefore explicitly in scope for the contract-kind/hash
+validation seam.
 
 ## Exit criteria
 

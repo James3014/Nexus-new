@@ -1241,7 +1241,7 @@ class UnifiedMCPGateway:
                             "description": "Versioned, expiring approval bound to the persisted task attempt and runtime identity.",
                             "required": [
                                 "schema", "approval_id", "approved_by", "issued_at", "expires_at",
-                                "bound_task_id", "bound_attempt_id", "bound_action_type", "task_card_hash",
+                                "bound_task_id", "bound_attempt_id", "bound_action_type", "contract_kind", "contract_hash", "task_card_hash",
                                 "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash",
                                 "lifecycle_revision", "server_instance_id",
                             ],
@@ -1255,7 +1255,9 @@ class UnifiedMCPGateway:
                                 "bound_attempt_id": {"type": "string"},
                                 "bound_action_type": {"type": "string", "const": "CANDIDATE_APPROVE"},
                                 "approval_scope": {"type": "string", "const": "ALLOW_ACTION_ONCE", "default": "ALLOW_ACTION_ONCE"},
-                                "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "contract_kind": {"type": "string", "enum": ["TRACKED_TASK_CARD", "OWNER_INLINE"]},
+                                "contract_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "task_card_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
                                 "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                                 "full_tool_schema_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                                 "permission_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -1472,15 +1474,23 @@ class UnifiedMCPGateway:
         if not re.fullmatch(r"[0-9a-f]{40}", base):
             raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-        task_card_hash = str(state.get("task_card_hash") or "").strip()
-        if not re.fullmatch(r"[0-9a-f]{64}", task_card_hash):
+        task_card_hash = str(state.get("task_card_hash")).strip() if state.get("task_card_hash") else None
+        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
+        contract_hash = str(state.get("contract_hash") or "").strip() or (task_card_hash or None)
+        owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
+        if contract_kind == ContractKind.TRACKED_TASK_CARD.value and not re.fullmatch(r"[0-9a-f]{64}", task_card_hash):
             raise GatewayInputError("CANDIDATE_TASK_CARD_HASH_REQUIRED")
+        if contract_kind == ContractKind.OWNER_INLINE.value and not contract_hash:
+            raise GatewayInputError("CANDIDATE_OWNER_INLINE_CONTRACT_REQUIRED")
         approval_receipt = validate_approval_grant(
             arguments.get("approval"),
             task_id=task_id,
             attempt_id=str(state.get("attempt_id") or ""),
             action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
             task_card_hash=task_card_hash,
+            contract_kind=contract_kind,
+            contract_hash=contract_hash,
+            owner_inline_contract=owner_inline_contract,
             tool_manifest_hash=TOOL_MANIFEST_REVISION,
             full_tool_schema_hash=FULL_TOOL_SCHEMA_HASH,
             permission_policy_hash=PERMISSION_POLICY_HASH,
@@ -1534,10 +1544,17 @@ class UnifiedMCPGateway:
         if not allowed_files:
             raise GatewayInputError("CANDIDATE_ALLOWED_PATHS_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-        task_card_hash = str(state.get("task_card_hash") or "").strip()
+        task_card_hash = str(state.get("task_card_hash")).strip() if state.get("task_card_hash") else None
+        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
+        contract_hash = str(state.get("contract_hash") or "").strip() or (task_card_hash or None)
+        owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
         binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
         approval_grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
-        if not re.fullmatch(r"[0-9a-f]{64}", task_card_hash) or not approval_grant:
+        if contract_kind == ContractKind.TRACKED_TASK_CARD.value and not re.fullmatch(r"[0-9a-f]{64}", task_card_hash):
+            raise LifecycleGuardError("CANDIDATE_TASK_CARD_HASH_REQUIRED", "tracked candidate integration requires a task card hash")
+        if contract_kind == ContractKind.OWNER_INLINE.value and not contract_hash:
+            raise LifecycleGuardError("CANDIDATE_OWNER_INLINE_CONTRACT_REQUIRED", "Owner Inline integration requires a contract hash")
+        if not approval_grant:
             raise LifecycleGuardError("APPROVAL_REVALIDATION_REQUIRED", "integration requires a persisted versioned approval binding")
         approval_receipt = validate_approval_grant(
             approval_grant,
@@ -1545,6 +1562,9 @@ class UnifiedMCPGateway:
             attempt_id=str(state.get("attempt_id") or ""),
             action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
             task_card_hash=task_card_hash,
+            contract_kind=contract_kind,
+            contract_hash=contract_hash,
+            owner_inline_contract=owner_inline_contract,
             tool_manifest_hash=TOOL_MANIFEST_REVISION,
             full_tool_schema_hash=FULL_TOOL_SCHEMA_HASH,
             permission_policy_hash=PERMISSION_POLICY_HASH,
@@ -1575,6 +1595,8 @@ class UnifiedMCPGateway:
             integration_branch=branch,
             runtime_identity={
                 "task_card_hash": task_card_hash,
+                "contract_kind": contract_kind,
+                "contract_hash": contract_hash,
                 "tool_manifest_hash": TOOL_MANIFEST_REVISION,
                 "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
                 "permission_policy_hash": PERMISSION_POLICY_HASH,

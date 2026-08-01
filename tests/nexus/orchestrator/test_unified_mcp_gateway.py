@@ -44,6 +44,8 @@ class FakeService:
             "promotion_status": "APPROVED" if self.approved_binding else "PENDING_HUMAN_APPROVAL",
             "attempt_id": "attempt-recovery",
             "controller_revision": "a" * 40,
+            "contract_kind": "TRACKED_TASK_CARD",
+            "contract_hash": "c" * 64,
             "task_card_hash": "c" * 64,
             "approved_binding": self.approved_binding,
             "contract": {"allowed_files": ["README.md"]},
@@ -121,10 +123,12 @@ def test_public_candidate_approve_schema_requires_versioned_approval():
     approval = schema["properties"]["approval"]
     assert approval["properties"]["schema"]["const"] == "nexus.approval.v2"
     assert approval["properties"]["approval_scope"]["const"] == "ALLOW_ACTION_ONCE"
+    assert {"contract_kind", "contract_hash", "task_card_hash"}.issubset(set(approval["required"]))
+    assert approval["properties"]["task_card_hash"]["type"] == ["string", "null"]
     assert approval["additionalProperties"] is False
 
 
-def _approval(task_id="recover-1", attempt_id="attempt-recovery"):
+def _approval(task_id="recover-1", attempt_id="attempt-recovery", *, contract_kind="TRACKED_TASK_CARD", contract_hash="c" * 64, task_card_hash="c" * 64, owner_inline_contract=None):
     return {
         "schema": "nexus.approval.v2",
         "approval_id": "approval-recovery",
@@ -135,13 +139,57 @@ def _approval(task_id="recover-1", attempt_id="attempt-recovery"):
         "bound_attempt_id": attempt_id,
         "bound_action_type": "CANDIDATE_APPROVE",
         "approval_scope": "ALLOW_ACTION_ONCE",
-        "task_card_hash": "c" * 64,
+        "contract_kind": contract_kind,
+        "contract_hash": contract_hash,
+        "task_card_hash": task_card_hash,
         "tool_manifest_hash": TOOL_MANIFEST_REVISION,
         "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
         "permission_policy_hash": PERMISSION_POLICY_HASH,
         "lifecycle_revision": LIFECYCLE_REVISION,
         "server_instance_id": SERVER_INSTANCE_ID,
     }
+
+
+def test_owner_inline_candidate_approval_uses_generic_contract_binding(monkeypatch):
+    from nexus.contracts.lifecycle_action import build_owner_inline_contract
+
+    service = FakeService()
+    inline = build_owner_inline_contract(
+        task_id="recover-1",
+        objective="bounded owner inline candidate",
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        expected_head="a" * 40,
+        issued_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+    )
+    original_snapshot = service.get_task_snapshot
+
+    def owner_snapshot(task_id, *, include_details=False):
+        state = original_snapshot(task_id, include_details=include_details)
+        state.update({
+            "contract_kind": "OWNER_INLINE",
+            "contract_hash": inline["contract_hash"],
+            "owner_inline_contract": inline,
+            "task_card_hash": None,
+        })
+        return state
+
+    service.get_task_snapshot = owner_snapshot
+    gateway = UnifiedMCPGateway(service=service)
+    approval = _approval(
+        contract_kind="OWNER_INLINE",
+        contract_hash=inline["contract_hash"],
+        task_card_hash=None,
+        owner_inline_contract=inline,
+    )
+    response = gateway.handle({"jsonrpc": "2.0", "id": 414, "method": "tools/call", "params": {"name": "nexus_candidate_approve", "arguments": {
+        "task_id": "recover-1", "candidate_commit_sha": "a" * 40, "candidate_tree_sha": "a" * 40,
+        "candidate_state_hash": "b" * 64, "verified_receipt_hash": "b" * 64, "approval": approval,
+    }}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "APPROVED"
+    assert payload["approval_receipt"]["contract_kind"] == "OWNER_INLINE"
 
 
 def test_owner_inline_clean_routes_direct_without_task_card(monkeypatch):

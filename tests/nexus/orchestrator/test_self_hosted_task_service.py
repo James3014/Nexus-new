@@ -431,6 +431,8 @@ def test_integrate_revalidates_persisted_approval_definition_identity(tmp_path):
         "bound_attempt_id": "attempt-1",
         "bound_action_type": "CANDIDATE_APPROVE",
         "approval_scope": "ALLOW_ACTION_ONCE",
+        "contract_kind": "TRACKED_TASK_CARD",
+        "contract_hash": "a" * 64,
         "task_card_hash": "a" * 64,
         "tool_manifest_hash": "b" * 64,
         "full_tool_schema_hash": "c" * 64,
@@ -444,6 +446,8 @@ def test_integrate_revalidates_persisted_approval_definition_identity(tmp_path):
         "attempt_id": "attempt-1",
         "status": "APPROVED",
         "promotion_status": "APPROVED",
+        "contract_kind": "TRACKED_TASK_CARD",
+        "contract_hash": "a" * 64,
         "task_card_hash": "a" * 64,
         "promotion_packet": packet,
         "approved_binding": {**packet, "approval_grant": grant},
@@ -492,6 +496,37 @@ def test_owner_inline_contract_is_persisted_and_hash_tampering_fails_closed(tmp_
     tampered["owner_inline_contract"] = {**contract, "task_id": "inline-state-2", "objective": "changed"}
     with pytest.raises(RuntimeError, match="CONTRACT_HASH_MISMATCH"):
         service._submit_direct_canonical(tampered, "inline-state-2")
+
+
+def test_owner_inline_approved_integration_revalidates_generic_contract_binding(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    now = datetime.now(timezone.utc)
+    contract = build_owner_inline_contract(
+        task_id="inline-approval", objective="bounded owner inline candidate", allowed_files=["README.md"],
+        verifier_commands=["git diff --check"], expected_head="a" * 40, issued_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=5)).isoformat(),
+    )
+    packet = {"candidate_commit_sha": "c" * 40, "candidate_tree_sha": "d" * 40, "candidate_state_hash": "e" * 64, "verified_receipt_hash": "f" * 64}
+    grant = {
+        "schema": "nexus.approval.v2", "approval_id": "inline-approval-grant", "approved_by": "James",
+        "issued_at": now.isoformat(), "expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "bound_task_id": "inline-approval", "bound_attempt_id": "attempt-1", "bound_action_type": "CANDIDATE_APPROVE",
+        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "OWNER_INLINE", "contract_hash": contract["contract_hash"],
+        "task_card_hash": None, "tool_manifest_hash": "b" * 64, "full_tool_schema_hash": "c" * 64,
+        "permission_policy_hash": "d" * 64, "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+        "server_instance_id": "server-1", "consumed_at": now.isoformat(),
+    }
+    service._write_state("inline-approval", {
+        "task_id": "inline-approval", "attempt_id": "attempt-1", "status": "APPROVED", "promotion_status": "APPROVED",
+        "controller_revision": "a" * 40, "contract_kind": "OWNER_INLINE", "contract_hash": contract["contract_hash"],
+        "owner_inline_contract": {**contract, "objective": "tampered"}, "task_card_hash": None,
+        "promotion_packet": packet, "approved_binding": {**packet, "approval_grant": grant},
+    })
+    with pytest.raises(RuntimeError, match="CONTRACT_HASH_MISMATCH"):
+        service.integrate_approved("inline-approval", runtime_identity={
+            "tool_manifest_hash": "b" * 64, "full_tool_schema_hash": "c" * 64,
+            "permission_policy_hash": "d" * 64, "lifecycle_revision": "nexus.lifecycle.gateway.v2", "server_instance_id": "server-1",
+        })
 
 
 def test_approved_task_action_envelope_requires_integration_not_terminal(tmp_path):

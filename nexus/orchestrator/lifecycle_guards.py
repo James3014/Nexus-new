@@ -8,6 +8,7 @@ service's lifecycle authority.
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,7 +64,10 @@ def validate_approval_grant(
     task_id: str,
     attempt_id: str,
     action_type: str,
-    task_card_hash: str,
+    task_card_hash: Optional[str],
+    contract_kind: str = ContractKind.TRACKED_TASK_CARD.value,
+    contract_hash: Optional[str] = None,
+    owner_inline_contract: Optional[Mapping[str, Any]] = None,
     tool_manifest_hash: str,
     full_tool_schema_hash: str,
     permission_policy_hash: str,
@@ -80,7 +84,7 @@ def validate_approval_grant(
         )
     required = (
         "schema", "approval_id", "approved_by", "issued_at", "expires_at",
-        "bound_task_id", "bound_attempt_id", "bound_action_type", "task_card_hash",
+        "bound_task_id", "bound_attempt_id", "bound_action_type", "contract_kind", "contract_hash",
         "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash",
         "lifecycle_revision", "server_instance_id",
     )
@@ -101,7 +105,27 @@ def validate_approval_grant(
         or str(approval.get("bound_action_type")) != action_type
     ):
         raise LifecycleGuardError("APPROVAL_BINDING_MISMATCH", "approval is bound to a different task attempt or action")
+    if contract_kind not in {ContractKind.TRACKED_TASK_CARD.value, ContractKind.OWNER_INLINE.value}:
+        raise LifecycleGuardError("APPROVAL_CONTRACT_KIND_UNSUPPORTED", "approval contract kind is not lifecycle-authorized")
+    if contract_kind == ContractKind.TRACKED_TASK_CARD.value:
+        if not task_card_hash or not re.fullmatch(r"[0-9a-f]{64}", str(task_card_hash)):
+            raise LifecycleGuardError("CANDIDATE_TASK_CARD_HASH_REQUIRED", "tracked task card approval requires a SHA-256 card hash")
+        if contract_hash is None:
+            contract_hash = task_card_hash
+    else:
+        if task_card_hash is not None:
+            raise LifecycleGuardError("APPROVAL_BINDING_MISMATCH", "Owner Inline approval cannot carry task_card_hash")
+        if not contract_hash or not re.fullmatch(r"[0-9a-f]{64}", str(contract_hash)):
+            raise LifecycleGuardError("CONTRACT_HASH_MISMATCH", "Owner Inline approval requires a SHA-256 contract hash")
+        try:
+            validated = validate_owner_inline_contract(owner_inline_contract or {}, expected_task_id=task_id)
+        except ValueError as exc:
+            raise LifecycleGuardError(str(exc), "Owner Inline contract failed approval binding validation") from exc
+        if validated["contract_hash"] != contract_hash:
+            raise LifecycleGuardError("CONTRACT_HASH_MISMATCH", "Owner Inline contract hash does not match persisted identity")
     expected = {
+        "contract_kind": contract_kind,
+        "contract_hash": contract_hash,
         "task_card_hash": task_card_hash,
         "tool_manifest_hash": tool_manifest_hash,
         "full_tool_schema_hash": full_tool_schema_hash,
@@ -109,9 +133,17 @@ def validate_approval_grant(
         "lifecycle_revision": lifecycle_revision,
         "server_instance_id": server_instance_id,
     }
+    binding_mismatches = {
+        key: {"expected": value, "received": approval.get(key)}
+        for key, value in {"contract_kind": contract_kind, "contract_hash": contract_hash, "task_card_hash": task_card_hash}.items()
+        if str(approval.get(key)) != str(value)
+    }
+    if binding_mismatches:
+        raise LifecycleGuardError("APPROVAL_BINDING_MISMATCH", "approval contract binding does not match persisted task identity", details={"mismatches": binding_mismatches})
     mismatches = {
         key: {"expected": value, "received": approval.get(key)}
         for key, value in expected.items()
+        if key not in {"contract_kind", "contract_hash", "task_card_hash"}
         if str(approval.get(key)) != str(value)
     }
     if mismatches:
@@ -142,6 +174,9 @@ def validate_approval_grant(
         "bound_task_id": task_id,
         "bound_attempt_id": attempt_id,
         "bound_action_type": action_type,
+        "contract_kind": contract_kind,
+        "contract_hash": contract_hash,
+        "task_card_hash": task_card_hash,
         "approval_scope": "ALLOW_ACTION_ONCE",
         "consumed": bool(approval.get("consumed_at")),
         "consumed_at": approval.get("consumed_at"),

@@ -4150,6 +4150,7 @@ class SelfHostedTaskService:
                 same_request = (
                     str(existing_grant.get("approval_id")) == str(grant.get("approval_id"))
                     and all(existing.get(key) == value for key, value in expected.items())
+                    and all(existing_grant.get(key) == grant.get(key) for key in ("contract_kind", "contract_hash", "task_card_hash"))
                 )
                 if same_request:
                     duplicate = True
@@ -4334,8 +4335,25 @@ class SelfHostedTaskService:
             grant = approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None
             if not grant or not grant.get("consumed_at"):
                 raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: persisted approval grant is missing consume evidence")
+            contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
+            contract_hash = state.get("contract_hash")
+            task_card_hash = state.get("task_card_hash")
+            if contract_kind == ContractKind.OWNER_INLINE.value:
+                try:
+                    validated_inline = validate_owner_inline_contract(
+                        state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else {},
+                        expected_task_id=task_id,
+                        expected_head=str(state.get("controller_revision") or ""),
+                    )
+                except ValueError as exc:
+                    raise RuntimeError("CONTRACT_HASH_MISMATCH: persisted Owner Inline contract is invalid") from exc
+                if validated_inline.get("contract_hash") != contract_hash:
+                    raise RuntimeError("CONTRACT_HASH_MISMATCH: persisted Owner Inline contract hash drifted")
+                task_card_hash = None
             expected_identity = {
-                "task_card_hash": state.get("task_card_hash"),
+                "contract_kind": contract_kind,
+                "contract_hash": contract_hash,
+                "task_card_hash": task_card_hash,
                 "tool_manifest_hash": runtime_identity.get("tool_manifest_hash"),
                 "full_tool_schema_hash": runtime_identity.get("full_tool_schema_hash"),
                 "permission_policy_hash": runtime_identity.get("permission_policy_hash"),
@@ -4348,7 +4366,8 @@ class SelfHostedTaskService:
                 if str(grant.get(key)) != str(value)
             }
             if drift:
-                raise RuntimeError(f"APPROVAL_DEFINITION_DRIFT: {json.dumps(drift, sort_keys=True)}")
+                code = "APPROVAL_BINDING_MISMATCH" if set(drift) & {"contract_kind", "contract_hash", "task_card_hash"} else "APPROVAL_DEFINITION_DRIFT"
+                raise RuntimeError(f"{code}: {json.dumps(drift, sort_keys=True)}")
             packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
             binding_fields = ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")
             if any(approved.get(field) != packet.get(field) for field in binding_fields):
