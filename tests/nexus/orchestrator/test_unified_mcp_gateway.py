@@ -102,6 +102,58 @@ def test_manifest_status_and_recommended_tools_share_tools_list_truth():
     assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
 
 
+def test_owner_inline_clean_routes_direct_without_task_card(monkeypatch):
+    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: []))
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 102, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
+        "task_id": "owner-inline-clean", "what": "Fix one bounded README typo", "why": "Owner inline smoke", "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+    }}})
+    payload = response["result"]["structuredContent"]
+    assert payload["execution_lane"] == "DIRECT_CANONICAL"
+    assert payload["contract_kind"] == "OWNER_INLINE"
+    assert len(payload["contract_hash"]) == 64
+    assert payload["task_card_required"] is False
+
+
+def test_owner_inline_dirty_nonoverlap_uses_isolated_target_without_card(monkeypatch):
+    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: ["nexus/orchestrator/unified_mcp_gateway.py"]))
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 103, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
+        "task_id": "owner-inline-disjoint", "what": "Fix one bounded README typo", "why": "Dirty disjoint smoke", "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+    }}})
+    payload = response["result"]["structuredContent"]
+    assert payload["execution_lane"] == "ISOLATED_TARGET"
+    assert payload["contract_kind"] == "OWNER_INLINE"
+    assert payload["dirty_overlap"] is False
+    assert payload["target_created"] is False
+
+
+def test_dirty_path_overlap_fails_closed_before_target_creation(monkeypatch):
+    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: ["nexus/orchestrator/unified_mcp_gateway.py"]))
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 104, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
+        "task_id": "owner-inline-overlap", "what": "Fix one bounded gateway typo", "why": "Overlap smoke", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+    }}})
+    payload = response["result"]["structuredContent"]
+    assert payload["blocker"] == "DIRTY_PATH_OVERLAP_REQUIRES_RECONCILIATION"
+    assert payload["target_created"] is False
+    assert payload["overlapping_paths"] == ["nexus/orchestrator/unified_mcp_gateway.py"]
+
+
+def test_delegated_worker_without_task_card_still_requires_tracked_binding(monkeypatch):
+    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: []))
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 105, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
+        "task_id": "delegated-no-card", "what": "Fix one bounded README typo", "why": "Delegation smoke", "allowed_files": ["README.md"],
+        "preferred_worker": "agy",
+    }}})
+    assert response["result"]["isError"] is True
+    assert "TASK_CARD_BINDING_REQUIRED" in response["result"]["structuredContent"]["error"]
+
+
 def test_cline_parser_extracts_final_patch_from_json_event_array():
     events = json.dumps([
         {"type": "system", "content": "started"},

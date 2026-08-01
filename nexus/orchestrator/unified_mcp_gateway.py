@@ -20,16 +20,18 @@ import subprocess
 import threading
 import time
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.contracts.lifecycle_action import (
+    ContractKind,
     LifecycleActionType,
     MutationDomain,
     PermissionProfile,
+    build_owner_inline_contract,
     build_action_envelope,
 )
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
@@ -1045,6 +1047,9 @@ class UnifiedMCPGateway:
                         "preferred_model": {"type": "string", "default": ""},
                         "task_card_path": {"type": "string"},
                         "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "owner_confirmation": {"type": "boolean", "description": "Explicit Owner authorization for a bounded inline contract."},
+                        "owner_inline_expires_at": {"type": "string", "format": "date-time"},
+                        "worker_may_commit": {"type": "boolean", "default": False},
                         "idempotency_key": {"type": "string", "maxLength": 256},
                         "apply": {"type": "boolean", "default": False},
                     },
@@ -1599,6 +1604,100 @@ class UnifiedMCPGateway:
             "planner_decision_id": hashlib.sha256(json.dumps(planner_snapshot, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16],
         }
 
+    @staticmethod
+    def _dirty_paths() -> list[str]:
+        """Return normalized paths from the canonical porcelain snapshot."""
+        paths: list[str] = []
+        for line in _git("status", "--porcelain=v1").splitlines():
+            if len(line) < 4:
+                continue
+            raw = line[3:].strip()
+            if " -> " in raw:
+                raw = raw.rsplit(" -> ", 1)[-1]
+            if raw.startswith('"') and raw.endswith('"'):
+                raw = raw[1:-1]
+            if raw:
+                paths.append(raw)
+        return sorted(set(paths))
+
+    @staticmethod
+    def _dirty_overlap(dirty_paths: list[str], requested_paths: list[str]) -> list[str]:
+        overlap: list[str] = []
+        for dirty in dirty_paths:
+            for requested in requested_paths:
+                if dirty == requested or dirty.startswith(requested.rstrip("/") + "/") or requested.startswith(dirty.rstrip("/") + "/"):
+                    overlap.append(dirty)
+                    break
+        return sorted(set(overlap))
+
+    @staticmethod
+    def _owner_inline_contract(
+        *, task_id: str, what: str, allowed: list[str], verifiers: list[str], expected_head: str, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        issued_at = datetime.now(timezone.utc)
+        expires_raw = str(arguments.get("owner_inline_expires_at") or "").strip()
+        expires_at = expires_raw or (issued_at + timedelta(minutes=10)).isoformat()
+        return build_owner_inline_contract(
+            task_id=task_id,
+            objective=what,
+            allowed_files=allowed,
+            verifier_commands=verifiers,
+            expected_head=expected_head,
+            issued_at=issued_at.isoformat(),
+            expires_at=expires_at,
+            permission_profile=PermissionProfile.MUTATE_BOUNDED,
+            worker_may_commit=bool(arguments.get("worker_may_commit", False)),
+        )
+
+    def _resolve_contract_binding(
+        self, *, task_id: str, what: str, allowed: list[str], verifiers: list[str], base: str, arguments: Mapping[str, Any], worker: str
+    ) -> dict[str, Any]:
+        card_path = str(arguments.get("task_card_path") or "").strip() or None
+        card_hash = str(arguments.get("task_card_hash") or "").strip() or None
+        owner_confirmation = arguments.get("owner_confirmation") is True
+        delegated = worker not in {"", "auto", "primary", "codex"}
+        high_risk = any(bool(arguments.get(flag)) for flag in (
+            "migration_authority", "schema_authority", "route_authority_mutation",
+            "security_policy_weakening", "public_claim_allowed", "production_ready",
+        ))
+        top_level = {path.split("/", 1)[0] for path in allowed}
+        cross_module = len(allowed) > 1 and (len(top_level) > 1 or any(path.startswith("nexus/") for path in allowed))
+        if card_path or card_hash:
+            if not card_path or not card_hash:
+                raise GatewayInputError("TASK_CARD_BINDING_REQUIRED")
+            kind = ContractKind.TRACKED_TASK_CARD
+            if owner_confirmation:
+                raise GatewayInputError("CONTRACT_BINDING_AMBIGUOUS")
+        elif owner_confirmation:
+            if delegated or high_risk or cross_module:
+                raise GatewayInputError("TRACKED_TASK_CARD_REQUIRED")
+            try:
+                inline = self._owner_inline_contract(
+                    task_id=task_id, what=what, allowed=allowed, verifiers=verifiers, expected_head=base, arguments=arguments,
+                )
+            except ValueError as exc:
+                raise GatewayInputError(str(exc)) from exc
+            return {
+                "contract_kind": ContractKind.OWNER_INLINE.value,
+                "contract_hash": inline["contract_hash"],
+                "owner_inline_contract": inline,
+                "task_card_path": None,
+                "task_card_hash": None,
+                "task_card_required": False,
+            }
+        else:
+            kind = ContractKind.NONE
+        if (delegated or high_risk or cross_module) and kind != ContractKind.TRACKED_TASK_CARD:
+            raise GatewayInputError("TASK_CARD_BINDING_REQUIRED")
+        return {
+            "contract_kind": kind.value,
+            "contract_hash": None,
+            "owner_inline_contract": None,
+            "task_card_path": card_path,
+            "task_card_hash": card_hash,
+            "task_card_required": kind == ContractKind.TRACKED_TASK_CARD,
+        }
+
     def _task_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         dispatch_started = time.perf_counter()
         what = _text(arguments.get("what"), "what")
@@ -1629,18 +1728,76 @@ class UnifiedMCPGateway:
         route_decision_ms = max(0, int((time.perf_counter() - route_started) * 1000))
         base = _git("rev-parse", "HEAD").strip()
         apply_requested = bool(arguments.get("apply", False))
+        verifiers = list(arguments.get("verifier_commands") or ["git diff --check"])
+        binding = self._resolve_contract_binding(
+            task_id=task_id, what=what, allowed=allowed, verifiers=verifiers, base=base, arguments=arguments, worker=worker,
+        )
+        dirty_paths = self._dirty_paths()
+        overlapping_paths = self._dirty_overlap(dirty_paths, allowed)
+        route["dirty_paths"] = dirty_paths
+        route["requested_allowed_files"] = allowed
+        route["dirty_overlap"] = bool(overlapping_paths)
+        route["overlapping_paths"] = overlapping_paths
+        if dirty_paths and not overlapping_paths and route["execution_lane"] == "DIRECT_CANONICAL" and binding["contract_kind"] == ContractKind.OWNER_INLINE.value:
+            route["execution_lane"] = "ISOLATED_TARGET"
+            route["route_reason"] = "dirty_non_overlapping_owner_inline"
+        if dirty_paths and not overlapping_paths and route["execution_lane"] == "DIRECT_CANONICAL" and binding["contract_kind"] == ContractKind.NONE.value:
+            return {
+                "schema": "nexus.task_dispatch.v1",
+                "task_id": task_id,
+                "controller_revision": base,
+                "execution_lane": "DIRECT_CANONICAL",
+                "contract_kind": ContractKind.NONE.value,
+                "contract_hash": None,
+                "task_card_required": True,
+                "dirty_paths": dirty_paths,
+                "requested_allowed_files": allowed,
+                "dirty_overlap": False,
+                "overlapping_paths": [],
+                "target_created": False,
+                "status": "FINAL_BLOCK",
+                "blocker": "CONTRACT_BINDING_REQUIRED",
+                "next_action": "provide_owner_inline_contract_or_task_card",
+                "route": route,
+            }
+        if overlapping_paths and route["execution_lane"] != "ASSISTED_CANONICAL":
+            return {
+                "schema": "nexus.task_dispatch.v1",
+                "task_id": task_id,
+                "what": what,
+                "why": why,
+                "controller_revision": base,
+                "execution_lane": route["execution_lane"],
+                "route_authority": "CapabilityPlanner",
+                "contract_kind": binding["contract_kind"],
+                "contract_hash": binding["contract_hash"],
+                "task_card_required": binding["task_card_required"],
+                "dirty_paths": dirty_paths,
+                "requested_allowed_files": allowed,
+                "dirty_overlap": True,
+                "overlapping_paths": overlapping_paths,
+                "target_created": False,
+                "status": "FINAL_BLOCK",
+                "blocker": "DIRTY_PATH_OVERLAP_REQUIRES_RECONCILIATION",
+                "next_action": "reconcile_overlapping_work",
+                "recommended_tool": "nexus_workspace_snapshot",
+                "route": route,
+            }
         assisted_candidate_only = route["execution_lane"] == "ASSISTED_CANONICAL" and not apply_requested
         action_request = {
             "task_id": task_id,
             "what": what,
             "why": why,
             "allowed_files": allowed,
-            "verifier_commands": list(arguments.get("verifier_commands") or ["git diff --check"]),
+            "verifier_commands": verifiers,
             "execution_preference": preference,
             "preferred_worker": worker,
             "preferred_model": requested_model,
-            "task_card_path": arguments.get("task_card_path"),
-            "task_card_hash": arguments.get("task_card_hash"),
+            "task_card_path": binding["task_card_path"],
+            "task_card_hash": binding["task_card_hash"],
+            "contract_kind": binding["contract_kind"],
+            "contract_hash": binding["contract_hash"],
+            "owner_inline_contract": binding["owner_inline_contract"],
             "apply": apply_requested,
         }
         action = build_action_envelope(
@@ -1651,8 +1808,10 @@ class UnifiedMCPGateway:
             expected_head=base,
             allowed_paths=allowed,
             mutation=not assisted_candidate_only,
-            task_card_path=arguments.get("task_card_path"),
-            task_card_hash=arguments.get("task_card_hash"),
+            task_card_path=binding["task_card_path"],
+            task_card_hash=binding["task_card_hash"],
+            contract_kind=ContractKind(binding["contract_kind"]),
+            contract_hash=binding["contract_hash"],
             idempotency_key=arguments.get("idempotency_key"),
             permission_profile=PermissionProfile.VERIFY if assisted_candidate_only else PermissionProfile.MUTATE_BOUNDED,
             mutation_domain=MutationDomain.NONE if assisted_candidate_only else MutationDomain.REPOSITORY,
@@ -1671,6 +1830,12 @@ class UnifiedMCPGateway:
             "why": why,
             "controller_revision": base,
             "allowed_files": allowed,
+            "contract_kind": binding["contract_kind"],
+            "contract_hash": binding["contract_hash"],
+            "task_card_required": binding["task_card_required"],
+            "dirty_paths": dirty_paths,
+            "dirty_overlap": bool(overlapping_paths),
+            "overlapping_paths": overlapping_paths,
             "action": action.model_dump(mode="json"),
             "guard_receipt": guard_receipt,
             **route,
@@ -1715,9 +1880,10 @@ class UnifiedMCPGateway:
                 what,
                 why,
                 allowed,
-                list(arguments.get("verifier_commands") or ["git diff --check"]),
+                verifiers,
                 base,
                 action=action.model_dump(mode="json"),
+                contract_binding=binding,
             )
             # Legacy synchronous non-Cline adapters still use the existing
             # service handoff; the Cline path above is the durable Assisted
@@ -1775,18 +1941,26 @@ class UnifiedMCPGateway:
             applied_telemetry = dict(applied.get("telemetry") or {}) if isinstance(applied, Mapping) else {}
             applied_telemetry.update(telemetry(context_build_ms=context_build_ms, provider_start_ms=provider_start_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms, verifier_time_ms=int(applied_telemetry.get("verifier_time_ms", 0) or 0), commit_time_ms=int(applied_telemetry.get("commit_time_ms", 0) or 0), worktree_time_ms=int(applied_telemetry.get("worktree_time_ms", 0) or 0), cleanup_time_ms=int(applied_telemetry.get("cleanup_time_ms", 0) or 0)))
             return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "telemetry": applied_telemetry, "changed_files": changed, "receipt": applied, "handoff": handoff, "next_action": "none"}
-        request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base, action=action.model_dump(mode="json"))
+        request = self._canonical_request(task_id, what, why, allowed, verifiers, base, action=action.model_dump(mode="json"), contract_binding=binding)
         request.update({"execution_lane": route["execution_lane"]})
         if route["execution_lane"] == "DIRECT_CANONICAL":
             request.update({"primary_agent": True, "worker": "primary"})
             return {**envelope, "status": "DIRECT_CANONICAL_READY", "telemetry": telemetry(), "next_action": "edit_canonical_checkout", "completion_surface": "nexus_task_finish", "base_sha": base, "mutation_lease": {"type": "canonical_mutation_lock", "path": "/tmp/nexus-mcp-gateway-canonical.lock", "required_for_apply": True}, "handoff": self.service.submit_task(request)}
-        if not arguments.get("task_card_path") or not arguments.get("task_card_hash"):
+        if binding["contract_kind"] == ContractKind.NONE.value:
             return {**envelope, "status": "FINAL_BLOCK", "blocker": "TASK_CARD_BINDING_REQUIRED", "telemetry": telemetry(), "next_action": "provide_task_card_path_and_hash"}
-        request.update({"worker": worker if worker != "auto" else "codex", "task_card_path": arguments["task_card_path"], "task_card_hash": arguments["task_card_hash"]})
-        return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "telemetry": telemetry(), "next_action": "wait_for_task", "handoff": self.service.submit_task(request)}
+        request.update({
+            "worker": worker if worker != "auto" else "codex",
+            "contract_kind": binding["contract_kind"],
+            "contract_hash": binding["contract_hash"],
+            "owner_inline_contract": binding["owner_inline_contract"],
+            "task_card_path": binding["task_card_path"],
+            "task_card_hash": binding["task_card_hash"],
+        })
+        handoff = self.service.submit_task(request)
+        return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "telemetry": telemetry(), "next_action": "wait_for_task", "target_created": bool(handoff.get("target_created", False)) if isinstance(handoff, Mapping) else None, "handoff": handoff}
 
     @staticmethod
-    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None, contract_binding: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
         request = {
             "task_id": task_id, "what": what, "why": why,
             "controller_revision": base, "target_base_revision": base,
@@ -1795,6 +1969,14 @@ class UnifiedMCPGateway:
             "target_worktree_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
             "allowed_files": allowed, "verifier_commands": verifiers,
         }
+        if contract_binding:
+            request.update({
+                "contract_kind": contract_binding.get("contract_kind"),
+                "contract_hash": contract_binding.get("contract_hash"),
+                "owner_inline_contract": contract_binding.get("owner_inline_contract"),
+                "task_card_path": contract_binding.get("task_card_path"),
+                "task_card_hash": contract_binding.get("task_card_hash"),
+            })
         if action:
             request["action"] = dict(action)
             request["action_id"] = action.get("action_id")

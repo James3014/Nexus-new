@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +18,7 @@ import pytest
 
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
+from nexus.contracts.lifecycle_action import build_owner_inline_contract
 from nexus.orchestrator.self_hosted_task_service import (
     SelfHostedTaskService,
     resolve_canonical_target_roots,
@@ -376,6 +378,38 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["promotion_status"] == "APPROVED"
     assert approved["merge_performed"] is False
     assert approved["push_performed"] is False
+
+
+def test_owner_inline_contract_is_persisted_and_hash_tampering_fails_closed(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    now = datetime.now(timezone.utc)
+    contract = build_owner_inline_contract(
+        task_id="inline-state",
+        objective="bounded repair",
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        expected_head="a" * 40,
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(minutes=5)).isoformat(),
+    )
+    request = {
+        "task_id": "inline-state", "what": "bounded repair", "why": "inline state",
+        "controller_revision": "a" * 40, "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "controller_repo_root": str(tmp_path),
+        "target_repo_root": str(tmp_path / "target"), "target_worktree_root": str(tmp_path),
+        "execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary",
+        "contract_kind": "OWNER_INLINE", "contract_hash": contract["contract_hash"],
+        "owner_inline_contract": contract,
+    }
+    result = service._submit_direct_canonical(request, "inline-state")
+    assert result["state_created"] is True
+    state = service._read_state("inline-state")
+    assert state["contract_kind"] == "OWNER_INLINE"
+    assert state["contract_hash"] == contract["contract_hash"]
+    tampered = {**request, "task_id": "inline-state-2"}
+    tampered["owner_inline_contract"] = {**contract, "task_id": "inline-state-2", "objective": "changed"}
+    with pytest.raises(RuntimeError, match="CONTRACT_HASH_MISMATCH"):
+        service._submit_direct_canonical(tampered, "inline-state-2")
 
 
 def test_approved_task_action_envelope_requires_integration_not_terminal(tmp_path):

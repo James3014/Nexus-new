@@ -44,6 +44,7 @@ from nexus.orchestrator.task_contract import (
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
+from nexus.contracts.lifecycle_action import ContractKind, validate_owner_inline_contract
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
@@ -134,6 +135,18 @@ def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping
         and request.get("allow_unbound_test_identity") is not False
     )
 
+    if str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
+        inline = request.get("owner_inline_contract")
+        try:
+            validate_owner_inline_contract(
+                inline if isinstance(inline, Mapping) else {},
+                expected_task_id=contract.task_id,
+                expected_head=str(contract.controller_revision or ""),
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return
+
     task_id = contract.task_id
     card_path_str = request.get("task_card_path")
     card_path = None
@@ -180,6 +193,28 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
         if current_rev != req_rev and not current_rev.startswith(req_rev):
             raise RuntimeError(f"LIFECYCLE_REVISION_MISMATCH: current revision {current_rev} does not match required {req_rev}")
 
+    if str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
+        inline = request.get("owner_inline_contract")
+        try:
+            validated = validate_owner_inline_contract(
+                inline if isinstance(inline, Mapping) else {},
+                expected_task_id=contract.task_id,
+                expected_head=str(contract.controller_revision or ""),
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return {
+            "lifecycle_revision": current_rev,
+            "lifecycle_executable_path": str(Path(sys.executable).resolve()),
+            "worker_module_path": str(Path(__file__).resolve()),
+            "controller_revision": contract.controller_revision,
+            "contract_kind": ContractKind.OWNER_INLINE.value,
+            "contract_hash": validated["contract_hash"],
+            "owner_inline_contract": validated,
+            "task_card_path": None,
+            "task_card_hash": None,
+        }
+
     card_path_str = request.get("task_card_path")
     card_path = None
     if card_path_str:
@@ -209,6 +244,8 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
         "lifecycle_executable_path": str(Path(sys.executable).resolve()),
         "worker_module_path": str(Path(__file__).resolve()),
         "controller_revision": contract.controller_revision,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value if card_hash else ContractKind.NONE.value,
+        "contract_hash": None,
         "task_card_path": card_path_res,
         "task_card_hash": card_hash,
     }
@@ -2316,6 +2353,16 @@ class SelfHostedTaskService:
 
     def _submit_direct_canonical(self, request: Mapping[str, Any], task_id: str) -> dict[str, Any]:
         """Record a Target-free canonical mutation intent exactly once."""
+        inline_contract = None
+        if str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
+            try:
+                inline_contract = validate_owner_inline_contract(
+                    request.get("owner_inline_contract") if isinstance(request.get("owner_inline_contract"), Mapping) else {},
+                    expected_task_id=task_id,
+                    expected_head=str(request.get("controller_revision") or ""),
+                )
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
         action_id = str(request.get("action_id") or action.get("action_id") or f"action-{uuid4().hex}")
         attempt_id = str(request.get("attempt_id") or action.get("attempt_id") or f"attempt-{uuid4().hex}")
@@ -2407,6 +2454,9 @@ class SelfHostedTaskService:
             "request_hash": request_hash,
             "controller_worktree": str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT),
             "controller_revision": base,
+            "contract_kind": str(request.get("contract_kind") or ContractKind.NONE.value),
+            "contract_hash": str(request.get("contract_hash") or "") or None,
+            "owner_inline_contract": _jsonable(inline_contract),
             "execution_lane": "DIRECT_CANONICAL",
             "target_worktree": None,
             "target_created_at": None,
@@ -2760,6 +2810,9 @@ class SelfHostedTaskService:
             "lifecycle_executable_path": identity["lifecycle_executable_path"],
             "worker_module_path": identity["worker_module_path"],
             "controller_revision": identity["controller_revision"],
+            "contract_kind": identity.get("contract_kind", ContractKind.NONE.value),
+            "contract_hash": identity.get("contract_hash"),
+            "owner_inline_contract": identity.get("owner_inline_contract"),
             "task_card_path": identity["task_card_path"],
             "task_card_hash": identity["task_card_hash"],
             "status_history": [{"status": "SUBMITTED", "at": now}],

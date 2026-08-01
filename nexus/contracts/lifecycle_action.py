@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -54,10 +55,108 @@ class MutationDomain(str, Enum):
     INTEGRATION = "INTEGRATION"
 
 
+class ContractKind(str, Enum):
+    """Authorization source, independent from the execution lane."""
+
+    NONE = "NONE"
+    TRACKED_TASK_CARD = "TRACKED_TASK_CARD"
+    OWNER_INLINE = "OWNER_INLINE"
+
+
 def canonical_request_hash(payload: Mapping[str, Any]) -> str:
     """Hash the request without relying on caller key order or formatting."""
     encoded = json.dumps(dict(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return sha256(encoded).hexdigest()
+
+
+def owner_inline_contract_hash(contract: Mapping[str, Any]) -> str:
+    """Hash an inline contract without trusting a caller-supplied hash."""
+    payload = dict(contract)
+    payload.pop("contract_hash", None)
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def build_owner_inline_contract(
+    *,
+    task_id: str,
+    objective: str,
+    allowed_files: list[str] | tuple[str, ...],
+    verifier_commands: list[str] | tuple[str, ...],
+    expected_head: str,
+    issued_at: str,
+    expires_at: str,
+    permission_profile: PermissionProfile = PermissionProfile.MUTATE_BOUNDED,
+    worker_may_commit: bool = False,
+) -> dict[str, Any]:
+    """Create the immutable bounded Owner-inline authorization contract."""
+    paths = [str(path) for path in allowed_files if str(path).strip()]
+    if not 1 <= len(paths) <= 4:
+        raise ValueError("OWNER_INLINE_ALLOWED_FILES_LIMIT")
+    for path in paths:
+        _repo_path(path, "allowed_files")
+    verifiers = [str(command).strip() for command in verifier_commands if str(command).strip()]
+    if not verifiers:
+        raise ValueError("OWNER_INLINE_VERIFIERS_REQUIRED")
+    if not _SHA40.fullmatch(expected_head):
+        raise ValueError("OWNER_INLINE_EXPECTED_HEAD_INVALID")
+    contract: dict[str, Any] = {
+        "schema": "nexus.owner_inline_contract.v1",
+        "contract_kind": ContractKind.OWNER_INLINE.value,
+        "task_id": _safe_id(task_id, "task_id"),
+        "owner_confirmation": True,
+        "objective": str(objective).strip(),
+        "allowed_files": paths,
+        "verifier_commands": verifiers,
+        "expected_head": expected_head,
+        "issued_at": str(issued_at),
+        "expires_at": str(expires_at),
+        "permission_profile": permission_profile.value,
+        "worker_may_commit": bool(worker_may_commit),
+        "worker_may_approve": False,
+        "worker_may_integrate": False,
+        "worker_may_push": False,
+        "authorized_deletions": False,
+    }
+    contract["contract_hash"] = owner_inline_contract_hash(contract)
+    return contract
+
+
+def validate_owner_inline_contract(contract: Mapping[str, Any], *, expected_task_id: Optional[str] = None, expected_head: Optional[str] = None) -> dict[str, Any]:
+    """Fail closed on tampering or authority widening in an inline contract."""
+    value = dict(contract)
+    if value.get("schema") != "nexus.owner_inline_contract.v1" or value.get("contract_kind") != ContractKind.OWNER_INLINE.value:
+        raise ValueError("OWNER_INLINE_SCHEMA_INVALID")
+    if value.get("owner_confirmation") is not True:
+        raise ValueError("OWNER_INLINE_CONFIRMATION_REQUIRED")
+    if expected_task_id is not None and value.get("task_id") != expected_task_id:
+        raise ValueError("OWNER_INLINE_TASK_ID_MISMATCH")
+    if expected_head is not None and value.get("expected_head") != expected_head:
+        raise ValueError("OWNER_INLINE_HEAD_MISMATCH")
+    try:
+        issued = datetime.fromisoformat(str(value.get("issued_at")).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(value.get("expires_at")).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("OWNER_INLINE_EXPIRY_INVALID") from exc
+    if expires <= issued or expires <= datetime.now(timezone.utc):
+        raise ValueError("OWNER_INLINE_CONTRACT_EXPIRED")
+    if not isinstance(value.get("allowed_files"), list) or not 1 <= len(value["allowed_files"]) <= 4:
+        raise ValueError("OWNER_INLINE_ALLOWED_FILES_LIMIT")
+    for path in value["allowed_files"]:
+        _repo_path(path, "allowed_files")
+    if not isinstance(value.get("verifier_commands"), list) or not value["verifier_commands"]:
+        raise ValueError("OWNER_INLINE_VERIFIERS_REQUIRED")
+    forbidden = {
+        "worker_may_approve": False,
+        "worker_may_integrate": False,
+        "worker_may_push": False,
+        "authorized_deletions": False,
+    }
+    if any(value.get(key) is not expected for key, expected in forbidden.items()):
+        raise ValueError("OWNER_INLINE_AUTHORITY_WIDENING")
+    supplied = str(value.get("contract_hash") or "")
+    if not _SHA64.fullmatch(supplied) or supplied != owner_inline_contract_hash(value):
+        raise ValueError("CONTRACT_HASH_MISMATCH")
+    return value
 
 
 def _safe_id(value: str, field: str) -> str:
@@ -88,6 +187,8 @@ class LifecycleActionEnvelope(BaseModel):
     action_type: LifecycleActionType
     task_card_path: Optional[str] = None
     task_card_hash: Optional[str] = None
+    contract_kind: ContractKind = ContractKind.NONE
+    contract_hash: Optional[str] = None
     expected_head: Optional[str] = None
     allowed_paths: tuple[str, ...] = ()
     permission_profile: PermissionProfile = PermissionProfile.OBSERVE
@@ -114,10 +215,10 @@ class LifecycleActionEnvelope(BaseModel):
     def validate_card_path(cls, value: Optional[str]) -> Optional[str]:
         return _repo_path(value, "task_card_path") if value else value
 
-    @field_validator("task_card_hash", "tool_manifest_hash", "request_hash")
+    @field_validator("task_card_hash", "contract_hash", "tool_manifest_hash", "request_hash")
     @classmethod
     def validate_sha256(cls, value: Optional[str], info) -> Optional[str]:
-        if value is None and info.field_name == "task_card_hash":
+        if value is None and info.field_name in {"task_card_hash", "contract_hash"}:
             return value
         if not _SHA64.fullmatch(value):
             raise ValueError(f"{info.field_name} must be a lowercase SHA-256 digest")
@@ -150,6 +251,10 @@ class LifecycleActionEnvelope(BaseModel):
             raise ValueError("non-mutation actions must use mutation_domain=NONE")
         if bool(self.task_card_path) != bool(self.task_card_hash):
             raise ValueError("task_card_path and task_card_hash must be supplied together")
+        if self.contract_kind == ContractKind.OWNER_INLINE and self.contract_hash is None:
+            raise ValueError("OWNER_INLINE actions require contract_hash")
+        if self.contract_kind == ContractKind.TRACKED_TASK_CARD and not self.task_card_hash:
+            raise ValueError("TRACKED_TASK_CARD actions require task_card_hash")
         return self
 
     def verify_request(self, payload: Mapping[str, Any]) -> bool:
@@ -167,6 +272,8 @@ def build_action_envelope(
     mutation: bool,
     task_card_path: Optional[str] = None,
     task_card_hash: Optional[str] = None,
+    contract_kind: ContractKind = ContractKind.NONE,
+    contract_hash: Optional[str] = None,
     attempt_id: Optional[str] = None,
     action_id: Optional[str] = None,
     idempotency_key: Optional[str] = None,
@@ -183,6 +290,8 @@ def build_action_envelope(
         action_type=action_type,
         task_card_path=task_card_path,
         task_card_hash=task_card_hash,
+        contract_kind=contract_kind,
+        contract_hash=contract_hash,
         expected_head=expected_head,
         allowed_paths=tuple(allowed_paths),
         permission_profile=permission_profile,

@@ -14,9 +14,11 @@ from typing import Any, Mapping, Optional
 
 from nexus.contracts.lifecycle_action import (
     ApprovalScope,
+    ContractKind,
     LifecycleActionEnvelope,
     MutationDomain,
     PermissionProfile,
+    validate_owner_inline_contract,
 )
 
 CANONICAL_SOURCE_ROOT = Path("/Users/jameschen/Workspace/nexus")
@@ -143,6 +145,22 @@ def pre_action_guard(
                 details={"path": action.task_card_path, "expected": action.task_card_hash, "observed": observed_card_hash},
             )
 
+    if action.contract_kind == ContractKind.OWNER_INLINE:
+        inline = request.get("owner_inline_contract") if isinstance(request, Mapping) else None
+        try:
+            validated = validate_owner_inline_contract(
+                inline if isinstance(inline, Mapping) else {},
+                expected_task_id=action.task_id,
+                expected_head=action.expected_head,
+            )
+        except ValueError as exc:
+            raise LifecycleGuardError(str(exc), "Owner inline contract failed immutable binding validation") from exc
+        if validated["contract_hash"] != action.contract_hash:
+            raise LifecycleGuardError(
+                "CONTRACT_HASH_MISMATCH", "Owner inline contract hash does not match action envelope",
+                details={"expected": action.contract_hash, "observed": validated["contract_hash"]},
+            )
+
     return {
         "schema": "nexus.lifecycle_guard_receipt.v1",
         "guard_stage": "pre_action",
@@ -158,6 +176,8 @@ def pre_action_guard(
         "permission_profile": action.permission_profile.value,
         "approval_scope": action.approval_scope.value,
         "mutation_domain": action.mutation_domain.value,
+        "contract_kind": action.contract_kind.value,
+        "contract_hash": action.contract_hash,
         "repository_paths_applicable": repository_paths_applicable,
         "idempotency_authority": "self_hosted_task_service",
         "approval_expiry_enforced": False,
