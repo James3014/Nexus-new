@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: active
+status: completed
 campaign_id: lifecycle-two-lane-canonical-closure
 source_specification: owner-authorized lifecycle diagnosis and two-lane canonical closure plan from 2026-08-01
 AUTO_CHAIN: false
@@ -31,7 +31,7 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 
 ## Current Frontier
 
-`lifecycle-two-lane-p6-cutover-gate`
+none (completed)
 
 ## Completed Cards
 
@@ -44,7 +44,9 @@ Ordinary read, diagnosis, and bounded primary-agent edits use the canonical chec
 
 ## Current Gate
 
-`lifecycle-two-lane-p6-cutover-gate` is the only current frontier. `AUTO_CHAIN=false`; owner review remains required for any promotion, integration, push, branch/ref cleanup, or external workspace cleanup.
+The P6 cutover gate is complete. `AUTO_CHAIN=false`; owner review remains required for any future promotion, integration, push, branch/ref cleanup, or external workspace cleanup.
+
+P6 gate evidence: 30-task matrix passed; combined lifecycle regression passed `213/213`; canonical checkout is clean with one registered worktree.
 
 ## Dependencies
 
