@@ -1401,6 +1401,60 @@ def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monk
     assert result["owner_finish"]["archive"]["dry_run"] is False
 
 
+def test_owner_finish_ten_candidate_matrix_archives_each_terminal(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    calls = []
+    original_approve = service.approve_promotion
+
+    def approve(task_id, **kwargs):
+        calls.append(("approve", task_id))
+        return original_approve(task_id, **kwargs)
+
+    def integrate(task_id, *, integration_branch):
+        calls.append(("integrate", task_id, integration_branch))
+        state = service._read_state(task_id)
+        return service._checkpoint(task_id, "INTEGRATED", {
+            "promotion_status": "INTEGRATED",
+            "terminal_status": "INTEGRATED",
+            "state_retention_status": "TERMINAL",
+            "archive_eligible": True,
+            "merge_performed": True,
+            "integration_branch": integration_branch,
+            "integration_result_sha": "f" * 40,
+        }, attempt_id=state.get("attempt_id"))
+
+    monkeypatch.setattr(service, "approve_promotion", approve)
+    monkeypatch.setattr(service, "integrate_approved", integrate)
+
+    for index in range(10):
+        task_id = f"owner-finish-matrix-{index}"
+        binding = {
+            "candidate_commit_sha": f"{index + 1:040x}",
+            "candidate_tree_sha": f"{index + 101:040x}",
+            "candidate_state_hash": f"{index + 201:064x}",
+            "verified_receipt_hash": f"{index + 301:064x}",
+        }
+        service._write_state(task_id, {
+            "task_id": task_id,
+            "status": "CANDIDATE_CAPTURED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": binding,
+            "request": {},
+            "attempt_id": f"attempt-{index}",
+            "attempts": [{"attempt_id": f"attempt-{index}"}],
+        })
+
+        result = service.owner_finish(task_id, **binding)
+
+        assert result["status"] == "INTEGRATED"
+        assert not service._state_path(task_id).exists()
+        assert service._archive_state_path(task_id).is_file()
+
+    assert len(calls) == 20
+    assert [item[0] for item in calls].count("approve") == 10
+    assert [item[0] for item in calls].count("integrate") == 10
+
+
 def test_owner_finish_does_not_integrate_invalid_binding(tmp_path, monkeypatch):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     integrated = False

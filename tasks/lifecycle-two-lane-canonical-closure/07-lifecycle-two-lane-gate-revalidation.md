@@ -73,6 +73,7 @@ git worktree list --porcelain
 - Original P4 gate: 20 bounded fault/retry cases passed with stable task IDs and exactly one recommended tool/next action per case.
 - Default route regression: `test_ordinary_primary_request_defaults_to_direct_canonical` passed; an ordinary primary request returned a Direct handoff with no state or Target.
 - Read SLO regression: `test_original_gate_read_p95_stays_below_300ms_without_side_effects` passed across 20 in-process read samples with no state-root creation.
+- Owner-finish matrix: `test_owner_finish_ten_candidate_matrix_archives_each_terminal` passed; each of 10 exact bindings completed through one approve → integrate → archive operation.
 - Focused action regression: Direct, owner-finish, retry, fault routing, and cleaned-verified retry tests passed; MCP/CLI suite passed `40 passed`; py_compile passed for all lifecycle surfaces.
 - Commits: `48dbab1fa` (physical matrix), `957bc41f0` (cleaned verified block action routing), `bf57dcb54` (20 fault gate), `816aa5874` (Direct-by-default), `5d98bffeb` (CLI/MCP lane exposure), and `c41bcb00f` (read p95 gate).
 - Live inventory: canonical checkout is clean on `nexus/integration/main`; one registered worktree (the canonical checkout); no active Target; disabled `nexus-worktrees` paths absent; empty runtime Target root removed.
