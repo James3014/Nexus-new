@@ -341,6 +341,7 @@ class UnifiedMCPGateway:
         }
 
     def _task_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        dispatch_started = time.perf_counter()
         what = _text(arguments.get("what"), "what")
         why = _text(arguments.get("why"), "why")
         allowed = [str(path).strip() for path in (arguments.get("allowed_files") or []) if str(path).strip()]
@@ -355,7 +356,9 @@ class UnifiedMCPGateway:
             raise GatewayInputError("execution_preference is unsupported")
         worker = str(arguments.get("preferred_worker", "auto")).strip().lower() or "auto"
         task_id = self._task_id(arguments, what, why, allowed)
+        route_started = time.perf_counter()
         route = self._plan_route(what=what, allowed=allowed, preference=preference, worker=worker)
+        route_decision_ms = max(0, int((time.perf_counter() - route_started) * 1000))
         base = _git("rev-parse", "HEAD").strip()
         envelope = {
             "schema": "nexus.task_dispatch.v1",
@@ -366,37 +369,58 @@ class UnifiedMCPGateway:
             "allowed_files": allowed,
             **route,
         }
+        def telemetry(**values: int) -> dict[str, int]:
+            defaults = {
+                "route_decision_ms": route_decision_ms,
+                "context_build_ms": 0,
+                "provider_time_ms": 0,
+                "patch_validation_ms": 0,
+                "commit_time_ms": 0,
+                "worktree_time_ms": 0,
+                "cleanup_time_ms": 0,
+                "total_wall_time_ms": max(0, int((time.perf_counter() - dispatch_started) * 1000)),
+            }
+            defaults.update(values)
+            defaults["total_wall_time_ms"] = max(0, int((time.perf_counter() - dispatch_started) * 1000))
+            return defaults
         if route["execution_lane"] == "ASSISTED_CANONICAL":
+            context_started = time.perf_counter()
             prompt = self._assist_prompt(what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]))
+            context_build_ms = max(0, int((time.perf_counter() - context_started) * 1000))
             started = time.perf_counter()
             try:
                 proposal = self._model_runner(prompt=prompt, allowed_files=allowed, provider=str(arguments.get("preferred_worker") or "agy"))
             except Exception as exc:
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PROVIDER_FAILED", "error": str(exc), "next_action": "inspect_provider_or_retry_same_task"}
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PROVIDER_FAILED", "error": str(exc), "telemetry": telemetry(context_build_ms=context_build_ms), "next_action": "inspect_provider_or_retry_same_task"}
             provider_time_ms = max(0, int((time.perf_counter() - started) * 1000))
             if not proposal.get("patch"):
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": str(proposal.get("blocker") or "EMPTY_ASSIST_PATCH"), "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "next_action": "inspect_provider_or_retry_same_task"}
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": str(proposal.get("blocker") or "EMPTY_ASSIST_PATCH"), "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_time_ms=provider_time_ms), "next_action": "inspect_provider_or_retry_same_task"}
+            patch_validation_started = time.perf_counter()
             try:
                 changed = self._validate_assisted_patch(str(proposal["patch"]), allowed)
             except Exception as exc:
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PATCH_REJECTED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "next_action": "inspect_provider_or_retry_same_task"}
+                patch_validation_ms = max(0, int((time.perf_counter() - patch_validation_started) * 1000))
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PATCH_REJECTED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
+            patch_validation_ms = max(0, int((time.perf_counter() - patch_validation_started) * 1000))
             if not bool(arguments.get("apply", True)):
-                return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "patch": str(proposal["patch"]), "changed_files": changed, "next_action": "apply_assisted_candidate"}
+                return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "patch": str(proposal["patch"]), "changed_files": changed, "next_action": "apply_assisted_candidate"}
             request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base)
             try:
                 applied = self._apply_runner(patch=str(proposal["patch"]), request=request, provider=str(proposal.get("provider") or "agy"), provider_time_ms=provider_time_ms)
             except Exception as exc:
-                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_APPLY_FAILED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "next_action": "inspect_provider_or_retry_same_task"}
-            return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "changed_files": changed, "receipt": applied, "next_action": "none"}
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_APPLY_FAILED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "telemetry": telemetry(context_build_ms=context_build_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms), "next_action": "inspect_provider_or_retry_same_task"}
+            applied_telemetry = dict(applied.get("telemetry") or {}) if isinstance(applied, Mapping) else {}
+            applied_telemetry.update(telemetry(context_build_ms=context_build_ms, provider_time_ms=provider_time_ms, patch_validation_ms=patch_validation_ms, commit_time_ms=int(applied_telemetry.get("commit_time_ms", 0) or 0), worktree_time_ms=int(applied_telemetry.get("worktree_time_ms", 0) or 0), cleanup_time_ms=int(applied_telemetry.get("cleanup_time_ms", 0) or 0)))
+            return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "telemetry": applied_telemetry, "changed_files": changed, "receipt": applied, "next_action": "none"}
         request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base)
         request.update({"execution_lane": route["execution_lane"]})
         if route["execution_lane"] == "DIRECT_CANONICAL":
             request.update({"primary_agent": True, "worker": "primary"})
-            return {**envelope, "status": "DIRECT_CANONICAL_READY", "next_action": "edit_canonical_then_nexus_task_finish", "handoff": self.service.submit_task(request)}
+            return {**envelope, "status": "DIRECT_CANONICAL_READY", "telemetry": telemetry(), "next_action": "edit_canonical_then_nexus_task_finish", "handoff": self.service.submit_task(request)}
         if not arguments.get("task_card_path") or not arguments.get("task_card_hash"):
-            return {**envelope, "status": "FINAL_BLOCK", "blocker": "TASK_CARD_BINDING_REQUIRED", "next_action": "provide_task_card_path_and_hash"}
+            return {**envelope, "status": "FINAL_BLOCK", "blocker": "TASK_CARD_BINDING_REQUIRED", "telemetry": telemetry(), "next_action": "provide_task_card_path_and_hash"}
         request.update({"worker": worker if worker != "auto" else "codex", "task_card_path": arguments["task_card_path"], "task_card_hash": arguments["task_card_hash"]})
-        return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "next_action": "wait_for_task", "handoff": self.service.submit_task(request)}
+        return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "telemetry": telemetry(), "next_action": "wait_for_task", "handoff": self.service.submit_task(request)}
 
     @staticmethod
     def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str) -> dict[str, Any]:
@@ -473,6 +497,7 @@ class UnifiedMCPGateway:
         return changed
 
     def _apply_assisted_patch(self, *, patch: str, request: Mapping[str, Any], provider: str, provider_time_ms: int) -> dict[str, Any]:
+        apply_started = time.perf_counter()
         lock_path = Path("/tmp/nexus-mcp-gateway-canonical.lock")
         with lock_path.open("w", encoding="utf-8") as lock_handle:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
@@ -500,12 +525,13 @@ class UnifiedMCPGateway:
                     result = subprocess.run(tokens, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
                     if result.returncode != 0:
                         raise RuntimeError(f"verifier failed: {command}: {result.stderr.strip()}")
+                commit_started = time.perf_counter()
                 subprocess.run(["git", "add", "--", *changed], cwd=CANONICAL_SOURCE_ROOT, check=True, capture_output=True, text=True)
                 commit = subprocess.run(["git", "commit", "-m", f"feat(assist): apply bounded model patch {request['task_id']}"], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, check=False)
                 if commit.returncode != 0:
                     raise RuntimeError(commit.stderr.strip() or "assist commit failed")
                 receipt = self.service.complete_direct_canonical({**dict(request), "execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary"}, expected_commit_sha=_git("rev-parse", "HEAD").strip())
-                receipt.setdefault("telemetry", {}).update({"provider_time_ms": provider_time_ms, "worktree_time_ms": 0})
+                receipt.setdefault("telemetry", {}).update({"provider_time_ms": provider_time_ms, "worktree_time_ms": 0, "commit_time_ms": max(0, int((time.perf_counter() - commit_started) * 1000)), "cleanup_time_ms": 0, "total_wall_time_ms": max(0, int((time.perf_counter() - apply_started) * 1000))})
                 return receipt
             except Exception:
                 if applied:

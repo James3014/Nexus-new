@@ -113,6 +113,17 @@ def test_task_run_routes_small_request_direct_without_target_fields():
     assert payload["status"] == "DIRECT_CANONICAL_READY"
     assert service.submitted[0]["target_worktree_root"] == "/Users/jameschen/Workspace/nexus-runtime-targets"
     assert service.submitted[0]["primary_agent"] is True
+    assert set((payload := response["result"]["structuredContent"])["telemetry"]) >= {
+        "route_decision_ms",
+        "context_build_ms",
+        "provider_time_ms",
+        "patch_validation_ms",
+        "commit_time_ms",
+        "worktree_time_ms",
+        "cleanup_time_ms",
+        "total_wall_time_ms",
+    }
+    assert payload["telemetry"]["provider_time_ms"] == 0
 
 
 def test_task_run_assisted_is_fail_closed_without_side_effect():
@@ -140,6 +151,9 @@ def test_task_run_assisted_applies_injected_bounded_patch_without_target():
     assert payload["route_authority"] == "CapabilityPlanner"
     assert len(applied) == 1
     assert service.submitted == []
+    assert payload["telemetry"]["provider_time_ms"] >= 0
+    assert payload["telemetry"]["patch_validation_ms"] >= 0
+    assert payload["telemetry"]["total_wall_time_ms"] >= payload["telemetry"]["provider_time_ms"]
 
 
 def test_task_run_isolated_requires_task_card_binding():
