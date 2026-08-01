@@ -246,7 +246,11 @@ CANONICAL_SOURCE_ROOT = Path("/Users/jameschen/Workspace/nexus")
 CANONICAL_SOURCE_BRANCH = "nexus/integration/main"
 
 
-def resolve_execution_lane(request: Mapping[str, Any]) -> dict[str, Any]:
+def resolve_execution_lane(
+    request: Mapping[str, Any],
+    *,
+    active_mutation_tasks: int = 0,
+) -> dict[str, Any]:
     """Classify ordinary primary-agent work without allocating a Target."""
     requested = str(request.get("execution_lane", "ISOLATED_TARGET")).strip().upper()
     if requested not in {"DIRECT_CANONICAL", "ISOLATED_TARGET"}:
@@ -285,8 +289,23 @@ def resolve_execution_lane(request: Mapping[str, Any]) -> dict[str, Any]:
         blockers.append("canonical_git_probe_failed")
     if len(request.get("allowed_files") or []) > 4:
         blockers.append("allowed_file_limit_exceeded")
+    if active_mutation_tasks > 0:
+        blockers.append("another_mutation_task_is_active")
     if request.get("authorized_deletions"):
         blockers.append("deletions_forbidden")
+    if request.get("generated_change") or request.get("large_change"):
+        blockers.append("generated_or_large_change_forbidden")
+    lockfile_names = {
+        "uv.lock", "poetry.lock", "package-lock.json", "pnpm-lock.yaml",
+        "yarn.lock", "Cargo.lock", "Gemfile.lock",
+    }
+    for raw_path in request.get("allowed_files") or []:
+        path = str(raw_path).strip().rstrip("/")
+        name = Path(path).name
+        if name in lockfile_names:
+            blockers.append("lockfile_change_forbidden")
+        if path.startswith(("generated/", "dist/", "build/", ".next/")) or name.endswith(".generated.json"):
+            blockers.append("generated_or_large_change_forbidden")
     for flag in ("migration_authority", "schema_authority", "route_authority_mutation", "security_policy_weakening", "public_claim_allowed", "production_ready"):
         if request.get(flag):
             blockers.append(f"{flag}_forbidden")
@@ -2019,8 +2038,141 @@ class SelfHostedTaskService:
             "next_gate": "OWNER_REVIEW",
         }
 
+    def complete_direct_canonical(
+        self,
+        request: Mapping[str, Any],
+        *,
+        expected_commit_sha: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Verify a primary-agent commit already made on the canonical checkout.
+
+        This surface never creates lifecycle state, a Candidate, or a Target. It
+        is deliberately a post-commit gate: the primary agent performs the
+        scoped edit/commit, then this method proves the commit and verifiers.
+        """
+        active = sum(
+            1
+            for state in self._workspace_task_states().values()
+            if state.get("status") not in TERMINAL_STATUSES
+            and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
+        )
+        lane = resolve_execution_lane(request, active_mutation_tasks=active)
+        if str(request.get("execution_lane", "")).strip().upper() != "DIRECT_CANONICAL":
+            raise RuntimeError("DIRECT_CANONICAL completion requires explicit execution_lane")
+        if not lane["eligible"]:
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
+        controller = CANONICAL_SOURCE_ROOT
+        started = time.perf_counter()
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        )
+        if status.returncode != 0 or status.stdout.strip():
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: canonical checkout must be clean after commit")
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if branch != CANONICAL_SOURCE_BRANCH:
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: canonical branch drift")
+        worktrees = [
+            line.removeprefix("worktree ").strip()
+            for line in subprocess.run(
+                ["git", "worktree", "list", "--porcelain"], cwd=controller,
+                capture_output=True, text=True, check=False,
+            ).stdout.splitlines()
+            if line.startswith("worktree ")
+        ]
+        if worktrees != [str(controller.resolve())]:
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: registered worktree set is not canonical-only")
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        if expected_commit_sha and head != expected_commit_sha:
+            raise RuntimeError("DIRECT_CANONICAL_COMMIT_MISMATCH: HEAD differs from expected commit")
+        base = str(request.get("controller_revision") or "").strip()
+        if len(base) != 40:
+            raise RuntimeError("DIRECT_CANONICAL_REVISION_REQUIRED: controller_revision must be an exact SHA")
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", base, head], cwd=controller,
+            capture_output=True, check=False,
+        )
+        if ancestry.returncode != 0:
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: commit is not descended from controller_revision")
+        changed = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}..{head}"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.splitlines()
+        deleted = subprocess.run(
+            ["git", "diff", "--diff-filter=D", "--name-only", f"{base}..{head}"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.splitlines()
+        allowed = tuple(str(path).rstrip("/") for path in request.get("allowed_files") or ())
+        if not changed:
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: commit has no scoped changes")
+        if deleted or any(
+            not any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed)
+            for path in changed
+        ):
+            raise RuntimeError("DIRECT_CANONICAL_SCOPE_MISMATCH: commit changed files outside allowed scope")
+        diff_check = subprocess.run(
+            ["git", "diff", "--check", f"{base}..{head}"], cwd=controller,
+            capture_output=True, text=True, check=False,
+        )
+        if diff_check.returncode != 0:
+            raise RuntimeError("DIRECT_CANONICAL_DIFF_CHECK_FAILED: " + diff_check.stdout.strip())
+        commit_shape = subprocess.run(
+            ["git", "rev-list", "--parents", "-n", "1", head], cwd=controller,
+            capture_output=True, text=True, check=False,
+        ).stdout.split()
+        if len(commit_shape) != 2:
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: merge commit is not allowed")
+        verifier_started = time.perf_counter()
+        verifier_contract = type("DirectVerifierContract", (), {
+            "verifier_commands": tuple(str(command) for command in request.get("verifier_commands") or ())
+        })()
+        passed, evidence, failures = CandidateVerifier._run_verifiers(verifier_contract, str(controller))
+        verifier_time_ms = max(0, int((time.perf_counter() - verifier_started) * 1000))
+        if not passed:
+            raise RuntimeError("DIRECT_CANONICAL_VERIFIER_FAILED: " + ",".join(failures))
+        total_time_ms = max(0, int((time.perf_counter() - started) * 1000))
+        telemetry = {
+            "wall_time_ms": total_time_ms,
+            "provider_time_ms": 0,
+            "verifier_time_ms": verifier_time_ms,
+            "worktree_time_ms": 0,
+            "commit_hook_time_ms": 0,
+            "cleanup_time_ms": 0,
+            "overhead_ms": max(0, total_time_ms - verifier_time_ms),
+        }
+        receipt = {
+            "schema": "nexus.self_hosted_direct_receipt.v1",
+            "task_id": str(request.get("task_id") or f"direct-{head[:12]}"),
+            "execution_lane": "DIRECT_CANONICAL",
+            "status": "DIRECT_CANONICAL_COMPLETED",
+            "controller_repo_root": str(controller),
+            "controller_branch": branch,
+            "commit_sha": head,
+            "changed_files": changed,
+            "candidate_created": False,
+            "target_created": False,
+            "state_created": False,
+            "verifier_evidence": _jsonable(evidence),
+            "telemetry": telemetry,
+        }
+        receipt["receipt_hash"] = hashlib.sha256(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return receipt
+
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        lane = resolve_execution_lane(request)
+        active_mutations = sum(
+            1 for state in self._workspace_task_states().values()
+            if state.get("status") not in TERMINAL_STATUSES
+            and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
+        )
+        lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
         if str(request.get("execution_lane", "ISOLATED_TARGET")).strip().upper() == "DIRECT_CANONICAL" and lane["eligible"]:
             task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
             return {
@@ -2032,7 +2184,9 @@ class SelfHostedTaskService:
                 "controller_branch": CANONICAL_SOURCE_BRANCH,
                 "target_created": False,
                 "state_created": False,
-                "next_action": lane["next_action"],
+                "next_action": "run_direct_canonical_completion",
+                "required_surface": "nexus_self_hosted_direct_complete",
+                "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
             }
         contract = self.build_contract(request)
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)

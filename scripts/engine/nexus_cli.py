@@ -209,6 +209,7 @@ from scripts.engine.commands.self_hosted_actions import (
     run_self_hosted_close_without_candidate,
     run_self_hosted_cleanup,
     run_self_hosted_dispose,
+    run_self_hosted_direct_complete,
     run_self_hosted_integrate,
     run_self_hosted_owner_finish,
     run_self_hosted_list_actionable,
@@ -3566,6 +3567,27 @@ def self_hosted_submit(
         request_data["protected_contracts"] = pc
 
     res = run_self_hosted_submit(request_data, state_dir=state_dir)
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="direct-complete")
+@click.option("--request-file", "request_file", type=click.Path(exists=True, dir_okay=False), required=True, help="JSON Direct Canonical request.")
+@click.option("--expected-commit-sha", default=None, help="Expected canonical HEAD after the scoped commit.")
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory for mutation-task occupancy checks.")
+@translate_action_exceptions
+def self_hosted_direct_complete(
+    request_file: str,
+    expected_commit_sha: str | None,
+    state_dir: str | None,
+) -> None:
+    """Verify a primary-agent commit in the canonical checkout without a Target."""
+    with open(request_file, "r", encoding="utf-8") as handle:
+        request_data = json.load(handle)
+    res = run_self_hosted_direct_complete(
+        request_data,
+        expected_commit_sha=expected_commit_sha,
+        state_dir=state_dir,
+    )
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 

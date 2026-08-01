@@ -1286,6 +1286,55 @@ def test_direct_canonical_lane_fails_closed_to_isolated_for_delegated_worker(tmp
     assert "delegated_worker_forbidden" in lane["blockers"]
 
 
+def test_direct_canonical_completion_verifies_scoped_commit_without_lifecycle_state(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    subprocess.run(["git", "init", "-q", str(controller)], check=True)
+    subprocess.run(["git", "-C", str(controller), "branch", "-M", "nexus/integration/main"], check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "-C", str(controller), "commit", "--allow-empty", "-m", "init"], check=True, capture_output=True)
+    base = subprocess.run(["git", "-C", str(controller), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    (controller / "src").mkdir()
+    (controller / "src" / "canary.py").write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(controller), "add", "src/canary.py"], check=True)
+    subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "-C", str(controller), "commit", "-m", "direct canary"], check=True, capture_output=True)
+    head = subprocess.run(["git", "-C", str(controller), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+
+    receipt = service.complete_direct_canonical({
+        "task_id": "direct-complete",
+        "controller_repo_root": str(controller),
+        "controller_revision": base,
+        "allowed_files": ["src/canary.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }, expected_commit_sha=head)
+
+    assert receipt["status"] == "DIRECT_CANONICAL_COMPLETED"
+    assert receipt["commit_sha"] == head
+    assert receipt["candidate_created"] is False
+    assert receipt["target_created"] is False
+    assert receipt["state_created"] is False
+    assert receipt["telemetry"]["overhead_ms"] >= 0
+    assert not (tmp_path / "state").exists()
+
+
+def test_direct_lane_rejects_lockfile_and_active_mutation_task():
+    lane = resolve_execution_lane({
+        "controller_repo_root": "/Users/jameschen/Workspace/nexus",
+        "allowed_files": ["package-lock.json"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }, active_mutation_tasks=1)
+
+    assert lane["execution_lane"] == "ISOLATED_TARGET"
+    assert "lockfile_change_forbidden" in lane["blockers"]
+    assert "another_mutation_task_is_active" in lane["blockers"]
+
+
 def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monkeypatch):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     calls: list[tuple[str, str]] = []

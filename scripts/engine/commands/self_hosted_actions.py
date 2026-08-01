@@ -41,6 +41,21 @@ def run_self_hosted_submit(
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 
+def run_self_hosted_direct_complete(
+    request: dict[str, Any],
+    expected_commit_sha: str | None = None,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    svc = get_self_hosted_service(state_dir=state_dir, service=service)
+    try:
+        return svc.complete_direct_canonical(request, expected_commit_sha=expected_commit_sha)
+    except (OSError, ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
 def run_self_hosted_retry(
     task_id: str,
     state_dir: str | Path | None = None,

@@ -62,6 +62,18 @@ class NexusSelfHostedMCPServer:
                 },
             },
             {
+                "name": "nexus_self_hosted_direct_complete",
+                "description": "Verify a primary-agent commit already made in the canonical checkout without creating state, Candidate, or Target.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["request"],
+                    "properties": {
+                        "request": {"type": "object"},
+                        "expected_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                    },
+                },
+            },
+            {
                 "name": "nexus_self_hosted_get_task",
                 "description": "Read durable task lifecycle state.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
@@ -320,6 +332,11 @@ class NexusSelfHostedMCPServer:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> Any:
         if name == "nexus_self_hosted_submit_task":
             return self.service.submit_task(arguments)
+        if name == "nexus_self_hosted_direct_complete":
+            return self.service.complete_direct_canonical(
+                arguments.get("request") or {},
+                expected_commit_sha=arguments.get("expected_commit_sha"),
+            )
         if name == "nexus_self_hosted_compete_task":
             workers = arguments.get("workers") or []
             request = dict(arguments)
