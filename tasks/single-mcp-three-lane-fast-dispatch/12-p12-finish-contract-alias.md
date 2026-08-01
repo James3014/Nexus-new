@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p12-finish-contract-alias`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Let the public gateway finish a Direct task using the exact `base_sha` returned by `nexus_task_run`, while retaining the internal `controller_revision` compatibility alias.
 - read_only: false
@@ -41,3 +41,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/
 - New base-sha finish regression passes with existing gateway tests.
 - Scoped commit and Direct receipt exist.
 - External DevSpace and connector remain untouched.
+
+## Completion Evidence
+
+- Runtime commit: `7ecb408c5730644514a7816e056b52daa1b22a09`
+- Direct receipt: `bb87ecb23066c48f7a5914f82453a9f5ea03a0171f61e0ace4e0651fb561ae87`
+- Verification: 13 gateway tests passed; `git diff --check` passed.
