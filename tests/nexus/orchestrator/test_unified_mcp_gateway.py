@@ -28,6 +28,9 @@ class FakeService:
     def get_task(self, task_id):
         return {"task_id": task_id, "status": "TERMINAL"}
 
+    def wait_task(self, task_id, **kwargs):
+        return {"task_id": task_id, "status": "PENDING_HUMAN_APPROVAL", "task_action": {"action_state": "ACTION_REQUIRED", "next_action": "owner_finish"}, "wait": kwargs}
+
     def complete_direct_canonical(self, request, *, expected_commit_sha=None):
         return {"status": "DIRECT_CANONICAL_COMPLETED", "task_id": request["task_id"], "expected_commit_sha": expected_commit_sha}
 
@@ -49,7 +52,7 @@ def test_gateway_has_one_identity_and_bounded_public_surface():
 
     assert initialized["result"]["serverInfo"]["name"] == GATEWAY_NAME
     assert initialized["result"]["serverInfo"]["toolManifestRevision"] == TOOL_MANIFEST_REVISION
-    assert len(listed["result"]["tools"]) == 9
+    assert len(listed["result"]["tools"]) == 10
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in UnifiedMCPGateway.tool_specs()}
 
 
@@ -78,6 +81,16 @@ def test_gateway_forwards_high_level_lifecycle_actions():
     assert status["result"]["structuredContent"]["status"] == "TERMINAL"
     assert finish["result"]["structuredContent"]["status"] == "DIRECT_CANONICAL_COMPLETED"
     assert cancel["result"]["structuredContent"]["status"] == "CANCELLED"
+
+
+def test_wait_forwards_bounded_timeout_and_returns_next_action():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 16, "method": "tools/call", "params": {"name": "nexus_task_wait", "arguments": {"task_id": "t1", "timeout_seconds": 999, "poll_interval_seconds": 9}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "PENDING_HUMAN_APPROVAL"
+    assert payload["task_action"]["next_action"] == "owner_finish"
+    assert payload["wait"]["timeout_seconds"] == 60.0
+    assert payload["wait"]["poll_interval_seconds"] == 5.0
 
 
 def test_minimal_direct_finish_derives_canonical_target_fields():

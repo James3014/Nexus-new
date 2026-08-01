@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     gateway = UnifiedMCPGateway()
     if args.self_test:
         response = gateway.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
-        if not response or len(response["result"]["tools"]) != 9:
+        if not response or len(response["result"]["tools"]) != 10:
             raise SystemExit("gateway self-test failed")
         print("nexus-mcp-gateway self-test: PASS")
         return 0

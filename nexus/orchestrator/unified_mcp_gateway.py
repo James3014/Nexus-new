@@ -37,6 +37,7 @@ PUBLIC_TOOL_NAMES = (
     "nexus_git_diff",
     "nexus_task_run",
     "nexus_task_status",
+    "nexus_task_wait",
     "nexus_task_finish",
     "nexus_task_cancel",
 )
@@ -174,6 +175,19 @@ class UnifiedMCPGateway:
                 "name": "nexus_task_status",
                 "description": "Read one durable task's status and next action.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_task_wait",
+                "description": "Poll one bounded lifecycle task until attention, terminal, or timeout.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 10},
+                        "poll_interval_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 5, "default": 0.25},
+                    },
+                },
             },
             {
                 "name": "nexus_task_finish",
@@ -548,6 +562,11 @@ class UnifiedMCPGateway:
         if name == "nexus_task_status":
             task_id = _text(arguments.get("task_id"), "task_id")
             return self.service.get_task(task_id)
+        if name == "nexus_task_wait":
+            task_id = _text(arguments.get("task_id"), "task_id")
+            timeout = min(60.0, max(0.0, float(arguments.get("timeout_seconds", 10.0))))
+            poll = min(5.0, max(0.01, float(arguments.get("poll_interval_seconds", 0.25))))
+            return self.service.wait_task(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
         if name == "nexus_task_finish":
             return self._finish(arguments)
         if name == "nexus_task_cancel":
