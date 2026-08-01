@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p8-soak-gate`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Execute a deterministic bounded dispatch matrix proving that ordinary Direct and injected Assisted calls do not allocate Targets, while keeping real-provider and external-connector claims fail-closed.
 - read_only: false
@@ -42,3 +42,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/
 - The bounded synthetic matrix passes with no Target or lifecycle state allocation.
 - Real-provider, external artifact, connector registration, and two-start identity remain explicit follow-up gates.
 - Scoped commit and Direct receipt exist.
+
+## Completion Evidence
+
+- Runtime commit: `cb44a117731bff2aca913bfaf772bd9a832435f8`
+- Direct receipt: `ec89709f87b7685f8481ae9a15ea1ce75c290804abbeba92de4346dabbbb36b7`
+- Verification: 12 gateway tests passed, including 10 Direct + 20 Assisted + 10 isolated binding cases; gateway self-test passed; `git diff --check` passed.

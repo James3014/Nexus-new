@@ -35,10 +35,11 @@ one explicit executable next action.
 7. `06-p6-runtime-cutover.md` - `single-mcp-three-lane-p6-runtime-cutover`
 8. `07-p7-telemetry.md` - `single-mcp-three-lane-p7-telemetry`
 9. `08-p8-soak-gate.md` - `single-mcp-three-lane-p8-soak-gate`
+10. `09-p9-external-connector-cutover.md` - `single-mcp-three-lane-p9-external-connector-cutover`
 
 ## Current Frontier
 
-`single-mcp-three-lane-p8-soak-gate`
+`single-mcp-three-lane-p9-external-connector-cutover`
 
 ## Completed Cards
 
@@ -50,12 +51,15 @@ one explicit executable next action.
 - `single-mcp-three-lane-p5-isolated-closure`: runtime committed `52db1a004`; Direct receipt `a19a06dbd53c5b4259413f762a15c5e44f053d3a7a59972baf5256aacc4ba83e`
 - `single-mcp-three-lane-p6-runtime-cutover`: runtime committed `595b83c95`; Direct receipt `a63177872d989fe16e792ebebbe8a5fc81e01edb58da00e48cfc84bfa9841996`
 - `single-mcp-three-lane-p7-telemetry`: runtime committed `b05c3730c`; Direct receipt `31fc2111469a136275990d2e7bfe8e5782675f5108e0cf4cb5e80be7c144b057`
+- `single-mcp-three-lane-p8-soak-gate`: runtime committed `cb44a1177`; Direct receipt `ec89709f87b7685f8481ae9a15ea1ce75c290804abbeba92de4346dabbbb36b7`
 
 ## Dependencies
 
 P1 depends on P0. P2 depends on P1. P3 and P4 depend on P2. P5 depends on
 the existing lifecycle closure and P1. P6 depends on P1-P5. P7 depends on
 P2-P6. P8 depends on every implementation card and fresh runtime inventory.
+P9 requires an owner-authorized external artifact refresh and connector
+registration; it is not executable under the current campaign forbidden scope.
 
 ## Global Forbidden Scope
 
