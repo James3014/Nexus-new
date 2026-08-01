@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import fcntl
+import difflib
 import os
 import re
 import signal
@@ -18,6 +19,7 @@ import shutil
 import subprocess
 import threading
 import time
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -35,36 +37,17 @@ from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, Workfor
 
 GATEWAY_NAME = "nexus-mcp-gateway"
 GATEWAY_VERSION = "0.1.0"
+PUBLIC_APP_NAME = "Nexus"
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-PUBLIC_TOOL_NAMES = (
-    "nexus_gateway_status",
-    "nexus_workspace_snapshot",
-    "nexus_read",
-    "nexus_search",
-    "nexus_git_diff",
-    "nexus_task_run",
-    "nexus_task_status",
-    "nexus_task_wait",
-    "nexus_task_finish",
-    "nexus_task_cancel",
-    "nexus_task_list_actionable",
-    "nexus_task_reconcile",
-    "nexus_task_retry",
-    "nexus_task_resume",
-    "nexus_assist_submit",
-    "nexus_assist_result",
-    "nexus_assist_cancel",
-    "nexus_candidate_approve",
-    "nexus_candidate_integrate",
-    "nexus_candidate_dispose",
-)
-TOOL_MANIFEST_REVISION = hashlib.sha256(
-    json.dumps(PUBLIC_TOOL_NAMES, separators=(",", ":")).encode("utf-8")
-).hexdigest()
+# Populated from ``UnifiedMCPGateway.tool_specs()`` after the class definition.
+# There must be one public manifest truth; status, health, recovery validation,
+# and the MCP initialize revision all consume this derived tuple.
+PUBLIC_TOOL_NAMES: tuple[str, ...]
+TOOL_MANIFEST_REVISION: str
 
 
 class GatewayInputError(ValueError):
@@ -169,10 +152,22 @@ class UnifiedMCPGateway:
             return [executable, "--json", "--yolo", "--thinking", "none", "--model", selected, prompt]
         if provider == "agy":
             return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--print-timeout", "25s", "--prompt", prompt]
+        if provider == "gemini":
+            return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
+        if provider == "opencode":
+            return [executable, "run", "--model", model, prompt]
+        if provider == "mimo":
+            return [executable, "run", "--never-ask-questions", "--model", model, prompt]
+        if provider == "ollama":
+            return [executable, "run", model, prompt]
+        if provider == "grok":
+            return [executable, "--model", model, "--single", prompt, "--output-format", "json", "--no-alt-screen"]
+        if provider == "codex":
+            return [executable, "exec", "--json", "--full-auto", "-m", model, prompt]
         raise GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
 
     @staticmethod
-    def _decode_assist_payload(text: str, provider: str) -> Optional[dict[str, Any]]:
+    def _decode_assist_payload(text: str, provider: str, *, require_patch: bool = False) -> Optional[dict[str, Any]]:
         candidates = [text.strip()]
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match and match.group(0) not in candidates:
@@ -183,17 +178,18 @@ class UnifiedMCPGateway:
             except json.JSONDecodeError:
                 continue
             if isinstance(candidate, dict):
-                if provider == "cline" and "patch" not in candidate:
+                if provider == "cline" and "patch" not in candidate and (require_patch or "text" in candidate or "event" in candidate):
                     nested_texts = [str(candidate.get("text") or "")]
                     event = candidate.get("event")
                     if isinstance(event, dict):
                         nested_texts.append(str(event.get("text") or ""))
                     for nested_text in nested_texts:
                         if nested_text:
-                            nested_payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider)
+                            nested_payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider, require_patch=require_patch)
                             if nested_payload is not None:
                                 return nested_payload
-                    continue
+                    if require_patch:
+                        continue
                 return candidate
         for line in reversed(text.splitlines()):
             try:
@@ -208,12 +204,67 @@ class UnifiedMCPGateway:
                 nested.append(str(event.get("text") or ""))
             for nested_text in nested:
                 if nested_text:
-                    payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider)
+                    payload = UnifiedMCPGateway._decode_assist_payload(nested_text, provider, require_patch=require_patch)
                     if payload is not None:
                         return payload
             if provider != "cline":
                 return candidate
         return None
+
+    @staticmethod
+    def _snapshot_workspace(root: Path) -> dict[str, str]:
+        snapshot: dict[str, str] = {}
+        if not root.exists():
+            return snapshot
+        for path in sorted(item for item in root.rglob("*") if item.is_file()):
+            try:
+                snapshot[str(path.relative_to(root))] = UnifiedMCPGateway._hash_file(path)
+            except OSError:
+                snapshot[str(path.relative_to(root))] = "unreadable"
+        return snapshot
+
+    @staticmethod
+    def _validate_output_schema(value: Any, schema: Any) -> tuple[bool, str]:
+        if not isinstance(schema, Mapping):
+            return True, ""
+        def validate(current: Any, shape: Mapping[str, Any], path: str = "$") -> str:
+            expected = shape.get("type")
+            type_ok = {
+                "object": lambda x: isinstance(x, Mapping),
+                "array": lambda x: isinstance(x, list),
+                "string": lambda x: isinstance(x, str),
+                "number": lambda x: isinstance(x, (int, float)) and not isinstance(x, bool),
+                "integer": lambda x: isinstance(x, int) and not isinstance(x, bool),
+                "boolean": lambda x: isinstance(x, bool),
+                "null": lambda x: x is None,
+            }
+            if expected in type_ok and not type_ok[expected](current):
+                return f"output_schema_type:{path}:{expected}"
+            if "enum" in shape and current not in shape.get("enum", []):
+                return f"output_schema_enum:{path}"
+            if isinstance(current, Mapping):
+                missing = [str(field) for field in shape.get("required", []) or [] if str(field) not in current]
+                if missing:
+                    return "output_schema_missing:" + ",".join(f"{path}.{field}" for field in missing)
+                properties = shape.get("properties") if isinstance(shape.get("properties"), Mapping) else {}
+                for key, child in properties.items():
+                    if key in current and isinstance(child, Mapping):
+                        error = validate(current[key], child, f"{path}.{key}")
+                        if error:
+                            return error
+                if shape.get("additionalProperties") is False:
+                    extras = sorted(set(current) - set(properties))
+                    if extras:
+                        return f"output_schema_additional:{path}:{','.join(map(str, extras))}"
+            if isinstance(current, list) and isinstance(shape.get("items"), Mapping):
+                for index, item in enumerate(current):
+                    error = validate(item, shape["items"], f"{path}[{index}]")
+                    if error:
+                        return error
+            return ""
+
+        error = validate(value, schema)
+        return (not bool(error), error)
 
     def _assist_refresh(self, task_id: str) -> Optional[dict[str, Any]]:
         job = self._assist_read(task_id)
@@ -229,10 +280,18 @@ class UnifiedMCPGateway:
                 os.kill(int(job["pid"]), 0)
                 return job
             except (OSError, ValueError):
-                # A restarted Gateway no longer owns the child handle.  The
-                # durable artifacts are still authoritative; infer completion
-                # from their parsed result and keep the failure gate closed.
-                returncode = job.get("exit_code") if job.get("exit_code") is not None else 0
+                # A restarted Gateway may retain artifacts but no durable exit
+                # marker.  Output alone is not completion evidence: fail closed
+                # and require an explicit reconciliation decision.
+                if job.get("exit_code") is None:
+                    job.update({
+                        "status": "UNKNOWN_REQUIRES_RECONCILE",
+                        "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
+                        "reconciliation_required": True,
+                        "last_polled_at": self._utc_now(),
+                    })
+                    return self._assist_write(job)
+                returncode = job.get("exit_code")
         if returncode is None:
             job["status"] = "RUNNING"
             job["last_polled_at"] = self._utc_now()
@@ -241,7 +300,9 @@ class UnifiedMCPGateway:
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
         stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
-        parsed = self._decode_assist_payload(stdout, str(job.get("provider") or ""))
+        require_patch = str(job.get("job_kind") or "assist") != "model_probe"
+        parsed = self._decode_assist_payload(stdout, str(job.get("provider") or ""), require_patch=require_patch)
+        schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
         started_at = job.get("started_at")
         provider_time_ms = 0
         if started_at:
@@ -250,7 +311,7 @@ class UnifiedMCPGateway:
             except (TypeError, ValueError):
                 provider_time_ms = 0
         job.update({
-            "status": "COMPLETED" if returncode == 0 and parsed is not None else "FAILED",
+            "status": "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED",
             "finished_at": self._utc_now(),
             "exit_code": returncode,
             "stdout_sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
@@ -258,10 +319,30 @@ class UnifiedMCPGateway:
             "stdout_bytes": len(stdout.encode("utf-8")),
             "stderr_bytes": len(stderr.encode("utf-8")),
             "result": parsed,
-            "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and parsed is None else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None),
+            "blocker": ("ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and (parsed is None or not schema_valid) else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)),
+            "schema_error": schema_error,
+            "schema_validation_level": "bounded_subset",
             "provider_error": stderr[-1000:] if returncode != 0 else "",
             "provider_time_ms": provider_time_ms,
+            "last_stdout_at": datetime.fromtimestamp(stdout_path.stat().st_mtime, tz=timezone.utc).isoformat() if stdout_path.exists() else None,
+            "last_stderr_at": datetime.fromtimestamp(stderr_path.stat().st_mtime, tz=timezone.utc).isoformat() if stderr_path.exists() else None,
         })
+        workspace_root = Path(str(job.get("workspace_root") or ""))
+        if workspace_root.exists() and workspace_root != CANONICAL_SOURCE_ROOT:
+            after = self._snapshot_workspace(workspace_root)
+            before = job.get("filesystem_before") if isinstance(job.get("filesystem_before"), Mapping) else {}
+            job["filesystem_after"] = after
+            job["filesystem_delta"] = {
+                "created": sorted(set(after) - set(before)),
+                "removed": sorted(set(before) - set(after)),
+                "changed": sorted(path for path in set(before) & set(after) if before[path] != after[path]),
+            }
+            try:
+                shutil.rmtree(workspace_root)
+                job["process_cleanup"] = True
+            except OSError as exc:
+                job["process_cleanup"] = False
+                job["cleanup_error"] = str(exc)
         with self._assist_lock:
             self._assist_processes.pop(task_id, None)
         return self._assist_write(job)
@@ -269,7 +350,11 @@ class UnifiedMCPGateway:
     def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
         status = str(job.get("status") or "UNKNOWN")
         terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
-        next_action = "nexus_assist_result" if not terminal else ("none" if status == "COMPLETED" else "nexus_task_retry")
+        result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
+        if status == "UNKNOWN_REQUIRES_RECONCILE":
+            next_action = "nexus_task_reconcile"
+        else:
+            next_action = result_tool if not terminal else ("none" if status == "COMPLETED" else "nexus_task_retry")
         return {
             "schema": "nexus.assisted_provider_job.v1",
             "operation": operation,
@@ -277,6 +362,7 @@ class UnifiedMCPGateway:
             "job_id": job.get("job_id"),
             "action_id": job.get("action_id"),
             "attempt_id": job.get("attempt_id"),
+            "attempt_history": job.get("attempt_history", []),
             "status": status,
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
@@ -284,18 +370,35 @@ class UnifiedMCPGateway:
             "provider": job.get("provider"),
             "model": job.get("model"),
             "command_hash": job.get("command_hash"),
+            "job_kind": job.get("job_kind", "assist"),
+            "workspace_mode": job.get("workspace_mode", "isolated"),
+            "workspace_root": job.get("workspace_root"),
             "pid": job.get("pid"),
+            "pgid": job.get("pgid"),
             "started_at": job.get("started_at"),
             "finished_at": job.get("finished_at"),
             "exit_code": job.get("exit_code"),
             "provider_time_ms": job.get("provider_time_ms", 0),
+            "provider_started": bool(job.get("started_at")),
+            "binary_exec_started": job.get("started_at"),
+            "last_stdout_at": job.get("last_stdout_at"),
+            "last_stderr_at": job.get("last_stderr_at"),
             "stdout_sha256": job.get("stdout_sha256"),
             "stderr_sha256": job.get("stderr_sha256"),
             "result": job.get("result") if status == "COMPLETED" else None,
             "blocker": job.get("blocker"),
             "provider_error": job.get("provider_error", ""),
+            "schema_error": job.get("schema_error", ""),
+            "schema_validation_level": job.get("schema_validation_level", "bounded_subset"),
+            "requested_tools_policy": job.get("requested_tools_policy", []),
+            "tool_policy_enforcement": "not_enforced",
+            "filesystem_delta": job.get("filesystem_delta", {"created": [], "removed": [], "changed": []}),
+            "process_cleanup": job.get("process_cleanup", False),
+            "process_killed": bool(job.get("process_killed", False)),
+            "connector_disconnected_at": job.get("connector_disconnected_at"),
+            "reconnected_at": job.get("reconnected_at"),
             "artifacts": {"stdout": job.get("stdout_artifact"), "stderr": job.get("stderr_artifact")},
-            "attention_required": status in {"FAILED", "CANCELLED"},
+            "attention_required": status in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"},
             "next_action": next_action,
             "recommended_tool": next_action,
         }
@@ -328,6 +431,7 @@ class UnifiedMCPGateway:
         root = self._assist_root()
         stdout_path = root / f"{job_id}.stdout"
         stderr_path = root / f"{job_id}.stderr"
+        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-assist-{task_id}-", dir="/tmp"))
         action_value = dict(action or {})
         if not action_value:
             base = _git("rev-parse", "HEAD").strip()
@@ -350,17 +454,28 @@ class UnifiedMCPGateway:
         now = self._utc_now()
         job: dict[str, Any] = {
             "schema": "nexus.assisted_provider_job.v1",
+            "job_kind": "assist",
             "task_id": task_id,
             "job_id": job_id,
+            "attempt_history": [],
             "action_id": action_value.get("action_id") or f"action-{uuid4().hex}",
             "attempt_id": action_value.get("attempt_id") or f"attempt-{uuid4().hex}",
             "status": "SUBMITTED",
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
             "apply_requested": bool(arguments.get("apply", False)),
+            "workspace_mode": "isolated",
+            "workspace_root": str(workspace_root),
+            "filesystem_before": self._snapshot_workspace(workspace_root),
+            "filesystem_after": None,
+            "filesystem_delta": {"created": [], "removed": [], "changed": []},
+            "process_cleanup": False,
+            "output_schema": {"type": "object", "required": ["patch"]},
+            "result_artifact": str(self._assist_path(task_id)),
             "provider": provider,
             "model": model if "/" in model else f"cline-pass/{model}",
             "command_hash": hashlib.sha256(json.dumps(command, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "command": command,
             "submitted_at": now,
             "started_at": None,
             "finished_at": None,
@@ -368,16 +483,19 @@ class UnifiedMCPGateway:
             "stdout_artifact": str(stdout_path),
             "stderr_artifact": str(stderr_path),
             "action": action_value,
+            "connector_disconnected_at": None,
+            "reconnected_at": None,
         }
         self._assist_write(job)
         started = time.perf_counter()
         stdout_handle = stdout_path.open("w", encoding="utf-8")
         stderr_handle = stderr_path.open("w", encoding="utf-8")
         try:
-            process = subprocess.Popen(command, cwd=CANONICAL_SOURCE_ROOT, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
         except Exception:
             stdout_handle.close()
             stderr_handle.close()
+            shutil.rmtree(workspace_root, ignore_errors=True)
             job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
             return self._assist_response(self._assist_write(job), operation="submit")
         stdout_handle.close()
@@ -394,26 +512,409 @@ class UnifiedMCPGateway:
             if job is None:
                 raise KeyError(f"unknown task_id: {task_id}")
             response = self._assist_response(job, operation="wait")
-            if response["status"] in {"COMPLETED", "FAILED", "CANCELLED"} or time.monotonic() >= deadline:
+            if response["status"] in {"COMPLETED", "FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"} or time.monotonic() >= deadline:
                 return response
             time.sleep(max(0.01, min(5.0, poll_interval_seconds)))
+
+    def _cleanup_assist_workspace(self, job: dict[str, Any]) -> None:
+        workspace_root = Path(str(job.get("workspace_root") or ""))
+        if not workspace_root.exists() or workspace_root == CANONICAL_SOURCE_ROOT:
+            job["process_cleanup"] = workspace_root == CANONICAL_SOURCE_ROOT or not workspace_root.exists()
+            return
+        after = self._snapshot_workspace(workspace_root)
+        before = job.get("filesystem_before") if isinstance(job.get("filesystem_before"), Mapping) else {}
+        job["filesystem_after"] = after
+        job["filesystem_delta"] = {
+            "created": sorted(set(after) - set(before)),
+            "removed": sorted(set(before) - set(after)),
+            "changed": sorted(path for path in set(before) & set(after) if before[path] != after[path]),
+        }
+        try:
+            shutil.rmtree(workspace_root)
+            job["process_cleanup"] = True
+        except OSError as exc:
+            job["process_cleanup"] = False
+            job["cleanup_error"] = str(exc)
 
     def _assist_cancel(self, task_id: str) -> dict[str, Any]:
         job = self._assist_refresh(task_id)
         if job is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        if job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
+        if job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"}:
             pid = int(job.get("pid") or 0)
+            process = None
+            with self._assist_lock:
+                process = self._assist_processes.get(task_id)
+            terminated = False
             if pid:
                 try:
                     os.killpg(int(job.get("pgid") or pid), signal.SIGTERM)
                 except OSError:
                     pass
-            job.update({"status": "CANCELLED", "finished_at": self._utc_now(), "blocker": "ASSIST_CANCELLED"})
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    if process is not None and process.poll() is not None:
+                        terminated = True
+                        break
+                    try:
+                        os.kill(pid, 0)
+                    except OSError:
+                        terminated = True
+                        break
+                    time.sleep(0.05)
+                if not terminated:
+                    try:
+                        os.killpg(int(job.get("pgid") or pid), signal.SIGKILL)
+                    except OSError:
+                        pass
+                    if process is not None:
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            pass
+                    try:
+                        os.kill(pid, 0)
+                    except OSError:
+                        terminated = True
+            job.update({
+                "status": "CANCELLED",
+                "finished_at": self._utc_now(),
+                "blocker": "ASSIST_CANCELLED" if terminated else "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
+                "process_killed": terminated,
+                "exit_code": process.returncode if process is not None else None,
+            })
+            self._cleanup_assist_workspace(job)
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
             self._assist_write(job)
         return self._assist_response(job, operation="cancel")
+
+    def _assist_retry(self, task_id: str) -> dict[str, Any]:
+        job = self._assist_refresh(task_id)
+        if job is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if job.get("status") not in {"FAILED", "CANCELLED"}:
+            raise GatewayInputError("ASSIST_RETRY_REQUIRES_TERMINAL_FAILURE")
+        command = job.get("command")
+        if not isinstance(command, list) or not command:
+            raise GatewayInputError("ASSIST_RETRY_COMMAND_NOT_RETAINED")
+        history = list(job.get("attempt_history") or [])
+        history.append({
+            "job_id": job.get("job_id"),
+            "attempt_id": job.get("attempt_id"),
+            "status": job.get("status"),
+            "exit_code": job.get("exit_code"),
+            "result_artifact": job.get("result_artifact"),
+        })
+        new_job_id = f"{str(job.get('job_kind') or 'assist')}-{uuid4().hex}"
+        root = self._assist_root()
+        stdout_path = root / f"{new_job_id}.stdout"
+        stderr_path = root / f"{new_job_id}.stderr"
+        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-retry-{task_id}-", dir="/tmp"))
+        new_job = dict(job)
+        new_job.update({
+            "job_id": new_job_id,
+            "attempt_id": f"attempt-{uuid4().hex}",
+            "attempt_history": history,
+            "status": "SUBMITTED",
+            "submitted_at": self._utc_now(),
+            "started_at": None,
+            "finished_at": None,
+            "pid": None,
+            "pgid": None,
+            "exit_code": None,
+            "blocker": None,
+            "provider_error": "",
+            "result": None,
+            "stdout_artifact": str(stdout_path),
+            "stderr_artifact": str(stderr_path),
+            "result_artifact": str(self._assist_path(task_id)),
+            "workspace_root": str(workspace_root),
+            "filesystem_before": self._snapshot_workspace(workspace_root),
+            "filesystem_after": None,
+            "filesystem_delta": {"created": [], "removed": [], "changed": []},
+            "process_cleanup": False,
+            "process_killed": False,
+            "connector_disconnected_at": None,
+            "reconnected_at": self._utc_now(),
+        })
+        self._assist_write(new_job)
+        stdout_handle = stdout_path.open("w", encoding="utf-8")
+        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        try:
+            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+        except Exception:
+            stdout_handle.close()
+            stderr_handle.close()
+            shutil.rmtree(workspace_root, ignore_errors=True)
+            new_job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+            return self._assist_response(self._assist_write(new_job), operation="retry")
+        stdout_handle.close()
+        stderr_handle.close()
+        new_job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
+        with self._assist_lock:
+            self._assist_processes[task_id] = process
+        return self._assist_response(self._assist_write(new_job), operation="retry")
+
+    @staticmethod
+    def _safe_slug(value: Any, field: str, *, max_length: int = 80) -> str:
+        result = _text(value, field, max_length=max_length)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0," + str(max_length - 1) + r"}", result):
+            raise GatewayInputError(f"{field} must be a stable bounded slug")
+        return result
+
+    @staticmethod
+    def _hash_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _provider_executable(self, provider: str) -> tuple[dict[str, str], Optional[str]]:
+        metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)
+        if metadata is None:
+            return {}, None
+        binary_env = metadata.get("binary_env", "")
+        configured = os.environ.get(binary_env, "").strip() if binary_env else ""
+        executable = configured or shutil.which(metadata.get("binary_name", provider))
+        if not executable or not Path(executable).is_file() or not os.access(executable, os.X_OK):
+            return metadata, None
+        return metadata, executable
+
+    def _provider_preflight(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        provider = str(arguments.get("provider") or "cline").strip().lower()
+        requested_model = str(arguments.get("model") or arguments.get("preferred_model") or "").strip()
+        if provider == "cline" and not requested_model:
+            requested_model = "glm-5.2"
+        metadata, executable = self._provider_executable(provider)
+        resolved_model = requested_model
+        if provider == "cline" and resolved_model and "/" not in resolved_model:
+            resolved_model = f"cline-pass/{resolved_model}"
+        result: dict[str, Any] = {
+            "schema": "nexus.provider_preflight.v1",
+            "provider": provider,
+            "requested_model": requested_model,
+            "resolved_model": resolved_model,
+            "requested_model_verified": False,
+            "resolved_model_evidence": None,
+            "binary_found": bool(executable),
+            "binary_path": executable,
+            "binary_sha256": None,
+            "cli_version": None,
+            "authenticated": False,
+            "model_reachable": False,
+            "probe_requested": bool(arguments.get("probe", False)),
+            "probe_latency_ms": 0,
+            "exit_code": None,
+            "stdout_sha256": None,
+            "stderr_sha256": None,
+            "status": "BLOCKED",
+            "blocker": None,
+            "next_action": None,
+        }
+        if not metadata:
+            result["blocker"] = "ASSIST_PROVIDER_NOT_REGISTERED"
+            return result
+        if not executable:
+            result["blocker"] = "ASSIST_PROVIDER_UNAVAILABLE"
+            return result
+        try:
+            result["binary_sha256"] = self._hash_file(Path(executable))
+        except OSError:
+            result["blocker"] = "ASSIST_PROVIDER_BINARY_UNREADABLE"
+            return result
+        version_started = time.perf_counter()
+        version_root = Path(tempfile.mkdtemp(prefix=f"nexus-preflight-{provider}-", dir="/tmp"))
+        try:
+            version = subprocess.run([executable, "--version"], cwd=version_root, capture_output=True, text=True, timeout=5, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            result["blocker"] = "ASSIST_PROVIDER_VERSION_FAILED"
+            result["provider_error"] = str(exc)
+            shutil.rmtree(version_root, ignore_errors=True)
+            return result
+        shutil.rmtree(version_root, ignore_errors=True)
+        result["cli_version"] = (version.stdout or version.stderr).strip()[:512]
+        result["version_latency_ms"] = max(0, int((time.perf_counter() - version_started) * 1000))
+        if version.returncode != 0:
+            result["exit_code"] = version.returncode
+            result["blocker"] = "ASSIST_PROVIDER_VERSION_FAILED"
+            return result
+        # Model/auth execution is intentionally never synchronous here.  A
+        # caller asking for probe=true receives a bounded handoff to the
+        # isolated async model-probe surface, so ChatGPT request lifetimes and
+        # the canonical checkout are not part of provider probing.
+        if bool(arguments.get("probe", False)):
+            result.update({
+                "status": "VERSION_VERIFIED",
+                "blocker": "MODEL_PROBE_ASYNC_REQUIRED",
+                "next_action": "nexus_model_probe",
+                "probe_mode": "deferred_async_isolated",
+            })
+        else:
+            result.update({"status": "VERSION_VERIFIED", "blocker": "MODEL_PROBE_REQUIRED", "next_action": "nexus_model_probe"})
+        return result
+
+    def _task_card_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if arguments.get("owner_confirmation") is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
+        task_id = self._safe_slug(arguments.get("task_id"), "task_id")
+        objective = _text(arguments.get("objective"), "objective", max_length=4000)
+        allowed = [str(path).strip() for path in arguments.get("allowed_files") or [] if str(path).strip()]
+        if not allowed or len(allowed) > 10:
+            raise GatewayInputError("allowed_files must contain 1-10 bounded paths")
+        for path in allowed:
+            _safe_relative_path(path, "allowed_files")
+        verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
+        if not verifiers:
+            raise GatewayInputError("verifier_commands is required")
+        campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
+        index_path = campaign_root / "INDEX.md"
+        card_path = campaign_root / f"00-{task_id}.md"
+        if campaign_root.exists() or index_path.exists() or card_path.exists():
+            raise GatewayInputError("TASK_CARD_CREATE_WOULD_OVERWRITE")
+        card = "\n".join([
+            f"# Task Card: {task_id}", "", "artifact_authority: current", f"task_id: `{task_id}`",
+            "owner: James Chen", "status: ACTIVE", "commit_required: true", "candidate_required: true",
+            "worker_may_commit: true", "worker_may_approve: false", "worker_may_integrate: false",
+            "worker_may_push: false", "AUTO_CHAIN: false", "", "## Objective", "", objective, "",
+            "## Allowed files", "", *[f"- `{path}`" for path in allowed], "", "## Verification commands", "",
+            "```bash", *verifiers, "```", "", "## Exit criteria", "", "Owner review of the exact scoped commit.",
+            "", "## Block classification", "", "Unverifiable or out-of-scope mutation is a HARD_BLOCK.", "",
+        ])
+        index = "\n".join([
+            f"# Campaign Index: {campaign}", "", "artifact_authority: current", "owner: James Chen",
+            "status: active, governed and sequential", "AUTO_CHAIN: false", "", "## Objective", "", objective,
+            "", "## Ordered cards", "", "| Order | Task ID | Card | Status | Dependency |", "|---:|---|---|---|---|",
+            f"| 0 | `{task_id}` | `00-{task_id}.md` | ACTIVE | Owner confirmation |", "",
+        ])
+        tasks_root = CANONICAL_SOURCE_ROOT / "tasks"
+        tasks_root.mkdir(parents=True, exist_ok=True)
+        temporary_root = tasks_root / f".{campaign}.create-{uuid4().hex}"
+        try:
+            temporary_root.mkdir(parents=False, exist_ok=False)
+            temporary_index = temporary_root / "INDEX.md"
+            temporary_card = temporary_root / f"00-{task_id}.md"
+            temporary_index.write_text(index, encoding="utf-8")
+            temporary_card.write_text(card, encoding="utf-8")
+            if not temporary_index.is_file() or not temporary_card.is_file():
+                raise RuntimeError("TASK_CARD_CREATE_ATOMIC_WRITE_FAILED")
+            hashed = subprocess.run(["git", "hash-object", str(temporary_card)], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, check=False)
+            card_hash = hashed.stdout.strip()
+            if hashed.returncode != 0 or not _SHA_RE.fullmatch(card_hash):
+                raise RuntimeError("TASK_CARD_CREATE_HASH_FAILED")
+            if campaign_root.exists():
+                raise GatewayInputError("TASK_CARD_CREATE_WOULD_OVERWRITE")
+            os.replace(temporary_root, campaign_root)
+        except Exception:
+            shutil.rmtree(temporary_root, ignore_errors=True)
+            raise
+        diff_lines = list(difflib.unified_diff([], card.splitlines(True), fromfile="/dev/null", tofile=str(card_path.relative_to(CANONICAL_SOURCE_ROOT))))
+        index_diff_lines = list(difflib.unified_diff([], index.splitlines(True), fromfile="/dev/null", tofile=str(index_path.relative_to(CANONICAL_SOURCE_ROOT))))
+        return {
+            "schema": "nexus.task_card_create.v1",
+            "status": "CREATED_PENDING_COMMIT",
+            "campaign_id": campaign,
+            "task_id": task_id,
+            "index_path": str(index_path.relative_to(CANONICAL_SOURCE_ROOT)),
+            "card_path": str(card_path.relative_to(CANONICAL_SOURCE_ROOT)),
+            "card_hash": card_hash,
+            "exact_card_diff": "".join(diff_lines),
+            "exact_index_diff": "".join(index_diff_lines),
+            "successor_execution": "NOT_STARTED",
+            "owner_confirmation": True,
+        }
+
+    def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        provider = str(arguments.get("provider") or "cline").strip().lower()
+        metadata, executable = self._provider_executable(provider)
+        if not metadata:
+            raise GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
+        if not executable:
+            raise GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
+        model = str(arguments.get("model") or metadata.get("default_model") or "").strip()
+        prompt = _text(arguments.get("prompt"), "prompt", max_length=16000)
+        schema = arguments.get("output_schema") or {"type": "object"}
+        if not isinstance(schema, Mapping) or len(json.dumps(schema, ensure_ascii=False)) > 16000:
+            raise GatewayInputError("output_schema must be a bounded object")
+        workspace_mode = str(arguments.get("workspace_mode") or "isolated").strip().lower()
+        if workspace_mode != "isolated":
+            raise GatewayInputError("MODEL_PROBE_REQUIRES_ISOLATED_WORKSPACE")
+        task_id = self._task_id(arguments, prompt, provider, ["model_probe"])
+        existing = self._assist_read(task_id)
+        if existing is not None:
+            return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.TASK_RUN,
+            request={"task_id": task_id, "provider": provider, "model": model, "prompt": prompt, "output_schema": schema, "context_arm": arguments.get("context_arm")},
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=_git("rev-parse", "HEAD").strip(),
+            allowed_paths=[],
+            mutation=False,
+            permission_profile=PermissionProfile.VERIFY,
+        ).model_dump(mode="json")
+        job_id = f"probe-{uuid4().hex}"
+        root = self._assist_root()
+        stdout_path = root / f"{job_id}.stdout"
+        stderr_path = root / f"{job_id}.stderr"
+        workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
+        probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
+        command = self._assist_command(executable=executable, provider=provider, model=model, prompt=probe_prompt)
+        job: dict[str, Any] = {
+            "schema": "nexus.assisted_provider_job.v1",
+            "job_kind": "model_probe",
+            "task_id": task_id,
+            "job_id": job_id,
+            "attempt_history": [],
+            "action_id": action["action_id"],
+            "attempt_id": action["attempt_id"],
+            "status": "SUBMITTED",
+            "execution_lane": "ASSISTED_CANONICAL",
+            "candidate_only": True,
+            "apply_requested": False,
+            "provider": provider,
+            "model": model,
+            "context_arm": arguments.get("context_arm"),
+            "requested_tools_policy": list(arguments.get("tools_allowed") or []),
+            "workspace_mode": workspace_mode,
+            "workspace_root": str(workspace_root),
+            "filesystem_before": self._snapshot_workspace(workspace_root),
+            "output_schema": dict(schema),
+            "command_hash": hashlib.sha256(json.dumps(command, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "command": command,
+            "submitted_at": self._utc_now(),
+            "started_at": None,
+            "finished_at": None,
+            "provider_time_ms": 0,
+            "stdout_artifact": str(stdout_path),
+            "stderr_artifact": str(stderr_path),
+            "result_artifact": str(self._assist_path(task_id)),
+            "action": action,
+            "connector_disconnected_at": None,
+            "reconnected_at": None,
+        }
+        self._assist_write(job)
+        stdout_handle = stdout_path.open("w", encoding="utf-8")
+        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        try:
+            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+        except Exception:
+            stdout_handle.close()
+            stderr_handle.close()
+            shutil.rmtree(workspace_root, ignore_errors=True)
+            job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+            return self._assist_response(self._assist_write(job), operation="submit")
+        stdout_handle.close()
+        stderr_handle.close()
+        job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
+        with self._assist_lock:
+            self._assist_processes[task_id] = process
+        return self._assist_response(self._assist_write(job), operation="submit")
 
     def _resolve_assisted_worker(self, requested: str, requested_model: str) -> tuple[str, str, str | None]:
         """Resolve provider, exact model, and policy worker ID from one request."""
@@ -603,6 +1104,59 @@ class UnifiedMCPGateway:
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
             },
             {
+                "name": "nexus_provider_preflight",
+                "description": "Verify a registered provider binary, version, identity, and optional exact-model probe.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["provider"],
+                    "properties": {
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "probe": {"type": "boolean", "default": False},
+                        "timeout_seconds": {"type": "number", "minimum": 1, "maximum": 60, "default": 30},
+                    },
+                },
+            },
+            {
+                "name": "nexus_task_card_create",
+                "description": "Create exactly one new governed campaign INDEX and Task Card after explicit owner confirmation.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands"],
+                    "properties": {
+                        "owner_confirmation": {"type": "boolean"},
+                        "campaign_id": {"type": "string"},
+                        "task_id": {"type": "string"},
+                        "objective": {"type": "string"},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                    },
+                },
+            },
+            {
+                "name": "nexus_model_probe",
+                "description": "Run one schema-bound model probe in an isolated workspace and return a durable job.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["provider", "model", "prompt", "output_schema"],
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "prompt": {"type": "string", "maxLength": 16000},
+                        "output_schema": {"type": "object"},
+                        "tools_allowed": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "Requested policy only; provider-specific enforcement is not claimed."},
+                        "workspace_mode": {"type": "string", "enum": ["isolated"], "default": "isolated"},
+                        "context_arm": {"type": "string", "enum": ["bare", "nexus_bounded", "nexus_full"]},
+                    },
+                },
+            },
+            {
+                "name": "nexus_model_probe_result",
+                "description": "Retrieve one durable schema-bound model probe result and filesystem/process receipt.",
+                "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
                 "name": "nexus_candidate_approve",
                 "description": "Approve an exact Candidate binding; approval does not integrate or push.",
                 "inputSchema": {
@@ -643,6 +1197,8 @@ class UnifiedMCPGateway:
         lifecycle = self.service.lifecycle_status()
         return {
             "schema": "nexus.mcp_gateway_status.v1",
+            "public_app_name": PUBLIC_APP_NAME,
+            "namespace_policy": "stable_public_name_with_manifest_revision",
             "server": GATEWAY_NAME,
             "version": GATEWAY_VERSION,
             "tool_manifest_revision": TOOL_MANIFEST_REVISION,
@@ -743,6 +1299,9 @@ class UnifiedMCPGateway:
 
     def _task_retry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
+        assisted = self._assist_read(task_id)
+        if assisted is not None:
+            return self._assist_retry(task_id)
         return self._recovery_payload(self.service.retry_task(task_id), operation="retry", include_state=True)
 
     def _task_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -1355,6 +1914,18 @@ class UnifiedMCPGateway:
             return self._assist_response(self._assist_refresh(task_id) or job, operation="result")
         if name == "nexus_assist_cancel":
             return self._assist_cancel(_text(arguments.get("task_id"), "task_id"))
+        if name == "nexus_provider_preflight":
+            return self._provider_preflight(arguments)
+        if name == "nexus_task_card_create":
+            return self._task_card_create(arguments)
+        if name == "nexus_model_probe":
+            return self._model_probe_submit(arguments)
+        if name == "nexus_model_probe_result":
+            task_id = _text(arguments.get("task_id"), "task_id")
+            job = self._assist_read(task_id)
+            if job is None or job.get("job_kind") != "model_probe":
+                raise KeyError(f"unknown model_probe task_id: {task_id}")
+            return self._assist_response(self._assist_refresh(task_id) or job, operation="result")
         if name == "nexus_candidate_approve":
             return self._candidate_approve(arguments)
         if name == "nexus_candidate_integrate":
@@ -1374,7 +1945,7 @@ class UnifiedMCPGateway:
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": GATEWAY_NAME, "version": GATEWAY_VERSION, "toolManifestRevision": TOOL_MANIFEST_REVISION},
+                    "serverInfo": {"name": GATEWAY_NAME, "title": PUBLIC_APP_NAME, "version": GATEWAY_VERSION, "toolManifestRevision": TOOL_MANIFEST_REVISION},
                 },
             }
         if method == "tools/list":
@@ -1395,3 +1966,12 @@ class UnifiedMCPGateway:
             if response is not None:
                 output_stream.write(json.dumps(response, sort_keys=True, ensure_ascii=False) + "\n")
                 output_stream.flush()
+
+
+# Single manifest truth: every public name is derived from the actual MCP
+# schema returned by tools/list.  No second hand-maintained inventory can drift
+# from connector discovery, status, health, or recommended-tool validation.
+PUBLIC_TOOL_NAMES = tuple(spec["name"] for spec in UnifiedMCPGateway.tool_specs())
+TOOL_MANIFEST_REVISION = hashlib.sha256(
+    json.dumps(PUBLIC_TOOL_NAMES, separators=(",", ":")).encode("utf-8")
+).hexdigest()

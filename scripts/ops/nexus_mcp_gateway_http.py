@@ -20,6 +20,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     CANONICAL_SOURCE_ROOT,
     GATEWAY_NAME,
     GATEWAY_VERSION,
+    PUBLIC_APP_NAME,
     TOOL_MANIFEST_REVISION,
     UnifiedMCPGateway,
 )
@@ -61,6 +62,8 @@ def runtime_identity() -> dict[str, Any]:
     return {
         "status": "ok",
         "server": GATEWAY_NAME,
+        "public_app_name": PUBLIC_APP_NAME,
+        "namespace_policy": "stable_public_name_with_manifest_revision",
         "version": GATEWAY_VERSION,
         "transport": "streamable_http",
         "repo_root": str(CANONICAL_SOURCE_ROOT),

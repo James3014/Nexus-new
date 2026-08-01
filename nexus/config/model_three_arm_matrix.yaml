@@ -118,6 +118,19 @@ models:
     timeout_sec: 240
     resource_tier: free_remote
 
+  cline_glm_52:
+    cohort: candidate
+    provider: cline
+    transport: cline_cli
+    model: glm-5.2
+    resolved_model: cline-pass/glm-5.2
+    timeout_sec: 240
+    resource_tier: cloud_subscription
+    admission_state: REGISTERED_CONDITIONAL
+    candidate_only: true
+    requires_live_preflight: true
+    stable_promotion_proven: false
+
   local_advisor_3b:
     cohort: required
     provider: ollama

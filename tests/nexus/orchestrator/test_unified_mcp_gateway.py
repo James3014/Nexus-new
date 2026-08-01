@@ -11,6 +11,7 @@ sys.path.insert(0, repo_root)
 
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     GATEWAY_NAME,
+    PUBLIC_TOOL_NAMES,
     TOOL_MANIFEST_REVISION,
     UnifiedMCPGateway,
 )
@@ -75,6 +76,15 @@ def test_gateway_has_one_identity_and_bounded_public_surface():
     assert initialized["result"]["serverInfo"]["toolManifestRevision"] == TOOL_MANIFEST_REVISION
     assert len(listed["result"]["tools"]) == len(UnifiedMCPGateway.tool_specs())
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in UnifiedMCPGateway.tool_specs()}
+
+
+def test_manifest_status_and_recommended_tools_share_tools_list_truth():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    names = tuple(tool["name"] for tool in gateway.tool_specs())
+    assert names == PUBLIC_TOOL_NAMES
+    assert gateway.handle({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "nexus_gateway_status", "arguments": {}}})["result"]["structuredContent"]["tool_count"] == len(names)
+    assert TOOL_MANIFEST_REVISION
+    assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
 
 
 def test_gateway_read_and_snapshot_are_bounded():
@@ -467,3 +477,153 @@ def test_cline_task_run_returns_async_assisted_action_with_verify_envelope(monke
     assert payload["action"]["mutation"] is False
     assert payload["action"]["permission_profile"] == "VERIFY"
     assert service.submitted == []
+
+
+def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatch):
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+
+    def fake_run(command, **kwargs):
+        assert command[-1] == "--version"
+        assert kwargs["cwd"] != Path("/Users/jameschen/Workspace/nexus")
+        return SimpleNamespace(returncode=0, stdout="cline 1.2.3\n", stderr="")
+
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 703, "method": "tools/call", "params": {"name": "nexus_provider_preflight", "arguments": {"provider": "cline", "model": "glm-5.2", "probe": True}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "VERSION_VERIFIED"
+    assert payload["blocker"] == "MODEL_PROBE_ASYNC_REQUIRED"
+    assert payload["next_action"] == "nexus_model_probe"
+    assert payload["requested_model"] == "glm-5.2"
+    assert payload["resolved_model"] == "cline-pass/glm-5.2"
+    assert payload["binary_found"] is True
+    assert payload["authenticated"] is False
+    assert payload["model_reachable"] is False
+    assert payload["requested_model_verified"] is False
+    assert payload["binary_sha256"]
+    assert payload["stdout_sha256"] is None
+
+
+def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="f" * 40, stderr=""))
+    gateway = UnifiedMCPGateway(service=FakeService())
+    arguments = {
+        "owner_confirmation": True,
+        "campaign_id": "chatgpt-bootstrap",
+        "task_id": "first-card",
+        "objective": "Create a bounded card from the public MCP surface.",
+        "allowed_files": ["nexus/example.py"],
+        "verifier_commands": ["git diff --check"],
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 704, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": arguments}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "CREATED_PENDING_COMMIT"
+    assert payload["card_hash"] == "f" * 40
+    assert (tmp_path / "tasks/chatgpt-bootstrap/INDEX.md").exists()
+    assert (tmp_path / "tasks/chatgpt-bootstrap/00-first-card.md").exists()
+    second = gateway.handle({"jsonrpc": "2.0", "id": 705, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": arguments}})
+    assert second["result"]["isError"] is True
+    assert "TASK_CARD_CREATE_WOULD_OVERWRITE" in second["result"]["structuredContent"]["error"]
+
+
+def test_task_card_create_hash_failure_leaves_no_campaign(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="hash failed"))
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 7051, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "atomic-failure", "task_id": "card", "objective": "bounded", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    assert response["result"]["isError"] is True
+    assert not (tmp_path / "tasks/atomic-failure").exists()
+    assert not list((tmp_path / "tasks").glob(".atomic-failure.create-*"))
+
+
+def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monkeypatch, tmp_path):
+    class FakePopen:
+        pid = 54003
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 0
+            stdout.write(json.dumps({"probe": "ok"}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    submitted = gateway.handle({"jsonrpc": "2.0", "id": 706, "method": "tools/call", "params": {"name": "nexus_model_probe", "arguments": {"task_id": "probe-cline-1", "provider": "cline", "model": "glm-5.2", "prompt": "Return probe JSON", "output_schema": {"type": "object", "required": ["probe"]}, "context_arm": "bare"}}})
+    first = submitted["result"]["structuredContent"]
+    assert first["status"] == "RUNNING"
+    assert first["job_kind"] == "model_probe"
+    assert first["workspace_mode"] == "isolated"
+    waited = gateway.handle({"jsonrpc": "2.0", "id": 707, "method": "nexus/noop", "params": {}})
+    assert waited["error"]["code"] == -32601
+    result = gateway.handle({"jsonrpc": "2.0", "id": 708, "method": "tools/call", "params": {"name": "nexus_model_probe_result", "arguments": {"task_id": "probe-cline-1"}}})
+    payload = result["result"]["structuredContent"]
+    assert payload["status"] == "COMPLETED"
+    assert payload["result"]["probe"] == "ok"
+    assert payload["process_cleanup"] is True
+    assert payload["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
+    assert payload["schema_validation_level"] == "bounded_subset"
+    assert payload["tool_policy_enforcement"] == "not_enforced"
+
+
+def test_restart_with_lost_process_and_no_exit_marker_fails_closed(tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    job = {
+        "task_id": "lost-provider-1",
+        "job_id": "assist-lost",
+        "job_kind": "model_probe",
+        "status": "RUNNING",
+        "provider": "cline",
+        "model": "cline-pass/glm-5.2",
+        "pid": 999999,
+        "pgid": 999999,
+        "exit_code": None,
+        "workspace_mode": "isolated",
+        "workspace_root": str(tmp_path / "missing-workspace"),
+        "filesystem_before": {},
+        "attempt_history": [],
+    }
+    gateway._assist_write(job)
+    result = gateway.handle({"jsonrpc": "2.0", "id": 709, "method": "tools/call", "params": {"name": "nexus_model_probe_result", "arguments": {"task_id": "lost-provider-1"}}})
+    payload = result["result"]["structuredContent"]
+    assert payload["status"] == "UNKNOWN_REQUIRES_RECONCILE"
+    assert payload["blocker"] == "ASSIST_PROVIDER_PROCESS_LOST"
+    assert payload["next_action"] == "nexus_task_reconcile"
+
+
+def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
+    class FakePopen:
+        pid = 54004
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 0
+            stdout.write(json.dumps({"probe": "wrong"}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway.handle({"jsonrpc": "2.0", "id": 710, "method": "tools/call", "params": {"name": "nexus_model_probe", "arguments": {"task_id": "probe-wrong-schema", "provider": "cline", "model": "glm-5.2", "prompt": "probe", "output_schema": {"type": "object", "required": ["expected"]}}}})
+    result = gateway.handle({"jsonrpc": "2.0", "id": 711, "method": "tools/call", "params": {"name": "nexus_model_probe_result", "arguments": {"task_id": "probe-wrong-schema"}}})
+    payload = result["result"]["structuredContent"]
+    assert payload["status"] == "FAILED"
+    assert payload["blocker"] == "ASSIST_PROVIDER_MALFORMED_OUTPUT"
+    assert payload["schema_error"].startswith("output_schema_missing:")
