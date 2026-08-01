@@ -28,7 +28,8 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 
 ## Ready Cards
 
-- `context-budget-and-overlay-gates`: ready after orphan inventory evidence; required pre-P2 implementation frontier.
+- none; context-budget and overlay evidence is awaiting owner review before
+  lifecycle P2.
 
 ## Completed Cards
 
@@ -40,6 +41,7 @@ Make Agent bootstrap stateful, worktree-local, and machine-verifiable after Work
 - `briefing-overlay-reduction`: INTEGRATED_WITH_OWNER_REVIEW at `e25902e30`; 10 focused tests passed, compact output is task-aware, and legacy output requires explicit opt-in.
 - `workspace-retry-and-permission-gate`: INTEGRATED_WITH_OWNER_REVIEW at `86c197690`; 27 focused lifecycle/CLI tests passed and live retry returned a structured retained-review block without state mutation.
 - `orphan-workspace-reconciliation`: read-only inventory, plan, and actionable-task checks passed on clean canonical HEAD `900701af1`; inventory hash `6672e6457e1ab5335a20b70c114b487b7d888a504e7c7ea8df52f94afa463833`; plan hash `4b918437b967410cb2e7f89023f2caef6a75053ae44729bba3a63df3bf9e3be4`; no releasable or blocked paths and zero actionable tasks.
+- `context-budget-and-overlay-gates`: COMPLETED pending owner review; exact bootstrap/context/briefing gate `15 passed`, shell syntax and diff checks passed; L0/L1/L2 split and conditional Workforce Admission load map are physically present.
 
 ## Blocked Cards
 

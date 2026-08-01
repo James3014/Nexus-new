@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,13 @@ def _render_briefing(tmp_path: Path) -> str:
     )
     assert str(out_file) in result.stdout
     return out_file.read_text(encoding="utf-8")
+
+
+def _current_frontier() -> str:
+    index = Path("tasks/bootstrap-authority-convergence/INDEX.md").read_text(encoding="utf-8")
+    match = re.search(r"## Current Frontier\s+`([^`]+)`", index)
+    assert match, "bootstrap campaign must expose one current frontier"
+    return match.group(1)
 
 
 def test_enforced_briefing_requires_bootstrap_before_active(tmp_path):
@@ -48,7 +56,7 @@ def test_compact_briefing_is_task_aware_and_smaller_than_legacy(tmp_path):
     compact_text = compact_path.read_text(encoding="utf-8")
     legacy_text = legacy_path.read_text(encoding="utf-8")
     assert len(compact_text) < len(legacy_text)
-    assert "task_id: orphan-workspace-reconciliation" in compact_text
+    assert f"task_id: {_current_frontier()}" in compact_text
     assert "workforce_query: python3 scripts/engine/nexus_cli.py workforce status" in compact_text
     assert "authority: non_normative" in legacy_text
 

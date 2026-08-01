@@ -5,7 +5,7 @@
 - task_id: `context-budget-and-overlay-gates`
 - campaign_id: `bootstrap-authority-convergence`
 - artifact_authority: current
-- status: READY
+- status: COMPLETED
 - owner: James Chen
 - depends_on: `orphan-workspace-reconciliation` read-only evidence
 - commit_required: true
@@ -51,6 +51,7 @@ manifest reading.
 - `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`
 - `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`
 - `tests/ops/test_bootstrap_context_budget.py`
+- `tests/ops/test_nexus_enforced_briefing.py`
 - `tasks/bootstrap-authority-convergence/INDEX.md`
 
 ## Forbidden scope
@@ -78,6 +79,15 @@ The L0/L1/L2 split is physically present, normal-task bootstrap no longer
 requires full workforce YAML/policy loading, all authority invariants remain
 machine-tested, and the scoped commit is owner-reviewable. Lifecycle P2 stays
 blocked until this card is integrated.
+
+## Evidence
+
+- `15 passed` from the exact bootstrap/context/briefing pytest command.
+- `bash -n scripts/ops/_nexus_enforced_briefing.sh` passed.
+- `git diff --check` passed.
+- L0 `AGENTS.md` is 5,294 bytes; four L2 overlays total 6,101 bytes.
+- Existing briefing test now derives the current frontier from the campaign
+  index instead of pinning a completed card id.
 
 ## Block classification
 
