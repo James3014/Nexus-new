@@ -1548,6 +1548,113 @@ def test_thirty_task_cutover_matrix_uses_one_of_two_explicit_lanes(tmp_path, mon
     assert not (tmp_path / "nexus-runtime-targets").exists()
 
 
+def test_revalidation_15_direct_10_isolated_5_fault_matrix(tmp_path, monkeypatch):
+    """P7 physical matrix: real commits, real Target cleanup, and fault actions."""
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "config", "user.name", "P7 Matrix")
+    _git(controller, "config", "user.email", "p7@example.test")
+    _git(controller, "commit", "--allow-empty", "-m", "matrix base")
+    _git(controller, "branch", "-M", "nexus/integration/main")
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+
+    direct_receipts = []
+    for index in range(15):
+        base = _git(controller, "rev-parse", "HEAD")
+        relative = f"src/direct-{index}.py"
+        (controller / "src").mkdir(exist_ok=True)
+        (controller / relative).write_text(f"value = {index}\n", encoding="utf-8")
+        _git(controller, "add", relative)
+        _git(controller, "commit", "-m", f"direct matrix {index}")
+        head = _git(controller, "rev-parse", "HEAD")
+        direct_receipts.append(service.complete_direct_canonical({
+            "task_id": f"direct-matrix-{index}",
+            "controller_repo_root": str(controller),
+            "controller_revision": base,
+            "allowed_files": [relative],
+            "verifier_commands": ["/usr/bin/true"],
+            "primary_agent": True,
+            "worker": "primary",
+            "execution_lane": "DIRECT_CANONICAL",
+        }, expected_commit_sha=head))
+
+    assert len(direct_receipts) == 15
+    assert all(item["target_created"] is False and item["state_created"] is False for item in direct_receipts)
+    direct_overheads = sorted(item["telemetry"]["overhead_ms"] for item in direct_receipts)
+    assert direct_overheads[int(len(direct_overheads) * 0.95) - 1] < 1000
+
+    target_root = tmp_path / "isolated-targets"
+    manager = WorktreeManager(root_dir=str(target_root))
+    isolated_controller = tmp_path / "isolated-controller"
+    isolated_controller.mkdir()
+    _init_repo(isolated_controller)
+    _git(isolated_controller, "config", "user.name", "P7 Isolated")
+    _git(isolated_controller, "config", "user.email", "p7-isolated@example.test")
+    (isolated_controller / "README").write_text("base\n", encoding="utf-8")
+    _git(isolated_controller, "add", "README")
+    _git(isolated_controller, "commit", "-m", "isolated base")
+    isolated_base = _git(isolated_controller, "rev-parse", "HEAD")
+    prepare_ms = []
+    release_ms = []
+    for index in range(10):
+        request = _request(
+            tmp_path,
+            task_id=f"isolated-matrix-{index}",
+            controller_revision=isolated_base,
+            target_base_revision=isolated_base,
+            controller_repo_root=str(isolated_controller),
+            target_repo_root=str(target_root / f"placeholder-{index}"),
+            target_worktree_root=str(target_root),
+            allowed_files=["src/"],
+        )
+        contract = service.build_contract(request)
+        started = time.perf_counter()
+        slot = manager.prepare_reusable_slot(contract, campaign_id=f"matrix-{index}", slot_index=0, task_states={})
+        prepare_ms.append((time.perf_counter() - started) * 1000)
+        assert slot.status == "READY"
+        slot_contract = contract.model_copy(update={
+            "target_repo_root": slot.slot_path,
+            "target_worktree_root": str(Path(slot.slot_path).parent),
+        })
+        lease = manager.create_lease(slot_contract)
+        target = Path(lease.target_worktree)
+        (target / "src").mkdir(exist_ok=True)
+        (target / "src" / f"isolated-{index}.txt").write_text("bounded\n", encoding="utf-8")
+        _git(target, "add", "src")
+        _git(target, "commit", "-m", f"isolated matrix {index}")
+        salvage = manager.protect_salvage_head(slot_contract, lease, f"matrix-{index}")
+        started = time.perf_counter()
+        cleanup = manager.cleanup_terminal_target(
+            slot_contract,
+            lease,
+            salvage_commit=str(salvage["salvage_commit_sha"]),
+            salvage_ref=str(salvage["salvage_ref"]),
+        )
+        release_ms.append((time.perf_counter() - started) * 1000)
+        assert cleanup.decision in {"REMOVED", "ALREADY_REMOVED"}
+        assert not target.exists()
+
+    fault_cases = [
+        {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED"},
+        {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "error": "provider"},
+        {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "error": "verifier"},
+        {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES", "error": "commit"},
+        {"status": "INTEGRATION_FAILED", "promotion_status": "INTEGRATION_FAILED", "merge_performed": False, "approved_binding": {"candidate_commit_sha": "a" * 40}},
+    ]
+    expected_tools = [
+        "nexus_self_hosted_retry", "nexus_self_hosted_retry", "nexus_self_hosted_retry",
+        "nexus_self_hosted_cleanup", "nexus_self_hosted_retry_integration",
+    ]
+    actions = [SelfHostedTaskService._task_action_envelope({"task_id": f"fault-{i}", **case}) for i, case in enumerate(fault_cases)]
+    assert [action["recommended_tool"] for action in actions] == expected_tools
+    assert all(action["next_action"] for action in actions)
+    assert sorted(prepare_ms)[int(len(prepare_ms) * 0.95) - 1] < 5000
+    assert sorted(release_ms)[int(len(release_ms) * 0.95) - 1] < 5000
+    assert not (target_root / "serial-slot" / "slot-0").exists()
+
+
 def test_workspace_apply_requires_exact_plan_binding(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = _real_request(tmp_path, task_id="workspace-apply")
