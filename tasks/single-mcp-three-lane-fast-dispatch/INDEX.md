@@ -38,7 +38,7 @@ one explicit executable next action.
 
 ## Current Frontier
 
-`single-mcp-three-lane-p5-isolated-closure`
+`single-mcp-three-lane-p6-runtime-cutover`
 
 ## Completed Cards
 
@@ -47,6 +47,7 @@ one explicit executable next action.
 - `single-mcp-three-lane-p2-dispatch-router`: runtime/scope committed `940a6796d`; Direct receipt `f3550ff6ce91b8ff3a5361343612344e1b3b2907643d3dd610f1bfbb934235c1`
 - `single-mcp-three-lane-p3-assisted-canonical`: runtime committed `e556d507a`; Direct receipt `96685865b699117ab7e8825d3a721336006dcb964e34c171bd4dd3697b314e7a`
 - `single-mcp-three-lane-p4-direct-completion`: runtime committed `123e63994`; Direct receipt `8c4e99504774485d0424cc2712207028b8a148c2024b4fba713cab517dc14f52`
+- `single-mcp-three-lane-p5-isolated-closure`: runtime committed `52db1a004`; Direct receipt `a19a06dbd53c5b4259413f762a15c5e44f053d3a7a59972baf5256aacc4ba83e`
 
 ## Dependencies
 
