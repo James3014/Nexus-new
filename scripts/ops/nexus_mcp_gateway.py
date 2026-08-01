@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway
+from nexus.orchestrator.unified_mcp_gateway import PUBLIC_TOOL_NAMES, UnifiedMCPGateway
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,9 +19,10 @@ def main(argv: list[str] | None = None) -> int:
     gateway = UnifiedMCPGateway()
     if args.self_test:
         response = gateway.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
-        if not response or len(response["result"]["tools"]) != 10:
+        names = tuple(tool["name"] for tool in response["result"]["tools"]) if response else ()
+        if names != PUBLIC_TOOL_NAMES:
             raise SystemExit("gateway self-test failed")
-        print("nexus-mcp-gateway self-test: PASS")
+        print(f"nexus-mcp-gateway self-test: PASS ({len(names)} tools)")
         return 0
     gateway.serve(sys.stdin, sys.stdout)
     return 0
