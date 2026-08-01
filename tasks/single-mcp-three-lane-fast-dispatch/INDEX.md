@@ -38,7 +38,11 @@ one explicit executable next action.
 
 ## Current Frontier
 
-`single-mcp-three-lane-p0-authority`
+`single-mcp-three-lane-p1-authority`
+
+## Completed Cards
+
+- `single-mcp-three-lane-p0-authority`: committed `d5a4547d2`; Direct receipt `cb5c9c358c3062777e69c1a92e54719a5b60ba02f635cfaf5e6a5a3e450e11f5`
 
 ## Dependencies
 

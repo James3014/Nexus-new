@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p0-authority`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: IN_PROGRESS
+- status: COMPLETED
 - owner: James Chen
 - objective: Establish the current Git-tracked authority and bounded implementation frontier for the single MCP three-lane fast-dispatch campaign.
 - read_only: false
@@ -55,6 +55,12 @@ git worktree list --porcelain
 - The index names this card as the only current frontier.
 - The card contains explicit allowed and forbidden scope, verification, and completion gates.
 - Canonical lifecycle actionable count remains zero and no Target is created.
+
+## Completion Evidence
+
+- Scoped commit: `d5a4547d28c44696effaa79e176ef75dbac9475e`
+- Direct receipt: `cb5c9c358c3062777e69c1a92e54719a5b60ba02f635cfaf5e6a5a3e450e11f5`
+- Verification: `git diff --check` passed; `state_created=false`; `target_created=false`.
 
 ## Block Classification
 
