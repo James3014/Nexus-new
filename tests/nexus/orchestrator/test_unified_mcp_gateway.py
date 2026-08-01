@@ -543,6 +543,7 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
     assert captured["command"][captured["command"].index("--model") + 1] == "cline-pass/glm-5.2"
     assert "--plan" in captured["command"]
     assert captured["command"][captured["command"].index("--auto-approve") + 1] == "false"
+    assert captured["command"][captured["command"].index("--timeout") + 1] == "60"
     assert "--yolo" not in captured["command"]
 
 

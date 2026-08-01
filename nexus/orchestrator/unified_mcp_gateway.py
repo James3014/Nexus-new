@@ -66,6 +66,7 @@ PERMISSION_POLICY_HASH = hashlib.sha256(
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
+CLINE_RUN_TIMEOUT_SECONDS = 60
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # Populated from ``UnifiedMCPGateway.tool_specs()`` after the class definition.
@@ -176,7 +177,7 @@ class UnifiedMCPGateway:
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
-            return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--model", selected, prompt]
+            return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
             return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--print-timeout", "25s", "--prompt", prompt]
         if provider == "gemini":
@@ -2215,7 +2216,7 @@ class UnifiedMCPGateway:
             cline_model = selected_model or "glm-5.2"
             if "/" not in cline_model:
                 cline_model = f"cline-pass/{cline_model}"
-            command = [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--model", cline_model, prompt]
+            command = [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", cline_model, prompt]
         elif requested == "gemini":
             command = [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", selected_model, "-p", prompt, "--output-format", "json"]
         elif requested == "opencode":
@@ -2230,7 +2231,7 @@ class UnifiedMCPGateway:
             command = [executable, "--model", selected_model, "--single", prompt, "--output-format", "json", "--no-alt-screen"]
         else:
             command = [executable, "--model", selected_model, "--prompt", prompt]
-        provider_timeout = 90 if requested == "cline" else 30
+        provider_timeout = CLINE_RUN_TIMEOUT_SECONDS + 5 if requested == "cline" else 30
         try:
             result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=provider_timeout, check=False)
         except subprocess.TimeoutExpired as exc:
