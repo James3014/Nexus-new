@@ -7,8 +7,9 @@ source_spec: Corrected governed AGY account-pool runtime integration
 ordered_cards:
   - 00-agy-account-pool-runtime-integration.md
   - 01-agy-account-pool-real-manager-runtime-closure.md
+  - 02-agy-gateway-executable-authority-convergence.md
 dependencies: []
-current_frontier: 01-agy-account-pool-real-manager-runtime-closure.md
+current_frontier: 02-agy-gateway-executable-authority-convergence.md
 completed_cards:
   - 00-agy-account-pool-runtime-integration.md
 blocked_cards: []

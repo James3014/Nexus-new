@@ -35,7 +35,7 @@ from nexus.contracts.lifecycle_action import (
     build_action_envelope,
 )
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
-from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
+from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY, resolve_registered_provider_executable
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
@@ -775,12 +775,11 @@ class UnifiedMCPGateway:
         metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)
         if metadata is None:
             return {}, None
-        binary_env = metadata.get("binary_env", "")
-        configured = os.environ.get(binary_env, "").strip() if binary_env else ""
-        executable = configured or shutil.which(metadata.get("binary_name", provider))
-        if not executable or not Path(executable).is_file() or not os.access(executable, os.X_OK):
+        try:
+            executable = resolve_registered_provider_executable(provider)
+        except ValueError:
             return metadata, None
-        return metadata, executable
+        return metadata, str(Path(executable).resolve())
 
     def _provider_preflight(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()

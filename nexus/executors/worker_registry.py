@@ -19,6 +19,7 @@ from nexus.executors.worker_contract import (
     WorkerPreflight,
     WorkerProviderUnavailable,
 )
+from nexus.services.unified_runtime import resolve_registered_provider_executable
 
 
 class CodexWorkerAdapter:
@@ -209,18 +210,19 @@ class AgyWorkerAdapter:
         self._injected_account_pool = account_pool
 
     def _configured_executable(self) -> str:
-        configured = os.getenv(self.executable_env, "").strip()
-        if configured:
-            return str(Path(configured).expanduser())
-        # Prefer the process PATH so a Gateway launched with a non-login shell
-        # can still discover the installed executable.  Fall back to the
-        # conventional per-user location without embedding a user-specific
-        # absolute path in production source.
-        discovered = shutil.which("agy")
-        if discovered:
-            return str(Path(discovered).resolve())
-        home = os.getenv("HOME")
-        return str((Path(home).expanduser() if home else Path.home()) / ".local/bin/agy")
+        try:
+            return resolve_registered_provider_executable("agy")
+        except ValueError:
+            # Preserve a deterministic diagnostic path for preflight while
+            # keeping alias mismatch/non-executable states fail closed.
+            configured = os.getenv(self.executable_env, "").strip()
+            if configured:
+                return str(Path(configured).expanduser())
+            discovered = shutil.which("agy")
+            if discovered:
+                return str(Path(discovered).resolve())
+            home = os.getenv("HOME")
+            return str((Path(home).expanduser() if home else Path.home()) / ".local/bin/agy")
 
     def _project_id(self) -> str:
         return os.getenv(self.project_id_env, "").strip()
@@ -273,9 +275,12 @@ class AgyWorkerAdapter:
     def preflight(self) -> WorkerPreflight:
         executable = self._configured_executable()
         resolved = shutil.which(executable)
-        authorized = os.getenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "0") == "1"
+        authorized = (
+            os.getenv("NEXUS_AGY_RUNTIME_AUTHORIZED", "0") == "1"
+            or os.getenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "0") == "1"
+        )
         if not authorized:
-            reason = "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1 is required"
+            reason = "NEXUS_AGY_RUNTIME_AUTHORIZED=1 is required"
         elif resolved is None:
             reason = f"executable not found: {executable}"
         else:

@@ -1596,6 +1596,44 @@ def resolve_registered_online_cli_spec(
     return spec
 
 
+def resolve_registered_provider_executable(
+    provider: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the physical executable shared by Gateway and worker adapters.
+
+    AGY historically had two environment aliases (``NEXUS_AGY_BIN`` at the
+    Gateway edge and ``NEXUS_AGY_EXECUTABLE`` in the worker).  Treat them as
+    aliases of one authority and fail closed when they point at different
+    binaries instead of allowing route-specific drift.
+    """
+    key = str(provider or "").strip().lower()
+    metadata = ONLINE_CLI_SPEC_REGISTRY.get(key)
+    if metadata is None:
+        raise ValueError("provider_not_registered")
+    env = dict(environ or os.environ)
+    names = [metadata["binary_env"]]
+    if key == "agy":
+        names.append("NEXUS_AGY_EXECUTABLE")
+    candidates: list[str] = []
+    for name in names:
+        value = str(env.get(name, "") or "").strip()
+        if not value:
+            continue
+        resolved = shutil.which(value) or value
+        candidates.append(str(Path(resolved).expanduser().resolve()))
+    if candidates and len(set(candidates)) != 1:
+        raise ValueError("provider_executable_alias_mismatch")
+    executable = candidates[0] if candidates else shutil.which(metadata["binary_name"])
+    if not executable:
+        raise ValueError("provider_binary_not_found")
+    path = Path(executable).expanduser().resolve()
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise ValueError("provider_binary_not_executable")
+    return str(path)
+
+
 def build_subprocess_online_invoker(
     spec: OnlineCliSpec,
     *,

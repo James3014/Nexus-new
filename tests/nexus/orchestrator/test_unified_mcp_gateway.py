@@ -728,6 +728,18 @@ def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatc
     assert payload["stdout_sha256"] is None
 
 
+def test_gateway_provider_executable_uses_shared_registered_resolver(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "resolve_registered_provider_executable", lambda provider: "/bin/echo")
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    metadata, executable = gateway._provider_executable("agy")
+
+    assert metadata["binary_env"] == "NEXUS_AGY_BIN"
+    assert executable == "/bin/echo"
+
+
 def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 

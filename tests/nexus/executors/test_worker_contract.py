@@ -49,6 +49,7 @@ def test_unauthorized_provider_fails_closed_even_when_binary_is_installed(monkey
 
 def test_agy_adapter_requires_external_runtime_authorization(monkeypatch, tmp_path):
     monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    monkeypatch.delenv("NEXUS_AGY_RUNTIME_AUTHORIZED", raising=False)
     monkeypatch.setenv("NEXUS_AGY_PROJECT_ID", "project-123")
     monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
     adapter = AgyWorkerAdapter()
@@ -59,12 +60,23 @@ def test_agy_adapter_requires_external_runtime_authorization(monkeypatch, tmp_pa
     assert preflight.ready is False
     assert preflight.authorized is False
     assert preflight.implementation_status == "IMPLEMENTED"
-    with pytest.raises(WorkerProviderUnavailable, match="NEXUS_EXTERNAL_RUNTIME_AUTHORIZED"):
+    with pytest.raises(WorkerProviderUnavailable, match="NEXUS_AGY_RUNTIME_AUTHORIZED"):
         adapter.invoke(
             type("Contract", (), {"task_id": "agy-task"})(),
             type("Lease", (), {"target_worktree": str(tmp_path)})(),
             prompt="bounded",
         )
+
+
+def test_agy_adapter_accepts_provider_scoped_runtime_authorization(monkeypatch):
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    monkeypatch.setenv("NEXUS_AGY_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+
+    preflight = AgyWorkerAdapter().preflight()
+
+    assert preflight.ready is True
+    assert preflight.authorized is True
 
 
 def test_agy_adapter_uses_isolated_project_without_project_id(monkeypatch):

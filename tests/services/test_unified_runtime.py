@@ -40,6 +40,7 @@ from nexus.services.unified_runtime import (
     build_subprocess_online_invoker,
     extract_online_stage_payload,
     resolve_online_transport_binding,
+    resolve_registered_provider_executable,
     resolve_registered_online_cli_spec,
 )
 from nexus.contracts.unified_runtime_receipt import validate_failure_diagnostics
@@ -1704,6 +1705,33 @@ def test_registered_cli_spec_resolver_prefers_provider_command_env() -> None:
     )
 
     assert spec.command == ("/opt/codex-wrapper", "--stdin", "--output", "plain")
+
+
+def test_registered_provider_executable_unifies_agy_aliases(monkeypatch) -> None:
+    monkeypatch.setattr("nexus.services.unified_runtime.shutil.which", lambda value: "/bin/echo")
+    resolved = resolve_registered_provider_executable(
+        "agy",
+        environ={
+            "NEXUS_AGY_BIN": "/bin/echo",
+            "NEXUS_AGY_EXECUTABLE": "/bin/echo",
+        },
+    )
+    assert resolved == "/bin/echo"
+
+
+def test_registered_provider_executable_rejects_agy_alias_drift(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.shutil.which",
+        lambda value: value,
+    )
+    with pytest.raises(ValueError, match="provider_executable_alias_mismatch"):
+        resolve_registered_provider_executable(
+            "agy",
+            environ={
+                "NEXUS_AGY_BIN": "/opt/agy/bin/agy-a",
+                "NEXUS_AGY_EXECUTABLE": "/opt/agy/bin/agy-b",
+            },
+        )
 
 
 def test_registered_online_invoker_fails_closed_without_external_authorization(monkeypatch) -> None:
