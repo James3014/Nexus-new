@@ -40,7 +40,7 @@ one explicit executable next action.
 
 ## Current Frontier
 
-`single-mcp-three-lane-p10-compatibility-adapter-cutover`
+`single-mcp-three-lane-p9-external-connector-cutover`
 
 ## Completed Cards
 
@@ -53,6 +53,7 @@ one explicit executable next action.
 - `single-mcp-three-lane-p6-runtime-cutover`: runtime committed `595b83c95`; Direct receipt `a63177872d989fe16e792ebebbe8a5fc81e01edb58da00e48cfc84bfa9841996`
 - `single-mcp-three-lane-p7-telemetry`: runtime committed `b05c3730c`; Direct receipt `31fc2111469a136275990d2e7bfe8e5782675f5108e0cf4cb5e80be7c144b057`
 - `single-mcp-three-lane-p8-soak-gate`: runtime committed `cb44a1177`; Direct receipt `ec89709f87b7685f8481ae9a15ea1ce75c290804abbeba92de4346dabbbb36b7`
+- `single-mcp-three-lane-p10-compatibility-adapter-cutover`: runtime committed `4c8604928`; Direct receipt `3ef82182e7dd13dec3470594f2c08d1bbbe863c7a26ddf1519f8455d7209ef7c`
 
 ## Dependencies
 
