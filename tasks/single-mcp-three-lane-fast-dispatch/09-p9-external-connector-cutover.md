@@ -5,7 +5,7 @@
 - task_id: `single-mcp-three-lane-p9-external-connector-cutover`
 - campaign_id: `single-mcp-three-lane-fast-dispatch`
 - artifact_authority: current
-- status: HARD_BLOCK
+- status: IN_PROGRESS
 - owner: James Chen
 - objective: Replace the stale external DevSpace MCP surface with the canonical Nexus gateway and prove fresh artifact identity across two clean starts before claiming one GPT-visible MCP registration.
 - read_only: true
@@ -43,3 +43,9 @@ Owner must authorize a separate external-artifact cutover task with exact allowe
 external files, install/restart commands, connector identity, and rollback
 surface. Until then the canonical gateway implementation is complete through
 P8, but the campaign completion gate remains open.
+
+## Unblock Evidence
+
+- Owner authorization received in the active continuation on 2026-08-01.
+- Execution is bounded by P13's exact external allowed files and formal build
+  and two-start verification gates.

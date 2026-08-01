@@ -39,10 +39,11 @@ one explicit executable next action.
 11. `10-p10-compatibility-adapter-cutover.md` - `single-mcp-three-lane-p10-compatibility-adapter-cutover`
 12. `11-p11-gateway-contract-hardening.md` - `single-mcp-three-lane-p11-gateway-contract-hardening`
 13. `12-p12-finish-contract-alias.md` - `single-mcp-three-lane-p12-finish-contract-alias`
+14. `13-p13-external-gateway-cutover.md` - `single-mcp-three-lane-p13-external-gateway-cutover`
 
 ## Current Frontier
 
-`single-mcp-three-lane-p9-external-connector-cutover`
+`single-mcp-three-lane-p13-external-gateway-cutover`
 
 ## Completed Cards
 
@@ -65,18 +66,22 @@ P1 depends on P0. P2 depends on P1. P3 and P4 depend on P2. P5 depends on
 the existing lifecycle closure and P1. P6 depends on P1-P5. P7 depends on
 P2-P6. P8 depends on every implementation card and fresh runtime inventory.
 P9 requires an owner-authorized external artifact refresh and connector
-registration; it is not executable under the current campaign forbidden scope.
+registration; owner authorization was supplied in the active continuation and
+is bounded by P13's exact external allowed files and verification gates.
 P10 is a corrective compatibility-adapter card: it closes the stale P0 wrapper
 behavior without mutating the external DevSpace repository.
 P11 hardens the canonical gateway receipt contract and does not authorize any
 external provider transmission or connector mutation.
 P12 closes the public Direct finish contract using the gateway's `base_sha`
 alias; it is canonical-only and does not alter external registration.
+P13 is owner-authorized on 2026-08-01 to update the external DevSpace source,
+build/install its immutable artifact, and perform the two-start connector gate.
 
 ## Global Forbidden Scope
 
 - No direct lifecycle JSON edits.
-- No mutation of `/Users/jameschen/Workspace/nexus-devspace-mcp` in this campaign.
+- No mutation of `/Users/jameschen/Workspace/nexus-devspace-mcp` outside the
+  exact P13 Allowed Files exception.
 - No public connector cutover before identity, security, and two-start gates pass.
 - No worker approval, integration, push, protected history rewrite, or branch/ref deletion.
 - No use or recreation of `nexus-worktrees`.
