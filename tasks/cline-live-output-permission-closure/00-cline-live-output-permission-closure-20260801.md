@@ -47,13 +47,16 @@ Owner review of the exact scoped commit.
   receipt explicitly records `allowlist_not_enforced`
 - timeout/cancel distinction: poll timeout remains non-destructive; explicit
   cancel retains SIGTERM/SIGKILL bounded cleanup and isolated workspace receipt
+- cancel receipts now hash and size flushed stdout/stderr after bounded process
+  termination (`stream_flush_status=FLUSHED`); the focused regression covers
+  emitted partial streams plus workspace cleanup
 - direct live binary probe: `PASS` (Cline 3.0.48, resolved model
   `cline-pass/glm-5.2`, exit 0, real NDJSON `run_start`/`agent_event`/`run_result`,
   exact model evidence, no canonical mutation)
 - Gateway live candidate attempt: `RECOVERABLE_BLOCK`
 - Gateway cancel acceptance: `PASS` for both bounded attempts; each recorded
   `CANCELLED`, `process_killed=true`, `process_cleanup=true`, isolated workspace
-  removed, and canonical HEAD/diff unchanged
+  removed, flushed stream hashes, and canonical HEAD/diff unchanged
 - blocker: Gateway Cline path can still enter provider tool calls in a
   non-interactive session despite `--plan --auto-approve false`; no physical
   no-tool/allowlist enforcement is available, so the bounded candidate cannot

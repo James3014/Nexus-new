@@ -634,6 +634,10 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
 
         def __init__(self, command, *, stdout, stderr, **kwargs):
             self.command = command
+            stdout.write("partial provider output\\n")
+            stdout.flush()
+            stderr.write("partial provider warning\\n")
+            stderr.flush()
 
         def poll(self):
             return None
@@ -652,6 +656,9 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     assert receipt["status"] == "CANCELLED"
     assert receipt["process_killed"] is True
     assert receipt["process_cleanup"] is True
+    assert receipt["stream_flush_status"] == "FLUSHED"
+    assert receipt["stdout_sha256"]
+    assert receipt["stderr_sha256"]
     assert not Path(receipt["workspace_root"]).exists()
 
 

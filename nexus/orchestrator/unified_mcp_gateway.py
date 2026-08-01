@@ -361,19 +361,14 @@ class UnifiedMCPGateway:
             "status": "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED",
             "finished_at": self._utc_now(),
             "exit_code": returncode,
-            "stdout_sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
-            "stderr_sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
-            "stdout_bytes": len(stdout.encode("utf-8")),
-            "stderr_bytes": len(stderr.encode("utf-8")),
             "result": parsed,
             "blocker": ("ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and (parsed is None or not schema_valid) else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)),
             "schema_error": schema_error,
             "schema_validation_level": "bounded_subset",
             "provider_error": stderr[-1000:] if returncode != 0 else "",
             "provider_time_ms": provider_time_ms,
-            "last_stdout_at": datetime.fromtimestamp(stdout_path.stat().st_mtime, tz=timezone.utc).isoformat() if stdout_path.exists() else None,
-            "last_stderr_at": datetime.fromtimestamp(stderr_path.stat().st_mtime, tz=timezone.utc).isoformat() if stderr_path.exists() else None,
         })
+        self._assist_record_stream_artifacts(job)
         workspace_root = Path(str(job.get("workspace_root") or ""))
         if workspace_root.exists() and workspace_root != CANONICAL_SOURCE_ROOT:
             after = self._snapshot_workspace(workspace_root)
@@ -447,6 +442,7 @@ class UnifiedMCPGateway:
             "filesystem_delta": job.get("filesystem_delta", {"created": [], "removed": [], "changed": []}),
             "process_cleanup": job.get("process_cleanup", False),
             "process_killed": bool(job.get("process_killed", False)),
+            "stream_flush_status": job.get("stream_flush_status", "not_observed"),
             "connector_disconnected_at": job.get("connector_disconnected_at"),
             "reconnected_at": job.get("reconnected_at"),
             "artifacts": {"stdout": job.get("stdout_artifact"), "stderr": job.get("stderr_artifact")},
@@ -588,6 +584,41 @@ class UnifiedMCPGateway:
             job["process_cleanup"] = False
             job["cleanup_error"] = str(exc)
 
+    @staticmethod
+    def _assist_record_stream_artifacts(job: dict[str, Any]) -> None:
+        """Record flushed stdout/stderr evidence after the child has exited.
+
+        Cancellation must not report cleanup closure while leaving the durable
+        receipt without the bytes that were already emitted.  Reading after a
+        bounded wait/reap makes the hashes an observation of the final files,
+        not a promise that the provider completed successfully.
+        """
+        streams = {
+            "stdout": Path(str(job.get("stdout_artifact") or "")),
+            "stderr": Path(str(job.get("stderr_artifact") or "")),
+        }
+        complete = True
+        for name, path in streams.items():
+            if not path.exists():
+                complete = False
+                job[f"{name}_sha256"] = None
+                job[f"{name}_bytes"] = 0
+                job[f"last_{name}_at"] = None
+                continue
+            try:
+                data = path.read_bytes()
+                stat = path.stat()
+            except OSError:
+                complete = False
+                job[f"{name}_sha256"] = None
+                job[f"{name}_bytes"] = 0
+                job[f"last_{name}_at"] = None
+                continue
+            job[f"{name}_sha256"] = hashlib.sha256(data).hexdigest()
+            job[f"{name}_bytes"] = len(data)
+            job[f"last_{name}_at"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+        job["stream_flush_status"] = "FLUSHED" if complete else "PARTIAL_OR_MISSING"
+
     def _assist_cancel(self, task_id: str) -> dict[str, Any]:
         job = self._assist_refresh(task_id)
         if job is None:
@@ -599,6 +630,7 @@ class UnifiedMCPGateway:
                 "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
                 "process_killed": False,
             })
+            self._assist_record_stream_artifacts(job)
             self._cleanup_assist_workspace(job)
             self._assist_write(job)
         elif job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
@@ -644,6 +676,7 @@ class UnifiedMCPGateway:
                 "process_killed": terminated,
                 "exit_code": process.returncode if process is not None else None,
             })
+            self._assist_record_stream_artifacts(job)
             self._cleanup_assist_workspace(job)
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
