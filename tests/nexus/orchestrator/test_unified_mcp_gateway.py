@@ -94,11 +94,28 @@ def test_task_run_routes_small_request_direct_without_target_fields():
 
 def test_task_run_assisted_is_fail_closed_without_side_effect():
     service = FakeService()
-    gateway = UnifiedMCPGateway(service=service)
+    gateway = UnifiedMCPGateway(service=service, model_runner=lambda **_: {"provider": "agy", "blocker": "ASSIST_PROVIDER_UNAVAILABLE"})
     response = gateway.handle({"jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "FINAL_BLOCK"
-    assert payload["blocker"] == "ASSISTED_CANONICAL_NOT_IMPLEMENTED"
+    assert payload["blocker"] == "ASSIST_PROVIDER_UNAVAILABLE"
+    assert service.submitted == []
+
+
+def test_task_run_assisted_applies_injected_bounded_patch_without_target():
+    service = FakeService()
+    applied = []
+    gateway = UnifiedMCPGateway(
+        service=service,
+        model_runner=lambda **_: {"provider": "agy", "patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@\n"},
+        apply_runner=lambda **kwargs: applied.append(kwargs) or {"status": "DIRECT_CANONICAL_COMPLETED", "target_created": False, "state_created": False},
+    )
+    gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
+    response = gateway.handle({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
+    assert payload["route_authority"] == "CapabilityPlanner"
+    assert len(applied) == 1
     assert service.submitted == []
 
 

@@ -9,8 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import fcntl
+import os
 import re
+import shlex
+import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -91,8 +96,10 @@ def _bounded_text(value: str, field: str) -> str:
 class UnifiedMCPGateway:
     """JSON-RPC MCP server with one public identity and bounded tools."""
 
-    def __init__(self, service: Optional[SelfHostedTaskService] = None):
+    def __init__(self, service: Optional[SelfHostedTaskService] = None, *, model_runner: Any = None, apply_runner: Any = None):
         self.service = service or SelfHostedTaskService()
+        self._model_runner = model_runner or self._run_agy_plan
+        self._apply_runner = apply_runner or self._apply_assisted_patch
 
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
@@ -159,6 +166,7 @@ class UnifiedMCPGateway:
                         "preferred_worker": {"type": "string", "default": "auto"},
                         "task_card_path": {"type": "string"},
                         "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "apply": {"type": "boolean", "default": True},
                     },
                 },
             },
@@ -342,20 +350,29 @@ class UnifiedMCPGateway:
             **route,
         }
         if route["execution_lane"] == "ASSISTED_CANONICAL":
-            return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSISTED_CANONICAL_NOT_IMPLEMENTED", "next_action": "implement_assisted_canonical"}
-        request = {
-            "task_id": task_id,
-            "what": what,
-            "why": why,
-            "controller_revision": base,
-            "target_base_revision": base,
-            "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
-            "target_repo_root": f"/Users/jameschen/Workspace/nexus-runtime-targets/{task_id}",
-            "target_worktree_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
-            "allowed_files": allowed,
-            "verifier_commands": list(arguments.get("verifier_commands") or ["git diff --check"]),
-            "execution_lane": route["execution_lane"],
-        }
+            prompt = self._assist_prompt(what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]))
+            started = time.perf_counter()
+            try:
+                proposal = self._model_runner(prompt=prompt, allowed_files=allowed, provider=str(arguments.get("preferred_worker") or "agy"))
+            except Exception as exc:
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PROVIDER_FAILED", "error": str(exc), "next_action": "inspect_provider_or_retry_same_task"}
+            provider_time_ms = max(0, int((time.perf_counter() - started) * 1000))
+            if not proposal.get("patch"):
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": str(proposal.get("blocker") or "EMPTY_ASSIST_PATCH"), "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "next_action": "inspect_provider_or_retry_same_task"}
+            try:
+                changed = self._validate_assisted_patch(str(proposal["patch"]), allowed)
+            except Exception as exc:
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_PATCH_REJECTED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "next_action": "inspect_provider_or_retry_same_task"}
+            if not bool(arguments.get("apply", True)):
+                return {**envelope, "status": "ASSISTED_CANONICAL_PROPOSAL_READY", "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "patch": str(proposal["patch"]), "changed_files": changed, "next_action": "apply_assisted_candidate"}
+            request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base)
+            try:
+                applied = self._apply_runner(patch=str(proposal["patch"]), request=request, provider=str(proposal.get("provider") or "agy"), provider_time_ms=provider_time_ms)
+            except Exception as exc:
+                return {**envelope, "status": "FINAL_BLOCK", "blocker": "ASSIST_APPLY_FAILED", "error": str(exc), "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "next_action": "inspect_provider_or_retry_same_task"}
+            return {**envelope, "status": "ASSISTED_CANONICAL_COMPLETED", "provider": proposal.get("provider", "unknown"), "provider_time_ms": provider_time_ms, "changed_files": changed, "receipt": applied, "next_action": "none"}
+        request = self._canonical_request(task_id, what, why, allowed, list(arguments.get("verifier_commands") or ["git diff --check"]), base)
+        request.update({"execution_lane": route["execution_lane"]})
         if route["execution_lane"] == "DIRECT_CANONICAL":
             request.update({"primary_agent": True, "worker": "primary"})
             return {**envelope, "status": "DIRECT_CANONICAL_READY", "next_action": "edit_canonical_then_nexus_task_finish", "handoff": self.service.submit_task(request)}
@@ -363,6 +380,121 @@ class UnifiedMCPGateway:
             return {**envelope, "status": "FINAL_BLOCK", "blocker": "TASK_CARD_BINDING_REQUIRED", "next_action": "provide_task_card_path_and_hash"}
         request.update({"worker": worker if worker != "auto" else "codex", "task_card_path": arguments["task_card_path"], "task_card_hash": arguments["task_card_hash"]})
         return {**envelope, "status": "ISOLATED_TARGET_SUBMITTED", "next_action": "wait_for_task", "handoff": self.service.submit_task(request)}
+
+    @staticmethod
+    def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str) -> dict[str, Any]:
+        return {
+            "task_id": task_id, "what": what, "why": why,
+            "controller_revision": base, "target_base_revision": base,
+            "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
+            "target_repo_root": f"/Users/jameschen/Workspace/nexus-runtime-targets/{task_id}",
+            "target_worktree_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
+            "allowed_files": allowed, "verifier_commands": verifiers,
+        }
+
+    @staticmethod
+    def _assist_prompt(what: str, why: str, allowed: list[str], verifiers: list[str]) -> str:
+        context: list[str] = []
+        for raw in allowed:
+            path = _safe_relative_path(raw, "allowed_files")
+            if path.is_file() and path.stat().st_size <= 128 * 1024:
+                context.append(f"FILE {raw}\n{path.read_text(encoding='utf-8')}\nEND FILE")
+        return (
+            "You are a bounded patch proposer. Use plan/read-only mode. Do not edit files, run tools, or commit. "
+            "Return only JSON matching the requested schema, with a unified diff in patch. "
+            f"WHAT: {what}\nWHY: {why}\nALLOWED FILES: {', '.join(allowed)}\nVERIFIERS: {verifiers}\n" + "\n".join(context)
+        )
+
+    @staticmethod
+    def _run_agy_plan(*, prompt: str, allowed_files: list[str], provider: str) -> dict[str, Any]:
+        if provider not in {"", "auto", "agy"}:
+            return {"provider": provider, "blocker": "ASSIST_PROVIDER_NOT_AUTHORIZED"}
+        executable = shutil.which("agy") or "/Users/jameschen/.local/bin/agy"
+        if not Path(executable).is_file():
+            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_UNAVAILABLE"}
+        schema = json.dumps({"type": "object", "required": ["patch"], "properties": {"patch": {"type": "string"}, "summary": {"type": "string"}, "tests": {"type": "array", "items": {"type": "string"}}}}, separators=(",", ":"))
+        model = os.environ.get("NEXUS_ASSIST_MODEL", "")
+        command = [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--json-schema", schema, "--effort", "low"]
+        if model:
+            command.extend(["--model", model])
+        command.extend(["--print-timeout", "25s", "--prompt", prompt])
+        result = subprocess.run(command, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
+        if result.returncode != 0:
+            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_FAILED", "error": result.stderr.strip()[-1000:]}
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
+        if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
+            payload = payload["result"]
+        if not isinstance(payload, dict):
+            return {"provider": "agy", "blocker": "ASSIST_PROVIDER_MALFORMED_OUTPUT"}
+        payload["provider"] = "agy"
+        return payload
+
+    @staticmethod
+    def _validate_assisted_patch(patch: str, allowed: list[str]) -> list[str]:
+        if not patch.startswith("diff --git "):
+            raise GatewayInputError("assist output must begin with diff --git")
+        changed: list[str] = []
+        for line in patch.splitlines():
+            if line.startswith("+++ b/"):
+                path = line[6:]
+                _safe_relative_path(path, "assist patch")
+                changed.append(path)
+            if line.startswith("+++ /dev/null"):
+                raise GatewayInputError("assist deletions are forbidden")
+        changed = sorted(set(changed))
+        if not changed:
+            raise GatewayInputError("assist patch has no changed files")
+        for path in changed:
+            if not any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed):
+                raise GatewayInputError(f"assist patch changed file outside allowed_files: {path}")
+        check = subprocess.run(["git", "apply", "--check", "--binary", "--whitespace=nowarn", "-"], cwd=CANONICAL_SOURCE_ROOT, input=patch, capture_output=True, text=True, timeout=5, check=False)
+        if check.returncode != 0:
+            raise GatewayInputError(check.stderr.strip() or "assist patch does not apply cleanly")
+        return changed
+
+    def _apply_assisted_patch(self, *, patch: str, request: Mapping[str, Any], provider: str, provider_time_ms: int) -> dict[str, Any]:
+        lock_path = Path("/tmp/nexus-mcp-gateway-canonical.lock")
+        with lock_path.open("w", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            if _git("status", "--porcelain=v1").strip():
+                raise RuntimeError("canonical checkout must be clean")
+            base = _git("rev-parse", "HEAD").strip()
+            if base != request["controller_revision"]:
+                raise RuntimeError("canonical revision drift")
+            changed = self._validate_assisted_patch(patch, list(request["allowed_files"]))
+            applied = False
+            try:
+                apply_result = subprocess.run(["git", "apply", "--binary", "--whitespace=nowarn", "-"], cwd=CANONICAL_SOURCE_ROOT, input=patch, capture_output=True, text=True, timeout=10, check=False)
+                if apply_result.returncode != 0:
+                    raise RuntimeError(apply_result.stderr.strip() or "assist patch apply failed")
+                applied = True
+                changed_after = _git("diff", "--name-only").splitlines()
+                if sorted(changed_after) != changed or _git("diff", "--diff-filter=D", "--name-only").strip():
+                    raise RuntimeError("assist patch scope or deletion gate failed")
+                for command in request.get("verifier_commands") or ["git diff --check"]:
+                    tokens = shlex.split(str(command))
+                    if not tokens or any(token in {";", "&&", "||", "|", ">", "`"} for token in tokens):
+                        raise RuntimeError("verifier command is not bounded")
+                    if tokens[:2] in (["git", "commit"], ["git", "push"], ["git", "merge"], ["git", "reset"], ["git", "clean"]):
+                        raise RuntimeError("verifier command may not mutate lifecycle state")
+                    result = subprocess.run(tokens, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"verifier failed: {command}: {result.stderr.strip()}")
+                subprocess.run(["git", "add", "--", *changed], cwd=CANONICAL_SOURCE_ROOT, check=True, capture_output=True, text=True)
+                commit = subprocess.run(["git", "commit", "-m", f"feat(assist): apply bounded model patch {request['task_id']}"], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, check=False)
+                if commit.returncode != 0:
+                    raise RuntimeError(commit.stderr.strip() or "assist commit failed")
+                receipt = self.service.complete_direct_canonical({**dict(request), "execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary"}, expected_commit_sha=_git("rev-parse", "HEAD").strip())
+                receipt.setdefault("telemetry", {}).update({"provider_time_ms": provider_time_ms, "worktree_time_ms": 0})
+                return receipt
+            except Exception:
+                if applied:
+                    subprocess.run(["git", "reset", "--", *changed], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, check=False)
+                    subprocess.run(["git", "apply", "-R", "--binary", "--whitespace=nowarn", "-"], cwd=CANONICAL_SOURCE_ROOT, input=patch, capture_output=True, text=True, check=False)
+                raise
 
     def _finish(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()
