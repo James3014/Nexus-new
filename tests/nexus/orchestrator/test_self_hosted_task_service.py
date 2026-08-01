@@ -24,6 +24,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     SelfHostedTaskService,
     resolve_canonical_target_roots,
     resolve_execution_lane,
+    validate_task_card_binding,
 )
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
@@ -107,6 +108,18 @@ def test_what_why_are_mapped_to_architect_contract(tmp_path):
     assert contract.objective == "Add one bounded canary test"
     assert contract.goal.what == contract.objective
     assert contract.goal.why == "Prove the MCP request becomes a governed task"
+
+
+def test_task_card_relative_path_resolves_from_canonical_root(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state")
+    request = _request(
+        tmp_path,
+        task_id="agy-gateway-executable-authority-convergence",
+        task_card_path="tasks/agy-account-pool-runtime/02-agy-gateway-executable-authority-convergence.md",
+    )
+    contract = service.build_contract(request)
+
+    validate_task_card_binding(contract, request)
     assert contract.preferred_provider == "codex"
     assert contract.human_approval_required is True
 

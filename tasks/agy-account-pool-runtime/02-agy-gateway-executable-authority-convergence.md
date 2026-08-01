@@ -26,9 +26,11 @@ enabling the account pool for unrelated providers by default.
 
 - `nexus/services/unified_runtime.py`
 - `nexus/orchestrator/unified_mcp_gateway.py`
+- `nexus/orchestrator/self_hosted_task_service.py`
 - `nexus/executors/worker_registry.py`
 - `tests/services/test_unified_runtime.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
+- `tests/nexus/orchestrator/test_self_hosted_task_service.py`
 - `tests/nexus/executors/test_worker_contract.py`
 - `tests/nexus/orchestrator/test_self_hosted_task_service.py`
 

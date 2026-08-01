@@ -151,7 +151,7 @@ def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping
     card_path_str = request.get("task_card_path")
     card_path = None
     if card_path_str:
-        card_path = Path(card_path_str).expanduser().resolve()
+        card_path = _resolve_task_card_path(card_path_str)
     else:
         possible = Path.cwd() / f"tasks/{task_id}.md"
         if possible.exists():
@@ -218,7 +218,7 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
     card_path_str = request.get("task_card_path")
     card_path = None
     if card_path_str:
-        card_path = Path(card_path_str).expanduser().resolve()
+        card_path = _resolve_task_card_path(card_path_str)
     else:
         task_id = contract.task_id
         possible = Path.cwd() / f"tasks/{task_id}.md"
@@ -247,6 +247,17 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
         "task_card_path": card_path_res,
         "task_card_hash": card_hash,
     }
+
+
+def _resolve_task_card_path(value: str | Path) -> Path:
+    """Resolve a repository-relative card independent of the Gateway cwd."""
+    raw = Path(value).expanduser()
+    if raw.is_absolute():
+        return raw.resolve()
+    direct = raw.resolve()
+    if direct.exists():
+        return direct
+    return (CANONICAL_SOURCE_ROOT / raw).resolve()
 
 
 def validate_lifecycle_revision(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
