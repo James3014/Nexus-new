@@ -38,7 +38,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | VERIFIED_PENDING_OWNER_REVIEW | P3 owner review |
 | 4b | `lifecycle-workflow-p4b-direct-reconcile-closure` | `04b-direct-reconcile-closure.md` | COMPLETED_PENDING_OWNER_REVIEW | P4 recovery surface evidence |
 | 4c | `lifecycle-workflow-mcp-assisted-async-closure` | `04c-mcp-assisted-async-closure.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP execution closure |
-| 4d | `lifecycle-workflow-mcp-closure-complete` | `04d-mcp-closure-complete.md` | ACTIVE | User-prioritized MCP closure completion |
+| 4d | `lifecycle-workflow-mcp-closure-complete` | `04d-mcp-closure-complete.md` | COMPLETED_PENDING_OWNER_REVIEW | User-prioritized MCP closure completion |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
 | 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | PENDING | P5 integrated |
 | 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | PENDING | P6 integrated |

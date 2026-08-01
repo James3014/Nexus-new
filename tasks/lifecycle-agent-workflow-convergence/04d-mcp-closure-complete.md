@@ -3,7 +3,7 @@
 artifact_authority: current
 task_id: `lifecycle-workflow-mcp-closure-complete`
 owner: James Chen
-status: ACTIVE
+status: COMPLETED_PENDING_OWNER_REVIEW
 source_specification: `/Users/jameschen/.codex/attachments/b0b05b05-16f9-4547-8c9c-24ce84a19139/pasted-text.txt`
 commit_required: true
 candidate_required: true
@@ -63,6 +63,21 @@ git diff --check
 Real account authentication/quota may remain a recoverable provider block; it
 must be represented in the preflight/probe receipt, not mistaken for a model
 failure or promotion.
+
+The public `context_arm` input is retained for compatibility but is explicitly
+`record_only_not_applied` until a separate context-bundle calibration card
+implements distinct prompts. Live Cline verification reached the fail-closed
+`ASSIST_PROVIDER_PROCESS_LOST` path after Gateway reload; no provider success
+or account authentication is claimed.
+
+## Candidate evidence
+
+- Commit: `80aee9a0ee2f17523be66324f38f586946cd6bd8`
+- Prior implementation commit: `9cc89684296ca6149dc5efb943b1b2441b77ecd9`
+- Focused gateway tests: 29 passed
+- Focused HTTP tests: 5 passed
+- Live Gateway: `tool_count=24`, manifest `6c1b0339588b313aaf3c8f30f25aa0cf72459850adc7d21b67e52bb89e9c55dd`
+- Live Cline submit/reload/reconcile: `UNKNOWN_REQUIRES_RECONCILE` -> `FAILED/ASSIST_PROVIDER_PROCESS_LOST`, `process_cleanup=true`
 
 ## Block classification
 
