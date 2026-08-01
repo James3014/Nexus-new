@@ -405,7 +405,12 @@ class SelfHostedTaskService:
         promotion_status = str(state.get("promotion_status") or "")
         candidate_commit = cls._candidate_commit(state)
 
-        if status == "DIRECT_RECONCILE_REQUIRED":
+        if status == "DIRECT_RECONCILE_REQUIRED" and state.get("reconciliation_decision") == "RETAINED_FOR_REVIEW":
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "inspect_receipt_and_candidate"
+            recommended_tool = "nexus_task_status"
+        elif status == "DIRECT_RECONCILE_REQUIRED":
             action_state = "FINAL_BLOCK"
             attention_required = True
             next_action = "nexus_task_reconcile"
@@ -1638,10 +1643,137 @@ class SelfHostedTaskService:
             json.dumps(observed, sort_keys=True, separators=(",", ":")),
         )
 
+    def _reconcile_direct_failure(self, task_id: str) -> Optional[dict[str, Any]]:
+        """Close a no-mutation Direct failure without replaying its action."""
+        state = self._read_state(task_id)
+        if state is None:
+            return None
+        if state.get("status") != "DIRECT_RECONCILE_REQUIRED":
+            return state
+        request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+        controller = Path(
+            str(request.get("controller_repo_root") or state.get("controller_worktree") or CANONICAL_SOURCE_ROOT)
+        ).expanduser().resolve()
+        expected_head = str(request.get("controller_revision") or state.get("controller_revision") or "").strip()
+        allowed = {str(path).rstrip("/") for path in request.get("allowed_files") or () if str(path).strip()}
+        observed: dict[str, Any] = {
+            "controller_repo_root": str(controller),
+            "expected_head": expected_head,
+            "current_head": None,
+            "expected_head_is_ancestor": False,
+            "commits_since_base": [],
+            "working_tree_changes": [],
+            "staged_changes": [],
+            "allowed_paths": sorted(allowed),
+            "target_created": bool(state.get("target_worktree") or state.get("lease")),
+            "candidate_created": bool(state.get("candidate_ref") or state.get("candidate_commit_sha") or state.get("promotion_packet")),
+        }
+        probe_error = ""
+        try:
+            observed["current_head"] = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False,
+            ).stdout.strip()
+            if len(expected_head) == 40 and observed["current_head"]:
+                ancestor = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", expected_head, str(observed["current_head"])],
+                    cwd=controller, capture_output=True, text=True, check=False,
+                )
+                observed["expected_head_is_ancestor"] = ancestor.returncode == 0
+                if observed["expected_head_is_ancestor"]:
+                    observed["commits_since_base"] = subprocess.run(
+                        ["git", "diff", "--name-only", f"{expected_head}..HEAD"],
+                        cwd=controller, capture_output=True, text=True, check=False,
+                    ).stdout.splitlines()
+            observed["working_tree_changes"] = subprocess.run(
+                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
+            ).stdout.splitlines()
+            observed["staged_changes"] = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
+            ).stdout.splitlines()
+        except OSError as exc:
+            probe_error = str(exc)
+            observed["probe_error"] = probe_error
+
+        touched = {
+            str(path)
+            for path in (
+                list(observed.get("commits_since_base") or [])
+                + list(observed.get("working_tree_changes") or [])
+                + list(observed.get("staged_changes") or [])
+            )
+        }
+        allowed_touched = sorted(
+            path
+            for path in touched
+            if any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed)
+        )
+        observed["allowed_paths_touched"] = allowed_touched
+        safe_no_mutation = bool(
+            not probe_error
+            and len(expected_head) == 40
+            and bool(observed.get("current_head"))
+            and observed.get("expected_head_is_ancestor") is True
+            and not observed.get("target_created")
+            and not observed.get("candidate_created")
+            and not allowed_touched
+        )
+        action = dict(state.get("canonical_action") or {})
+        reconciliation = dict(action.get("reconciliation") or {})
+        now = _utc_now()
+        if safe_no_mutation:
+            reconciliation.update({
+                "status": "RECONCILED",
+                "decision": "NO_MUTATION_OBSERVED",
+                "evidence": observed,
+                "reconciled_at": now,
+            })
+            action["reconciliation"] = reconciliation
+            return self._checkpoint(
+                task_id,
+                "FINAL_BLOCK",
+                {
+                    "canonical_action": action,
+                    "reconciliation_status": "RECONCILED",
+                    "reconciliation_decision": "NO_MUTATION_OBSERVED",
+                    "reconciliation_evidence": observed,
+                    "reconciliation_required": False,
+                    "cleanup_decision": "ALREADY_REMOVED",
+                    "cleanup_eligible": True,
+                    "cleanup_performed": False,
+                    "promotion_status": "NOT_CREATED",
+                    "terminal_status": "FINAL_BLOCK",
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": True,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+
+        reconciliation.update({
+            "status": "REQUIRED",
+            "decision": "RETAINED_FOR_REVIEW",
+            "evidence": observed,
+            "reconciled_at": now,
+        })
+        action["reconciliation"] = reconciliation
+        return self._checkpoint(
+            task_id,
+            "DIRECT_RECONCILE_REQUIRED",
+            {
+                "canonical_action": action,
+                "reconciliation_status": "REQUIRED",
+                "reconciliation_decision": "RETAINED_FOR_REVIEW",
+                "reconciliation_evidence": observed,
+                "reconciliation_required": True,
+            },
+            attempt_id=state.get("attempt_id"),
+        )
+
     def reconcile_task(self, task_id: str) -> Optional[dict[str, Any]]:
         state = self._read_state(task_id)
         if state is None:
             return state
+        if state.get("status") == "DIRECT_RECONCILE_REQUIRED":
+            return self._reconcile_direct_failure(task_id)
         if state.get("status") in {"DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
             return self._reconcile_direct_action(task_id)
         if state.get("status") in TERMINAL_STATUSES:

@@ -1421,6 +1421,17 @@ def test_direct_canonical_interrupted_state_reconciles_without_replay(tmp_path, 
     assert reconciled["canonical_action"]["reconciliation"]["blocker"] == "UNKNOWN_REQUIRES_RECONCILE"
     assert reconciled["target_worktree"] is None
 
+    closed = service.reconcile_task("direct-interrupted")
+    assert closed["status"] == "FINAL_BLOCK"
+    assert closed["reconciliation_status"] == "RECONCILED"
+    assert closed["reconciliation_decision"] == "NO_MUTATION_OBSERVED"
+    assert closed["reconciliation_required"] is False
+    assert closed["cleanup_decision"] == "ALREADY_REMOVED"
+    assert closed["task_action"]["next_action"] == "retry_same_task"
+    repeated = service.reconcile_task("direct-interrupted")
+    assert repeated["status"] == "FINAL_BLOCK"
+    assert repeated["reconciliation_decision"] == "NO_MUTATION_OBSERVED"
+
 
 def test_direct_canonical_idempotency_key_reuse_fails_closed_across_tasks(tmp_path, monkeypatch):
     controller = tmp_path / "canonical"

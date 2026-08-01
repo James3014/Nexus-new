@@ -36,6 +36,7 @@ checkout; isolated Targets are reserved for explicit risk or Candidate work.
 | 2 | `lifecycle-workflow-p2-durable-canonical-actions` | `02-durable-direct-action-state.md` | VERIFIED_PENDING_OWNER_REVIEW | P1b + bootstrap-authority-convergence owner review |
 | 3 | `lifecycle-workflow-p3-fast-three-lane-dispatch` | `03-three-lane-fast-dispatch.md` | VERIFIED_PENDING_OWNER_REVIEW | P2 implementation verified |
 | 4 | `lifecycle-workflow-p4-public-recovery-actions` | `04-public-recovery-surface.md` | VERIFIED_PENDING_OWNER_REVIEW | P3 owner review |
+| 4b | `lifecycle-workflow-p4b-direct-reconcile-closure` | `04b-direct-reconcile-closure.md` | ACTIVE | P4 recovery surface evidence |
 | 5 | `lifecycle-workflow-p5-enforcement-permissions` | `05-enforcement-and-permissions.md` | PENDING | P4 integrated |
 | 6 | `lifecycle-workflow-p6-approval-reconnect-drift` | `06-approval-reconnect-definition-drift.md` | PENDING | P5 integrated |
 | 7 | `lifecycle-workflow-p7-acceptance-rollout` | `07-acceptance-pilot-and-rollout.md` | PENDING | P6 integrated |
