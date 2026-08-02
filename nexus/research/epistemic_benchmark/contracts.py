@@ -484,3 +484,6 @@ FORBIDDEN_REPORT_WORDS: Tuple[str, ...] = (
     "ledger proven",
     "research improved",
 )
+
+validate_case = validate_public_case
+validate_oracle = validate_oracle_record

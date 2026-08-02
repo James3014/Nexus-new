@@ -295,7 +295,7 @@ def prepare_benchmark_run(
     case_count = len(cases)
 
     # Create output directory structure
-    run_dir = os.path.join(output_dir, benchmark_run_id)
+    run_dir = output_dir
     os.makedirs(run_dir, exist_ok=True)
 
     for arm in BenchmarkArm:

@@ -53,7 +53,7 @@ def _prepare_run(seed: int = 20260802) -> tuple:
     tmp = tempfile.mkdtemp()
     manifest = prepare_benchmark_run(tmp, seed)
     run_id = manifest["benchmark_run_id"]
-    run_dir = os.path.join(tmp, run_id)
+    run_dir = tmp
     return run_dir, run_id, manifest
 
 
@@ -268,8 +268,8 @@ def test_packet_content_deterministic_same_seed():
     m2 = prepare_benchmark_run(tmp2, seed=777)
     run_id = m1["benchmark_run_id"]
 
-    run_dir1 = os.path.join(tmp1, run_id)
-    run_dir2 = os.path.join(tmp2, run_id)
+    run_dir1 = tmp1
+    run_dir2 = tmp2
 
     # Check one packet from each arm
     case_id = "EBR-001"

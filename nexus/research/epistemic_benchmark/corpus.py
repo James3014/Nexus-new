@@ -783,6 +783,9 @@ def get_public_corpus() -> List[Dict[str, Any]]:
     return list(_CASES)
 
 
+get_corpus = get_public_corpus
+
+
 def get_public_case(case_id: str) -> Optional[Dict[str, Any]]:
     _ensure_built()
     return _CASES_BY_ID.get(case_id)
