@@ -31,7 +31,7 @@ from nexus.executors.worker_contract import (
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager
+from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationExecutionError
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,
@@ -45,13 +45,17 @@ from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
 from nexus.contracts.lifecycle_action import ContractKind, validate_owner_inline_contract
+from nexus.contracts.target_integration_lifecycle import (
+    ExternalAcceptanceReceipt,
+    IntegrationAuthorizationEnvelope,
+)
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
     "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
     "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
-    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED",
+    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED", "INTEGRATED_AND_CLEANED",
 })
 PENDING_CANDIDATE_STATUSES = frozenset({
     "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
@@ -478,6 +482,21 @@ class SelfHostedTaskService:
             attention_required = False
             next_action = "wait_for_task"
             recommended_tool = "nexus_self_hosted_wait_task"
+        elif status == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "owner_review_post_apply_failure"
+            recommended_tool = "nexus_self_hosted_get_receipt"
+        elif status == "INTEGRATION_FAILED_PRE_APPLY":
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "retry_integration_same_task"
+            recommended_tool = "nexus_self_hosted_retry_integration"
+        elif status == "INTEGRATED_TARGET_RETAINED":
+            action_state = "ACTION_REQUIRED"
+            attention_required = True
+            next_action = "retry_cleanup"
+            recommended_tool = "nexus_self_hosted_cleanup"
         elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
             action_state = "FINAL_BLOCK"
             attention_required = True
@@ -3364,13 +3383,122 @@ class SelfHostedTaskService:
             "active_targets": sum(bool((state.get("lease") or {}).get("target_worktree")) and state.get("status") not in TERMINAL_STATUSES for state in states),
         }
 
+    def _cleanup_authority_blocker(
+        self,
+        state: Mapping[str, Any],
+        contract: Any,
+        lease: TargetWorktreeLease,
+    ) -> Optional[str]:
+        """Revalidate persisted acceptance, authorization, integration, and refs."""
+        if state.get("status") != "INTEGRATED" or state.get("promotion_status") != "INTEGRATED":
+            return "cleanup requires INTEGRATED lifecycle state"
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        raw_acceptance = state.get("external_acceptance") or binding.get("external_acceptance")
+        raw_authorization = state.get("integration_authorization") or binding.get("integration_authorization")
+        if raw_acceptance is None:
+            return "external acceptance receipt is missing"
+        if raw_authorization is None:
+            return "Owner cleanup authorization is missing"
+        try:
+            acceptance = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+            authorization = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+        except (TypeError, ValueError) as exc:
+            return f"cleanup authority binding invalid: {exc}"
+        if acceptance.task_id != state.get("task_id") or acceptance.candidate_commit != packet.get("candidate_commit_sha"):
+            return "external acceptance binding mismatch"
+        if authorization.task_id != state.get("task_id") or authorization.candidate_commit != packet.get("candidate_commit_sha"):
+            return "cleanup authorization candidate mismatch"
+        if authorization.attempt_id not in {"", str(state.get("attempt_id") or "")}:
+            return "cleanup authorization attempt mismatch"
+        if authorization.acceptance_receipt_hash != acceptance.receipt_hash:
+            return "cleanup authorization acceptance mismatch"
+        if state.get("task_card_hash") and authorization.task_card_hash != state.get("task_card_hash"):
+            return "cleanup authorization task card mismatch"
+        if authorization.candidate_tree_sha != str(packet.get("candidate_tree_sha") or ""):
+            return "cleanup authorization candidate tree mismatch"
+        if authorization.candidate_state_hash != str(packet.get("candidate_state_hash") or ""):
+            return "cleanup authorization candidate state mismatch"
+        if "CLEANUP_OWNED_TARGET" not in authorization.action_set or not authorization.cleanup_requested:
+            return "cleanup authorization does not include CLEANUP_OWNED_TARGET"
+        grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
+        if not grant or not grant.get("consumed_at") or grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
+            return "one-shot Owner approval grant is missing or invalid"
+        receipt = state.get("integration_receipt") if isinstance(state.get("integration_receipt"), Mapping) else None
+        if not receipt or not receipt.get("verifier_passed") or not receipt.get("merge_performed") or not receipt.get("post_apply_verified"):
+            return "post-apply integration receipt is missing or incomplete"
+        if receipt.get("acceptance_receipt_hash") != acceptance.receipt_hash:
+            return "integration receipt acceptance mismatch"
+        if receipt.get("authorization_hash") != authorization.authorization_hash:
+            return "integration receipt authorization mismatch"
+        integration_sha = str(receipt.get("integration_commit_sha") or "")
+        candidate_sha = str(packet.get("candidate_commit_sha") or "")
+        if not integration_sha or integration_sha != str(state.get("integration_result_sha") or ""):
+            return "integration receipt result binding is missing"
+        controller = Path(contract.controller_repo_root).resolve()
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        candidate_ref = str(state.get("candidate_ref") or "")
+        if not candidate_ref:
+            return "candidate durable ref is missing"
+        if authorization.durable_ref != candidate_ref:
+            return "cleanup authorization durable ref mismatch"
+        if Path(authorization.canonical_root).resolve() != controller:
+            return "cleanup authorization canonical root mismatch"
+        if str(state.get("integration_branch") or authorization.canonical_branch) != authorization.canonical_branch:
+            return "cleanup authorization integration branch mismatch"
+        try:
+            if manager._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller) != candidate_sha:
+                return "candidate durable ref mismatch"
+            if manager._run_git(["merge-base", "--is-ancestor", candidate_sha, integration_sha], cwd=controller) is None:
+                return "candidate is not an ancestor of integration result"
+            branch = str(state.get("integration_branch") or authorization.canonical_branch)
+            if manager._run_git(["merge-base", "--is-ancestor", integration_sha, branch], cwd=controller) is None:
+                return "canonical branch does not contain integration result"
+        except RuntimeError as exc:
+            return f"integration ancestry/ref verification failed: {exc}"
+        if Path(lease.target_worktree).resolve() != Path(authorization.cleanup_target_path).resolve():
+            return "cleanup target path binding mismatch"
+        return None
+
     def cleanup_tasks(self, *, task_id: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
         ids = [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
         decisions = []
         for item in ids:
             state = (self._read_state_snapshot(item) if dry_run else self._read_state(item)) or {}
+            if not dry_run and not self._state_path(item).exists():
+                _, archived = self._latest_archived_state(item)
+                if archived and archived.get("status") == "INTEGRATED":
+                    state = self._reactivate_archived_state(item, archived)
             if not state:
                 decisions.append({"task_id": item, "cleanup_decision": "ALREADY_REMOVED", "cleanup_blocker": "task state not found", "cleanup_performed": False})
+                continue
+            if state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
+                decision = {
+                    "task_id": item,
+                    "status": state.get("status"),
+                    "cleanup_decision": "BLOCKED_BY_POST_APPLY_FAILURE",
+                    "cleanup_blocker": "post-apply verification failed after physical integration apply",
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
+                    "target_present_after": True,
+                }
+                decisions.append(decision)
+                if not dry_run:
+                    self._checkpoint(item, str(state.get("status")), decision, attempt_id=state.get("attempt_id"))
+                continue
+            if state.get("status") == "INTEGRATION_FAILED_PRE_APPLY":
+                decision = {
+                    "task_id": item,
+                    "status": state.get("status"),
+                    "cleanup_decision": "BLOCKED_BY_PRE_APPLY_FAILURE",
+                    "cleanup_blocker": "integration was not applied; retry integration before cleanup",
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
+                    "target_present_after": True,
+                }
+                decisions.append(decision)
+                if not dry_run:
+                    self._checkpoint(item, str(state.get("status")), decision, attempt_id=state.get("attempt_id"))
                 continue
             if state.get("status") == "RETAINED_FOR_REVIEW":
                 worker_pid = state.get("worker_pid")
@@ -3537,6 +3665,17 @@ class SelfHostedTaskService:
             lease = TargetWorktreeLease(**state["lease"])
             packet = state.get("promotion_packet") or {}
             binding = state.get("approved_binding") or {}
+            authority_blocker = self._cleanup_authority_blocker(state, contract, lease)
+            if authority_blocker:
+                decisions.append({
+                    "task_id": item,
+                    "status": state.get("status"),
+                    "cleanup_decision": "BLOCKED_BY_AUTHORITY",
+                    "cleanup_blocker": authority_blocker,
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
+                })
+                continue
             if state.get("promotion_status") in {"APPROVED", "INTEGRATED"} and any(
                 binding.get(field) != packet.get(field)
                 for field in (
@@ -3558,6 +3697,15 @@ class SelfHostedTaskService:
                 candidate_ref=state.get("candidate_ref"),
                 dry_run=dry_run,
             )
+            cleanup_receipt = asdict(cleanup)
+            cleanup_receipt_hash = hashlib.sha256(
+                json.dumps(
+                    cleanup_receipt,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
             decision = {
                 "task_id": item,
                 "status": state.get("status"),
@@ -3566,7 +3714,21 @@ class SelfHostedTaskService:
                 "cleanup_performed": cleanup.performed,
                 "cleanup_eligible": cleanup.eligible,
                 "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                "cleanup_receipt": cleanup_receipt,
+                "cleanup_receipt_hash": cleanup_receipt_hash,
             }
+            cleanup_receipt["target_present_after"] = Path(lease.target_worktree).resolve().exists()
+            cleanup_receipt_hash = hashlib.sha256(
+                json.dumps(
+                    cleanup_receipt,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
+            decision["cleanup_receipt"] = cleanup_receipt
+            decision["cleanup_receipt_hash"] = cleanup_receipt_hash
+            decision["target_present_after"] = cleanup_receipt["target_present_after"]
             decisions.append(decision)
             if not dry_run:
                 terminal = "RETAINED_FOR_REVIEW" if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES" else str(state.get("status"))
@@ -3579,7 +3741,9 @@ class SelfHostedTaskService:
         for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
             payload = path.read_bytes()
             state = json.loads(payload)
-            if state.get("status") not in {"FINAL_BLOCK", "INTEGRATED", "REJECTED", "SUPERSEDED", "CANCELLED"}:
+            if state.get("status") not in {"FINAL_BLOCK", "INTEGRATED", "INTEGRATED_AND_CLEANED", "REJECTED", "SUPERSEDED", "CANCELLED"}:
+                continue
+            if state.get("status") == "INTEGRATED" and state.get("cleanup_status") not in {None, "CLEANED"}:
                 continue
             digest = hashlib.sha256(payload).hexdigest()
             destination = archive_root / path.name
@@ -4160,6 +4324,8 @@ class SelfHostedTaskService:
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
         grant = dict(approval_context or {}) if approval_context is not None else None
+        external_acceptance: dict[str, Any] | None = None
+        integration_authorization: dict[str, Any] | None = None
         if grant is not None:
             if str(grant.get("schema") or "") != "nexus.approval.v2":
                 raise RuntimeError("APPROVAL_LEGACY_BINDING_INVALIDATED")
@@ -4167,6 +4333,45 @@ class SelfHostedTaskService:
                 raise RuntimeError("APPROVAL_ALREADY_CONSUMED")
             if str(grant.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
                 raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
+            raw_acceptance = grant.get("external_acceptance")
+            raw_authorization = grant.get("integration_authorization")
+            if (raw_acceptance is None) != (raw_authorization is None):
+                raise RuntimeError("AUTHORIZED_CLOSURE_BINDING_INCOMPLETE")
+            if raw_acceptance is not None and raw_authorization is not None:
+                acceptance_obj = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+                authorization_obj = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+                if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != candidate_commit_sha:
+                    raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
+                if authorization_obj.task_id != task_id or authorization_obj.candidate_commit != candidate_commit_sha:
+                    raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
+                expected_authorization = {
+                    "attempt_id": str(state.get("attempt_id") or ""),
+                    "task_card_hash": str(state.get("task_card_hash") or grant.get("task_card_hash") or ""),
+                    "candidate_tree_sha": candidate_tree_sha,
+                    "candidate_state_hash": candidate_state_hash,
+                    "candidate_receipt_hash": verified_receipt_hash,
+                }
+                authorization_values = {
+                    "attempt_id": authorization_obj.attempt_id,
+                    "task_card_hash": authorization_obj.task_card_hash,
+                    "candidate_tree_sha": authorization_obj.candidate_tree_sha,
+                    "candidate_state_hash": authorization_obj.candidate_state_hash,
+                    "candidate_receipt_hash": authorization_obj.candidate_receipt_hash,
+                }
+                authorization_drift = [
+                    key for key, expected_value in expected_authorization.items()
+                    if str(authorization_values[key]) != str(expected_value)
+                ]
+                if authorization_drift:
+                    raise RuntimeError(
+                        "INTEGRATION_AUTHORIZATION_BINDING_MISMATCH: "
+                        + ", ".join(authorization_drift)
+                    )
+                if authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash:
+                    raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
+                external_acceptance = acceptance_obj.to_dict()
+                integration_authorization = authorization_obj.to_dict()
+                integration_authorization["authorization_hash"] = authorization_obj.authorization_hash
         now = _utc_now()
         duplicate = False
 
@@ -4194,7 +4399,14 @@ class SelfHostedTaskService:
                 "status": status,
                 "promotion_status": status,
                 "candidate_status": status,
-                "approved_binding": ({**expected, "approval_grant": consumed} if valid else None),
+                "approved_binding": ({
+                    **expected,
+                    "approval_grant": consumed,
+                    "external_acceptance": external_acceptance,
+                    "integration_authorization": integration_authorization,
+                } if valid else None),
+                "external_acceptance": external_acceptance,
+                "integration_authorization": integration_authorization,
                 "approval_error": None if valid else "promotion binding does not match candidate packet",
                 "merge_performed": False,
                 "push_performed": False,
@@ -4217,27 +4429,122 @@ class SelfHostedTaskService:
         candidate_state_hash: str,
         verified_receipt_hash: str,
         integration_branch: str = "nexus/integration/main",
+        approval_context: Optional[Mapping[str, Any]] = None,
+        external_acceptance: Optional[Mapping[str, Any]] = None,
+        integration_authorization: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Owner-only atomic finish surface: approve the exact packet, then integrate it."""
+        """Owner-only terminal finish: approve, integrate, cleanup/retain, then archive."""
+        if external_acceptance is None or integration_authorization is None:
+            raise RuntimeError("owner finish requires external acceptance and Owner authorization")
+        existing = self._read_state(task_id)
+        if existing and existing.get("finalization_receipt") and existing.get("status") in {
+            "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED",
+        }:
+            return {
+                **existing,
+                "duplicate": True,
+                "owner_finish": {
+                    "approval_status": "ALREADY_FINALIZED",
+                    "integration_status": existing.get("integration_status"),
+                    "cleanup_status": existing.get("cleanup_status"),
+                    "archive": {"dry_run": False, "entries": []},
+                },
+            }
+        context = dict(approval_context or {})
+        context["external_acceptance"] = dict(external_acceptance)
+        context["integration_authorization"] = dict(integration_authorization)
         approved = self.approve_promotion(
             task_id,
             candidate_commit_sha=candidate_commit_sha,
             candidate_tree_sha=candidate_tree_sha,
             candidate_state_hash=candidate_state_hash,
             verified_receipt_hash=verified_receipt_hash,
+            approval_context=context,
         )
         if approved.get("status") != "APPROVED" or approved.get("promotion_status") != "APPROVED":
             raise RuntimeError("owner finish requires an exact approved candidate binding")
         integrated = self.integrate_approved(task_id, integration_branch=integration_branch)
-        archive = self.archive_states(dry_run=False)
-        return {
-            **integrated,
-            "owner_finish": {
-                "approval_status": "APPROVED",
-                "integration_status": integrated.get("status"),
-                "archive": archive,
-            },
+        authorization = dict(integration_authorization)
+        state_after_integration = self._read_state(task_id) or integrated
+        lease_target = str((state_after_integration.get("lease") or {}).get("target_worktree") or "")
+        requested_target = str(authorization.get("cleanup_target_path") or lease_target)
+        target_path = Path(requested_target).expanduser().resolve() if requested_target else None
+        temp_roots = (Path(tempfile.gettempdir()).resolve(), Path("/private/tmp"))
+        controller_root = Path(str((state_after_integration.get("contract") or {}).get("controller_repo_root") or "")).expanduser().resolve()
+        cleanup_allowed = bool(
+            self.ephemeral
+            and authorization.get("cleanup_requested") is True
+            and "CLEANUP_OWNED_TARGET" in (authorization.get("action_set") or [])
+            and target_path is not None
+            and any(target_path == root or root in target_path.parents for root in temp_roots)
+            and target_path != controller_root
+        )
+        if cleanup_allowed:
+            cleanup_result = self.cleanup_tasks(task_id=task_id, dry_run=False)
+        else:
+            cleanup_result = {
+                "dry_run": False,
+                "decisions": [{
+                    "task_id": task_id,
+                    "cleanup_decision": "RETAINED_OUTSIDE_EPHEMERAL_SCOPE",
+                    "cleanup_blocker": "live or non-ephemeral cleanup authority is disabled",
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
+                    "target_present_after": True,
+                }],
+            }
+        decisions = [d for d in cleanup_result.get("decisions", []) if d.get("task_id", task_id) == task_id]
+        decision = decisions[0] if decisions else {
+            "cleanup_decision": "CLEANUP_BLOCKED",
+            "cleanup_blocker": "cleanup authority returned no decision",
+            "cleanup_performed": False,
+            "cleanup_eligible": False,
+            "target_present_after": True,
         }
+        cleanup_receipt = dict(decision.get("cleanup_receipt") or {})
+        cleanup_receipt.setdefault("schema", "nexus.target_cleanup_receipt.v1")
+        cleanup_receipt.setdefault("task_id", task_id)
+        cleanup_receipt.setdefault("decision", decision.get("cleanup_decision"))
+        cleanup_receipt.setdefault("blocker", decision.get("cleanup_blocker"))
+        cleanup_receipt.setdefault("performed", bool(decision.get("cleanup_performed")))
+        cleanup_receipt.setdefault("eligible", bool(decision.get("cleanup_eligible")))
+        cleanup_receipt.setdefault(
+            "target_present_after",
+            bool(decision.get("target_present_after", decision.get("cleanup_decision") != "ALREADY_REMOVED")),
+        )
+        cleanup_receipt_hash = hashlib.sha256(json.dumps(cleanup_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        cleaned = (
+            not bool(cleanup_receipt.get("target_present_after"))
+            and (bool(cleanup_receipt.get("performed")) or cleanup_receipt.get("decision") == "ALREADY_REMOVED")
+        )
+        final_status = "INTEGRATED_AND_CLEANED" if cleaned else "INTEGRATED_TARGET_RETAINED"
+        finalization_status = "CLEANED" if cleaned else "RETAINED"
+        retention_reason = None if cleaned else str(cleanup_receipt.get("blocker") or cleanup_receipt.get("decision") or "cleanup was not performed")
+        integration_receipt = integrated.get("integration_receipt") or {}
+        finalization = {
+            "schema": "nexus.task_finalization_receipt.v1",
+            "identity": {"task_id": task_id, "campaign_id": (state_after_integration.get("request") or {}).get("campaign_id"), "attempt_id": state_after_integration.get("attempt_id"), "task_card_hash": state_after_integration.get("task_card_hash")},
+            "candidate": {"commit_sha": candidate_commit_sha, "tree_sha": candidate_tree_sha, "state_hash": candidate_state_hash, "verified_receipt_hash": verified_receipt_hash},
+            "acceptance": {"receipt_hash": authorization.get("acceptance_receipt_hash") or dict(external_acceptance).get("receipt_hash"), "reviewer_id": dict(external_acceptance).get("reviewer_id")},
+            "authorization": {"authorization_hash": authorization.get("authorization_hash"), "approval_id": ((state_after_integration.get("approved_binding") or {}).get("approval_grant") or {}).get("approval_id"), "consumed_at": ((state_after_integration.get("approved_binding") or {}).get("approval_grant") or {}).get("consumed_at"), "action_set": list(authorization.get("action_set") or [])},
+            "integration": {"status": "INTEGRATED", "branch": integrated.get("integration_branch") or integration_branch, "head_before": integrated.get("integration_base_sha"), "staging_commit": integration_receipt.get("staging_commit_sha"), "head_after": integrated.get("integration_result_sha"), "candidate_is_ancestor": True, "merge_performed": bool(integrated.get("merge_performed", True)), "staging_verified": bool(integration_receipt.get("staging_verified", True)), "post_apply_verified": bool(integration_receipt.get("post_apply_verified", True)), "receipt_hash": hashlib.sha256(json.dumps(integration_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest(), "failure_reason": None},
+            "cleanup": {"status": finalization_status, "target_id": authorization.get("cleanup_target_id"), "target_path": requested_target, "target_present_after": bool(cleanup_receipt.get("target_present_after")), "performed": bool(cleanup_receipt.get("performed")), "eligible": bool(cleanup_receipt.get("eligible")), "blocker": cleanup_receipt.get("blocker"), "receipt_hash": cleanup_receipt_hash},
+            "terminal": {"final_status": final_status, "retention_reason": retention_reason, "next_action": "none" if cleaned else "retry_cleanup", "archive_eligible": cleaned},
+            "created_at": _utc_now(),
+        }
+        finalization["receipt_hash"] = hashlib.sha256(json.dumps(finalization, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        values = {"status": final_status, "promotion_status": "INTEGRATED", "candidate_status": "INTEGRATED", "integration_status": "INTEGRATED", "cleanup_status": finalization_status, "target_present": bool(cleanup_receipt.get("target_present_after")), "cleanup_receipt": cleanup_receipt, "cleanup_receipt_hash": cleanup_receipt_hash, "finalization_receipt": finalization, "retention_reason": retention_reason, "next_action": "none" if cleaned else "retry_cleanup", "terminal_status": final_status, "final_disposition": final_status, "archive_eligible": cleaned, "state_retention_status": "TERMINAL" if cleaned else "ACTIONABLE"}
+        persisted = self._checkpoint(task_id, final_status, values, attempt_id=state_after_integration.get("attempt_id"))
+        if persisted is None:
+            persisted = dict(state_after_integration)
+            persisted.update(values)
+            persisted["task_id"] = task_id
+            self._write_state(task_id, persisted)
+        archive = {"dry_run": False, "entries": []}
+        if cleaned:
+            archive = self.archive_states(dry_run=False)
+        fresh = self._read_state(task_id) or persisted
+        return {**fresh, "duplicate": False, "owner_finish": {"approval_status": "APPROVED", "integration_status": "INTEGRATED", "cleanup_status": finalization_status, "archive": archive}}
 
     def recover_verified_uncommitted_candidate(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
@@ -4349,11 +4656,11 @@ class SelfHostedTaskService:
             request.get("task_card_required") or request.get("lifecycle_identity_required")
         ):
             raise RuntimeError("EPHEMERAL_INTEGRATION_FORBIDDEN: rehearsal state cannot be integrated")
-        if state.get("status") == "INTEGRATED" and state.get("promotion_status") == "INTEGRATED":
+        if state.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED"} and state.get("promotion_status") == "INTEGRATED":
             return state
         promotion_status = state.get("promotion_status") or state.get("status")
-        if promotion_status == "INTEGRATION_FAILED" and state.get("merge_performed"):
-            raise RuntimeError("cannot retry an integration that already performed a merge")
+        if state.get("merge_performed") or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
+            raise RuntimeError("INTEGRATION_ALREADY_APPLIED_RETRY_FORBIDDEN")
         if state.get("status") not in {"APPROVED", "INTEGRATING"} and promotion_status not in {"APPROVED", "INTEGRATING"}:
             raise RuntimeError(
                 "exact approved binding is required before integration; "
@@ -4403,6 +4710,31 @@ class SelfHostedTaskService:
             if any(approved.get(field) != packet.get(field) for field in binding_fields):
                 raise RuntimeError("APPROVAL_CANDIDATE_BINDING_DRIFT")
 
+        approved = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        raw_acceptance = state.get("external_acceptance") or approved.get("external_acceptance")
+        raw_authorization = state.get("integration_authorization") or approved.get("integration_authorization")
+        if raw_acceptance is None:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_REQUIRED: persisted acceptance receipt is missing")
+        if raw_authorization is None:
+            raise RuntimeError("OWNER_AUTHORIZATION_REQUIRED: persisted integration authorization is missing")
+        acceptance_obj = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+        authorization_obj = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+        if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != str((state.get("promotion_packet") or {}).get("candidate_commit_sha") or ""):
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
+        if authorization_obj.task_id != task_id or authorization_obj.attempt_id not in {"", str(state.get("attempt_id") or "")}:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
+        if authorization_obj.candidate_commit != acceptance_obj.candidate_commit or authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
+        if authorization_obj.canonical_branch != integration_branch:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_BRANCH_DRIFT")
+        if "INTEGRATION_STAGING" not in authorization_obj.action_set or "APPLY_VERIFIED_INTEGRATION" not in authorization_obj.action_set:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_ACTION_SET_INCOMPLETE")
+        grant = approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None
+        if not grant or not grant.get("consumed_at"):
+            raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: one-shot approval grant is not consumed")
+        if grant.get("consumed_at") and grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
+            raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
+
         self._checkpoint(
             task_id,
             "INTEGRATING",
@@ -4428,20 +4760,67 @@ class SelfHostedTaskService:
         try:
             receipt = ControlledIntegrationManager(
                 integration_root=contract.controller_repo_root
-            ).integrate_task_state(integrating, integration_branch=integration_branch)
+            ).integrate_authorized_task_state(
+                integrating,
+                integration_branch=integration_branch,
+                staging_root=str(state.get("integration_staging_root") or (Path(contract.target_worktree_root).parent / ".nexus-integration-staging")),
+                apply=True,
+                post_apply_commands=tuple(tuple(command) for command in state.get("post_apply_commands") or ()),
+            )
+        except IntegrationExecutionError as exc:
+            failed_status = (
+                "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"
+                if exc.merge_performed
+                else "INTEGRATION_FAILED_PRE_APPLY"
+            )
+            integration_status = "APPLIED_NOT_VERIFIED" if exc.merge_performed else "NOT_APPLIED"
+            self._checkpoint(
+                task_id,
+                failed_status,
+                {
+                    "status": failed_status,
+                    "promotion_status": failed_status,
+                    "integration_branch": integration_branch,
+                    "integration_error": str(exc),
+                    "integration_status": integration_status,
+                    "integration_execution": {
+                        "stage": exc.stage,
+                        "branch_head_before": exc.branch_head_before,
+                        "branch_head_after": exc.branch_head_after,
+                        "staging_commit_sha": exc.staging_commit_sha,
+                        "candidate_commit_sha": exc.candidate_commit_sha,
+                        "candidate_is_ancestor": exc.merge_performed,
+                        "merge_performed": exc.merge_performed,
+                        "post_apply_verified": exc.post_apply_verified,
+                        "failure_reason": exc.failure_reason,
+                    },
+                    "integration_result_sha": exc.integration_result_sha,
+                    "terminal_status": failed_status,
+                    "final_disposition": failed_status,
+                    "state_retention_status": "ACTIONABLE",
+                    "archive_eligible": False,
+                    "cleanup_eligible": False,
+                    "merge_performed": exc.merge_performed,
+                    "push_performed": False,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+            raise
         except Exception as exc:
             self._checkpoint(
                 task_id,
-                "INTEGRATION_FAILED",
+                "INTEGRATION_FAILED_PRE_APPLY",
                 {
-                    "status": "INTEGRATION_FAILED",
-                    "promotion_status": "INTEGRATION_FAILED",
+                    "status": "INTEGRATION_FAILED_PRE_APPLY",
+                    "promotion_status": "INTEGRATION_FAILED_PRE_APPLY",
                     "integration_branch": integration_branch,
                     "integration_error": str(exc),
-                    "terminal_status": "INTEGRATION_FAILED",
-                    "final_disposition": "INTEGRATION_FAILED",
-                    "state_retention_status": "TERMINAL",
-                    "archive_eligible": True,
+                    "integration_status": "NOT_APPLIED",
+                    "terminal_status": "INTEGRATION_FAILED_PRE_APPLY",
+                    "final_disposition": "INTEGRATION_FAILED_PRE_APPLY",
+                    "state_retention_status": "ACTIONABLE",
+                    "archive_eligible": False,
+                    "cleanup_eligible": False,
                     "merge_performed": False,
                     "push_performed": False,
                 },
@@ -4455,9 +4834,9 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        if state.get("status") != "INTEGRATION_FAILED" or state.get("merge_performed"):
-            raise RuntimeError("integration retry requires INTEGRATION_FAILED before any merge")
-        if state.get("promotion_status") != "INTEGRATION_FAILED" or not state.get("approved_binding"):
+        if state.get("merge_performed") or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
+            raise RuntimeError("INTEGRATION_ALREADY_APPLIED_RETRY_FORBIDDEN")
+        if state.get("status") not in {"INTEGRATION_FAILED", "INTEGRATION_FAILED_PRE_APPLY"} or not state.get("approved_binding"):
             raise RuntimeError("integration retry requires the original approved binding")
         branch = integration_branch or state.get("integration_branch") or "nexus/integration/main"
         self._checkpoint(
@@ -4492,6 +4871,17 @@ class SelfHostedTaskService:
             raise RuntimeError("integration receipt merge_performed must be True")
         if receipt.push_performed:
             raise RuntimeError("integration receipt push_performed must be False")
+        if not getattr(receipt, "post_apply_verified", False):
+            raise RuntimeError("post-apply verification is required before integration recording")
+        if getattr(receipt, "staging_commit_sha", None) != receipt.integration_commit_sha:
+            raise RuntimeError("integration result must equal the verified staging commit")
+        acceptance_state = state.get("external_acceptance") if isinstance(state.get("external_acceptance"), Mapping) else {}
+        authorization_state = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
+        if acceptance_state or authorization_state:
+            if getattr(receipt, "acceptance_receipt_hash", None) != acceptance_state.get("receipt_hash"):
+                raise RuntimeError("integration receipt acceptance binding mismatch")
+            if getattr(receipt, "authorization_hash", None) != authorization_state.get("authorization_hash"):
+                raise RuntimeError("integration receipt authorization binding mismatch")
 
         packet = state.get("promotion_packet") or {"candidate_commit_sha": receipt.integration_commit_sha}
         binding = state.get("approved_binding") or packet
