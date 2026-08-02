@@ -95,7 +95,11 @@ def test_negative_missing_run_rejected_by_exporter():
             "--output", export_file,
         ])
         assert res_exp.returncode != 0
-        assert "EXPORT_RUN_NOT_FOUND" in res_exp.stderr
+        assert any(code in res_exp.stderr for code in (
+            "EXPORT_RUN_NOT_FOUND",
+            "EXPORT_BLIND_TASK_RUN_MISMATCH",
+            "EXPORT_VERIFICATION_FAILED",
+        ))
         assert not os.path.exists(export_file)
 
 

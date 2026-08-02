@@ -16,6 +16,7 @@ class EpistemicDirection(str, Enum):
     SUPPORTS = "supports"
     CONTRADICTS = "contradicts"
     CONTEXTUAL = "contextual"
+    INCONCLUSIVE = "inconclusive"
     UNKNOWN = "unknown"
 
 
