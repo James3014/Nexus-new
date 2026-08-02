@@ -159,6 +159,14 @@ class EpistemicVerificationResult:
     blockers: tuple[str, ...]
     claim_evidence_read_model: dict[str, Any]
     schema: str = EPISTEMIC_VERIFICATION_RESULT_SCHEMA
+    source_schema: str = ""
+    source_export_id: str = ""
+    source_export_sha256: str = ""
+    source_state_manifest_sha256: str = ""
+    source_task_id: str = ""
+    source_attempt_id: str = ""
+    source_profile_id: str = ""
+    source_run_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -169,6 +177,14 @@ class EpistemicVerificationResult:
             "receipt_refs": list(self.receipt_refs),
             "blockers": list(self.blockers),
             "claim_evidence_read_model": self.claim_evidence_read_model,
+            "source_schema": self.source_schema,
+            "source_export_id": self.source_export_id,
+            "source_export_sha256": self.source_export_sha256,
+            "source_state_manifest_sha256": self.source_state_manifest_sha256,
+            "source_task_id": self.source_task_id,
+            "source_attempt_id": self.source_attempt_id,
+            "source_profile_id": self.source_profile_id,
+            "source_run_id": self.source_run_id,
         }
 
 
@@ -182,6 +198,14 @@ class EpistemicReceiptExtension:
     blockers: tuple[str, ...] = ()
     claim_boundary: Any = None
     schema: str = EPISTEMIC_RECEIPT_EXTENSION_SCHEMA
+    source_schema: str = ""
+    source_export_id: str = ""
+    source_export_sha256: str = ""
+    source_state_manifest_sha256: str = ""
+    source_task_id: str = ""
+    source_attempt_id: str = ""
+    source_profile_id: str = ""
+    source_run_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         boundary_dict = self.claim_boundary.to_dict() if self.claim_boundary and hasattr(self.claim_boundary, "to_dict") else {}
@@ -194,6 +218,14 @@ class EpistemicReceiptExtension:
             "receipt_refs": list(self.receipt_refs),
             "blockers": list(self.blockers),
             "claim_boundary": boundary_dict,
+            "source_schema": self.source_schema,
+            "source_export_id": self.source_export_id,
+            "source_export_sha256": self.source_export_sha256,
+            "source_state_manifest_sha256": self.source_state_manifest_sha256,
+            "source_task_id": self.source_task_id,
+            "source_attempt_id": self.source_attempt_id,
+            "source_profile_id": self.source_profile_id,
+            "source_run_id": self.source_run_id,
             "runtime_update_allowed": False,
             "public_benchmark_allowed": False,
             "public_claim_allowed": False,

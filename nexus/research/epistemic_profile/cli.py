@@ -22,6 +22,9 @@ def cmd_verify_export(args: argparse.Namespace) -> int:
             "status": res.status.value,
             "records_checked": res.records_checked,
             "blockers": list(res.blockers),
+            "source_export_id": res.source_export_id,
+            "source_export_sha256": res.source_export_sha256,
+            "source_state_manifest_sha256": res.source_state_manifest_sha256,
             "runtime_update_allowed": False,
             "public_claim_allowed": False,
             "public_benchmark_allowed": False,
@@ -34,7 +37,7 @@ def cmd_verify_export(args: argparse.Namespace) -> int:
             return 1
 
         if getattr(args, "output", None):
-            write_epistemic_receipt(res, args.output)
+            write_epistemic_receipt(res, args.output, source_export_path=args.input)
 
         print(json.dumps(output_summary, indent=2))
         return 0

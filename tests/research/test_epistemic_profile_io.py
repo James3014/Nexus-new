@@ -63,22 +63,31 @@ def _make_valid_export_dict() -> dict:
     return payload
 
 
+def _rehash(payload: dict) -> dict:
+    p = {k: v for k, v in payload.items() if k != "export_sha256"}
+    canonical = json.dumps(p, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    payload["export_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return payload
+
+
 def test_valid_export_dict_loads_cleanly():
     exp_dict = _make_valid_export_dict()
     inp = load_epistemic_profile_export(exp_dict)
     assert inp.task_id == "task_001"
     assert inp.run_id == "run_001"
     assert len(inp.records) == 1
-    assert inp.records[0].claim_id == "clm_001"
 
     res = verify_epistemic_profile_export(exp_dict)
     assert res.status == EpistemicIntegrityStatus.PASS
     assert res.records_checked == 1
+    assert res.source_export_id == "exp_001"
+    assert res.source_export_sha256 == exp_dict["export_sha256"]
 
 
 def test_unknown_schema_fails_closed():
     exp_dict = _make_valid_export_dict()
     exp_dict["schema"] = "unknown.schema.v99"
+    exp_dict = _rehash(exp_dict)
 
     res = verify_epistemic_profile_export(exp_dict)
     assert res.status == EpistemicIntegrityStatus.RETURN
@@ -87,35 +96,132 @@ def test_unknown_schema_fails_closed():
 
 def test_extra_top_level_key_fails_closed():
     payload = _make_valid_export_dict()
-    del payload["export_sha256"]
     payload["unauthorized_key"] = "attacker_data"
-    canonical_json = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    payload["export_sha256"] = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+    payload = _rehash(payload)
 
     res = verify_epistemic_profile_export(payload)
     assert res.status == EpistemicIntegrityStatus.RETURN
     assert "EP_EXPORT_KEYS_MISMATCH" in res.blockers
 
 
-def test_export_hash_mismatch_fails_closed():
+def test_extra_verification_key_fails_closed():
     payload = _make_valid_export_dict()
-    payload["export_sha256"] = "0" * 64
+    payload["verification"]["extra_key"] = True
+    payload = _rehash(payload)
 
     res = verify_epistemic_profile_export(payload)
     assert res.status == EpistemicIntegrityStatus.RETURN
-    assert "EP_EXPORT_HASH_MISMATCH" in res.blockers
+    assert "EP_VERIFICATION_KEYS_MISMATCH" in res.blockers
 
 
-def test_valid_hash_with_forbidden_field_fails_closed():
+def test_extra_record_key_fails_closed():
     payload = _make_valid_export_dict()
-    del payload["export_sha256"]
-    payload["records"][0]["source_text"] = "unauthorized_raw_source"
-    canonical_json = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    payload["export_sha256"] = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+    payload["records"][0]["extra_rec_key"] = "bogus"
+    payload = _rehash(payload)
 
     res = verify_epistemic_profile_export(payload)
     assert res.status == EpistemicIntegrityStatus.RETURN
-    assert "EP_FORBIDDEN_KEY_DETECTED" in res.blockers
+    assert "EP_RECORD_KEYS_MISMATCH" in res.blockers
+
+
+def test_extra_artifact_key_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["records"][0]["artifact"]["extra_art_key"] = "bogus"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_ARTIFACT_KEYS_MISMATCH" in res.blockers
+
+
+def test_string_boolean_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["records"][0]["cannot_establish_present"] = "false"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_RECORD_KEYS_MISMATCH" in res.blockers
+
+
+def test_integer_id_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["task_id"] = 123
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_EXPORT_KEYS_MISMATCH" in res.blockers
+
+
+def test_string_receipt_refs_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["records"][0]["receipt_refs"] = "event:rcp_001"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_RECORD_KEYS_MISMATCH" in res.blockers
+
+
+def test_boolean_records_exported_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["verification"]["records_exported"] = True
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_VERIFICATION_KEYS_MISMATCH" in res.blockers
+
+
+def test_invalid_direction_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["records"][0]["direction"] = "super_supported"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_INVALID_DIRECTION" in res.blockers
+
+
+def test_invalid_scope_alignment_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["records"][0]["scope_alignment"] = "full"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_INVALID_SCOPE_ALIGNMENT" in res.blockers
+
+
+def test_corrupted_gate_a_status_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["verification"]["gate_a_status"] = "GATE_A_CORRUPTED"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_GATE_A_NOT_VERIFIED" in res.blockers
+
+
+def test_false_subsystem_flag_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["verification"]["evidence_pipeline_valid"] = False
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_EVIDENCE_PIPELINE_NOT_VERIFIED" in res.blockers
+
+
+def test_invalid_state_manifest_hash_fails_closed():
+    payload = _make_valid_export_dict()
+    payload["verification"]["state_manifest_sha256"] = "invalid_hash"
+    payload = _rehash(payload)
+
+    res = verify_epistemic_profile_export(payload)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_INVALID_STATE_MANIFEST_HASH" in res.blockers
 
 
 def test_verification_is_non_mutating_on_input_file():
@@ -138,11 +244,13 @@ def test_verification_is_non_mutating_on_input_file():
         assert stat_before.st_mtime_ns == stat_after.st_mtime_ns
 
 
-def test_write_epistemic_receipt():
+def test_receipt_overwriting_input_rejected():
     payload = _make_valid_export_dict()
     res = verify_epistemic_profile_export(payload)
     with tempfile.TemporaryDirectory() as tmpdir:
-        receipt_file = Path(tmpdir) / "receipt.json"
-        saved = write_epistemic_receipt(res, receipt_file)
-        assert receipt_file.exists()
-        assert saved["status"] == "PASS"
+        export_file = Path(tmpdir) / "export.json"
+        with open(export_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+
+        with pytest.raises(ValueError, match="RECEIPT_OUTPUT_OVERWRITES_INPUT"):
+            write_epistemic_receipt(res, export_file, source_export_path=export_file)

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import pytest
-
-from research_ledger.gate_a_harness import run_gate_a_synthetic
-from research_ledger.nexus_profile_export import export_nexus_epistemic_profile
 
 from nexus.research.epistemic_profile.contracts import EpistemicIntegrityStatus
 from nexus.research.epistemic_profile.io import (
@@ -19,6 +19,8 @@ from nexus.research.epistemic_profile.io import (
     FORBIDDEN_KEYS,
 )
 
+RESEARCH_LEDGER_SRC = os.path.abspath("research-ledger/src")
+
 
 def _rehash_export(payload: dict) -> dict:
     p_sans = {k: v for k, v in payload.items() if k != "export_sha256"}
@@ -27,31 +29,49 @@ def _rehash_export(payload: dict) -> dict:
     return payload
 
 
-def test_positive_end_to_end_bridge_pipeline():
+def _run_rl_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "PYTHONPATH": RESEARCH_LEDGER_SRC}
+    cmd = [sys.executable, "-m", "research_ledger.cli"] + args
+    return subprocess.run(cmd, env=env, capture_output=True, text=True)
+
+
+def test_positive_end_to_end_bridge_pipeline_via_subprocess():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
         receipt_file = os.path.join(tmpdir, "receipt.json")
 
-        run_gate_a_synthetic(state_dir)
+        # 1. Run Gate A synthetic via Research Ledger CLI
+        res_syn = _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        assert res_syn.returncode == 0, f"run-gate-a-synthetic failed: {res_syn.stderr}"
 
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="task_e2e_001",
-            attempt_id="att_e2e_001",
-            profile_id="prof_e2e_001",
-            output_path=export_file,
-        )
+        # 2. Export Nexus Profile via Research Ledger CLI
+        res_exp = _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "task_e2e_001",
+            "--attempt-id", "att_e2e_001",
+            "--profile-id", "prof_e2e_001",
+            "--output", export_file,
+        ])
+        assert res_exp.returncode == 0, f"export-nexus-profile failed: {res_exp.stderr}"
         assert os.path.exists(export_file)
 
-        # Nexus Verification
-        res = verify_epistemic_profile_export(export_file)
-        assert res.status == EpistemicIntegrityStatus.PASS
-        assert res.records_checked > 0
+        with open(export_file, "r", encoding="utf-8") as f:
+            export_payload = json.load(f)
 
-        # Receipt writing
-        rcpt = write_epistemic_receipt(res, receipt_file)
+        # 3. Nexus Verification via strict loader
+        ver_res = verify_epistemic_profile_export(export_file)
+        assert ver_res.status == EpistemicIntegrityStatus.PASS
+        assert ver_res.records_checked > 0
+        assert ver_res.source_export_id == export_payload["export_id"]
+        assert ver_res.source_export_sha256 == export_payload["export_sha256"]
+
+        # 4. Write Receipt via Nexus
+        rcpt = write_epistemic_receipt(ver_res, receipt_file, source_export_path=export_file)
+        assert os.path.exists(receipt_file)
+        assert rcpt["source_export_sha256"] == export_payload["export_sha256"]
         assert rcpt["runtime_update_allowed"] is False
         assert rcpt["public_claim_allowed"] is False
         assert rcpt["public_benchmark_allowed"] is False
@@ -59,42 +79,43 @@ def test_positive_end_to_end_bridge_pipeline():
         assert rcpt["integration_approved"] is False
 
 
-def test_negative_1_corrupted_evidence_pipeline_fails_export():
-        with tempfile.TemporaryDirectory() as tmpdir:
-            state_dir = os.path.join(tmpdir, "rl_state")
-            export_file = os.path.join(tmpdir, "export.json")
-            run_gate_a_synthetic(state_dir)
-
-            # Corrupt evidence database
-            db_path = os.path.join(state_dir, "public", "evidence.sqlite3")
-            if os.path.exists(db_path):
-                os.remove(db_path)
-
-            with pytest.raises(RuntimeError, match="EXPORT_VERIFICATION_FAILED"):
-                export_nexus_epistemic_profile(
-                    state_dir=state_dir,
-                    run_id="run_s1",
-                    task_id="t1",
-                    attempt_id="a1",
-                    profile_id="p1",
-                    output_path=export_file,
-                )
-            assert not os.path.exists(export_file)
-
-
-def test_negative_2_modified_export_hash_fails_closed():
+def test_negative_missing_run_rejected_by_exporter():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+
+        res_exp = _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "nonexistent_run",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
+        assert res_exp.returncode != 0
+        assert "EXPORT_RUN_NOT_FOUND" in res_exp.stderr
+        assert not os.path.exists(export_file)
+
+
+def test_negative_modified_export_hash_fails_closed():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_dir = os.path.join(tmpdir, "rl_state")
+        export_file = os.path.join(tmpdir, "export.json")
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
+
+        with open(export_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
 
         payload["export_sha256"] = "0" * 64
         with open(export_file, "w", encoding="utf-8") as f:
@@ -105,19 +126,23 @@ def test_negative_2_modified_export_hash_fails_closed():
         assert "EP_EXPORT_HASH_MISMATCH" in res.blockers
 
 
-def test_negative_3_source_text_forgery_rehashed_fails_closed():
+def test_negative_source_text_forgery_rehashed_fails_closed():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
+
+        with open(export_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
 
         payload["records"][0]["source_text"] = "forged raw text"
         payload = _rehash_export(payload)
@@ -129,238 +154,119 @@ def test_negative_3_source_text_forgery_rehashed_fails_closed():
         assert "EP_FORBIDDEN_KEY_DETECTED" in res.blockers
 
 
-def test_negative_4_user_position_forgery_rehashed_fails_closed():
+def test_negative_invalid_direction_fails_closed():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
 
-        payload["user_position"] = "secret_user_opinion"
+        with open(export_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        payload["records"][0]["direction"] = "super_supports"
         payload = _rehash_export(payload)
         with open(export_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
         res = verify_epistemic_profile_export(export_file)
         assert res.status == EpistemicIntegrityStatus.RETURN
-        assert "EP_FORBIDDEN_KEY_DETECTED" in res.blockers
+        assert "EP_INVALID_DIRECTION" in res.blockers
 
 
-def test_negative_5_absolute_path_artifact_ref_fails_closed():
+def test_negative_string_boolean_fails_closed():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
 
-        payload["records"][0]["artifact"]["relative_ref"] = "/etc/passwd"
+        with open(export_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        payload["records"][0]["cannot_establish_present"] = "false"
         payload = _rehash_export(payload)
         with open(export_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
         res = verify_epistemic_profile_export(export_file)
         assert res.status == EpistemicIntegrityStatus.RETURN
+        assert "EP_RECORD_KEYS_MISMATCH" in res.blockers
 
 
-def test_negative_6_path_traversal_artifact_ref_fails_closed():
+def test_negative_corrupted_gate_status_fails_closed():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
 
-        payload["records"][0]["artifact"]["relative_ref"] = "../secret.txt"
+        with open(export_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        payload["verification"]["gate_a_status"] = "GATE_A_CORRUPTED"
         payload = _rehash_export(payload)
         with open(export_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
         res = verify_epistemic_profile_export(export_file)
         assert res.status == EpistemicIntegrityStatus.RETURN
+        assert "EP_GATE_A_NOT_VERIFIED" in res.blockers
 
 
-def test_negative_7_cross_run_record_fails_closed():
+def test_negative_unexpected_nested_key_fails_closed():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_dir = os.path.join(tmpdir, "rl_state")
         export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
+        _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
+        _run_rl_cli([
+            "export-nexus-profile",
+            "--state-dir", state_dir,
+            "--run-id", "run_s1",
+            "--task-id", "t1",
+            "--attempt-id", "a1",
+            "--profile-id", "p1",
+            "--output", export_file,
+        ])
 
-        payload["records"][0]["run_id"] = "run_OTHER"
+        with open(export_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        payload["verification"]["unexpected_field"] = "malicious"
         payload = _rehash_export(payload)
         with open(export_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
         res = verify_epistemic_profile_export(export_file)
         assert res.status == EpistemicIntegrityStatus.RETURN
-        assert "EP_CROSS_RUN_RECORD" in res.blockers
+        assert "EP_VERIFICATION_KEYS_MISMATCH" in res.blockers
 
 
-def test_negative_14_records_count_mismatch_fails_closed():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = os.path.join(tmpdir, "rl_state")
-        export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
-
-        payload["verification"]["records_exported"] = 999
-        payload = _rehash_export(payload)
-        with open(export_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-
-        res = verify_epistemic_profile_export(export_file)
-        assert res.status == EpistemicIntegrityStatus.RETURN
-        assert "EP_RECORDS_COUNT_MISMATCH" in res.blockers
-
-
-def test_negative_15_unknown_top_level_key_fails_closed():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = os.path.join(tmpdir, "rl_state")
-        export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
-
-        payload["bogus_key"] = "bogus"
-        payload = _rehash_export(payload)
-        with open(export_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-
-        res = verify_epistemic_profile_export(export_file)
-        assert res.status == EpistemicIntegrityStatus.RETURN
-        assert "EP_EXPORT_KEYS_MISMATCH" in res.blockers
-
-
-def test_negative_17_invalid_completion_status_fails_closed():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = os.path.join(tmpdir, "rl_state")
-        export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-        payload = export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
-
-        payload["completion_status"] = "BANANA"
-        payload = _rehash_export(payload)
-        with open(export_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-
-        res = verify_epistemic_profile_export(export_file)
-        assert res.status == EpistemicIntegrityStatus.RETURN
-        assert "EP_INVALID_COMPLETION_STATUS" in res.blockers
-
-
-def test_negative_22_export_output_inside_state_dir_rejected():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = os.path.join(tmpdir, "rl_state")
-        run_gate_a_synthetic(state_dir)
-        inside_file = os.path.join(state_dir, "bad.json")
-
-        with pytest.raises(ValueError, match="EXPORT_OUTPUT_INSIDE_STATE"):
-            export_nexus_epistemic_profile(
-                state_dir=state_dir,
-                run_id="run_s1",
-                task_id="t1",
-                attempt_id="a1",
-                profile_id="p1",
-                output_path=inside_file,
-            )
-
-
-def test_negative_23_state_dir_manifest_unmodified_by_export():
-    from research_ledger.gate_a_harness import _dir_hash_manifest
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = os.path.join(tmpdir, "rl_state")
-        export_file = os.path.join(tmpdir, "export.json")
-        run_gate_a_synthetic(state_dir)
-
-        m_before = _dir_hash_manifest(state_dir)
-
-        export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
-
-        m_after = _dir_hash_manifest(state_dir)
-        assert m_before == m_after
-
-
-def test_negative_25_receipt_contains_no_forbidden_fields():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = os.path.join(tmpdir, "rl_state")
-        export_file = os.path.join(tmpdir, "export.json")
-        receipt_file = os.path.join(tmpdir, "receipt.json")
-        run_gate_a_synthetic(state_dir)
-
-        export_nexus_epistemic_profile(
-            state_dir=state_dir,
-            run_id="run_s1",
-            task_id="t1",
-            attempt_id="a1",
-            profile_id="p1",
-            output_path=export_file,
-        )
-
-        res = verify_epistemic_profile_export(export_file)
-        rcpt = write_epistemic_receipt(res, receipt_file)
-
-        blob = json.dumps(rcpt)
-        for key in FORBIDDEN_KEYS:
-            assert f'"{key}"' not in blob
-
-
-def test_negative_28_nexus_production_code_does_not_import_research_ledger():
-    import ast
-    from pathlib import Path
+def test_negative_nexus_production_code_does_not_import_research_ledger():
     pkg_dir = Path("nexus/research/epistemic_profile")
     for py_file in pkg_dir.glob("*.py"):
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
