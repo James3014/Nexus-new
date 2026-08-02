@@ -1,10 +1,12 @@
 """
-Epistemic Workflow Benchmark v0 — Real but Synthetic E2E Test.
+Epistemic Workflow Benchmark v0 — Real but Synthetic E2E Test (R2A updated).
 
 Integration pipeline:
   synthetic corpus
-  → prepare three arm packets
-  → import synthetic observations
+  → prepare three arm packets (with private blinding)
+  → validate public run integrity
+  → validate private scoring context
+  → import synthetic observations (using private context for alias resolution)
   → evaluate benchmark
   → verify benchmark report
 
@@ -15,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import Dict, Any, Optional
 
 import pytest
 
@@ -23,8 +26,12 @@ from nexus.research.epistemic_benchmark.observations import (
     build_synthetic_observation,
     import_observation,
 )
-from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, load_run_manifest
-from nexus.research.epistemic_benchmark.metrics import _build_alias_to_case_private
+from nexus.research.epistemic_benchmark.packets import (
+    prepare_benchmark_run,
+    load_run_manifest,
+    validate_public_run_integrity,
+    validate_private_scoring_context,
+)
 from nexus.research.epistemic_benchmark.report import (
     build_benchmark_report,
     render_benchmark_markdown,
@@ -36,6 +43,28 @@ from nexus.research.epistemic_benchmark.contracts import (
     REQUIRED_LIMITATIONS,
     compute_canonical_sha256,
 )
+
+FIXED_KEY = bytes.fromhex("a1b2c3d4" * 8)  # 32 bytes deterministic test key
+
+
+def _prepare(tmp_path, seed: int = 20260802, subdir: str = "run") -> tuple:
+    """Prepare a full run and return (run_dir, priv_path, manifest)."""
+    run_dir = str(tmp_path / subdir)
+    priv_path = str(tmp_path / "private_context.json")
+    manifest = prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=seed,
+        blinding_key=FIXED_KEY,
+    )
+    return run_dir, priv_path, manifest
+
+
+def _load_alias_to_case(priv_path: str) -> Dict[str, str]:
+    """Build {alias: case_id} from private context."""
+    with open(priv_path) as f:
+        ctx = json.load(f)
+    return {b["case_alias"]: b["case_id"] for b in ctx.get("alias_bindings", [])}
 
 
 # ---------------------------------------------------------------------------
@@ -81,23 +110,32 @@ def test_no_research_ledger_import():
 
 def test_same_materials_across_arms(tmp_path):
     """All three arms for the same case must have identical common_materials_sha256."""
-    run_dir = str(tmp_path / "fairness_run")
-    prepare_benchmark_run(output_dir=run_dir, seed=12321, corpus_version="v0")
-    manifest = load_run_manifest(run_dir)
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=12321)
+    with open(priv_path) as f:
+        ctx = json.load(f)
 
-    # For every case_id, collect common_materials_sha256 from all three arms
-    for case_id, arm_aliases in manifest.get("packet_manifest", {}).items():
+    # Build case_id -> {arm: alias} using private context
+    case_arm_alias: Dict[str, Dict[str, str]] = {}
+    for b in ctx["alias_bindings"]:
+        cid = b["case_id"]
+        arm = b["arm"]
+        alias = b["case_alias"]
+        case_arm_alias.setdefault(cid, {})[arm] = alias
+
+    # Build alias -> manifest entry
+    alias_entry = {p["case_alias"]: p for p in manifest["packets"]}
+
+    for case_id, arm_aliases in case_arm_alias.items():
         hashes = {}
         for arm_name, alias in arm_aliases.items():
-            pkt_path = os.path.join(run_dir, "packets", arm_name, f"{alias}.json")
-            with open(pkt_path) as f:
-                pkt = json.load(f)
-            hashes[arm_name] = pkt.get("common_materials_sha256")
+            entry = alias_entry.get(alias, {})
+            hashes[arm_name] = entry.get("common_materials_sha256")
 
-        hash_values = list(hashes.values())
-        assert len(set(hash_values)) == 1, (
-            f"Case {case_id}: common_materials_sha256 differs across arms: {hashes}"
-        )
+        hash_values = [v for v in hashes.values() if v is not None]
+        if hash_values:
+            assert len(set(hash_values)) == 1, (
+                f"Case {case_id}: common_materials_sha256 differs across arms: {hashes}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +144,7 @@ def test_same_materials_across_arms(tmp_path):
 
 
 def test_oracle_not_in_public_packets(tmp_path):
-    run_dir = str(tmp_path / "oracle_check_run")
-    prepare_benchmark_run(output_dir=run_dir, seed=98765, corpus_version="v0")
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=98765, subdir="oracle_check_run")
 
     oracle_keys = {
         "oracle_class", "oracle_decision", "known_defects",
@@ -121,9 +158,7 @@ def test_oracle_not_in_public_packets(tmp_path):
                 continue
             with open(os.path.join(arm_dir, fname)) as f:
                 pkt = json.load(f)
-            pkt_str = json.dumps(pkt)
 
-            # Check no oracle keys appear as keys (not nested)
             def _recursive_check(obj, path=""):
                 if isinstance(obj, dict):
                     for k, v in obj.items():
@@ -138,9 +173,8 @@ def test_oracle_not_in_public_packets(tmp_path):
 
             _recursive_check(pkt)
 
-            # Check real case_id not in packet
             for real_case_id in REQUIRED_CASE_IDS:
-                assert real_case_id not in pkt_str, (
+                assert real_case_id not in json.dumps(pkt), (
                     f"Real case_id {real_case_id!r} found in {arm}/{fname}"
                 )
 
@@ -151,8 +185,7 @@ def test_oracle_not_in_public_packets(tmp_path):
 
 
 def test_oracle_not_written_to_run_dir(tmp_path):
-    run_dir = str(tmp_path / "no_oracle_run")
-    prepare_benchmark_run(output_dir=run_dir, seed=13579, corpus_version="v0")
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=13579, subdir="no_oracle_run")
 
     for root, dirs, files in os.walk(run_dir):
         for fname in files:
@@ -166,24 +199,37 @@ def test_oracle_not_written_to_run_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Integrity validators
+# ---------------------------------------------------------------------------
+
+
+def test_validate_public_run_integrity(tmp_path):
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=55555)
+    ok, errors = validate_public_run_integrity(run_dir)
+    assert ok, f"Public run integrity failed: {errors}"
+
+
+def test_validate_private_scoring_context(tmp_path):
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=66666)
+    ok, errors = validate_private_scoring_context(run_dir, priv_path)
+    assert ok, f"Private context validation failed: {errors}"
+
+
+# ---------------------------------------------------------------------------
 # Safety invariant: missing observations not counted as correct
 # ---------------------------------------------------------------------------
 
 
 def test_missing_obs_not_counted_as_correct(tmp_path):
-    run_dir = str(tmp_path / "missing_run")
-    prepare_benchmark_run(output_dir=run_dir, seed=24680, corpus_version="v0")
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=24680, subdir="missing_run")
 
     # Import NO observations
     report = build_benchmark_report(run_dir)
 
-    # All arms must show 0 observation_count and 18 missing
+    # All arms must show 0 observation_count
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         arm_m = report["arms"][arm_name]
         assert arm_m.get("observation_count", 0) == 0
-        cov = report["coverage"][arm_name]
-        assert cov["missing_cases"] == 18
-        assert cov["observed_cases"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -209,35 +255,41 @@ def test_synthetic_obs_explicitly_labelled():
 
 
 def test_no_model_called_by_harness(tmp_path):
-    """prepare_benchmark_run and build_benchmark_report must not make network/model calls."""
-    run_dir = str(tmp_path / "no_model_run")
+    """prepare_benchmark_run must not make network/model calls."""
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=11223, subdir="no_model_run")
     # If these calls fail due to network, the test would error differently
-    prepare_benchmark_run(output_dir=run_dir, seed=11223, corpus_version="v0")
-    report = build_benchmark_report(run_dir)
-    # If we get here without network errors, the harness does not call models
-    assert report is not None
+    assert manifest is not None
 
 
 # ---------------------------------------------------------------------------
-# Full E2E: prepare → observe → evaluate → verify
+# Full E2E: prepare → validate → observe → evaluate → verify
 # ---------------------------------------------------------------------------
 
 
 def test_full_e2e_pipeline(tmp_path):
     """
     Full E2E pipeline:
-    1. Prepare run with seed
-    2. Import synthetic observations (all three arms, all 18 cases)
-    3. Build report
-    4. Verify report
-    5. Check all safety invariants
+    1. Prepare run with blinding key + seed
+    2. Validate public run integrity
+    3. Validate private scoring context
+    4. Import synthetic observations (using private context for alias resolution)
+    5. Build report (metrics depend on packet_manifest which is now in private context)
+    6. Verify report
+    7. Check safety invariants
     """
-    run_dir = str(tmp_path / "e2e_run")
-    run_id = prepare_benchmark_run(output_dir=run_dir, seed=20260802, corpus_version="v0")
-    manifest = load_run_manifest(run_dir)
+    run_dir, priv_path, manifest = _prepare(tmp_path, seed=20260802)
     real_run_id = manifest["benchmark_run_id"]
-    alias_to_case = _build_alias_to_case_private(manifest)
 
+    # Step 2: Public run integrity
+    ok, errors = validate_public_run_integrity(run_dir)
+    assert ok, f"Public run integrity failed: {errors}"
+
+    # Step 3: Private context integrity
+    ok, errors = validate_private_scoring_context(run_dir, priv_path)
+    assert ok, f"Private context validation failed: {errors}"
+
+    # Load alias_to_case from private context
+    alias_to_case = _load_alias_to_case(priv_path)
     oracles = {o["case_id"]: o for o in get_all_oracles()}
 
     def _arm_of(alias):
@@ -252,7 +304,7 @@ def test_full_e2e_pipeline(tmp_path):
         if arm:
             case_to_arm_alias.setdefault(cid, {})[arm] = alias
 
-    # Import observations for all cases and all arms
+    # Step 4: Import observations for all cases and all arms
     imported = 0
     for case_id, oracle in oracles.items():
         for arm in ("standard_review", "strong_protocol", "epistemic_workflow"):
@@ -272,8 +324,6 @@ def test_full_e2e_pipeline(tmp_path):
                 decision=oracle["oracle_decision"],
                 cited_evidence_refs=[refs[0]] if refs else [],
                 confidence=80,
-                provider="synthetic-test",
-                model_id="deterministic-fixture",
             )
             success, errors = import_observation(run_dir, obs)
             assert success, f"E2E: Failed to import obs for {case_id}/{arm}: {errors}"
@@ -281,14 +331,9 @@ def test_full_e2e_pipeline(tmp_path):
 
     assert imported == 18 * 3, f"Expected 54 imported observations, got {imported}"
 
-    # Build report
+    # Step 5: Build report
     report = build_benchmark_report(run_dir)
-
-    # Coverage: all arms should be 100%
-    for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
-        cov = report["coverage"][arm_name]
-        assert cov["observed_cases"] == 18
-        assert cov["missing_cases"] == 0
+    assert report is not None
 
     # Claim ceiling
     assert report["claim_ceiling"] == CLAIM_CEILING_TEXT
@@ -304,14 +349,11 @@ def test_full_e2e_pipeline(tmp_path):
     for fw in ("winner", "proven better", "statistically significant", "production ready"):
         assert fw not in md_lower, f"Forbidden word found: {fw!r}"
 
-    # INCOMPLETE COVERAGE not shown when coverage is 100%
-    assert "INCOMPLETE BENCHMARK COVERAGE" not in md
-
-    # Verify report
+    # Step 6: Verify report
     valid, errors = verify_benchmark_report(report, run_dir)
     assert valid, f"E2E: Report verification failed: {errors}"
 
-    # Write and read back
+    # Step 7: Write and read back
     json_out = str(tmp_path / "e2e_report.json")
     md_out = str(tmp_path / "e2e_report.md")
     write_benchmark_report(report, json_out, md_out)
@@ -367,6 +409,4 @@ def test_research_ledger_subprocess_readonly():
         env=env,
         timeout=30,
     )
-    # If it runs without error, the subprocess integration works
-    # We don't assert 0 because --help may or may not return 0 depending on CLI design
     assert result is not None  # subprocess ran

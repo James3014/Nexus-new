@@ -23,6 +23,38 @@ BENCHMARK_PACKET_SCHEMA = "nexus.epistemic_benchmark_packet.v0"
 BENCHMARK_RUN_SCHEMA = "nexus.epistemic_benchmark_run.v0"
 BENCHMARK_OBSERVATION_SCHEMA = "nexus.epistemic_benchmark_observation.v0"
 BENCHMARK_REPORT_SCHEMA = "nexus.epistemic_benchmark_report.v0"
+BENCHMARK_PRIVATE_CONTEXT_SCHEMA = "nexus.epistemic_benchmark_private_context.v0"
+BENCHMARK_PUBLIC_MANIFEST_SCHEMA = "nexus.epistemic_benchmark_public_manifest.v0"
+
+# ---------------------------------------------------------------------------
+# Private Context Contract
+# ---------------------------------------------------------------------------
+
+PRIVATE_CONTEXT_EXACT_KEYS: Set[str] = {
+    "schema", "benchmark_run_id", "corpus_version", "seed",
+    "blinding_key_hex", "alias_bindings", "oracle_corpus_sha256",
+    "public_manifest_sha256", "private_context_sha256",
+}
+
+PRIVATE_CONTEXT_BINDING_KEYS: Set[str] = {"arm", "case_alias", "case_id"}
+
+# ---------------------------------------------------------------------------
+# Public Manifest Contract
+# ---------------------------------------------------------------------------
+
+PUBLIC_MANIFEST_EXACT_KEYS: Set[str] = {
+    "schema", "benchmark_run_id", "corpus_version", "created_at",
+    "arms", "case_count", "packets", "run_manifest_sha256",
+}
+
+PUBLIC_MANIFEST_PACKET_EXACT_KEYS: Set[str] = {
+    "arm", "case_alias", "relative_path", "packet_sha256", "common_materials_sha256",
+}
+
+PUBLIC_MANIFEST_FORBIDDEN_KEYS: Set[str] = {
+    "seed", "case_id", "packet_manifest", "alias_to_case", "blinding_key",
+    "blinding_key_hex", "private_context", "oracle", "expected_answer", "known_defects",
+}
 
 # ---------------------------------------------------------------------------
 # Closed enums

@@ -62,17 +62,19 @@ def _cmd_validate_corpus(args: argparse.Namespace) -> int:
 
 
 def _cmd_prepare_run(args: argparse.Namespace) -> int:
-    """Prepare a benchmark run. Does NOT write oracle to run directory."""
+    """Prepare a benchmark run. Does NOT write oracle or seed to public run directory."""
     from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run
     import os
 
-    output_dir = args.output
+    public_output_dir = args.output
+    private_context_path = args.private_context
     seed = int(args.seed)
     corpus_version = getattr(args, "corpus_version", "v0")
 
     try:
-        run_id = prepare_benchmark_run(
-            output_dir=output_dir,
+        manifest = prepare_benchmark_run(
+            public_output_dir=public_output_dir,
+            private_context_path=private_context_path,
             seed=seed,
             corpus_version=corpus_version,
         )
@@ -80,15 +82,66 @@ def _cmd_prepare_run(args: argparse.Namespace) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
-    # Verify oracle NOT in run directory
-    forbidden_names = {"oracle", "oracle_v0.json", "case_id_map.json", "expected_results.json"}
-    for root, dirs, files in os.walk(output_dir):
+    run_id = manifest["benchmark_run_id"]
+    case_count = manifest["case_count"]
+    packet_count = len(manifest.get("packets", []))
+    manifest_sha = manifest.get("run_manifest_sha256", "")
+
+    # Safety: verify oracle NOT in run directory
+    for root, dirs, files in os.walk(public_output_dir):
         for fname in files:
             if any(f in fname.lower() for f in ("oracle", "case_id_map", "expected_results", "answer_key")):
                 print(f"SECURITY_VIOLATION: oracle-like file written to run dir: {fname}", file=sys.stderr)
                 return 1
 
-    print(f"RUN_PREPARED: run_id={run_id} output={output_dir}")
+    # Output: no seed, no blinding key, no case IDs, no alias bindings, no oracle decisions
+    print(
+        f"RUN_PREPARED: run_id={run_id} cases={case_count} packets={packet_count} "
+        f"manifest_sha256={manifest_sha} output={public_output_dir}"
+    )
+    return 0
+
+
+def _cmd_validate_run(args: argparse.Namespace) -> int:
+    """Validate public run integrity."""
+    from nexus.research.epistemic_benchmark.packets import validate_public_run_integrity
+
+    run_dir = args.run_dir
+
+    try:
+        ok, errors = validate_public_run_integrity(run_dir)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    if not ok:
+        for e in errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    print(f"PUBLIC_RUN_VALID: run_dir={run_dir}")
+    return 0
+
+
+def _cmd_validate_private_context(args: argparse.Namespace) -> int:
+    """Validate private scoring context against public run."""
+    from nexus.research.epistemic_benchmark.packets import validate_private_scoring_context
+
+    run_dir = args.run_dir
+    private_context_path = args.private_context
+
+    try:
+        ok, errors = validate_private_scoring_context(run_dir, private_context_path)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    if not ok:
+        for e in errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    print(f"PRIVATE_CONTEXT_VALID: run_dir={run_dir}")
     return 0
 
 
@@ -175,9 +228,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # prepare-run
     p_prepare = subparsers.add_parser("prepare-run", help="Prepare a benchmark run")
-    p_prepare.add_argument("--output", required=True, help="Output directory for the run")
+    p_prepare.add_argument("--output", required=True, help="Output directory for the public run")
+    p_prepare.add_argument("--private-context", required=True, help="Output path for private context JSON")
     p_prepare.add_argument("--seed", required=True, help="Deterministic seed (integer)")
     p_prepare.add_argument("--corpus-version", default="v0", help="Corpus version (default: v0)")
+
+    # validate-run
+    p_vrun = subparsers.add_parser("validate-run", help="Validate public run integrity")
+    p_vrun.add_argument("--run-dir", required=True, help="Public run directory")
+
+    # validate-private-context
+    p_vctx = subparsers.add_parser("validate-private-context", help="Validate private scoring context")
+    p_vctx.add_argument("--run-dir", required=True, help="Public run directory")
+    p_vctx.add_argument("--private-context", required=True, help="Path to private context JSON")
 
     # import-observation
     p_import = subparsers.add_parser("import-observation", help="Import a single observation")
@@ -207,6 +270,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _cmd_evaluate(args)
     elif args.command == "verify-report":
         return _cmd_verify_report(args)
+    elif args.command == "validate-run":
+        return _cmd_validate_run(args)
+    elif args.command == "validate-private-context":
+        return _cmd_validate_private_context(args)
     else:
         parser.print_help()
         return 1
