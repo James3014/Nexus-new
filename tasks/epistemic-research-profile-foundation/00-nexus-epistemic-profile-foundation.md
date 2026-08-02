@@ -9,6 +9,11 @@ worker:
   formal_workforce_status: not_promoted_by_this_task
 implementation_status: candidate_ready
 independent_acceptance: pending
+repair_attempt:
+  attempt_id: erp00-agy-gemini36-medium-a2
+  status: authorized
+  source_rejection: ERP-00 independent acceptance A1
+  independent_acceptance: pending
 ---
 
 # Task Card ERP-00: Nexus Epistemic Research Profile Foundation
@@ -52,16 +57,31 @@ Establish the first version of the Epistemic Research Profile foundation inside 
 2. Milestone 1: Reconcile Research Ledger lab boundary.
 3. Milestone 2: Implement Nexus Epistemic Research Profile foundation.
 
+## Owner-authorized Repair Attempt A2
+- **Attempt ID**: `erp00-agy-gemini36-medium-a2`
+- **Scope of Repair**:
+  1. Revert `nexus/research/contamination_guard.py` modification back to base `ad130ac14399e0ee922c544e488dc4adfb87745b` behavior.
+  2. Enforce fail-closed validation on all authority and permission fields in `EpistemicAuthorityBoundary`.
+  3. Enforce fail-closed validation on claim ID binding, artifact relative ref binding, and closed-set completion status across verification result and direct read-model builders.
+- **Allowed Paths for A2**:
+  - `tasks/epistemic-research-profile-foundation/00-nexus-epistemic-profile-foundation.md`
+  - `nexus/research/contamination_guard.py`
+  - `nexus/research/epistemic_profile/authority.py`
+  - `nexus/research/epistemic_profile/contracts.py`
+  - `nexus/research/epistemic_profile/adapter.py`
+  - `tests/research/test_epistemic_profile_authority.py`
+  - `tests/research/test_epistemic_profile_contracts.py`
+  - `tests/research/test_epistemic_profile_adapter.py`
+- **Prohibitions**: No ERP-01, no runtime wiring, no routing changes, no integration, no merge, no push, no public claim.
+- **Output**: Candidate commit only for independent acceptance.
+
 ## Tests & Verification
 - TDD required (RED evidence before production implementation).
 - Mandatory Commands C1 - C9 must pass clean.
 - Existing governance regression tests must remain 100% green.
 
 ## Commit Policy
-- 3 independent candidate commits across 2 Git roots:
-  1. Nexus root: `chore(tasks): activate epistemic profile foundation`
-  2. Research Ledger root: `docs(research-ledger): define Nexus profile boundary`
-  3. Nexus root: `feat(research): add epistemic profile foundation`
+- Candidate commit for independent acceptance review.
 
 ## Claim Ceiling & Independent Acceptance
 - Maximum claim: Implementer-reported candidate readiness only.
