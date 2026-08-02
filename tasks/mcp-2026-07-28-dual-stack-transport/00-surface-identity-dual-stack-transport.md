@@ -224,3 +224,69 @@ DUAL_STACK_TRANSPORT_CANDIDATE_WITH_LOCAL_RESTART_AND_COMPATIBILITY_EVIDENCE
 It does not claim OAuth durability, principal-bound workspace isolation, Tasks
 extension compatibility, live ChatGPT modern negotiation, complete disconnect
 elimination, production readiness, or public deployment.
+
+## Candidate reconciliation settlement
+
+```yaml
+reconciled_at: 2026-08-03
+candidate:
+  commit: 904b17c4e55dc75b8a6dd3374a4b5a9e491f467e
+  tree: 07b364f1b31200b3e395100ca11604d1da442c42
+  card_sha256_at_candidate_formation: 54b1f51e155a1d713af2d7f49843b0ae016016b7363559481340c8c199f9d5b7
+  lockfile_sha256: 52f2b28aba23f0bb6e367277c23727872b0c8771f4aaab54fb66a1042e2af872
+  artifact_sha256: 65403d178a30b96671d377192bc8748ca67bc6ba82da371e627bc6689c8a8761
+  build_identity_sha256: 7175e242354d5bcd25601a63212809adb7ec19736711875e2285a8c24eb72de5
+clean_verification:
+  node: v24.5.0
+  npm: 11.5.2
+  npm_ci: PASS
+  tests: PASS_52_0
+  typecheck: PASS
+  build: PASS
+  pack: PASS
+  two_clean_artifacts_byte_identical: true
+  source_or_lock_changes: 0
+installed_runtime:
+  package: "@nexus-local/devspace@1.0.1-nexus.3"
+  source_commit: 904b17c4e55dc75b8a6dd3374a4b5a9e491f467e
+  package_matches_bound_artifact: true
+  protocol_mode: dual
+  surface_profile: canonical_gateway_proxy
+  effective_tool_count: 24
+  gateway_commit: 71504cce49f2472af560bc1ab6286830656395e3
+  gateway_manifest_revision: 6c1b0339588b313aaf3c8f30f25aa0cf72459850adc7d21b67e52bb89e9c55dd
+  observed_manifest_sha256: 746d8f049949c9549f9990da53da79b76e06a94c84de394b04421ce6df003f45
+  auth_disposition: REAUTH_REQUIRED
+authorization:
+  owner: James Chen
+  statement: "前四項授權"
+  receipt_sha256: cb073e06bfb2c3fdf64edf658dc2666b44e8342068a57509864452361dc8c84b
+  exact_candidate_integration: authorized
+  local_artifact_install_and_restart: authorized
+  live_connector_smoke: authorized
+  dual_public_cutover_after_gates: authorized
+  push: not_authorized
+  production_ready_claim: not_authorized
+acceptance:
+  prior_luna_review_sha256: 828a1c878dd3ce26a1ce710c2e7f08e862ce3698893c199295ac5b3488e71c3a
+  prior_luna_review_disposition: reviewer_evidence_only
+  formal_independent_acceptance: PENDING
+  reason: candidate-bound live long-task reconnect and duplicate-mutation receipts are absent
+live_evidence:
+  modern_2026_07_28: PASS
+  modern_calls_without_session_id: 22
+  legacy_initialize: PASS
+  persisted_workspace_read_after_process_restart: PASS
+  gateway_manifest_exact: PASS
+  raw_public_tool_leakage: false
+  public_authenticated_owner_reconnect: MISSING
+rollback:
+  artifact: /private/tmp/nexus-mcp-runtime-rollback-2d1efff/legacy-artifact.tgz
+  artifact_sha256: 7155a3b777d8d04fffe3c56536eb8dcb97244edd2b0ae25c0f9ea7d769b3f3a0
+settlement:
+  reconciliation_receipt: /private/tmp/nexus-mcp-reconcile-904b17c.c8CUyb/reconciliation-receipt.json
+  reconciliation_receipt_sha256: 4d06c114fad31af437bbeeec6e1e988a00b7a6e42557b34cc83e36219e0e8d3a
+  gate_verdict: CUTOVER_STATE_RECONCILIATION_REQUIRED
+  claim_ceiling: DUAL_STACK_TRANSPORT_CANDIDATE_WITH_LOCAL_RESTART_AND_COMPATIBILITY_EVIDENCE
+  auto_chain: false
+```
