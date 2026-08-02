@@ -8,6 +8,7 @@ import tempfile
 
 import pytest
 
+import inspect
 from nexus.research.epistemic_benchmark.contracts import (
     BENCHMARK_OBSERVATION_SCHEMA,
     compute_canonical_sha256,
@@ -89,12 +90,16 @@ def _make_obs(
         available = packet.get("common_materials", {}).get("available_evidence_refs", [])
         refs = [available[0]] if available else []
 
+    # Read the real packet SHA-256 so the observation binding is exact
+    pkt_sha256 = packet.get("packet_sha256")
+
     return build_synthetic_observation(
         benchmark_run_id=run_id,
         arm=arm,
         case_alias=pkt_alias,
         observation_id=obs_id,
         decision=decision,
+        packet_sha256=pkt_sha256,
         cited_evidence_refs=refs,
         confidence=confidence,
     )
@@ -314,3 +319,83 @@ def test_observation_hash_validation(run_dir):
     success, errors = import_observation(run_dir, obs)
     assert not success
     assert any("hash" in e.lower() or "SHA" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Section 14: Required RED Proofs
+# ---------------------------------------------------------------------------
+
+
+def test_red_01_allow_overwrite_still_exists():
+    from nexus.research.epistemic_benchmark.observations import import_observation
+    sig = inspect.signature(import_observation)
+    assert "allow_overwrite" not in sig.parameters, "RED-01: allow_overwrite parameter must be completely removed"
+
+
+def test_red_02_same_evaluator_different_id_duplicate_rejected(run_dir):
+    from nexus.research.epistemic_benchmark.observations import import_observation
+    # Build obs1 and obs2 with SAME evaluator_id to confirm the evaluator tuple rule
+    obs1 = _make_obs(run_dir, "standard_review", obs_id="obs-eval-dup-1")
+    obs2 = _make_obs(run_dir, "standard_review", obs_id="obs-eval-dup-2")
+    # Force same evaluator_id on obs2 so the (arm, alias, provider, model_id, evaluator_id, prompt_version) tuple matches
+    obs2["evaluator"]["evaluator_id"] = obs1["evaluator"]["evaluator_id"]
+    # Recompute hash because evaluator changed
+    from nexus.research.epistemic_benchmark.contracts import compute_canonical_sha256
+    obs2["observation_sha256"] = compute_canonical_sha256({k: v for k, v in obs2.items() if k != "observation_sha256"})
+    # Same evaluator tuple: obs2 has different observation_id but same evaluator details
+    s1, e1 = import_observation(run_dir, obs1)
+    assert s1, f"First import failed: {e1}"
+    s2, e2 = import_observation(run_dir, obs2)
+    assert not s2, "RED-02: Same evaluator tuple must be rejected even with different observation_id"
+    assert "BENCHMARK_DUPLICATE_EVALUATOR_OBSERVATION" in e2
+
+
+def test_red_03_malformed_json_counted_in_inventory(tmp_path, run_dir):
+    from nexus.research.epistemic_benchmark.observations import load_observation_inventory
+    # Put a malformed json file in observations/
+    obs_root = os.path.join(run_dir, "observations", "standard_review", "alias_test")
+    os.makedirs(obs_root, exist_ok=True)
+    bad_file = os.path.join(obs_root, "bad_obs.json")
+    with open(bad_file, "w") as f:
+        f.write("{invalid json syntax...")
+    inv = load_observation_inventory(run_dir)
+    assert len(inv.get("invalid", [])) + len(inv.get("unexpected_files", [])) > 0, "RED-03: Malformed JSON must be captured in inventory"
+
+
+def test_red_04_observation_missing_packet_sha256_rejected(run_dir):
+    obs = _make_obs(run_dir, "standard_review", obs_id="obs-nopktsha-1")
+    assert "packet_sha256" in obs, "RED-04: Observation schema must include packet_sha256"
+
+
+def test_red_05_wrong_packet_hash_rejected(run_dir):
+    from nexus.research.epistemic_benchmark.observations import verify_observation
+    obs = _make_obs(run_dir, "standard_review", obs_id="obs-wrongpkt-1")
+    if "packet_sha256" in obs:
+        obs["packet_sha256"] = "0" * 64
+        obs["observation_sha256"] = compute_canonical_sha256({k: v for k, v in obs.items() if k != "observation_sha256"})
+        valid, errs = verify_observation(obs, run_dir)
+        assert not valid, "RED-05: Mismatched packet_sha256 must be rejected"
+        # Error codes may include detail suffix; check for prefix match
+        assert any(e.startswith("OBS_PACKET_SHA256_MISMATCH") for e in errs), f"Expected OBS_PACKET_SHA256_MISMATCH in {errs}"
+    else:
+        pytest.fail("RED-05: Observation schema missing packet_sha256")
+
+
+def test_red_06_duplicate_observation_id_global_rejection(tmp_path):
+    from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run
+    from nexus.research.epistemic_benchmark.observations import import_observation
+    base = tmp_path / "global_dup_run"
+    run_dir = str(base / "run")
+    priv_path = str(base / "priv.json")
+    prepare_benchmark_run(public_output_dir=run_dir, private_context_path=priv_path, seed=99)
+
+    # Create obs for arm 1
+    obs1 = _make_obs(run_dir, "standard_review", obs_id="global-dup-id-100")
+    # Create obs for arm 2 with SAME observation_id
+    obs2 = _make_obs(run_dir, "strong_protocol", obs_id="global-dup-id-100")
+
+    s1, e1 = import_observation(run_dir, obs1)
+    assert s1, f"First import failed: {e1}"
+    s2, e2 = import_observation(run_dir, obs2)
+    assert not s2, "RED-06: Same observation_id across different arms/aliases must be globally rejected"
+    assert "BENCHMARK_DUPLICATE_OBSERVATION" in e2

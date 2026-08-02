@@ -81,6 +81,7 @@ def report_run(tmp_path_factory):
             case_alias=alias,
             observation_id=f"obs-{arm[:3]}-{case_id.lower()}-{suffix}",
             decision=decision,
+            packet_sha256=pkt.get("packet_sha256"),
             cited_evidence_refs=[refs[0]] if refs else [],
             confidence=confidence,
         )

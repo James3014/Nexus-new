@@ -787,7 +787,7 @@ def validate_packet(packet: Dict[str, Any]) -> List[str]:
 
 OBSERVATION_EXACT_KEYS: Set[str] = {
     "schema", "observation_id", "benchmark_run_id", "arm", "case_alias",
-    "evaluator", "decision", "detected_defect_ids", "cited_evidence_refs",
+    "packet_sha256", "evaluator", "decision", "detected_defect_ids", "cited_evidence_refs",
     "rationale_summary", "confidence", "execution",
     "skipped_checks", "observation_sha256",
 }
@@ -802,8 +802,8 @@ OBSERVATION_EXECUTION_KEYS: Set[str] = {
 }
 
 OBSERVATION_FORBIDDEN_KEYS: Set[str] = {
-    "chain_of_thought", "full_cot", "reasoning_chain",
-    "oracle", "expected_answer",
+    "chain_of_thought", "full_cot", "reasoning_chain", "reasoning_steps",
+    "oracle", "oracle_class", "oracle_decision", "expected_answer", "answer_key",
 }
 
 _ISO8601_RE = re.compile(
@@ -815,8 +815,28 @@ def _is_timezone_aware_iso8601(ts: str) -> bool:
     return bool(_ISO8601_RE.match(ts))
 
 
+def _contains_forbidden_keys(obj: Any) -> Optional[str]:
+    """Recursively scan data structures for any forbidden keys."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k.lower() in OBSERVATION_FORBIDDEN_KEYS:
+                return k
+            found = _contains_forbidden_keys(v)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _contains_forbidden_keys(item)
+            if found:
+                return found
+    return None
+
+
 def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] = None) -> List[str]:
     errors: List[str] = []
+    if not isinstance(obs, dict):
+        return ["OBS_NOT_DICT"]
+
     keys = set(obs.keys())
 
     missing = OBSERVATION_EXACT_KEYS - keys
@@ -826,9 +846,14 @@ def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] =
     if extra:
         errors.append(f"OBS_EXTRA_KEYS: {sorted(extra)}")
 
-    leaked = OBSERVATION_FORBIDDEN_KEYS & keys
-    if leaked:
-        errors.append(f"OBS_FORBIDDEN_KEYS: {sorted(leaked)}")
+    forbidden_key = _contains_forbidden_keys(obs)
+    if forbidden_key:
+        errors.append(f"OBS_FORBIDDEN_KEYS: {[forbidden_key]}")
+
+    # packet_sha256: 64-char lowercase hex
+    pkt_sha = obs.get("packet_sha256")
+    if not isinstance(pkt_sha, str) or not validate_sha256(pkt_sha):
+        errors.append(f"OBS_PACKET_SHA256_INVALID: {pkt_sha!r}")
 
     # arm
     arm = obs.get("arm", "")
@@ -848,28 +873,40 @@ def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] =
         elif not isinstance(conf, int) or conf < 0 or conf > 100:
             errors.append(f"OBS_CONFIDENCE_INVALID: {conf!r}")
 
-    # rationale summary length
-    rationale = obs.get("rationale_summary", "")
-    if isinstance(rationale, str) and len(rationale) > 2000:
+    # rationale summary: exact string <= 2000 chars
+    rationale = obs.get("rationale_summary")
+    if not isinstance(rationale, str):
+        errors.append(f"OBS_RATIONALE_NOT_STRING: {type(rationale).__name__}")
+    elif len(rationale) > 2000:
         errors.append("OBS_RATIONALE_TOO_LONG")
 
-    # evaluator
-    evaluator = obs.get("evaluator", {})
+    # evaluator: exact keys, all exact non-empty string, no extra keys
+    evaluator = obs.get("evaluator")
     if isinstance(evaluator, dict):
         ev_keys = set(evaluator.keys())
         missing_ev = OBSERVATION_EVALUATOR_KEYS - ev_keys
+        extra_ev = ev_keys - OBSERVATION_EVALUATOR_KEYS
         if missing_ev:
             errors.append(f"OBS_EVALUATOR_MISSING_KEYS: {sorted(missing_ev)}")
+        if extra_ev:
+            errors.append(f"OBS_EVALUATOR_EXTRA_KEYS: {sorted(extra_ev)}")
+        for ek in OBSERVATION_EVALUATOR_KEYS:
+            val = evaluator.get(ek)
+            if not isinstance(val, str) or isinstance(val, bool) or not val:
+                errors.append(f"OBS_EVALUATOR_VALUE_INVALID: {ek}={val!r}")
     else:
         errors.append("OBS_EVALUATOR_NOT_DICT")
 
-    # execution
-    execution = obs.get("execution", {})
+    # execution: exact keys, timestamps ISO-8601 aware, non-negative numbers, no extra keys
+    execution = obs.get("execution")
     if isinstance(execution, dict):
         ex_keys = set(execution.keys())
         missing_ex = OBSERVATION_EXECUTION_KEYS - ex_keys
+        extra_ex = ex_keys - OBSERVATION_EXECUTION_KEYS
         if missing_ex:
             errors.append(f"OBS_EXECUTION_MISSING_KEYS: {sorted(missing_ex)}")
+        if extra_ex:
+            errors.append(f"OBS_EXECUTION_EXTRA_KEYS: {sorted(extra_ex)}")
 
         dur = execution.get("duration_seconds")
         if dur is not None and (isinstance(dur, bool) or (not isinstance(dur, (int, float))) or dur < 0):
@@ -884,12 +921,28 @@ def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] =
         if cost is not None and (isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost < 0):
             errors.append(f"OBS_COST_NEGATIVE: {cost!r}")
 
-        for ts_field in ("started_at", "completed_at"):
-            ts = execution.get(ts_field, "")
-            if ts and not _is_timezone_aware_iso8601(ts):
-                errors.append(f"OBS_TIMESTAMP_NOT_AWARE: {ts_field}={ts!r}")
+        start_ts = execution.get("started_at", "")
+        comp_ts = execution.get("completed_at", "")
+        for ts_name, ts_val in (("started_at", start_ts), ("completed_at", comp_ts)):
+            if not isinstance(ts_val, str) or not _is_timezone_aware_iso8601(ts_val):
+                errors.append(f"OBS_TIMESTAMP_NOT_AWARE: {ts_name}={ts_val!r}")
+        if isinstance(start_ts, str) and isinstance(comp_ts, str) and _is_timezone_aware_iso8601(start_ts) and _is_timezone_aware_iso8601(comp_ts):
+            if comp_ts < start_ts:
+                errors.append(f"OBS_COMPLETED_BEFORE_STARTED: completed={comp_ts!r} started={start_ts!r}")
     else:
         errors.append("OBS_EXECUTION_NOT_DICT")
+
+    # List fields: list[str] and no duplicates
+    for list_field in ("detected_defect_ids", "cited_evidence_refs", "skipped_checks"):
+        val_list = obs.get(list_field)
+        if not isinstance(val_list, list):
+            errors.append(f"OBS_LIST_NOT_LIST: {list_field}={type(val_list).__name__}")
+        else:
+            for item in val_list:
+                if not isinstance(item, str) or isinstance(item, bool):
+                    errors.append(f"OBS_LIST_ITEM_NOT_STRING: {list_field}={item!r}")
+            if len(val_list) != len(set(val_list)):
+                errors.append(f"OBS_LIST_DUPLICATE_ITEMS: {list_field}")
 
     # cited evidence refs must exist in packet
     cited_refs = obs.get("cited_evidence_refs", [])
@@ -900,12 +953,12 @@ def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] =
         for ref in packet.get("common_materials", {}).get("available_evidence_refs", []):
             packet_refs.add(ref)
         for ref in cited_refs:
-            if ref and ref not in packet_refs:
+            if isinstance(ref, str) and ref and ref not in packet_refs:
                 errors.append(f"OBS_CITED_REF_NOT_IN_PACKET: {ref!r}")
 
     # observation hash
     sha = obs.get("observation_sha256", "")
-    if not validate_sha256(sha):
+    if not isinstance(sha, str) or not validate_sha256(sha):
         errors.append(f"OBS_SHA256_INVALID: {sha!r}")
     else:
         body = {k: v for k, v in obs.items() if k != "observation_sha256"}

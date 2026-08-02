@@ -322,6 +322,7 @@ def test_full_e2e_pipeline(tmp_path):
                 case_alias=alias,
                 observation_id=f"obs-e2e-{arm[:3]}-{case_id.lower()}",
                 decision=oracle["oracle_decision"],
+                packet_sha256=pkt.get("packet_sha256"),
                 cited_evidence_refs=[refs[0]] if refs else [],
                 confidence=80,
             )
