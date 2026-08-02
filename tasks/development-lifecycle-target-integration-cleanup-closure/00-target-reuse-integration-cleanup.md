@@ -212,4 +212,49 @@ authority_audit:
   new_verifier: false
   new_receipt_store: false
   planner_workforce_runtime_changed: false
+
+## Corrective settlement evidence
+
+```yaml
+task_id: target-reuse-integration-cleanup-closure
+attempt_id: codex-target-integration-cleanup-20260802-a3
+prior_candidate: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+prior_verdict: REJECT_CANDIDATE
+reopen_commit: d4ee02c77
+implementation_commit: c749ce63a
+starting_target_head: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+
+corrected_defects:
+  authorization_required: true
+  external_acceptance_required: true
+  one_shot_approval_consumption: true
+  adapter_raw_git_mutations: false
+  integration_delegated_to_controlled_manager: true
+  cleanup_delegated_to_self_hosted_and_worktree_manager: true
+  dirty_and_untracked_canonical_blocked_even_matching_hash: true
+  multiple_active_targets_typed_block: true
+  integration_receipt_fresh_reload: true
+  cleanup_receipt_fresh_reload: true
+  post_apply_verification: true
+  exact_verified_staging_commit_applied: true
+
+adversarial:
+  no_authorization: blocked
+  forged_cleanup_decision: retained
+  dirty_canonical: blocked
+  staging_failure_branch_unchanged: true
+  conflict_branch_unchanged: true
+
+verification:
+  focused_corrective_suite: 28_passed
+  existing_authority_candidate_verifier_suite: 113_passed
+  self_hosted_task_service: 126_passed
+  compileall: passed
+  adapter_raw_git_scan: zero_mutation_matches
+  diff_check: passed
+  deletion_audit: zero
+```
+
+Final claim remains bounded to
+`IMPLEMENTER_VERIFIED_TARGET_REUSE_INTEGRATION_CLEANUP_CANDIDATE`.
 ```
