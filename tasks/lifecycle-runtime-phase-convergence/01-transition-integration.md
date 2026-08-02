@@ -2,10 +2,21 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_CANDIDATE
 task_id: runtime-phase-transition-integration
 commit_required: true
 AUTO_CHAIN: false
+candidate_commit: a02506fe0f4c797d9d6398eab28142b012aa3c20
+claim_ceiling: IMPLEMENTER_VERIFIED_RUNTIME_PHASE_TRANSITION_CANDIDATE
+
+verification_receipt:
+  base_head: 28ab0ac7d3a3c0f1d43a5d8b882c32bca0e0e6f4
+  card_hash_at_execution: d7ee2fff748a2e1767b644c883502e73e58e3152dfdac8e68553c7c68e54f661
+  focused_tests: 8 passed
+  affected_regression: 40 passed
+  diff_check: PASS
+  evidence_scope: p_d_x_d_research_boundary_r_a_rejection_and_hard_guard
+  external_acceptance: DEFERRED_EXTERNAL_ACCEPTANCE
 
 ## Objective
 

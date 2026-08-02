@@ -1,8 +1,8 @@
 # Task Card: runtime-phase-receipt-hook-symmetry
 
-artifact_authority: draft-successor
+artifact_authority: current
 owner: James Chen
-status: DRAFT_PENDING_OWNER_ACTIVATION
+status: ACTIVE
 task_id: runtime-phase-receipt-hook-symmetry
 commit_required: true
 AUTO_CHAIN: false
