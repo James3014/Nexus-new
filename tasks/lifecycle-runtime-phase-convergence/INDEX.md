@@ -2,7 +2,7 @@
 
 artifact_authority: current
 owner: James Chen
-status: active, governed and sequential
+status: terminal candidate, governed and sequential
 source_specification: /Users/jameschen/.codex/attachments/c7cbb20c-e2c7-42f8-a943-be66aef5099d/pasted-text-1.txt
 AUTO_CHAIN: false
 
@@ -42,7 +42,7 @@ verifier, receipt store, memory database or MCP server.
 | 2 | `runtime-phase-receipt-hook-symmetry` | `02-receipt-hook-symmetry.md` | VERIFIED_CANDIDATE | Card 1 |
 | 3 | `runtime-development-lifecycle-mapping` | `03-development-runtime-mapping.md` | VERIFIED_CANDIDATE | Card 2 |
 | 4 | `runtime-memory-learning-closure` | `04-memory-learning-closure.md` | VERIFIED_CANDIDATE | Card 3 + workforce learning gate |
-| 5 | `runtime-full-acceptance` | `05-full-acceptance.md` | ACTIVE | Cards 0–4 + P7 disposition |
+| 5 | `runtime-full-acceptance` | `05-full-acceptance.md` | VERIFIED_CANDIDATE | Cards 0–4 + P7 disposition |
 
 ## Exit gate
 
@@ -59,6 +59,6 @@ transport or environment failures with retained evidence.
 
 ## Current frontier
 
-`runtime-full-acceptance` is active after Card 4's scoped candidate and fresh
-local verification. Only this card may mutate source until its exit criteria
-and receipt are complete; Card 5 is the terminal campaign frontier.
+`runtime-full-acceptance` is a terminal candidate after fresh local
+verification. No Card 6 is authorized. Owner P7 disposition, final approval,
+integration and any live provider/transport acceptance remain separate gates.
