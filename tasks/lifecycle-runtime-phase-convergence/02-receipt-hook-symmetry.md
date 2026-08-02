@@ -2,10 +2,21 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_CANDIDATE
 task_id: runtime-phase-receipt-hook-symmetry
 commit_required: true
 AUTO_CHAIN: false
+candidate_commit: dd420b3dd9fe898dac450dfbe73d6bfade7e7c3d
+claim_ceiling: IMPLEMENTER_VERIFIED_RUNTIME_PHASE_RECEIPT_HOOK_CANDIDATE
+
+verification_receipt:
+  base_head: a35c3c82a12e59abd9e3cacc0f99d2804cbab612
+  card_hash_at_execution: f4796774a54c3ac613c9c3bdf77cc4e82d4699d67d9ee7020dfa74d8728f23e7
+  focused_tests: 6 passed
+  affected_regression: 33 passed
+  diff_check: PASS
+  evidence_scope: phase_receipts_observer_symmetry_receipt_completeness_and_c_terminal_hooks
+  external_acceptance: DEFERRED_EXTERNAL_ACCEPTANCE
 
 ## Objective
 
