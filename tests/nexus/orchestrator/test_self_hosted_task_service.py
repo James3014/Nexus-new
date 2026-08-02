@@ -1709,7 +1709,7 @@ def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monk
         ),
     )
 
-    assert result["status"] == "INTEGRATED"
+    assert result["status"] == "INTEGRATED_AND_CLEANED"
     assert calls == [("approve", "owner-finish-canary"), ("integrate", "nexus/integration/main")]
     assert result["owner_finish"]["archive"]["dry_run"] is False
 
@@ -1770,7 +1770,7 @@ def test_owner_finish_ten_candidate_matrix_archives_each_terminal(tmp_path, monk
             ),
         )
 
-        assert result["status"] == "INTEGRATED"
+        assert result["status"] == "INTEGRATED_AND_CLEANED"
         assert not service._state_path(task_id).exists()
         assert service._archive_state_path(task_id).is_file()
 

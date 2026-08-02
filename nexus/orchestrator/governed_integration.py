@@ -40,6 +40,37 @@ class IntegrationReceipt:
     candidate_tree_sha: str | None = None
     candidate_state_hash: str | None = None
     verified_receipt_hash: str | None = None
+    branch_head_before: str | None = None
+    branch_head_after: str | None = None
+    candidate_is_ancestor: bool = False
+    staging_verified: bool = False
+
+
+class IntegrationExecutionError(RuntimeError):
+    """Carry physical Git truth across a failed integration execution."""
+
+    def __init__(
+        self,
+        *,
+        stage: str,
+        branch_head_before: str,
+        branch_head_after: str,
+        staging_commit_sha: str | None,
+        candidate_commit_sha: str,
+        merge_performed: bool,
+        post_apply_verified: bool,
+        failure_reason: str,
+    ) -> None:
+        self.stage = stage
+        self.branch_head_before = branch_head_before
+        self.branch_head_after = branch_head_after
+        self.staging_commit_sha = staging_commit_sha
+        self.candidate_commit_sha = candidate_commit_sha
+        self.merge_performed = merge_performed
+        self.post_apply_verified = post_apply_verified
+        self.failure_reason = failure_reason
+        self.integration_result_sha = branch_head_after if merge_performed else None
+        super().__init__(failure_reason)
 
 
 class ControlledIntegrationManager:
@@ -244,6 +275,8 @@ class ControlledIntegrationManager:
         self._git(["worktree", "add", "--detach", str(staging_path), expected_head], controller_root)
         staging_sha = ""
         applied = False
+        post_apply_verified = False
+        branch_head_after = expected_head
         try:
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], staging_path)
             verifier_commands = state.get("verifier_argv_commands") or contract.get("verifier_commands") or ()
@@ -267,19 +300,35 @@ class ControlledIntegrationManager:
                     self._git(["update-ref", f"refs/heads/{integration_branch}", staging_sha, expected_head], controller_root)
                 applied = True
                 exact_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+                branch_head_after = exact_head
                 if exact_head != staging_sha:
                     raise RuntimeError("applied HEAD is not the verified staging commit")
-                if self._git(["merge-base", "--is-ancestor", candidate_sha, exact_head], controller_root) is not None:
-                    pass
+                self._git(["merge-base", "--is-ancestor", candidate_sha, exact_head], controller_root)
                 if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
                     raise RuntimeError("canonical/integration worktree is dirty after apply")
                 for command in post_apply_commands:
                     result = subprocess.run(tuple(command), cwd=controller_root, capture_output=True, text=True)
                     if result.returncode != 0:
                         raise RuntimeError(f"post-apply verification failed: {' '.join(command)}")
-        except Exception:
-            subprocess.run(["git", "merge", "--abort"], cwd=staging_path, capture_output=True, text=True)
+                post_apply_verified = True
+        except IntegrationExecutionError:
             raise
+        except Exception as exc:
+            try:
+                branch_head_after = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+            except RuntimeError:
+                branch_head_after = expected_head
+            stage = "POST_APPLY_VERIFICATION" if applied else "PRE_APPLY"
+            raise IntegrationExecutionError(
+                stage=stage,
+                branch_head_before=expected_head,
+                branch_head_after=branch_head_after,
+                staging_commit_sha=staging_sha or None,
+                candidate_commit_sha=candidate_sha,
+                merge_performed=applied,
+                post_apply_verified=post_apply_verified,
+                failure_reason=str(exc),
+            ) from exc
         finally:
             if staging_path.exists():
                 self._git(["worktree", "remove", "--force", str(staging_path)], controller_root)
@@ -304,4 +353,8 @@ class ControlledIntegrationManager:
             candidate_tree_sha=str(authorization.get("candidate_tree_sha") or "") or None,
             candidate_state_hash=str(authorization.get("candidate_state_hash") or "") or None,
             verified_receipt_hash=str(packet.get("verified_receipt_hash") or "") or None,
+            branch_head_before=expected_head,
+            branch_head_after=final_head,
+            candidate_is_ancestor=True,
+            staging_verified=True,
         )
