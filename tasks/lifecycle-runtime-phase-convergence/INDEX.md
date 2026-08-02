@@ -38,7 +38,7 @@ verifier, receipt store, memory database or MCP server.
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
 | 0 | `runtime-phase-contract-freeze` | `00-phase-contract-freeze.md` | VERIFIED_CANDIDATE | Owner activation |
-| 1 | `runtime-phase-transition-integration` | `01-transition-integration.md` | DRAFT_PENDING_CARD_0 | Card 0 |
+| 1 | `runtime-phase-transition-integration` | `01-transition-integration.md` | ACTIVE | Card 0 |
 | 2 | `runtime-phase-receipt-hook-symmetry` | `02-receipt-hook-symmetry.md` | DRAFT_PENDING_CARD_1 | Card 1 |
 | 3 | `runtime-development-lifecycle-mapping` | `03-development-runtime-mapping.md` | DRAFT_PENDING_CARD_2 | Card 2 |
 | 4 | `runtime-memory-learning-closure` | `04-memory-learning-closure.md` | DRAFT_PENDING_CARD_3 | Card 3 + workforce learning gate |
@@ -59,7 +59,6 @@ transport or environment failures with retained evidence.
 
 ## Current frontier
 
-`runtime-phase-contract-freeze` has a scoped candidate and fresh local
-verification. The next pre-authorized frontier is
-`runtime-phase-transition-integration`; it remains separately governed and
-must preserve the same authority boundaries.
+`runtime-phase-transition-integration` is active after Card 0's scoped
+candidate and fresh local verification. Only this card may mutate source until
+its exit criteria and receipt are complete.

@@ -1,8 +1,8 @@
 # Task Card: runtime-phase-transition-integration
 
-artifact_authority: draft-successor
+artifact_authority: current
 owner: James Chen
-status: DRAFT_PENDING_OWNER_ACTIVATION
+status: ACTIVE
 task_id: runtime-phase-transition-integration
 commit_required: true
 AUTO_CHAIN: false
