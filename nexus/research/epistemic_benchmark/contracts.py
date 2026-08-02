@@ -118,7 +118,7 @@ def validate_case_material(m: Dict[str, Any]) -> List[str]:
 CASE_EXACT_KEYS: Set[str] = {
     "schema", "case_id", "case_version", "title_neutral", "task_contract",
     "candidate_summary", "materials", "available_evidence_refs",
-    "response_contract", "public_case_sha256",
+    "response_contract", "public_case_sha256", "epistemic_projection",
 }
 
 # Keys that must NOT appear in public case

@@ -53,6 +53,7 @@ def _make_minimal_case(**overrides):
         "materials": mats,
         "available_evidence_refs": ["mat-a"],
         "response_contract": "Return ACCEPT, REJECT, or BLOCK.",
+        "epistemic_projection": {},
     }
     body.update(overrides)
     # Recompute hash
