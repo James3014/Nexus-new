@@ -101,6 +101,21 @@ new attempt, external acceptance separation, authorization drift, staging
 failure/conflict/canonical drift, cleanup retention/eligibility, persisted
 receipt round-trip, and terminal reload.
 
+Exact focused evidence names:
+
+```text
+test_same_task_retry_reuses_target
+test_rejected_candidate_reuses_same_target_with_new_attempt
+test_new_stable_task_creates_new_target
+test_unowned_target_is_not_reused
+test_implementer_pass_does_not_mark_candidate_accepted
+test_authorization_and_cleanup_fail_closed_on_drift
+test_receipt_binding_is_caller_persisted_and_round_trips
+test_real_git_staging_failure_and_success_do_not_fake_ancestry
+test_real_git_canary_detects_canonical_drift_and_applies_verified_result
+test_real_git_conflict_and_owned_cleanup_are_fail_closed
+```
+
 ## Verification
 
 ```text
