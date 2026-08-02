@@ -20,12 +20,14 @@ from nexus.research.epistemic_benchmark.contracts import (
     BENCHMARK_PRIVATE_CONTEXT_SCHEMA,
     BENCHMARK_PUBLIC_MANIFEST_SCHEMA,
     PRIVATE_CONTEXT_EXACT_KEYS,
+    PRIVATE_CONTEXT_BINDING_KEYS,
     PUBLIC_MANIFEST_EXACT_KEYS,
     PUBLIC_MANIFEST_FORBIDDEN_KEYS,
     PUBLIC_MANIFEST_PACKET_EXACT_KEYS,
     BenchmarkArm,
     compute_canonical_sha256,
     validate_packet,
+    validate_public_case,
     validate_sha256,
 )
 from nexus.research.epistemic_benchmark.corpus import (
@@ -391,6 +393,13 @@ def prepare_benchmark_run(
 
     cases = get_public_corpus()
     case_count = len(cases)
+
+    # Section E: Validate all canonical cases & epistemic projections BEFORE staging
+    for c in cases:
+        c_errs = validate_public_case(c)
+        if c_errs:
+            raise ValueError(f"CANONICAL_CASE_VALIDATION_FAILED: case={c.get('case_id')}: {c_errs}")
+
     oracles = get_all_oracles()
 
     # Compute oracle corpus sha256
@@ -407,6 +416,11 @@ def prepare_benchmark_run(
     import tempfile, shutil
     staging_dir = tempfile.mkdtemp()
     staging_priv = private_context_path + ".staging_" + secrets.token_hex(8)
+
+    pub_abs_final = os.path.abspath(public_output_dir)
+    priv_abs_final = os.path.abspath(private_context_path)
+    priv_published = False
+    pub_published = False
 
     try:
         # Create packet directories in staging
@@ -506,33 +520,46 @@ def prepare_benchmark_run(
             os.makedirs(priv_dir, exist_ok=True)
         _atomic_write_json(private_ctx, staging_priv)
 
-        # Atomic promotion: move staging to final locations
-        # Move public run. If public_output_dir already exists (e.g. from
-        # mkdtemp in tests) but is empty, shutil.move would move staging
-        # INSIDE it rather than replacing it. Remove the empty dir first.
-        pub_abs_final = os.path.abspath(public_output_dir)
-        if os.path.isdir(pub_abs_final):
-            try:
-                os.rmdir(pub_abs_final)  # only succeeds if empty
-            except OSError:
-                pass  # non-empty: already guarded above
-        os.rename(staging_dir, pub_abs_final)
-        staging_dir = None  # prevent cleanup
+        # Section B: Fsync all files & staging directories before publication
+        _fsync_tree(staging_dir)
+        _fsync_file(staging_priv)
 
-        # Move private context
-        priv_final_dir = os.path.dirname(os.path.abspath(private_context_path))
+        # Section B: Atomic publication with rollback
+        # 1. Publish private context first
+        priv_final_dir = os.path.dirname(priv_abs_final)
         if priv_final_dir:
             os.makedirs(priv_final_dir, exist_ok=True)
-        os.replace(staging_priv, private_context_path)
-        staging_priv = None  # prevent cleanup
+        os.replace(staging_priv, priv_abs_final)
+        staging_priv = None
+        priv_published = True
+
+        # 2. Publish public run
+        if os.path.isdir(pub_abs_final):
+            try:
+                os.rmdir(pub_abs_final)
+            except OSError:
+                pass
+        os.rename(staging_dir, pub_abs_final)
+        staging_dir = None
+        pub_published = True
 
     except Exception:
-        # Cleanup: do not leave partial artifacts
+        # Rollback: delete any published output so no partial runs or private contexts remain
         if staging_dir is not None and os.path.exists(staging_dir):
             shutil.rmtree(staging_dir, ignore_errors=True)
         if staging_priv is not None and os.path.exists(staging_priv):
             try:
                 os.unlink(staging_priv)
+            except OSError:
+                pass
+        if priv_published and os.path.exists(priv_abs_final):
+            try:
+                os.unlink(priv_abs_final)
+            except OSError:
+                pass
+        if pub_published and os.path.exists(pub_abs_final):
+            try:
+                shutil.rmtree(pub_abs_final, ignore_errors=True)
             except OSError:
                 pass
         raise
@@ -915,6 +942,34 @@ def validate_private_scoring_context(
     return len(errors) == 0, errors
 
 
+def _fsync_file(path: str) -> None:
+    """Fsync a single file."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass  # best-effort on platforms that don't support fsync on files
+
+
+def _fsync_tree(directory: str) -> None:
+    """Recursively fsync all files and directories under directory."""
+    for root, dirs, files in os.walk(directory, topdown=False):
+        for fname in files:
+            _fsync_file(os.path.join(root, fname))
+        # Fsync the directory itself
+        try:
+            fd = os.open(root, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except (OSError, AttributeError):
+            pass  # best-effort
+
+
 def _atomic_write_json(obj: Any, path: str) -> None:
     import tempfile
     dirname = os.path.dirname(path)
@@ -934,50 +989,88 @@ def _atomic_write_json(obj: Any, path: str) -> None:
 # Run directory accessors
 # ---------------------------------------------------------------------------
 
-def load_run_manifest(run_dir: str) -> Dict[str, Any]:
-    """Load public manifest from run_dir.
-
-    For backward compatibility with metrics/report code that expects
-    packet_manifest and seed, this function also checks for a sibling
-    private context file (created by prepare_benchmark_run in legacy mode).
-    If found, injects packet_manifest ({case_id: {arm: alias}}) and seed
-    into the returned dict. These fields are NOT written to manifest.json.
+def load_public_run_manifest(public_run_dir: str) -> Dict[str, Any]:
     """
-    manifest_path = os.path.join(run_dir, "manifest.json")
+    Load and validate the public run manifest.
+
+    Section A: Pure public loader — reads ONLY public_run_dir/manifest.json.
+    - Does NOT search for sibling files.
+    - Does NOT read private context.
+    - Does NOT inject seed.
+    - Does NOT inject packet_manifest.
+    - Does NOT include case IDs.
+    - Validates public manifest exact schema and self-hash.
+    - Raises on invalid manifest (fail closed).
+    """
+    from nexus.research.epistemic_benchmark.contracts import (
+        PUBLIC_MANIFEST_EXACT_KEYS,
+        PUBLIC_MANIFEST_FORBIDDEN_KEYS,
+        compute_canonical_sha256,
+    )
+
+    manifest_path = os.path.join(public_run_dir, "manifest.json")
     if not os.path.exists(manifest_path):
-        raise FileNotFoundError(f"manifest.json not found in {run_dir}")
+        raise FileNotFoundError(f"manifest.json not found in {public_run_dir!r}")
+
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
-    # Backward-compat injection: try to load private context from sibling path
-    # (the convention used when private_context_path was auto-derived)
-    run_abs = os.path.abspath(run_dir)
-    parent_dir = os.path.dirname(run_abs)
-    run_name = os.path.basename(run_abs)
-    sibling_priv_path = os.path.join(parent_dir, f"_{run_name}_private_context.json")
-    if os.path.exists(sibling_priv_path):
-        try:
-            with open(sibling_priv_path, "r", encoding="utf-8") as f:
-                priv = json.load(f)
-            # Inject seed for report.py compat
-            if "seed" not in manifest and "seed" in priv:
-                manifest["seed"] = priv["seed"]
-            # Inject packet_manifest for metrics.py compat
-            # packet_manifest format: {case_id: {arm: alias}}
-            if "packet_manifest" not in manifest:
-                pm: Dict[str, Any] = {}
-                for binding in priv.get("alias_bindings", []):
-                    cid = binding.get("case_id", "")
-                    arm = binding.get("arm", "")
-                    alias = binding.get("case_alias", "")
-                    if cid and arm and alias:
-                        pm.setdefault(cid, {})[arm] = alias
-                if pm:
-                    manifest["packet_manifest"] = pm
-        except Exception:
-            pass  # If private context is unreadable, skip injection
+    if not isinstance(manifest, dict):
+        raise ValueError("PUBLIC_MANIFEST_NOT_DICT")
+
+    # Exact schema keys
+    mkeys = set(manifest.keys())
+    missing_mk = PUBLIC_MANIFEST_EXACT_KEYS - mkeys
+    extra_mk = mkeys - PUBLIC_MANIFEST_EXACT_KEYS
+    if missing_mk or extra_mk:
+        raise ValueError(
+            f"PUBLIC_MANIFEST_SCHEMA_INVALID: missing={sorted(missing_mk)} extra={sorted(extra_mk)}"
+        )
+
+    # Forbidden keys must not appear
+    leaked = PUBLIC_MANIFEST_FORBIDDEN_KEYS & mkeys
+    if leaked:
+        raise ValueError(f"PUBLIC_MANIFEST_FORBIDDEN_KEYS: {sorted(leaked)}")
+
+    # Self-hash
+    stored_hash = manifest.get("run_manifest_sha256", "")
+    body = {k: v for k, v in manifest.items() if k != "run_manifest_sha256"}
+    expected_hash = compute_canonical_sha256(body)
+    if stored_hash != expected_hash:
+        raise ValueError("PUBLIC_MANIFEST_HASH_MISMATCH")
+
+    # Recursive check: no forbidden keys anywhere in manifest
+    manifest_str = json.dumps(manifest)
+    for fk in PUBLIC_MANIFEST_FORBIDDEN_KEYS:
+        if f'"{fk}"' in manifest_str:
+            raise ValueError(f"PUBLIC_MANIFEST_FORBIDDEN_KEY_IN_BODY: {fk!r}")
 
     return manifest
+
+
+# Backward-compat alias: load_run_manifest is now a pure public loader.
+# It does NOT inject seed, packet_manifest, or any private context data.
+load_run_manifest = load_public_run_manifest
+
+
+def load_private_scoring_context(
+    public_run_dir: str,
+    private_context_path: str,
+) -> Dict[str, Any]:
+    """
+    Load and validate the private scoring context.
+
+    Section A: Explicit private loader — requires private_context_path to be
+    explicitly provided. Does NOT auto-derive it from filename conventions.
+    Calls validate_private_scoring_context() and fails closed on any error.
+    """
+    ok, errors = validate_private_scoring_context(public_run_dir, private_context_path)
+    if not ok:
+        raise ValueError(f"PRIVATE_CONTEXT_INVALID: {errors}")
+
+    with open(private_context_path, "r", encoding="utf-8") as f:
+        ctx = json.load(f)
+    return ctx
 
 
 

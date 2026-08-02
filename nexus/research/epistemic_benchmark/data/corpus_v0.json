@@ -31,7 +31,7 @@
       "mat-001-evidence-summary"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "ec806ea9c655be21d8d87b1b4f38da9118f21ad3b394801bda0ac80001f3d461",
+    "public_case_sha256": "16c307d2df362804dbda874c48bffc6ef5c5e44e41b2ee9d7c0117ce89f8c7ae",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -73,8 +73,11 @@
       "cannot_establish_flags": [],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -84,9 +87,9 @@
           "mat-001-test-report",
           "mat-001-evidence-summary"
         ],
-        "projection_sha256": "8cf0a9571c914f735308ed00b4531bd425ff1c02b64de566afc75510c763566a"
+        "projection_sha256": "17e2799378fc8a7f3960d998a51387e4a93696c82075377b453dc55d326a151f"
       },
-      "projection_sha256": "b5aa94c77d4fb7a98ed2d6c67ed2d1f06cc690998d76dbd0dc7721ee98b34b2f"
+      "projection_sha256": "17e2799378fc8a7f3960d998a51387e4a93696c82075377b453dc55d326a151f"
     }
   },
   {
@@ -114,7 +117,7 @@
       "mat-002-test-log"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "3219aa9890a94dd9f48750ca32954540a98a9158f7374c2e41d6d6782192d51f",
+    "public_case_sha256": "f58f448f8561016b7df9d051eba0e73f167b457dcf00299c776fd97df08c001b",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -154,12 +157,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_002"
+        {
+          "claim_id": "CLM-002",
+          "present": true,
+          "evidence_refs": [
+            "mat-002-test-log"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -170,9 +182,9 @@
         "evidence_refs": [
           "mat-002-test-log"
         ],
-        "projection_sha256": "0a11d6576f9dfac5f9e8f2df48a7324191130a3a47b0eee0c99bc91cfe595334"
+        "projection_sha256": "946bc8a5f8c719314eaefcccc8d7861a3d2e61ae181926a35bd1b79694ba6734"
       },
-      "projection_sha256": "12bf61335977ccfb845c4ee8367c8d6d9781c8baca60e727a63a76accc788040"
+      "projection_sha256": "946bc8a5f8c719314eaefcccc8d7861a3d2e61ae181926a35bd1b79694ba6734"
     }
   },
   {
@@ -200,7 +212,7 @@
       "mat-003-checklist"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "f37587d70581fa567a91de056772579322547460f24f9bc1ac3b2002da64f6d2",
+    "public_case_sha256": "7eee6033649ad1f7ae62aa30c33ef92e8279e98741d2e7735fe405ad618ea21e",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -240,12 +252,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_003"
+        {
+          "claim_id": "CLM-003",
+          "present": true,
+          "evidence_refs": [
+            "mat-003-checklist"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -256,9 +277,9 @@
         "evidence_refs": [
           "mat-003-checklist"
         ],
-        "projection_sha256": "726ff3dc8ad4a9e2241d1443812a7e93b5ef3e8fd7ccf9eb02f790e8b622135a"
+        "projection_sha256": "9aa802d8f310234b146fab7230f2542d33d81feee3f8d02e4172a8ab43456b79"
       },
-      "projection_sha256": "3088f25a1859a2381f6003721443479a773e439963a9f91779527a14763649ec"
+      "projection_sha256": "9aa802d8f310234b146fab7230f2542d33d81feee3f8d02e4172a8ab43456b79"
     }
   },
   {
@@ -287,7 +308,7 @@
       "mat-004-spec"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "cbba96462903a8740657297b78fc32d9e26583a209dd2cca559b5f834782cbdb",
+    "public_case_sha256": "4dce203141565b2e391cb8cdf028739cd279cb91d6622852f63da465b30a22a9",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -327,12 +348,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_004"
+        {
+          "claim_id": "CLM-004",
+          "present": true,
+          "evidence_refs": [
+            "mat-004-verifier-log"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -344,9 +374,9 @@
           "mat-004-verifier-log",
           "mat-004-spec"
         ],
-        "projection_sha256": "527c2349f36c8f5d31e7c50d4cb6b9f09182e996ab979499f2d7c1377d552179"
+        "projection_sha256": "4dc03771fda96e7834c2fbe2032e51360d5cb59ebbfe33aabd2c15cd2d9fa0e2"
       },
-      "projection_sha256": "de39717ffb675c072fb5a6526f49901454980bfd6f018366ede2766fc98511f8"
+      "projection_sha256": "4dc03771fda96e7834c2fbe2032e51360d5cb59ebbfe33aabd2c15cd2d9fa0e2"
     }
   },
   {
@@ -375,7 +405,7 @@
       "mat-005-commitment"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "a51f18b0b94729ba73fd5785b738512f90b4f657fc3ad5430be076b8bdfca79d",
+    "public_case_sha256": "0c2af4f60ea304052f2de7f0447bd0bbe540e65e3ab565ddbb8d95c16117fe48",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -415,12 +445,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_005"
+        {
+          "claim_id": "CLM-005",
+          "present": true,
+          "evidence_refs": [
+            "mat-005-artifact-info"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -432,9 +471,9 @@
           "mat-005-artifact-info",
           "mat-005-commitment"
         ],
-        "projection_sha256": "96d9edf621738b935eee957a19fea633e183194e717ccf12fafc6b27b826b204"
+        "projection_sha256": "4ca77e3850677eb2d66981e07689f3a99f07257cd06e0d432078667196fdf933"
       },
-      "projection_sha256": "9bd86b6ff1ee899705ead31def55d6fd87a2bbee985d84c43ccc02262aebca7a"
+      "projection_sha256": "4ca77e3850677eb2d66981e07689f3a99f07257cd06e0d432078667196fdf933"
     }
   },
   {
@@ -462,7 +501,7 @@
       "mat-006-evidence-bundle"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "fa57b410b3adb993df11368e43964cf58d2b9ee94abfaba09c4e94f8bee4e2ca",
+    "public_case_sha256": "4d0a49748d9943c1fbd742b543cd11c88a33080de121352dc1ce203318ad0b93",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -502,12 +541,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_006"
+        {
+          "claim_id": "CLM-006",
+          "present": true,
+          "evidence_refs": [
+            "mat-006-evidence-bundle"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -518,9 +566,9 @@
         "evidence_refs": [
           "mat-006-evidence-bundle"
         ],
-        "projection_sha256": "932d39c72467e4de9cee250c41ed58825f5e2851db461a377c57daaebd9922be"
+        "projection_sha256": "7b2687064a7e2110a153a17a3d38683c89d0748615d02065daad0cae45ca1327"
       },
-      "projection_sha256": "020ebb8a64e5c5c47405517e6b10e2731502adc4199cfa56cc4114ab44ecfb91"
+      "projection_sha256": "7b2687064a7e2110a153a17a3d38683c89d0748615d02065daad0cae45ca1327"
     }
   },
   {
@@ -549,7 +597,7 @@
       "mat-007-claim-spec"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "991d13b46be9103e0232ca145b59de1967a4be7446595742932fffb0ec11d3b6",
+    "public_case_sha256": "32e34ed19bb5b76a2329f28d4be5a5a6f9bf289def3bc197cfd4c4a48c30f42d",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -589,12 +637,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_007"
+        {
+          "claim_id": "CLM-007",
+          "present": true,
+          "evidence_refs": [
+            "mat-007-evidence-detail"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -606,9 +663,9 @@
           "mat-007-evidence-detail",
           "mat-007-claim-spec"
         ],
-        "projection_sha256": "093fb6ce8ba2ebfad84656df6f827a972982bfdaa6faff58adebb4b4884e0192"
+        "projection_sha256": "56a03663bde3df327215ecf0a6f8e3dd9bcfcf6cd9026f1470ffac78e1a41247"
       },
-      "projection_sha256": "25f11ecf87ab91d3d526254c9595b48e4cee2b8b2e3ec56748cb4797d2a236a2"
+      "projection_sha256": "56a03663bde3df327215ecf0a6f8e3dd9bcfcf6cd9026f1470ffac78e1a41247"
     }
   },
   {
@@ -637,7 +694,7 @@
       "mat-008-claim-spec"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "6f7460bc695a82e3ca4eeb16ce388598e15ae73fc7f3c518aa85f59ca3f27116",
+    "public_case_sha256": "03217039c0dde1eab78ac476bf3e99b42f27e6a53d5d1ff2d11065caafd5e983",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -677,12 +734,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_008"
+        {
+          "claim_id": "CLM-008",
+          "present": true,
+          "evidence_refs": [
+            "mat-008-lineage-report"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -694,9 +760,9 @@
           "mat-008-lineage-report",
           "mat-008-claim-spec"
         ],
-        "projection_sha256": "5a4294f3c52db2645e9df71b0a7c61c9a2e57dea547161993a2bb7895ef5153e"
+        "projection_sha256": "44bb73bc33c2bf69d903191fe48c7ec18a98b017120ad225368f86e158885a8c"
       },
-      "projection_sha256": "7add58daaf1ee9a195bce54965e637f7a8a926e77efa343d60752e9270e769eb"
+      "projection_sha256": "44bb73bc33c2bf69d903191fe48c7ec18a98b017120ad225368f86e158885a8c"
     }
   },
   {
@@ -725,7 +791,7 @@
       "mat-009-protocol"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "e3ef34488e642a612b56465b82e680fb113387a5e0825c279864f6ef5ca5689f",
+    "public_case_sha256": "2dc221bd108466057ac4875cf823491b92451cbcf58a301b70e1f78781e97f21",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -765,12 +831,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_009"
+        {
+          "claim_id": "CLM-009",
+          "present": true,
+          "evidence_refs": [
+            "mat-009-assessment"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -782,9 +857,9 @@
           "mat-009-assessment",
           "mat-009-protocol"
         ],
-        "projection_sha256": "ed95d6273120c3333fea314e83f110ed9727bdecd788f8ee49f92003f6f31d48"
+        "projection_sha256": "5602ef159a8eda396b37c55116a54f46d4c0d2245a63ccbf005570956d7b5f0c"
       },
-      "projection_sha256": "acffb131ac62028ecf991fbc50e6e1fab6ba4c61f6b6cdc227f916cf2c59e70a"
+      "projection_sha256": "5602ef159a8eda396b37c55116a54f46d4c0d2245a63ccbf005570956d7b5f0c"
     }
   },
   {
@@ -813,7 +888,7 @@
       "mat-010-artifact-version"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "c640354d4667c70c3cdc1800dd1e29810a9044098d15623f285c1bb484780fbd",
+    "public_case_sha256": "98a0051747966444787f702ca567a550d8f5c8a5bab5f4d2b7989cce78d05259",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -853,12 +928,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_010"
+        {
+          "claim_id": "CLM-010",
+          "present": true,
+          "evidence_refs": [
+            "mat-010-decision-trace"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -870,9 +954,9 @@
           "mat-010-decision-trace",
           "mat-010-artifact-version"
         ],
-        "projection_sha256": "9b5f2afdac5ef860a36f5f01d7e78b8ea9876589ce1f0919ded1bcc3d0808899"
+        "projection_sha256": "8c1cc751c74901e54f433567cfd7af3a4ae5c8bf3f0a9ccb3780fca901f2495e"
       },
-      "projection_sha256": "f5ba0c9982978d54691ba81b1f01ed8c92208f8d23ff551b952132111661a463"
+      "projection_sha256": "8c1cc751c74901e54f433567cfd7af3a4ae5c8bf3f0a9ccb3780fca901f2495e"
     }
   },
   {
@@ -901,7 +985,7 @@
       "mat-011-scope-contract"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "01b38da3b413b975a2664f59610051bba4cb2013e0d0f76ee6d49c13c8aa1696",
+    "public_case_sha256": "594a145043dd211cf4e5e83640c095a2c0109831bb3737cbb88616957be52d3a",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -941,12 +1025,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_011"
+        {
+          "claim_id": "CLM-011",
+          "present": true,
+          "evidence_refs": [
+            "mat-011-verification-report"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -958,9 +1051,9 @@
           "mat-011-verification-report",
           "mat-011-scope-contract"
         ],
-        "projection_sha256": "9882f150efbb8ef7bfe53ce7134c8d1170b98715a2eebec96b0e66b5334f72f6"
+        "projection_sha256": "23e3958c7db2f5ae624525d1e356ce2a697e9098595160812f8ea920dfedf54e"
       },
-      "projection_sha256": "dc4743e08fcc422174a9339c4691ce88462326b1bd1af00a406f5a93bf8d206c"
+      "projection_sha256": "23e3958c7db2f5ae624525d1e356ce2a697e9098595160812f8ea920dfedf54e"
     }
   },
   {
@@ -989,7 +1082,7 @@
       "mat-012-authority-spec"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "d5b5d56b8ca073783dcb3367b7ba5e6fd0051c1452fb7bd1406b06d00f4cbfcf",
+    "public_case_sha256": "15a7e7edfac4775cf9dde7afd400e6a4362fdb91fc45aa3c44110df8d62e5773",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1029,12 +1122,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_012"
+        {
+          "claim_id": "CLM-012",
+          "present": true,
+          "evidence_refs": [
+            "mat-012-source-doc"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1046,9 +1148,9 @@
           "mat-012-source-doc",
           "mat-012-authority-spec"
         ],
-        "projection_sha256": "eadddbef470676b58f4342e9a2da7e785bf89a5c97822072ef0cedf1f83b46f4"
+        "projection_sha256": "dc87c6bef651e07b6c10c8b56d5bfb79c598aa4756189f4e5ba170c7682a1eb6"
       },
-      "projection_sha256": "55745475d44ec092b023c7428057e5246973f4a45a7a4982c0be90e2adedc2cd"
+      "projection_sha256": "dc87c6bef651e07b6c10c8b56d5bfb79c598aa4756189f4e5ba170c7682a1eb6"
     }
   },
   {
@@ -1077,7 +1179,7 @@
       "mat-013-test-log"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "1571072093ec8d53378631a5949be5577f758158e7dacd6c99b53c98a01a9f5a",
+    "public_case_sha256": "dd898fe0f753694f52c2142495161961f85d7560b481c0f6307a1a03f6e30371",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1117,12 +1219,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_013"
+        {
+          "claim_id": "CLM-013",
+          "present": true,
+          "evidence_refs": [
+            "mat-013-report"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1134,9 +1245,9 @@
           "mat-013-report",
           "mat-013-test-log"
         ],
-        "projection_sha256": "78508bc882d324391bd7e831ccd0d032a2e56d0130bf84b3174bbd6e51408b2c"
+        "projection_sha256": "fd232f51963cb88734dbd2fa40aecaf7b27b7bf6ef2d0aaf0da3aeadfdb05aa2"
       },
-      "projection_sha256": "1876231c6178216a638eb0c187f7a0b681f4372cb84e8d4623ce2862d0908ab3"
+      "projection_sha256": "fd232f51963cb88734dbd2fa40aecaf7b27b7bf6ef2d0aaf0da3aeadfdb05aa2"
     }
   },
   {
@@ -1165,7 +1276,7 @@
       "mat-014-published-claim"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "b8b431e542cf3d45c68a21827fc1d39e6dd66667d4979574462b176c24771134",
+    "public_case_sha256": "b5a7f75d336dd0ecd6230dcec5332556a2b14970492ef3400f69485a41d7bfbd",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1205,12 +1316,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_014"
+        {
+          "claim_id": "CLM-014",
+          "present": true,
+          "evidence_refs": [
+            "mat-014-receipt"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1222,9 +1342,9 @@
           "mat-014-receipt",
           "mat-014-published-claim"
         ],
-        "projection_sha256": "ce4c6a1741d20aac0ad463b35457b8cdfd325452d6cf33a3c93bfb628b9901cc"
+        "projection_sha256": "652392a729dd4eede3dc8755ad43ffaa0e95aafeb374ebd01c63df619df1b4c5"
       },
-      "projection_sha256": "e0ffb059c7f888bf2e6b3b9f16e7210eebd265015189cf03a7448243a43ceb81"
+      "projection_sha256": "652392a729dd4eede3dc8755ad43ffaa0e95aafeb374ebd01c63df619df1b4c5"
     }
   },
   {
@@ -1253,7 +1373,7 @@
       "mat-015-current-artifact"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "a3af738e3dc9ba079a0893e27264047d511415b1fc713032b0ad4bd49b236876",
+    "public_case_sha256": "2d1e3383093f66e64dfa03f169f9282336b620e8688d010cd6c84c1388044356",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1293,12 +1413,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_015"
+        {
+          "claim_id": "CLM-015",
+          "present": true,
+          "evidence_refs": [
+            "mat-015-receipt"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1310,9 +1439,9 @@
           "mat-015-receipt",
           "mat-015-current-artifact"
         ],
-        "projection_sha256": "98ed76b1e6a01b72b84058a484e4c1fe97997b8e38649a14c636183d272e34ba"
+        "projection_sha256": "1644b2440db05f1d674d299fde1b9017db53952fd75952ea71dab0ce9f7a656d"
       },
-      "projection_sha256": "bdfeee92cac75087888a4ce1d6e7f41a6b6ed7e4de147f928784b1257c2fc034"
+      "projection_sha256": "1644b2440db05f1d674d299fde1b9017db53952fd75952ea71dab0ce9f7a656d"
     }
   },
   {
@@ -1341,7 +1470,7 @@
       "mat-016-contradicts"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "5fa0aff9e78cf1eaf75e1201f513cb26582e19a3f9fd91fb83948812c7c9073a",
+    "public_case_sha256": "c421f90a87d51a031588e0e45a6e00b4c9b2815a3c5e8ede5abc309572c60c97",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1381,13 +1510,18 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_016"
+        {
+          "claim_id": "CLM-016",
+          "present": true,
+          "evidence_refs": [
+            "mat-016-supports"
+          ]
+        }
       ],
       "conflicts": [
         {
-          "conflict_id": "CNF-016",
-          "direction_a": "supports",
-          "direction_b": "contradicts",
+          "claim_id": "CLM-016",
+          "present": true,
           "evidence_refs": [
             "mat-016-supports",
             "mat-016-contradicts"
@@ -1395,8 +1529,11 @@
         }
       ],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1408,9 +1545,9 @@
           "mat-016-supports",
           "mat-016-contradicts"
         ],
-        "projection_sha256": "0c29bf451ada98de5962b5ffca382674fc2c5ec8d051724ac78828e27c6fb379"
+        "projection_sha256": "1f5519cb71c19fb5c368d7c80e69ec84a0cc324806cf9c7708994ba8c613e718"
       },
-      "projection_sha256": "14d22cc32e94896c577a07900c61a5579f2042aa385005a5608b86e189e0b5ca"
+      "projection_sha256": "1f5519cb71c19fb5c368d7c80e69ec84a0cc324806cf9c7708994ba8c613e718"
     }
   },
   {
@@ -1439,7 +1576,7 @@
       "mat-017-contract"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "dfd555db0ccc115a2dc13a87b3132641dc4da5f8f6b1a42af7e6b6489c57c88f",
+    "public_case_sha256": "397464c3829320819fe2f21d85251705f3a109da18713b3923fa39654a20c1a9",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1479,12 +1616,21 @@
         }
       ],
       "cannot_establish_flags": [
-        "CANNOT_ESTABLISH_EBR_017"
+        {
+          "claim_id": "CLM-017",
+          "present": true,
+          "evidence_refs": [
+            "mat-017-evidence"
+          ]
+        }
       ],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1496,9 +1642,9 @@
           "mat-017-evidence",
           "mat-017-contract"
         ],
-        "projection_sha256": "b8239bff48487853e6b1cc4ef901119dbfe29250e8efd0dfad738761674a2176"
+        "projection_sha256": "e35029c5313facc0be4947a91f3bb5803b14114348bc112467f4b80828beacea"
       },
-      "projection_sha256": "e3f0ecfd7c1434bee0b49497b3dcfbac446187abda3ca550a0fc0dd6a1eac67f"
+      "projection_sha256": "e35029c5313facc0be4947a91f3bb5803b14114348bc112467f4b80828beacea"
     }
   },
   {
@@ -1533,7 +1679,7 @@
       "mat-018-evidence"
     ],
     "response_contract": "Return ACCEPT, REJECT, or BLOCK with cited evidence refs.",
-    "public_case_sha256": "e4c2ba18ecdb9eb4a951fc1d6b6156d549ed7f187be8d29cdde73700d249233a",
+    "public_case_sha256": "fb3a3b14800459d35d9d344427a5ab89d7af633516013e547eaf7d8f761330ff",
     "epistemic_projection": {
       "object_bindings": [
         {
@@ -1575,8 +1721,11 @@
       "cannot_establish_flags": [],
       "conflicts": [],
       "authority_locks": {
-        "task_contract_locked": true,
-        "candidate_summary_locked": true
+        "runtime_update_allowed": false,
+        "public_claim_allowed": false,
+        "public_benchmark_allowed": false,
+        "production_ready": false,
+        "integration_approved": false
       },
       "review_report": {
         "schema": "nexus.epistemic_review_report_summary.v0",
@@ -1586,9 +1735,9 @@
           "mat-018-pbt-report",
           "mat-018-evidence"
         ],
-        "projection_sha256": "41d0063cc48babfec45d965916851c567e0af3fbd9d94105566014ef3637ed32"
+        "projection_sha256": "25d93390f9f4bde4fd43c992e9d737f79d5af6e5ef1bb43c8ce011b991586e30"
       },
-      "projection_sha256": "c505892e7a2678c2c3821b395989f5b96c6d81826f7b6b9885323aafb53c4614"
+      "projection_sha256": "25d93390f9f4bde4fd43c992e9d737f79d5af6e5ef1bb43c8ce011b991586e30"
     }
   }
 ]
