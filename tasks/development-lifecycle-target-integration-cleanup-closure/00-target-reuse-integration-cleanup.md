@@ -3,9 +3,9 @@
 ```yaml
 task_id: target-reuse-integration-cleanup-closure
 campaign_id: development-lifecycle-target-integration-cleanup-closure
-attempt_id: codex-target-integration-cleanup-20260802-a3
-status: CANDIDATE_SETTLED
-prior_candidate: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+attempt_id: codex-target-integration-cleanup-20260802-a4
+status: ACTIVE_CORRECTIVE_ATTEMPT
+prior_candidate: 9a32d2f96267b8a53778a138f557e1ab5be8bf63
 prior_verdict: REJECT_CANDIDATE
 owner_activation: granted_for_implementation_candidate
 auto_chain: false
@@ -150,12 +150,53 @@ prior_rejection_defects:
   - receipt_test_did_not_reload_a_fresh_service
   - post_apply_verification_was_missing
 corrective_attempt:
-  attempt_id: codex-target-integration-cleanup-20260802-a3
-  starting_target_head: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+  attempt_id: codex-target-integration-cleanup-20260802-a4
+  starting_target_head: 9a32d2f96267b8a53778a138f557e1ab5be8bf63
   canonical_observed_head: ba6b7c1f7bd0817e759ce68ff73687afb5ff81f8
   canonical_drift: true
   reuse_target_without_rebase_or_reset: true
   claim_ceiling: IMPLEMENTER_VERIFIED_TARGET_REUSE_INTEGRATION_CLEANUP_CANDIDATE
+```
+
+## Durable finalization truth corrective closure
+
+```yaml
+reopen:
+  prior_task_card_hash: fd7ddbb49e3dd7f84c3b6eacdedb13535754752837044b2ece7ee2846ec010ee
+  prior_candidate: 9a32d2f96267b8a53778a138f557e1ab5be8bf63
+  prior_verdict: REJECT_CANDIDATE
+  defects:
+    - post_apply_physical_state_mismatch
+    - owner_finish_not_terminal
+objective:
+  terminal_success:
+    - INTEGRATED_AND_CLEANED
+    - INTEGRATED_TARGET_RETAINED
+  failure_states:
+    - INTEGRATION_FAILED_PRE_APPLY
+    - INTEGRATION_VERIFY_FAILED_AFTER_APPLY
+  invariants:
+    - physical_git_truth_equals_persisted_lifecycle_truth
+    - returned_finalization_receipt_equals_fresh_reload
+    - owner_finish_single_call_attempts_cleanup_or_typed_retention
+    - actionable_retention_is_not_archived
+    - post_apply_failure_is_not_retryable_or_cleanup_eligible
+    - pre_apply_failure_remains_retryable
+allowed_actions:
+  - external_acceptance
+  - exact_one_shot_owner_authorization
+  - transactional_staging
+  - exact_verified_commit_apply
+  - post_apply_verification
+  - durable_integration_receipt
+  - existing_cleanup_authority
+  - durable_finalization_receipt
+forbidden_actions:
+  - canonical_rollback
+  - branch_deletion
+  - candidate_ref_deletion
+  - live_target_cleanup
+  - push
 ```
 
 ## Corrective scope freeze
