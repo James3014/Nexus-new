@@ -45,6 +45,10 @@ from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
 from nexus.contracts.lifecycle_action import ContractKind, validate_owner_inline_contract
+from nexus.contracts.target_integration_lifecycle import (
+    ExternalAcceptanceReceipt,
+    IntegrationAuthorizationEnvelope,
+)
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
@@ -3364,6 +3368,63 @@ class SelfHostedTaskService:
             "active_targets": sum(bool((state.get("lease") or {}).get("target_worktree")) and state.get("status") not in TERMINAL_STATUSES for state in states),
         }
 
+    def _cleanup_authority_blocker(
+        self,
+        state: Mapping[str, Any],
+        contract: Any,
+        lease: TargetWorktreeLease,
+    ) -> Optional[str]:
+        """Revalidate persisted acceptance, authorization, integration, and refs."""
+        if state.get("status") != "INTEGRATED" or state.get("promotion_status") != "INTEGRATED":
+            return "cleanup requires INTEGRATED lifecycle state"
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        raw_acceptance = state.get("external_acceptance") or binding.get("external_acceptance")
+        raw_authorization = state.get("integration_authorization") or binding.get("integration_authorization")
+        if raw_acceptance is None:
+            return "external acceptance receipt is missing"
+        if raw_authorization is None:
+            return "Owner cleanup authorization is missing"
+        try:
+            acceptance = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+            authorization = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+        except (TypeError, ValueError) as exc:
+            return f"cleanup authority binding invalid: {exc}"
+        if acceptance.task_id != state.get("task_id") or acceptance.candidate_commit != packet.get("candidate_commit_sha"):
+            return "external acceptance binding mismatch"
+        if authorization.task_id != state.get("task_id") or authorization.candidate_commit != packet.get("candidate_commit_sha"):
+            return "cleanup authorization candidate mismatch"
+        if "CLEANUP_OWNED_TARGET" not in authorization.action_set or not authorization.cleanup_requested:
+            return "cleanup authorization does not include CLEANUP_OWNED_TARGET"
+        grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
+        if not grant or not grant.get("consumed_at") or grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
+            return "one-shot Owner approval grant is missing or invalid"
+        receipt = state.get("integration_receipt") if isinstance(state.get("integration_receipt"), Mapping) else None
+        if not receipt or not receipt.get("verifier_passed") or not receipt.get("merge_performed") or not receipt.get("post_apply_verified"):
+            return "post-apply integration receipt is missing or incomplete"
+        integration_sha = str(receipt.get("integration_commit_sha") or "")
+        candidate_sha = str(packet.get("candidate_commit_sha") or "")
+        if not integration_sha or integration_sha != str(state.get("integration_result_sha") or ""):
+            return "integration receipt result binding is missing"
+        controller = Path(contract.controller_repo_root).resolve()
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        candidate_ref = str(state.get("candidate_ref") or "")
+        if not candidate_ref:
+            return "candidate durable ref is missing"
+        try:
+            if manager._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller) != candidate_sha:
+                return "candidate durable ref mismatch"
+            if manager._run_git(["merge-base", "--is-ancestor", candidate_sha, integration_sha], cwd=controller) is None:
+                return "candidate is not an ancestor of integration result"
+            branch = str(state.get("integration_branch") or authorization.canonical_branch)
+            if manager._run_git(["merge-base", "--is-ancestor", integration_sha, branch], cwd=controller) is None:
+                return "canonical branch does not contain integration result"
+        except RuntimeError as exc:
+            return f"integration ancestry/ref verification failed: {exc}"
+        if Path(lease.target_worktree).resolve() != Path(authorization.cleanup_target_path).resolve():
+            return "cleanup target path binding mismatch"
+        return None
+
     def cleanup_tasks(self, *, task_id: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
         ids = [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
         decisions = []
@@ -3537,6 +3598,17 @@ class SelfHostedTaskService:
             lease = TargetWorktreeLease(**state["lease"])
             packet = state.get("promotion_packet") or {}
             binding = state.get("approved_binding") or {}
+            authority_blocker = self._cleanup_authority_blocker(state, contract, lease)
+            if authority_blocker:
+                decisions.append({
+                    "task_id": item,
+                    "status": state.get("status"),
+                    "cleanup_decision": "BLOCKED_BY_AUTHORITY",
+                    "cleanup_blocker": authority_blocker,
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
+                })
+                continue
             if state.get("promotion_status") in {"APPROVED", "INTEGRATED"} and any(
                 binding.get(field) != packet.get(field)
                 for field in (
@@ -4160,6 +4232,8 @@ class SelfHostedTaskService:
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
         grant = dict(approval_context or {}) if approval_context is not None else None
+        external_acceptance: dict[str, Any] | None = None
+        integration_authorization: dict[str, Any] | None = None
         if grant is not None:
             if str(grant.get("schema") or "") != "nexus.approval.v2":
                 raise RuntimeError("APPROVAL_LEGACY_BINDING_INVALIDATED")
@@ -4167,6 +4241,22 @@ class SelfHostedTaskService:
                 raise RuntimeError("APPROVAL_ALREADY_CONSUMED")
             if str(grant.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
                 raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
+            raw_acceptance = grant.get("external_acceptance")
+            raw_authorization = grant.get("integration_authorization")
+            if (raw_acceptance is None) != (raw_authorization is None):
+                raise RuntimeError("AUTHORIZED_CLOSURE_BINDING_INCOMPLETE")
+            if raw_acceptance is not None and raw_authorization is not None:
+                acceptance_obj = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+                authorization_obj = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+                if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != candidate_commit_sha:
+                    raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
+                if authorization_obj.task_id != task_id or authorization_obj.candidate_commit != candidate_commit_sha:
+                    raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
+                if authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash:
+                    raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
+                external_acceptance = acceptance_obj.to_dict()
+                integration_authorization = authorization_obj.to_dict()
+                integration_authorization["authorization_hash"] = authorization_obj.authorization_hash
         now = _utc_now()
         duplicate = False
 
@@ -4194,7 +4284,14 @@ class SelfHostedTaskService:
                 "status": status,
                 "promotion_status": status,
                 "candidate_status": status,
-                "approved_binding": ({**expected, "approval_grant": consumed} if valid else None),
+                "approved_binding": ({
+                    **expected,
+                    "approval_grant": consumed,
+                    "external_acceptance": external_acceptance,
+                    "integration_authorization": integration_authorization,
+                } if valid else None),
+                "external_acceptance": external_acceptance,
+                "integration_authorization": integration_authorization,
                 "approval_error": None if valid else "promotion binding does not match candidate packet",
                 "merge_performed": False,
                 "push_performed": False,
@@ -4217,14 +4314,23 @@ class SelfHostedTaskService:
         candidate_state_hash: str,
         verified_receipt_hash: str,
         integration_branch: str = "nexus/integration/main",
+        approval_context: Optional[Mapping[str, Any]] = None,
+        external_acceptance: Optional[Mapping[str, Any]] = None,
+        integration_authorization: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
         """Owner-only atomic finish surface: approve the exact packet, then integrate it."""
+        if external_acceptance is None or integration_authorization is None:
+            raise RuntimeError("owner finish requires external acceptance and Owner authorization")
+        context = dict(approval_context or {})
+        context["external_acceptance"] = dict(external_acceptance)
+        context["integration_authorization"] = dict(integration_authorization)
         approved = self.approve_promotion(
             task_id,
             candidate_commit_sha=candidate_commit_sha,
             candidate_tree_sha=candidate_tree_sha,
             candidate_state_hash=candidate_state_hash,
             verified_receipt_hash=verified_receipt_hash,
+            approval_context=context,
         )
         if approved.get("status") != "APPROVED" or approved.get("promotion_status") != "APPROVED":
             raise RuntimeError("owner finish requires an exact approved candidate binding")
@@ -4403,6 +4509,31 @@ class SelfHostedTaskService:
             if any(approved.get(field) != packet.get(field) for field in binding_fields):
                 raise RuntimeError("APPROVAL_CANDIDATE_BINDING_DRIFT")
 
+        approved = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        raw_acceptance = state.get("external_acceptance") or approved.get("external_acceptance")
+        raw_authorization = state.get("integration_authorization") or approved.get("integration_authorization")
+        if raw_acceptance is None:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_REQUIRED: persisted acceptance receipt is missing")
+        if raw_authorization is None:
+            raise RuntimeError("OWNER_AUTHORIZATION_REQUIRED: persisted integration authorization is missing")
+        acceptance_obj = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+        authorization_obj = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+        if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != str((state.get("promotion_packet") or {}).get("candidate_commit_sha") or ""):
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
+        if authorization_obj.task_id != task_id or authorization_obj.attempt_id not in {"", str(state.get("attempt_id") or "")}:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
+        if authorization_obj.candidate_commit != acceptance_obj.candidate_commit or authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
+        if authorization_obj.canonical_branch != integration_branch:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_BRANCH_DRIFT")
+        if "INTEGRATION_STAGING" not in authorization_obj.action_set or "APPLY_VERIFIED_INTEGRATION" not in authorization_obj.action_set:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_ACTION_SET_INCOMPLETE")
+        grant = approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None
+        if not grant or not grant.get("consumed_at"):
+            raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: one-shot approval grant is not consumed")
+        if grant.get("consumed_at") and grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
+            raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
+
         self._checkpoint(
             task_id,
             "INTEGRATING",
@@ -4428,7 +4559,13 @@ class SelfHostedTaskService:
         try:
             receipt = ControlledIntegrationManager(
                 integration_root=contract.controller_repo_root
-            ).integrate_task_state(integrating, integration_branch=integration_branch)
+            ).integrate_authorized_task_state(
+                integrating,
+                integration_branch=integration_branch,
+                staging_root=str(state.get("integration_staging_root") or (Path(contract.target_worktree_root).parent / ".nexus-integration-staging")),
+                apply=True,
+                post_apply_commands=tuple(tuple(command) for command in state.get("post_apply_commands") or ()),
+            )
         except Exception as exc:
             self._checkpoint(
                 task_id,
@@ -4492,6 +4629,17 @@ class SelfHostedTaskService:
             raise RuntimeError("integration receipt merge_performed must be True")
         if receipt.push_performed:
             raise RuntimeError("integration receipt push_performed must be False")
+        if not getattr(receipt, "post_apply_verified", False):
+            raise RuntimeError("post-apply verification is required before integration recording")
+        if getattr(receipt, "staging_commit_sha", None) != receipt.integration_commit_sha:
+            raise RuntimeError("integration result must equal the verified staging commit")
+        acceptance_state = state.get("external_acceptance") if isinstance(state.get("external_acceptance"), Mapping) else {}
+        authorization_state = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
+        if acceptance_state or authorization_state:
+            if getattr(receipt, "acceptance_receipt_hash", None) != acceptance_state.get("receipt_hash"):
+                raise RuntimeError("integration receipt acceptance binding mismatch")
+            if getattr(receipt, "authorization_hash", None) != authorization_state.get("authorization_hash"):
+                raise RuntimeError("integration receipt authorization binding mismatch")
 
         packet = state.get("promotion_packet") or {"candidate_commit_sha": receipt.integration_commit_sha}
         binding = state.get("approved_binding") or packet

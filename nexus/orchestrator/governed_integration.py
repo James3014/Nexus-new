@@ -31,6 +31,15 @@ class IntegrationReceipt:
     push_performed: bool
     worktree_removed: bool
     failure_reason: str | None = None
+    staging_commit_sha: str | None = None
+    post_apply_verified: bool = False
+    post_apply_error: str | None = None
+    acceptance_receipt_hash: str | None = None
+    authorization_hash: str | None = None
+    task_card_hash: str | None = None
+    candidate_tree_sha: str | None = None
+    candidate_state_hash: str | None = None
+    verified_receipt_hash: str | None = None
 
 
 class ControlledIntegrationManager:
@@ -182,4 +191,117 @@ class ControlledIntegrationManager:
             merge_performed=True,
             push_performed=False,
             worktree_removed=removed,
+        )
+
+    def integrate_authorized_task_state(
+        self,
+        state: Mapping[str, Any],
+        *,
+        integration_branch: str,
+        staging_root: str | Path,
+        apply: bool = True,
+        post_apply_commands: Sequence[Sequence[str]] = (),
+    ) -> IntegrationReceipt:
+        """Stage and apply one already authorized Candidate through this authority.
+
+        This is intentionally the only new Git execution seam.  Callers provide
+        persisted lifecycle state; the manager rechecks exact identity, clean
+        worktree state, branch head, staging ancestry, and post-apply state.
+        """
+        self._validate_branch(integration_branch)
+        contract = state.get("contract") or {}
+        packet = state.get("promotion_packet") or {}
+        authorization = state.get("integration_authorization") or {}
+        acceptance = state.get("external_acceptance") or {}
+        candidate_sha = str(packet.get("candidate_commit_sha") or packet.get("candidate_commit") or "")
+        task_id = str(state.get("task_id") or contract.get("task_id") or "")
+        controller_root = Path(str(contract.get("controller_repo_root", ""))).expanduser().resolve()
+        expected_head = str(authorization.get("expected_canonical_head") or "")
+        if not task_id or not candidate_sha or not expected_head:
+            raise RuntimeError("authorized integration identity is incomplete")
+        if not acceptance.get("passed"):
+            raise RuntimeError("external acceptance is required before integration")
+        if not authorization.get("cleanup_requested") and "CLEANUP_OWNED_TARGET" in (authorization.get("action_set") or []):
+            raise RuntimeError("authorization cleanup binding is inconsistent")
+        if "INTEGRATION_STAGING" not in (authorization.get("action_set") or []) or "APPLY_VERIFIED_INTEGRATION" not in (authorization.get("action_set") or []):
+            raise RuntimeError("Owner authorization does not include integration actions")
+        if str(authorization.get("canonical_branch") or "") != integration_branch:
+            raise RuntimeError("authorization integration branch drift")
+        if str(authorization.get("canonical_root") or "") != str(controller_root):
+            raise RuntimeError("authorization integration root drift")
+        if self._git(["rev-parse", f"{candidate_sha}^{{commit}}"], controller_root) != candidate_sha:
+            raise RuntimeError("candidate commit is not present in controller repository")
+        branch_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+        if branch_head != expected_head:
+            raise RuntimeError("integration branch HEAD drift")
+        if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
+            raise RuntimeError("canonical/integration worktree must be clean before apply")
+
+        staging_path = Path(staging_root).expanduser().resolve() / task_id
+        if staging_path.exists():
+            raise RuntimeError("integration staging Target already exists")
+        staging_path.parent.mkdir(parents=True, exist_ok=True)
+        self._git(["worktree", "add", "--detach", str(staging_path), expected_head], controller_root)
+        staging_sha = ""
+        applied = False
+        try:
+            self._git(["merge", "--no-ff", "--no-edit", candidate_sha], staging_path)
+            verifier_commands = state.get("verifier_argv_commands") or contract.get("verifier_commands") or ()
+            for command in verifier_commands:
+                tokens = tuple(command) if isinstance(command, (list, tuple)) else tuple(shlex.split(str(command)))
+                if len(tokens) < 1:
+                    raise RuntimeError(f"invalid staging verifier command: {command}")
+                result = subprocess.run(tokens, cwd=staging_path, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(f"staging verifier failed: {command}")
+            staging_sha = self._git(["rev-parse", "HEAD"], staging_path)
+            if apply:
+                if self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root) != expected_head:
+                    raise RuntimeError("integration branch HEAD drift before apply")
+                if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
+                    raise RuntimeError("canonical/integration worktree must be clean before apply")
+                current_branch = self._git(["branch", "--show-current"], controller_root)
+                if current_branch == integration_branch:
+                    self._git(["merge", "--ff-only", staging_sha], controller_root)
+                else:
+                    self._git(["update-ref", f"refs/heads/{integration_branch}", staging_sha, expected_head], controller_root)
+                applied = True
+                exact_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+                if exact_head != staging_sha:
+                    raise RuntimeError("applied HEAD is not the verified staging commit")
+                if self._git(["merge-base", "--is-ancestor", candidate_sha, exact_head], controller_root) is not None:
+                    pass
+                if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
+                    raise RuntimeError("canonical/integration worktree is dirty after apply")
+                for command in post_apply_commands:
+                    result = subprocess.run(tuple(command), cwd=controller_root, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"post-apply verification failed: {' '.join(command)}")
+        except Exception:
+            subprocess.run(["git", "merge", "--abort"], cwd=staging_path, capture_output=True, text=True)
+            raise
+        finally:
+            if staging_path.exists():
+                self._git(["worktree", "remove", "--force", str(staging_path)], controller_root)
+                self._git(["worktree", "prune"], controller_root)
+        final_head = self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root)
+        return IntegrationReceipt(
+            schema="nexus.integration_receipt.v1", task_id=task_id,
+            integration_branch=integration_branch,
+            source_branch=str((state.get("lease") or {}).get("target_branch") or ""),
+            candidate_commit_sha=candidate_sha,
+            integration_base_sha=expected_head,
+            integration_commit_sha=final_head,
+            verifier_passed=True,
+            merge_performed=applied,
+            push_performed=False,
+            worktree_removed=True,
+            staging_commit_sha=staging_sha,
+            post_apply_verified=bool(applied),
+            acceptance_receipt_hash=str(authorization.get("acceptance_receipt_hash") or acceptance.get("receipt_hash") or "") or None,
+            authorization_hash=str(authorization.get("authorization_hash") or "") or None,
+            task_card_hash=str(authorization.get("task_card_hash") or "") or None,
+            candidate_tree_sha=str(authorization.get("candidate_tree_sha") or "") or None,
+            candidate_state_hash=str(authorization.get("candidate_state_hash") or "") or None,
+            verified_receipt_hash=str(packet.get("verified_receipt_hash") or "") or None,
         )

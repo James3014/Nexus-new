@@ -57,7 +57,10 @@ class TargetResolutionDecision:
         _sha(self.base_revision)
         if self.mode is TargetResolutionMode.BLOCK and not self.reason:
             raise ValueError("blocked Target resolution requires a reason")
-        if self.mode is not TargetResolutionMode.DIRECT_CANONICAL and not self.target_id:
+        if self.mode in {
+            TargetResolutionMode.REUSE_EXISTING_TARGET,
+            TargetResolutionMode.CREATE_ISOLATED_TARGET,
+        } and not self.target_id:
             raise ValueError("isolated Target resolution requires target_id")
 
     def to_dict(self) -> dict[str, Any]:
@@ -114,6 +117,17 @@ class IntegrationAuthorizationEnvelope:
     rollback: str
     issued_at: str
     expires_at: str | None = None
+    attempt_id: str = ""
+    candidate_tree_sha: str = "0" * 40
+    candidate_state_hash: str = "0" * 64
+    reviewer_id: str = ""
+    verifier_artifact_hash: str = ""
+    require_clean: bool = True
+    strategy: str = ""
+    verification_commands_hash: str = ""
+    post_apply_commands_hash: str = ""
+    cleanup_requested: bool = True
+    approval_scope: str = "ALLOW_ACTION_ONCE"
 
     def __post_init__(self) -> None:
         if self.schema != "nexus.integration_authorization.v1":
@@ -127,6 +141,16 @@ class IntegrationAuthorizationEnvelope:
             _sha(value, size)
         _sha(self.candidate_commit)
         _sha(self.expected_canonical_head)
+        _sha(self.candidate_tree_sha)
+        _sha(self.candidate_state_hash, 64)
+        if self.verifier_artifact_hash:
+            _sha(self.verifier_artifact_hash, 64)
+        if self.verification_commands_hash:
+            _sha(self.verification_commands_hash, 64)
+        if self.post_apply_commands_hash:
+            _sha(self.post_apply_commands_hash, 64)
+        if self.approval_scope != "ALLOW_ACTION_ONCE":
+            raise ValueError("authorization scope must be ALLOW_ACTION_ONCE")
         if not self.action_set or len(set(self.action_set)) != len(self.action_set):
             raise ValueError("authorization action_set must be non-empty and unique")
         if not all((self.task_id, self.campaign_id, self.canonical_root, self.canonical_branch,
@@ -159,6 +183,17 @@ class IntegrationAuthorizationEnvelope:
             "cleanup_target_id": self.cleanup_target_id,
             "cleanup_target_path": self.cleanup_target_path,
             "durable_ref": self.durable_ref,
+            "attempt_id": self.attempt_id,
+            "candidate_tree_sha": self.candidate_tree_sha,
+            "candidate_state_hash": self.candidate_state_hash,
+            "reviewer_id": self.reviewer_id,
+            "verifier_artifact_hash": self.verifier_artifact_hash,
+            "require_clean": self.require_clean,
+            "strategy": self.strategy,
+            "verification_commands_hash": self.verification_commands_hash,
+            "post_apply_commands_hash": self.post_apply_commands_hash,
+            "cleanup_requested": self.cleanup_requested,
+            "approval_scope": self.approval_scope,
         }
         mismatches = [key for key, value in binding.items() if str(current.get(key)) != str(value)]
         if mismatches:

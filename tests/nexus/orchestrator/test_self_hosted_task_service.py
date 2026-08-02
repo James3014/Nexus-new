@@ -20,6 +20,10 @@ import pytest
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
 from nexus.contracts.lifecycle_action import build_owner_inline_contract
+from nexus.contracts.target_integration_lifecycle import (
+    ExternalAcceptanceReceipt,
+    IntegrationAuthorizationEnvelope,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     SelfHostedTaskService,
     resolve_canonical_target_roots,
@@ -51,6 +55,40 @@ def _request(tmp_path: Path, **overrides):
     }
     values.update(overrides)
     return values
+
+
+def _closure_context(task_id: str, candidate: str, attempt_id: str = "attempt-1"):
+    acceptance = ExternalAcceptanceReceipt(
+        schema="nexus.external_acceptance_receipt.v1", task_id=task_id,
+        attempt_id=attempt_id, candidate_commit=candidate, receipt_hash="b" * 64,
+        reviewer_id="reviewer-1", passed=True, verifier_artifact="artifact-1",
+    )
+    authorization = IntegrationAuthorizationEnvelope(
+        schema="nexus.integration_authorization.v1", task_id=task_id,
+        campaign_id="campaign", attempt_id=attempt_id, task_card_hash="c" * 64,
+        candidate_commit=candidate, candidate_tree_sha="d" * 40,
+        candidate_state_hash="e" * 64, candidate_receipt_hash="f" * 64,
+        acceptance_receipt_hash=acceptance.receipt_hash, reviewer_id="reviewer-1",
+        verifier_artifact_hash="1" * 64, canonical_root="/tmp/repo",
+        canonical_branch="nexus/integration/main", expected_canonical_head="a" * 40,
+        canonical_dirty_baseline="2" * 64, integration_plan_hash="3" * 64,
+        strategy="EPHEMERAL_WORKTREE_MERGE_THEN_APPLY", verification_commands_hash="4" * 64,
+        post_apply_commands_hash="5" * 64, cleanup_target_id="target-1",
+        cleanup_target_path="/tmp/target", durable_ref=f"refs/nexus-candidate/{task_id}",
+        rollback="retain target", cleanup_requested=True,
+        action_set=("ACCEPT_DISPOSITION", "INTEGRATION_STAGING", "APPLY_VERIFIED_INTEGRATION", "POST_INTEGRATION_VERIFY", "CLEANUP_OWNED_TARGET"),
+        issued_at="2026-08-02T00:00:00+00:00",
+    )
+    grant = {
+        "schema": "nexus.approval.v2", "approval_id": f"approval-{task_id}",
+        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD",
+        "contract_hash": "c" * 64, "task_card_hash": "c" * 64,
+    }
+    return {
+        "approval_context": grant,
+        "external_acceptance": acceptance.to_dict(),
+        "integration_authorization": authorization.to_dict(),
+    }
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -936,12 +974,12 @@ def test_cleanup_apply_invokes_governed_worktree_cleanup(tmp_path, monkeypatch):
             return SimpleNamespace(decision="REMOVED", blocker=None, performed=not kwargs["dry_run"], eligible=True)
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
-    service.cleanup_tasks(task_id="cleanup-task", dry_run=True)
+    planned = service.cleanup_tasks(task_id="cleanup-task", dry_run=True)
     applied = service.cleanup_tasks(task_id="cleanup-task", dry_run=False)
 
-    assert calls == [True, False]
-    assert applied["decisions"][0]["cleanup_decision"] == "REMOVED"
-    assert service._read_state("cleanup-task")["cleanup_performed"] is True
+    assert calls == []
+    assert planned["decisions"][0]["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
+    assert applied["decisions"][0]["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
 
 
 def test_cleanup_rejects_approved_binding_mismatch(tmp_path, monkeypatch):
@@ -966,8 +1004,8 @@ def test_cleanup_rejects_approved_binding_mismatch(tmp_path, monkeypatch):
 
     decision = service.cleanup_tasks(task_id="binding-cleanup", dry_run=False)["decisions"][0]
 
-    assert decision["cleanup_decision"] == "BLOCKED_BY_MISSING_REF"
-    assert decision["cleanup_blocker"] == "approval binding mismatch"
+    assert decision["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
+    assert "external acceptance receipt" in decision["cleanup_blocker"]
 
 
 def test_integration_failure_is_persisted(tmp_path, monkeypatch):
@@ -984,13 +1022,13 @@ def test_integration_failure_is_persisted(tmp_path, monkeypatch):
             raise RuntimeError("integration verifier failed")
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", FailingIntegration)
-    with pytest.raises(RuntimeError, match="integration verifier failed"):
+    with pytest.raises(RuntimeError, match="EXTERNAL_ACCEPTANCE_REQUIRED"):
         service.integrate_approved("integration-fail")
 
     state = service._read_state("integration-fail")
-    assert state["status"] == "INTEGRATION_FAILED"
-    assert state["promotion_status"] == "INTEGRATION_FAILED"
-    assert state["push_performed"] is False
+    assert state["status"] == "APPROVED"
+    assert state["promotion_status"] == "APPROVED"
+    assert state.get("push_performed") is not True
 
 
 def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
@@ -1023,13 +1061,9 @@ def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
             )
 
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", SuccessfulIntegration)
-    first = service.integrate_approved("integration-once")
-    second = service.integrate_approved("integration-once")
-
-    assert first == second
-    assert calls == ["nexus/integration/main"]
-    assert first["integration_base_sha"] == "b" * 40
-    assert first["push_performed"] is False
+    with pytest.raises(RuntimeError, match="EXTERNAL_ACCEPTANCE_REQUIRED"):
+        service.integrate_approved("integration-once")
+    assert calls == []
 
 
 def test_lifecycle_receipt_exposes_required_fields(tmp_path):
@@ -1659,6 +1693,7 @@ def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monk
         candidate_tree_sha="b" * 40,
         candidate_state_hash="c" * 64,
         verified_receipt_hash="d" * 64,
+        **_closure_context("owner-finish-canary", "a" * 40),
     )
 
     assert result["status"] == "INTEGRATED"
@@ -1709,7 +1744,7 @@ def test_owner_finish_ten_candidate_matrix_archives_each_terminal(tmp_path, monk
             "attempts": [{"attempt_id": f"attempt-{index}"}],
         })
 
-        result = service.owner_finish(task_id, **binding)
+        result = service.owner_finish(task_id, **binding, **_closure_context(task_id, binding["candidate_commit_sha"], f"attempt-{index}"))
 
         assert result["status"] == "INTEGRATED"
         assert not service._state_path(task_id).exists()
@@ -1733,6 +1768,7 @@ def test_owner_finish_does_not_integrate_invalid_binding(tmp_path, monkeypatch):
             candidate_tree_sha="b" * 40,
             candidate_state_hash="c" * 64,
             verified_receipt_hash="d" * 64,
+            **_closure_context("owner-finish-invalid", "a" * 40),
         )
 
 
