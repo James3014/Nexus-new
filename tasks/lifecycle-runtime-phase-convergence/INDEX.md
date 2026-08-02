@@ -9,7 +9,11 @@ AUTO_CHAIN: false
 activation:
   activated_by: James Chen
   activated_card: runtime-phase-contract-freeze
+  activation_evidence: /Users/jameschen/.codex/attachments/79acf82d-bce4-4346-95ca-054f30ae293c/pasted-text.txt
+  activation_base_head: 4ef2a03b9c40b5ea31d8cd56c9bee9ffc4f62fe4
+  owner_declared_card_hash: eda0791e09567a140d0537be00ebd668ae79bef78b9fbfa242d312c4fa61d4ba
   activation_source_card_hash: 81c8c2e07ebd3cf6b2d321ea2279126aa00b63746235184c478277aef3a30928
+  hash_reconciliation: observed_repository_card_hash_used
   activated_at: 2026-08-02
 
 ## Objective
@@ -33,7 +37,7 @@ verifier, receipt store, memory database or MCP server.
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `runtime-phase-contract-freeze` | `00-phase-contract-freeze.md` | ACTIVE | Owner activation |
+| 0 | `runtime-phase-contract-freeze` | `00-phase-contract-freeze.md` | VERIFIED_CANDIDATE | Owner activation |
 | 1 | `runtime-phase-transition-integration` | `01-transition-integration.md` | DRAFT_PENDING_CARD_0 | Card 0 |
 | 2 | `runtime-phase-receipt-hook-symmetry` | `02-receipt-hook-symmetry.md` | DRAFT_PENDING_CARD_1 | Card 1 |
 | 3 | `runtime-development-lifecycle-mapping` | `03-development-runtime-mapping.md` | DRAFT_PENDING_CARD_2 | Card 2 |
@@ -55,5 +59,7 @@ transport or environment failures with retained evidence.
 
 ## Current frontier
 
-`runtime-phase-contract-freeze` is active. No successor card may execute until
-Card 0 has a scoped candidate, fresh verification and a new Owner gate.
+`runtime-phase-contract-freeze` has a scoped candidate and fresh local
+verification. The next pre-authorized frontier is
+`runtime-phase-transition-integration`; it remains separately governed and
+must preserve the same authority boundaries.
