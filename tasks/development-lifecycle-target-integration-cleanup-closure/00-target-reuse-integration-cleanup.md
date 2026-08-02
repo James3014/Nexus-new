@@ -4,7 +4,7 @@
 task_id: target-reuse-integration-cleanup-closure
 campaign_id: development-lifecycle-target-integration-cleanup-closure
 attempt_id: codex-target-integration-cleanup-20260802-a3
-status: ACTIVE_CORRECTIVE_ATTEMPT
+status: CANDIDATE_SETTLED
 prior_candidate: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
 prior_verdict: REJECT_CANDIDATE
 owner_activation: granted_for_implementation_candidate
@@ -223,6 +223,10 @@ prior_verdict: REJECT_CANDIDATE
 reopen_commit: d4ee02c77
 implementation_commit: c749ce63a
 starting_target_head: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+safety_patch_commit: 8456920fe
+receipt_binding_commit: 0c08ecdf1
+owner_commit_ceiling_waiver: true
+final_target_head: 0c08ecdf1
 
 corrected_defects:
   authorization_required: true
@@ -246,7 +250,7 @@ adversarial:
   conflict_branch_unchanged: true
 
 verification:
-  focused_corrective_suite: 28_passed
+  focused_corrective_suite: 29_passed
   existing_authority_candidate_verifier_suite: 113_passed
   self_hosted_task_service: 126_passed
   compileall: passed

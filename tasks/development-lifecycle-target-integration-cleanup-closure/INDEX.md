@@ -20,7 +20,10 @@ settlement:
   attempt_id: codex-target-integration-cleanup-20260802-a3
   reopen_commit: d4ee02c77
   implementation_commit: c749ce63a
+  safety_patch_commit: 8456920fe
+  receipt_binding_commit: 0c08ecdf1
   prior_candidate: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+  owner_commit_ceiling_waiver: true
   verdict: IMPLEMENTER_VERIFIED_TARGET_REUSE_INTEGRATION_CLEANUP_CANDIDATE
 ```
 
