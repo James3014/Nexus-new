@@ -7,6 +7,8 @@ from typing import Any
 
 
 LEARNING_EXPERIENCE_SCHEMA_VERSION = "nexus_learning_experience.v1"
+RUNTIME_LEARNING_CLOSURE_SCHEMA = "nexus.runtime_learning_closure.v1"
+RUNTIME_LEARNING_PHASE_CHAIN = ("S", "P", "D", "X", "R", "A", "C")
 PHASE_CHAIN = ("S", "P", "X", "D", "R", "A", "C")
 HIGH_COST_CAPABILITIES = {
     "research",
@@ -115,6 +117,77 @@ class LearningExperience:
             "nexus_policy_targets": list(self.nexus_policy_targets),
             "model_training_targets": list(self.model_training_targets),
         }
+
+
+def build_runtime_learning_closure(
+    *,
+    task_id: str,
+    attempt_id: str,
+    action_id: str,
+    phase_receipts: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    candidate_ref: str = "",
+    outcome: str,
+    terminal_evidence: dict[str, Any],
+    uncertain_mutation: bool = False,
+    retrieved_lesson_ids: list[str] | tuple[str, ...] = (),
+    applied_lesson_ids: list[str] | tuple[str, ...] = (),
+    lesson_disposition: str = "shadow",
+    qualification: dict[str, Any] | None = None,
+    primary_task_success: bool = False,
+    learning_write_succeeded: bool = True,
+) -> dict[str, Any]:
+    """Build one outcome-linked learning episode without creating new storage."""
+
+    disposition = str(lesson_disposition or "shadow")
+    write_ok = bool(learning_write_succeeded)
+    episode = {
+        "schema": RUNTIME_LEARNING_CLOSURE_SCHEMA,
+        "task_id": str(task_id),
+        "attempt_id": str(attempt_id),
+        "action_id": str(action_id),
+        "phase_chain": list(RUNTIME_LEARNING_PHASE_CHAIN),
+        "phase_receipts": list(phase_receipts),
+        "candidate_ref": str(candidate_ref),
+        "outcome": str(outcome),
+        "terminal_evidence": dict(terminal_evidence or {}),
+        "uncertain_mutation": bool(uncertain_mutation),
+        "auto_replay_allowed": False,
+        "retrieved_lesson_ids": [str(item) for item in retrieved_lesson_ids],
+        "applied_lesson_ids": [str(item) for item in applied_lesson_ids],
+        "lesson_disposition": disposition,
+        "qualification": dict(qualification or {}),
+        "learning_write_succeeded": write_ok,
+        "primary_task_success": bool(primary_task_success and write_ok),
+        "learning_blocker": "" if write_ok else "LEARNING_WRITE_FAILED",
+    }
+    validate_runtime_learning_closure(episode)
+    return episode
+
+
+def validate_runtime_learning_closure(episode: dict[str, Any]) -> None:
+    required = (
+        "schema", "task_id", "attempt_id", "action_id", "phase_receipts",
+        "outcome", "terminal_evidence", "auto_replay_allowed", "lesson_disposition",
+        "learning_write_succeeded", "primary_task_success",
+    )
+    missing = [field for field in required if field not in episode]
+    if missing:
+        raise ValueError(f"RUNTIME_LEARNING_CLOSURE_INCOMPLETE:{','.join(missing)}")
+    if episode.get("schema") != RUNTIME_LEARNING_CLOSURE_SCHEMA:
+        raise ValueError("RUNTIME_LEARNING_CLOSURE_SCHEMA_INVALID")
+    if episode.get("auto_replay_allowed") is not False:
+        raise ValueError("RUNTIME_LEARNING_AUTO_REPLAY_FORBIDDEN")
+    if episode.get("uncertain_mutation") and episode.get("auto_replay_allowed"):
+        raise ValueError("RUNTIME_LEARNING_UNCERTAIN_REPLAY_FORBIDDEN")
+    if str(episode.get("outcome") or "").upper() in {"FAILED", "BLOCKED", "REJECTED"} and episode.get("lesson_disposition") == "graduated":
+        raise ValueError("RUNTIME_LEARNING_FAILED_ATTEMPT_CANNOT_GRADUATE")
+    if episode.get("lesson_disposition") == "graduated":
+        qualification = episode.get("qualification") or {}
+        required_qualification = ("terminal_evidence", "repeatability", "prevention_rule", "authority_qualification")
+        if not episode.get("terminal_evidence") or any(not qualification.get(field) for field in required_qualification[1:]):
+            raise ValueError("RUNTIME_LEARNING_QUALIFICATION_INCOMPLETE")
+    if episode.get("primary_task_success") and not episode.get("learning_write_succeeded"):
+        raise ValueError("RUNTIME_LEARNING_WRITE_FAILURE_CANNOT_REPORT_SUCCESS")
 
 
 def learning_experience_from_dict(payload: dict[str, Any]) -> LearningExperience:

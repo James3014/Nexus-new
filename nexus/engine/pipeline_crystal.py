@@ -16,6 +16,8 @@ from nexus.events.transport import NexusEventBus
 from nexus.engine.pipeline_outcome import PipelineOutcome, PipelineTerminalState, HumanReviewHandoff
 from nexus.core.outcome_schema import NexusOutcomeV2
 from nexus.services.continuous_learning import finalize_learning_loop
+from nexus.contracts.learning_experience import build_runtime_learning_closure
+from nexus.contracts.local_memory_hub import build_memory_learning_lineage
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,8 @@ class PipelineCrystalMixin:
             self._handle_crystallize_failure(ctx)
 
         learning_finalize: Dict[str, Any] = {}
+        learning_write_succeeded = True
+        learning_write_error = ""
         try:
             # 🚀 [v24.0] Immediate Bayesian Feedback to Learning Loop
             learning_finalize = finalize_learning_loop(
@@ -57,8 +61,56 @@ class PipelineCrystalMixin:
                 bayesian_params=ctx.bayesian_params # 🧪 Pass-through evolved params
             )
         except Exception as exc:
+            learning_write_succeeded = False
+            learning_write_error = str(exc)
             logger.warning("continuous_learning_finalize_failed: %s", exc)
-            
+
+        task_id = str(ctx.state.task_id)
+        attempt_id = str(ctx.state.metadata.get("attempt_id") or f"{task_id}:attempt")
+        action_id = str(ctx.state.metadata.get("action_id") or f"{task_id}:{attempt_id}:action")
+        lineage = build_memory_learning_lineage(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            action_id=action_id,
+            retrieved_lesson_ids=tuple(ctx.state.metadata.get("retrieved_lesson_ids") or ()),
+            applied_lesson_ids=tuple(ctx.state.metadata.get("applied_lesson_ids") or ()),
+            lesson_disposition=str(ctx.state.metadata.get("lesson_disposition") or "shadow"),
+            stable_knowledge_overwrite=False,
+            auto_replay_allowed=False,
+        )
+        terminal_evidence = {
+            "pipeline_outcome": bool(ctx.state.metadata.get("pipeline_outcome")),
+            "nexus_outcome_v2": bool(ctx.state.metadata.get("nexus_outcome_v2")),
+            "phase_receipt_count": len(ctx.state.metadata.get("phase_receipts") or ()),
+            "verification_exit_codes": list(ctx.state.metadata.get("verification_exit_codes") or ()),
+        }
+        learning_closure = build_runtime_learning_closure(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            action_id=action_id,
+            phase_receipts=list(ctx.state.metadata.get("phase_receipts") or ()),
+            candidate_ref=str(ctx.state.metadata.get("candidate_ref") or ""),
+            outcome=str(ctx.state.metadata.get("pipeline_terminal_state") or ("SUCCESS" if success else "FAILED")),
+            terminal_evidence=terminal_evidence,
+            uncertain_mutation=bool(ctx.state.metadata.get("uncertain_mutation")),
+            retrieved_lesson_ids=tuple(ctx.state.metadata.get("retrieved_lesson_ids") or ()),
+            applied_lesson_ids=tuple(ctx.state.metadata.get("applied_lesson_ids") or ()),
+            lesson_disposition=str(ctx.state.metadata.get("lesson_disposition") or "shadow"),
+            qualification=dict(ctx.state.metadata.get("learning_qualification") or {}),
+            primary_task_success=bool(success),
+            learning_write_succeeded=learning_write_succeeded,
+        )
+        learning_closure["memory_lineage"] = lineage
+        learning_closure["learning_finalize"] = learning_finalize
+        if learning_write_error:
+            learning_closure["learning_write_error"] = learning_write_error
+            ctx.state.metadata["learning_closure_failed"] = True
+            ctx.state.metadata["learning_closure_failure_reason"] = learning_write_error
+            # Reuse the existing final safety valve so a learning failure can
+            # never leave the primary task reported as a successful run.
+            ctx.state.metadata["evidence_trust_rejection"] = True
+        ctx.state.metadata["learning_closure"] = learning_closure
+
         self.engine.state_io.save_global_state(ctx.state)
         self.engine.commander.next_step(status="completed", state=ctx.state)
 
