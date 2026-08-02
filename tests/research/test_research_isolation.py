@@ -77,6 +77,20 @@ def test_contamination_guard_blocks_design_language_and_fields():
     assert "design_field" in contaminated.detected_terms
 
 
+def test_contamination_guard_blocks_design_field_without_design_language():
+    result = evaluate_research_contamination(
+        {
+            "schema_version": "research_facts.v1",
+            "observed_components": ["parser"],
+            "patch_plan": "candidate_001",
+        }
+    )
+
+    assert result.passed is False
+    assert result.detected_terms == ("design_field",)
+    assert result.failure_reason == "research_contamination_detected"
+
+
 def test_capability_planner_exposes_research_isolation_snapshot():
     plan = CapabilityPlanner().plan(
         task_desc="Use research to inspect cross-module timeout.",
