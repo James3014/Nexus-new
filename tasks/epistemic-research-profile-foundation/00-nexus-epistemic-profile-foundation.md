@@ -14,6 +14,12 @@ repair_attempt:
   status: authorized
   source_rejection: ERP-00 independent acceptance A1
   independent_acceptance: pending
+repair_attempt_a3:
+  attempt_id: erp00-agy-gemini36-medium-a3
+  status: authorized
+  source_rejection: ERP-00 independent acceptance A2
+  repair_class: pre_existing_contract_mismatch
+  independent_acceptance: pending
 ---
 
 # Task Card ERP-00: Nexus Epistemic Research Profile Foundation
@@ -75,9 +81,20 @@ Establish the first version of the Epistemic Research Profile foundation inside 
 - **Prohibitions**: No ERP-01, no runtime wiring, no routing changes, no integration, no merge, no push, no public claim.
 - **Output**: Candidate commit only for independent acceptance.
 
+## Owner-authorized Repair Attempt A3
+
+- Restore field-level contamination detection required by the existing
+  `test_research_isolation.py` contract.
+- The repair may reuse `has_design_fields()` from
+  `nexus.research.research_facts`.
+- This attempt may modify only the A3 allowed paths.
+- No Epistemic Profile contract, adapter, authority, runtime, routing,
+  acceptance, integration, push, ERP-01, or public-claim changes are authorized.
+- Output remains an implementer Candidate pending independent acceptance.
+
 ## Tests & Verification
 - TDD required (RED evidence before production implementation).
-- Mandatory Commands C1 - C9 must pass clean.
+- Mandatory Commands C1 - C10 must pass clean.
 - Existing governance regression tests must remain 100% green.
 
 ## Commit Policy
