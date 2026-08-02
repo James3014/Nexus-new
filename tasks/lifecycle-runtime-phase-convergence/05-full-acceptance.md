@@ -1,8 +1,8 @@
 # Task Card: runtime-full-acceptance
 
-artifact_authority: draft-successor
+artifact_authority: current
 owner: James Chen
-status: DRAFT_PENDING_OWNER_ACTIVATION
+status: ACTIVE
 task_id: runtime-full-acceptance
 commit_required: true
 AUTO_CHAIN: false

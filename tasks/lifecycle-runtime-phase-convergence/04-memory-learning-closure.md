@@ -2,10 +2,21 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_CANDIDATE
 task_id: runtime-memory-learning-closure
 commit_required: true
 AUTO_CHAIN: false
+candidate_commit: 45287f9d05f77efb5a6abfde96ae8db116d3c866
+claim_ceiling: IMPLEMENTER_VERIFIED_RUNTIME_MEMORY_LEARNING_CLOSURE_CANDIDATE
+
+verification_receipt:
+  base_head: f38efc366624b08d39f9d58e5b20bbfe631d8e68
+  card_hash_at_execution: 1ea77999aa3631a916ee40fa8165caf7342f22b98b18a046d53bdbaf71d5e21d
+  focused_tests: 5 passed
+  affected_regression: 18 passed
+  diff_check: PASS
+  evidence_scope: terminal_outcome_phase_receipts_qualified_learning_and_non_replayable_memory_lineage
+  external_acceptance: DEFERRED_EXTERNAL_ACCEPTANCE
 
 ## Objective
 

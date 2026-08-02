@@ -41,8 +41,8 @@ verifier, receipt store, memory database or MCP server.
 | 1 | `runtime-phase-transition-integration` | `01-transition-integration.md` | VERIFIED_CANDIDATE | Card 0 |
 | 2 | `runtime-phase-receipt-hook-symmetry` | `02-receipt-hook-symmetry.md` | VERIFIED_CANDIDATE | Card 1 |
 | 3 | `runtime-development-lifecycle-mapping` | `03-development-runtime-mapping.md` | VERIFIED_CANDIDATE | Card 2 |
-| 4 | `runtime-memory-learning-closure` | `04-memory-learning-closure.md` | ACTIVE | Card 3 + workforce learning gate |
-| 5 | `runtime-full-acceptance` | `05-full-acceptance.md` | DRAFT_PENDING_CARDS_0_4 | Cards 0–4 + P7 disposition |
+| 4 | `runtime-memory-learning-closure` | `04-memory-learning-closure.md` | VERIFIED_CANDIDATE | Card 3 + workforce learning gate |
+| 5 | `runtime-full-acceptance` | `05-full-acceptance.md` | ACTIVE | Cards 0–4 + P7 disposition |
 
 ## Exit gate
 
@@ -59,6 +59,6 @@ transport or environment failures with retained evidence.
 
 ## Current frontier
 
-`runtime-memory-learning-closure` is active after Card 3's scoped candidate and
-fresh local verification. Only this card may mutate source until its exit
-criteria and receipt are complete.
+`runtime-full-acceptance` is active after Card 4's scoped candidate and fresh
+local verification. Only this card may mutate source until its exit criteria
+and receipt are complete; Card 5 is the terminal campaign frontier.
