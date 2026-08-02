@@ -302,6 +302,31 @@ def test_persisted_receipts_equal_returned_receipts():
     assert hasattr(TargetIntegrationLifecycle, "reload_receipt")
 
 
+def test_authorize_default_action_set_excludes_branch_deletion(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    receipt = _acceptance(candidate)
+    preview = TargetIntegrationLifecycle.build_preview(
+        task_id="task-1", target_id="target-1", candidate_commit=candidate,
+        acceptance=receipt, canonical_branch="nexus/integration/canary",
+        expected_canonical_head=base, verification_commands=(),
+        cleanup_target_id="target-1", rollback="retain target",
+    )
+    auth = TargetIntegrationLifecycle.authorize(
+        task_id="task-1", campaign_id="campaign-1", task_card_hash="c" * 64,
+        candidate_commit=candidate, candidate_receipt_hash="d" * 64,
+        acceptance_receipt_hash=receipt.receipt_hash, canonical_root=str(root),
+        canonical_branch="nexus/integration/canary", expected_canonical_head=base,
+        canonical_dirty_baseline=_status_hash(root), preview=preview,
+        cleanup_target_id="target-1", cleanup_target_path=str(root / "target"),
+        durable_ref="refs/nexus-candidate/task-1", rollback="retain target",
+        issued_at="2026-08-02T00:00:00+00:00",
+    )
+    assert auth.action_set == (
+        "ACCEPT_DISPOSITION", "INTEGRATION_STAGING", "APPLY_VERIFIED_INTEGRATION",
+        "POST_INTEGRATION_VERIFY", "CLEANUP_OWNED_TARGET",
+    )
+
+
 def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
     receipt = _acceptance(candidate)

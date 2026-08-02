@@ -43,7 +43,6 @@ class TargetIntegrationLifecycle:
         "APPLY_VERIFIED_INTEGRATION",
         "POST_INTEGRATION_VERIFY",
         "CLEANUP_OWNED_TARGET",
-        "DELETE_OWNED_TASK_BRANCH_IF_ELIGIBLE",
     )
 
     @staticmethod
