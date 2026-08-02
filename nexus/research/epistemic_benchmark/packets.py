@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -841,6 +842,18 @@ def validate_private_scoring_context(
     if extra_ck:
         errors.append(f"PRIVATE_CONTEXT_EXTRA_KEYS: {sorted(extra_ck)}")
 
+    # 1a. Top-level types and values
+    if type(ctx.get("seed")) is not int:
+        errors.append("PRIVATE_CONTEXT_SEED_INVALID")
+    if ctx.get("benchmark_run_id") != manifest.get("benchmark_run_id"):
+        errors.append("PRIVATE_CONTEXT_RUN_ID_MISMATCH")
+    if ctx.get("corpus_version") != manifest.get("corpus_version"):
+        errors.append("PRIVATE_CONTEXT_CORPUS_VERSION_MISMATCH")
+
+    key_hex = ctx.get("blinding_key_hex", "")
+    if type(key_hex) is not str or len(key_hex) != 64 or not all(c in "0123456789abcdef" for c in key_hex):
+        errors.append("PRIVATE_CONTEXT_BLINDING_KEY_HEX_INVALID")
+
     # 2. Private context self-hash
     stored_csha = ctx.get("private_context_sha256", "")
     cbody = {k: v for k, v in ctx.items() if k != "private_context_sha256"}
@@ -872,6 +885,18 @@ def validate_private_scoring_context(
     # 5-8. Alias bindings coverage
     known_case_ids = set(REQUIRED_CASE_IDS)
     bindings = ctx.get("alias_bindings", [])
+    if type(bindings) is not list:
+        errors.append("PRIVATE_CONTEXT_ALIAS_BINDINGS_NOT_LIST")
+        bindings = []
+
+    expected_total = manifest.get("case_count", 0) * len(BenchmarkArm)
+    if len(bindings) != expected_total:
+        errors.append(f"PRIVATE_CONTEXT_BINDINGS_CARDINALITY_MISMATCH: got={len(bindings)} expected={expected_total}")
+
+    # Sorted check
+    expected_sorted = sorted(bindings, key=lambda x: (x.get("arm", "") if isinstance(x, dict) else "", x.get("case_alias", "") if isinstance(x, dict) else ""))
+    if bindings != expected_sorted:
+        errors.append("PRIVATE_CONTEXT_BINDINGS_UNSORTED")
 
     # Build expected: {(arm, alias)} from public manifest packets
     expected_arm_aliases: Set[Tuple[str, str]] = set()
@@ -882,15 +907,54 @@ def validate_private_scoring_context(
 
     actual_arm_aliases: Set[Tuple[str, str]] = set()
     case_arm_pairs: Set[Tuple[str, str]] = set()
+    seen_arm_alias = set()
+    seen_arm_case = set()
+    seen_aliases = set()
+
+    # HMAC rebinding check setup
+    run_id = ctx.get("benchmark_run_id", "")
+    valid_key_bytes = None
+    if type(key_hex) is str and len(key_hex) == 64 and all(c in "0123456789abcdef" for c in key_hex):
+        try:
+            valid_key_bytes = bytes.fromhex(key_hex)
+        except ValueError:
+            pass
 
     for b in bindings:
+        if type(b) is not dict:
+            errors.append("PRIVATE_CONTEXT_BINDING_NOT_DICT")
+            continue
+        if set(b.keys()) != {"arm", "case_alias", "case_id"}:
+            errors.append(f"PRIVATE_CONTEXT_BINDING_KEYS_INVALID: {sorted(b.keys())}")
+
         arm = b.get("arm", "")
         alias = b.get("case_alias", "")
         case_id = b.get("case_id", "")
 
+        if not re.match(r"^CASE-[0-9A-F]{16}$", alias):
+            errors.append(f"PRIVATE_CONTEXT_ALIAS_FORMAT_INVALID: {alias!r}")
+
+        if (arm, alias) in seen_arm_alias:
+            errors.append(f"PRIVATE_CONTEXT_DUPLICATE_ARM_ALIAS: arm={arm} alias={alias}")
+        seen_arm_alias.add((arm, alias))
+
+        if (arm, case_id) in seen_arm_case:
+            errors.append(f"PRIVATE_CONTEXT_DUPLICATE_ARM_CASE: arm={arm} case_id={case_id}")
+        seen_arm_case.add((arm, case_id))
+
+        if alias in seen_aliases:
+            errors.append(f"PRIVATE_CONTEXT_DUPLICATE_ALIAS: alias={alias}")
+        seen_aliases.add(alias)
+
         # 7. Unknown case ID
         if case_id not in known_case_ids:
             errors.append(f"PRIVATE_CONTEXT_UNKNOWN_CASE_ID: {case_id!r}")
+
+        # HMAC rebinding check
+        if valid_key_bytes and run_id and case_id in known_case_ids:
+            expected_alias = generate_case_alias(run_id, arm, case_id, valid_key_bytes)
+            if not hmac.compare_digest(expected_alias, alias):
+                errors.append("PRIVATE_CONTEXT_ALIAS_HMAC_MISMATCH")
 
         actual_arm_aliases.add((arm, alias))
         case_arm_pairs.add((case_id, arm))
@@ -906,11 +970,12 @@ def validate_private_scoring_context(
     # 6. Each case in three arms exactly once
     case_arm_counts: Dict[str, Set[str]] = {}
     for b in bindings:
-        cid = b.get("case_id", "")
-        arm = b.get("arm", "")
-        if cid not in case_arm_counts:
-            case_arm_counts[cid] = set()
-        case_arm_counts[cid].add(arm)
+        if type(b) is dict:
+            cid = b.get("case_id", "")
+            arm = b.get("arm", "")
+            if cid not in case_arm_counts:
+                case_arm_counts[cid] = set()
+            case_arm_counts[cid].add(arm)
 
     expected_arms_set = {arm.value for arm in BenchmarkArm}
     for cid, arms_seen in case_arm_counts.items():
@@ -928,16 +993,17 @@ def validate_private_scoring_context(
         pub_alias_map[alias] = pkt
 
     for b in bindings:
-        alias = b.get("case_alias", "")
-        arm = b.get("arm", "")
-        if alias in pub_alias_map:
-            pub_arm = pub_alias_map[alias].get("arm", "")
-            if pub_arm != arm:
-                errors.append(
-                    f"PRIVATE_CONTEXT_ARM_MISMATCH: alias={alias!r} ctx_arm={arm!r} pub_arm={pub_arm!r}"
-                )
-        else:
-            errors.append(f"PRIVATE_CONTEXT_ALIAS_NOT_IN_MANIFEST: alias={alias!r}")
+        if type(b) is dict:
+            alias = b.get("case_alias", "")
+            arm = b.get("arm", "")
+            if alias in pub_alias_map:
+                pub_arm = pub_alias_map[alias].get("arm", "")
+                if pub_arm != arm:
+                    errors.append(
+                        f"PRIVATE_CONTEXT_ARM_MISMATCH: alias={alias!r} ctx_arm={arm!r} pub_arm={pub_arm!r}"
+                    )
+            else:
+                errors.append(f"PRIVATE_CONTEXT_ALIAS_NOT_IN_MANIFEST: alias={alias!r}")
 
     return len(errors) == 0, errors
 

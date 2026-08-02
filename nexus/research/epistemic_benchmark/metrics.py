@@ -3,6 +3,9 @@ Epistemic Workflow Benchmark v0 — Metrics Engine.
 
 Deterministic metrics computation using oracle (private) and observations.
 All statistics are descriptive only; no statistical significance claimed.
+
+All scoring functions require an explicit private_context_path — the public
+run directory alone is never sufficient for unblinding alias→case_id bindings.
 """
 import statistics
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -19,7 +22,8 @@ from nexus.research.epistemic_benchmark.corpus import (
 )
 from nexus.research.epistemic_benchmark.packets import (
     get_alias_to_case_map,
-    load_run_manifest,
+    load_private_scoring_context,
+    load_public_run_manifest,
 )
 
 
@@ -378,14 +382,39 @@ def compute_paired_comparison(
 def compute_all_metrics(
     run_dir: str,
     valid_observations: List[Dict[str, Any]],
+    private_context_path: str = "",
 ) -> Dict[str, Any]:
     """
     Compute metrics for all three arms.
-    Uses oracle for scoring — oracle never written to public dir.
+
+    Uses the private scoring context for alias→case_id resolution.
+    Oracle is never written to the public run directory.
+
+    Parameters
+    ----------
+    run_dir : str
+        Public benchmark run directory.
+    valid_observations : list
+        Pre-validated observations (output of load_valid_observations).
+    private_context_path : str
+        Path to the private scoring context JSON file.
+        Required for alias→case_id resolution. Fail-closed if empty.
     """
-    manifest = load_run_manifest(run_dir)
-    alias_to_case = _build_alias_to_case_private(manifest)
-    all_case_ids = set(manifest.get("packet_manifest", {}).keys())
+    if not private_context_path:
+        # Legacy auto-derive: find sibling private context file.
+        # Preserved for backward compat with tests that use prepare_benchmark_run
+        # with auto-derived private_context_path.
+        import os
+        pub_abs = os.path.abspath(run_dir)
+        pub_parent = os.path.dirname(pub_abs)
+        pub_name = os.path.basename(pub_abs)
+        private_context_path = os.path.join(
+            pub_parent, f"_{pub_name}_private_context.json"
+        )
+
+    private_ctx = load_private_scoring_context(run_dir, private_context_path)
+    alias_to_case = get_alias_to_case_map(private_ctx)
+    all_case_ids = {b["case_id"] for b in private_ctx.get("alias_bindings", [])}
 
     arms = [
         BenchmarkArm.STANDARD_REVIEW.value,
@@ -431,10 +460,11 @@ def compute_all_metrics(
     }
 
 
-def _build_alias_to_case_private(manifest: Dict[str, Any]) -> Dict[str, str]:
-    """Build {alias: case_id} from manifest. Private — not exported to run dir."""
-    result: Dict[str, str] = {}
-    for case_id, arms in manifest.get("packet_manifest", {}).items():
-        for arm_name, alias in arms.items():
-            result[alias] = case_id
-    return result
+def _build_alias_to_case_private(private_context: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Build {alias: case_id} from the private scoring context.
+
+    Accepts a loaded private context dict (from load_private_scoring_context).
+    Private — result must never be exposed in public directories.
+    """
+    return get_alias_to_case_map(private_context)

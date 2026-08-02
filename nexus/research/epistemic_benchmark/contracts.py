@@ -161,18 +161,22 @@ PROJECTION_FORBIDDEN_KEYS: Set[str] = {
     "defect_description", "chain_of_thought", "reasoning_steps",
 }
 
-# Pattern: a valid string in a projection must be:
-# - A stable ID (e.g. mat-xxx, CASE-xxx, check-xxx, claim-xxx)
-# - A material ref
-# - A closed enum value
-# - A schema identifier (nexus.*)
-# - A warning code (all uppercase, underscores allowed)
-# - A SHA-256 hex (64 lowercase hex chars)
-# Free prose is rejected: strings with spaces that look like sentences.
-_SHA256_LEAF_RE = re.compile(r'^[0-9a-f]{64}$')
-_SCHEMA_LEAF_RE = re.compile(r'^nexus\.')
-_ID_LEAF_RE = re.compile(r'^[A-Za-z0-9_\-\.]{1,64}$')
-_FREE_PROSE_RE = re.compile(r'.*\s.{10,}')  # string with spaces and at least 10 chars after first space
+# Stable ID patterns for Epistemic Projection (Section B2)
+_SHA256_LEAF_RE = re.compile(r"^[0-9a-f]{64}$")
+_SCHEMA_LEAF_RE = re.compile(r"^nexus\.")
+_OBJECT_ID_RE = re.compile(r"^OBJ-[A-Z0-9_-]+$")
+_TARGET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_-]{1,63}$")
+_LINEAGE_ID_RE = re.compile(r"^LIN-[A-Z0-9_-]+$")
+_CLAIM_ID_RE = re.compile(r"^CLM-[A-Z0-9_-]+$")
+_CHECK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
+_WARNING_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+_PROJECTION_CLOSED_ENUMS: Set[str] = {
+    "BOUND", "MISMATCHED", "MISSING", "UNKNOWN",
+    "independent", "derivative", "shared_origin", "unknown",
+    "supports", "contradicts", "contextual", "inconclusive",
+    "PASS", "FAIL", "NOT_RUN",
+}
 
 # ---------------------------------------------------------------------------
 # SHA-256 utilities
@@ -316,26 +320,23 @@ def validate_public_case(case: Dict[str, Any]) -> List[str]:
 # Epistemic Projection Contract Validator (Section D)
 # ---------------------------------------------------------------------------
 
-def _is_valid_projection_leaf_string(s: str) -> bool:
-    """Return True if s is a valid leaf string in a projection (not free prose)."""
+def _is_valid_projection_leaf_string(s: str, available_material_refs: Optional[Set[str]] = None) -> bool:
+    """Return True if s is a valid leaf string in a projection matching allowed schemas/IDs/enums."""
     if not isinstance(s, str):
         return False
-    # SHA-256 hex
-    if _SHA256_LEAF_RE.match(s):
+    if _SHA256_LEAF_RE.match(s) or _SCHEMA_LEAF_RE.match(s):
         return True
-    # Schema identifier
-    if _SCHEMA_LEAF_RE.match(s):
+    if s in _PROJECTION_CLOSED_ENUMS:
         return True
-    # ID-like (no spaces, short)
-    if _ID_LEAF_RE.match(s):
+    if available_material_refs and s in available_material_refs:
         return True
-    # Reject free prose: strings with space and >=10 chars after first space
-    if _FREE_PROSE_RE.match(s):
-        return False
-    return True
+    if (_OBJECT_ID_RE.match(s) or _TARGET_NAME_RE.match(s) or _LINEAGE_ID_RE.match(s) or
+            _CLAIM_ID_RE.match(s) or _CHECK_NAME_RE.match(s) or _WARNING_CODE_RE.match(s)):
+        return True
+    return False
 
 
-def _scan_projection_forbidden(obj: Any, path: str = "") -> List[str]:
+def _scan_projection_forbidden(obj: Any, available_material_refs: Optional[Set[str]] = None, path: str = "") -> List[str]:
     """Recursively scan obj for forbidden keys and free-prose leaf strings."""
     errors: List[str] = []
     if isinstance(obj, dict):
@@ -343,12 +344,12 @@ def _scan_projection_forbidden(obj: Any, path: str = "") -> List[str]:
             full_key = f"{path}.{k}" if path else k
             if k in PROJECTION_FORBIDDEN_KEYS:
                 errors.append(f"PROJECTION_FORBIDDEN_KEY: {full_key}")
-            errors.extend(_scan_projection_forbidden(v, full_key))
+            errors.extend(_scan_projection_forbidden(v, available_material_refs, full_key))
     elif isinstance(obj, list):
         for i, item in enumerate(obj):
-            errors.extend(_scan_projection_forbidden(item, f"{path}[{i}]"))
+            errors.extend(_scan_projection_forbidden(item, available_material_refs, f"{path}[{i}]"))
     elif isinstance(obj, str):
-        if not _is_valid_projection_leaf_string(obj):
+        if not _is_valid_projection_leaf_string(obj, available_material_refs):
             errors.append(f"PROJECTION_FREE_PROSE_LEAF: {path}={obj[:80]!r}")
     return errors
 
@@ -358,7 +359,7 @@ def validate_epistemic_projection(
     available_material_refs: Set[str],
 ) -> List[str]:
     """
-    Strict epistemic projection validator (Section D).
+    Strict epistemic projection validator (Section B).
 
     Returns a list of error codes. Empty list = valid.
     """
@@ -393,7 +394,7 @@ def validate_epistemic_projection(
 
     # --- Recursive forbidden key and free-prose scan (excluding hash field) ---
     scan_target = {k: v for k, v in projection.items() if k != "projection_sha256"}
-    errors.extend(_scan_projection_forbidden(scan_target))
+    errors.extend(_scan_projection_forbidden(scan_target, available_material_refs))
 
     # --- Object bindings ---
     for i, ob in enumerate(projection.get("object_bindings", [])):
@@ -408,8 +409,14 @@ def validate_epistemic_projection(
                 errors.append(f"PROJECTION_OB_MISSING_KEYS[{i}]: {sorted(missing_ob)}")
             if extra_ob:
                 errors.append(f"PROJECTION_OB_EXTRA_KEYS[{i}]: {sorted(extra_ob)}")
+        oid = ob.get("object_id")
+        if not isinstance(oid, str) or not _OBJECT_ID_RE.match(oid):
+            errors.append(f"PROJECTION_OB_OBJECT_ID_INVALID[{i}]: {oid!r}")
+        tname = ob.get("target_name")
+        if not isinstance(tname, str) or not _TARGET_NAME_RE.match(tname):
+            errors.append(f"PROJECTION_OB_TARGET_NAME_INVALID[{i}]: {tname!r}")
         status = ob.get("status", "")
-        if status not in PROJECTION_OBJECT_BINDING_STATUS:
+        if not isinstance(status, str) or status not in PROJECTION_OBJECT_BINDING_STATUS:
             errors.append(f"PROJECTION_OB_STATUS_INVALID[{i}]: {status!r}")
         ev = ob.get("evidence_refs", [])
         if not isinstance(ev, list):
@@ -418,7 +425,7 @@ def validate_epistemic_projection(
             if len(ev) != len(set(ev)):
                 errors.append(f"PROJECTION_OB_EVIDENCE_DUPLICATES[{i}]")
             for ref in ev:
-                if ref not in available_material_refs:
+                if not isinstance(ref, str) or ref not in available_material_refs:
                     errors.append(f"PROJECTION_OB_EVIDENCE_UNKNOWN[{i}]: {ref!r}")
 
     # --- Source lineage ---
@@ -434,8 +441,11 @@ def validate_epistemic_projection(
                 errors.append(f"PROJECTION_SL_MISSING_KEYS[{i}]: {sorted(missing_sl)}")
             if extra_sl:
                 errors.append(f"PROJECTION_SL_EXTRA_KEYS[{i}]: {sorted(extra_sl)}")
+        lid = sl.get("lineage_id")
+        if not isinstance(lid, str) or not _LINEAGE_ID_RE.match(lid):
+            errors.append(f"PROJECTION_SL_LINEAGE_ID_INVALID[{i}]: {lid!r}")
         ind = sl.get("independence", "")
-        if ind not in PROJECTION_LINEAGE_INDEPENDENCE:
+        if not isinstance(ind, str) or ind not in PROJECTION_LINEAGE_INDEPENDENCE:
             errors.append(f"PROJECTION_SL_INDEPENDENCE_INVALID[{i}]: {ind!r}")
         ev = sl.get("evidence_refs", [])
         if not isinstance(ev, list):
@@ -444,7 +454,7 @@ def validate_epistemic_projection(
             if len(ev) != len(set(ev)):
                 errors.append(f"PROJECTION_SL_EVIDENCE_DUPLICATES[{i}]")
             for ref in ev:
-                if ref not in available_material_refs:
+                if not isinstance(ref, str) or ref not in available_material_refs:
                     errors.append(f"PROJECTION_SL_EVIDENCE_UNKNOWN[{i}]: {ref!r}")
 
     # --- Extraction/Assessment separation ---
@@ -460,8 +470,11 @@ def validate_epistemic_projection(
                 errors.append(f"PROJECTION_EA_MISSING_KEYS[{i}]: {sorted(missing_ea)}")
             if extra_ea:
                 errors.append(f"PROJECTION_EA_EXTRA_KEYS[{i}]: {sorted(extra_ea)}")
+        cid = ea.get("claim_id")
+        if not isinstance(cid, str) or not _CLAIM_ID_RE.match(cid):
+            errors.append(f"PROJECTION_EA_CLAIM_ID_INVALID[{i}]: {cid!r}")
         direction = ea.get("direction", "")
-        if direction not in PROJECTION_DIRECTION:
+        if not isinstance(direction, str) or direction not in PROJECTION_DIRECTION:
             errors.append(f"PROJECTION_EA_DIRECTION_INVALID[{i}]: {direction!r}")
         ev = ea.get("evidence_refs", [])
         if not isinstance(ev, list):
@@ -470,7 +483,7 @@ def validate_epistemic_projection(
             if len(ev) != len(set(ev)):
                 errors.append(f"PROJECTION_EA_EVIDENCE_DUPLICATES[{i}]")
             for ref in ev:
-                if ref not in available_material_refs:
+                if not isinstance(ref, str) or ref not in available_material_refs:
                     errors.append(f"PROJECTION_EA_EVIDENCE_UNKNOWN[{i}]: {ref!r}")
 
     # --- Verification status ---
@@ -486,8 +499,11 @@ def validate_epistemic_projection(
                 errors.append(f"PROJECTION_VS_MISSING_KEYS[{i}]: {sorted(missing_vs)}")
             if extra_vs:
                 errors.append(f"PROJECTION_VS_EXTRA_KEYS[{i}]: {sorted(extra_vs)}")
+        cname = vs.get("check_name")
+        if not isinstance(cname, str) or not _CHECK_NAME_RE.match(cname):
+            errors.append(f"PROJECTION_VS_CHECK_NAME_INVALID[{i}]: {cname!r}")
         status = vs.get("status", "")
-        if status not in PROJECTION_VERIFICATION_STATUS:
+        if not isinstance(status, str) or status not in PROJECTION_VERIFICATION_STATUS:
             errors.append(f"PROJECTION_VS_STATUS_INVALID[{i}]: {status!r}")
         ev = vs.get("evidence_refs", [])
         if not isinstance(ev, list):
@@ -496,7 +512,7 @@ def validate_epistemic_projection(
             if len(ev) != len(set(ev)):
                 errors.append(f"PROJECTION_VS_EVIDENCE_DUPLICATES[{i}]")
             for ref in ev:
-                if ref not in available_material_refs:
+                if not isinstance(ref, str) or ref not in available_material_refs:
                     errors.append(f"PROJECTION_VS_EVIDENCE_UNKNOWN[{i}]: {ref!r}")
 
     # --- Cannot-establish flags ---
@@ -512,8 +528,11 @@ def validate_epistemic_projection(
                 errors.append(f"PROJECTION_CE_MISSING_KEYS[{i}]: {sorted(missing_ce)}")
             if extra_ce:
                 errors.append(f"PROJECTION_CE_EXTRA_KEYS[{i}]: {sorted(extra_ce)}")
+        cid = ce.get("claim_id")
+        if not isinstance(cid, str) or not _CLAIM_ID_RE.match(cid):
+            errors.append(f"PROJECTION_CE_CLAIM_ID_INVALID[{i}]: {cid!r}")
         present = ce.get("present")
-        if not isinstance(present, bool) or isinstance(present, type(None)):
+        if not isinstance(present, bool) or type(present) is not bool:
             errors.append(f"PROJECTION_CE_PRESENT_NOT_BOOL[{i}]: {present!r}")
         ev = ce.get("evidence_refs", [])
         if not isinstance(ev, list):
@@ -522,7 +541,7 @@ def validate_epistemic_projection(
             if len(ev) != len(set(ev)):
                 errors.append(f"PROJECTION_CE_EVIDENCE_DUPLICATES[{i}]")
             for ref in ev:
-                if ref not in available_material_refs:
+                if not isinstance(ref, str) or ref not in available_material_refs:
                     errors.append(f"PROJECTION_CE_EVIDENCE_UNKNOWN[{i}]: {ref!r}")
 
     # --- Conflicts ---
@@ -538,8 +557,11 @@ def validate_epistemic_projection(
                 errors.append(f"PROJECTION_CF_MISSING_KEYS[{i}]: {sorted(missing_cf)}")
             if extra_cf:
                 errors.append(f"PROJECTION_CF_EXTRA_KEYS[{i}]: {sorted(extra_cf)}")
+        cid = cf.get("claim_id")
+        if not isinstance(cid, str) or not _CLAIM_ID_RE.match(cid):
+            errors.append(f"PROJECTION_CF_CLAIM_ID_INVALID[{i}]: {cid!r}")
         present = cf.get("present")
-        if not isinstance(present, bool) or isinstance(present, type(None)):
+        if not isinstance(present, bool) or type(present) is not bool:
             errors.append(f"PROJECTION_CF_PRESENT_NOT_BOOL[{i}]: {present!r}")
         ev = cf.get("evidence_refs", [])
         if not isinstance(ev, list):
@@ -548,7 +570,7 @@ def validate_epistemic_projection(
             if len(ev) != len(set(ev)):
                 errors.append(f"PROJECTION_CF_EVIDENCE_DUPLICATES[{i}]")
             for ref in ev:
-                if ref not in available_material_refs:
+                if not isinstance(ref, str) or ref not in available_material_refs:
                     errors.append(f"PROJECTION_CF_EVIDENCE_UNKNOWN[{i}]: {ref!r}")
 
     # --- Authority locks ---
@@ -566,8 +588,10 @@ def validate_epistemic_projection(
         for ak in PROJECTION_AUTHORITY_LOCK_KEYS:
             if ak in al:
                 val = al[ak]
-                if not isinstance(val, bool):
+                if type(val) is not bool:
                     errors.append(f"PROJECTION_AL_NOT_BOOL: {ak}={val!r}")
+                elif val is not False:
+                    errors.append(f"PROJECTION_AL_FLAG_MUST_BE_FALSE: {ak}={val!r}")
 
     # --- Review report ---
     rr = projection.get("review_report", {})
@@ -582,6 +606,11 @@ def validate_epistemic_projection(
         if extra_rr:
             errors.append(f"PROJECTION_RR_EXTRA_KEYS: {sorted(extra_rr)}")
 
+        # Review report schema must be exact
+        rr_schema = rr.get("schema")
+        if rr_schema != PROJECTION_REVIEW_REPORT_SCHEMA:
+            errors.append(f"PROJECTION_RR_SCHEMA_INVALID: {rr_schema!r}")
+
         # Review report projection_sha256 must match outer
         rr_psha = rr.get("projection_sha256", "")
         if validate_sha256(stored_psha) and rr_psha != stored_psha:
@@ -591,8 +620,8 @@ def validate_epistemic_projection(
 
         # object_count must be non-negative int, not bool
         oc = rr.get("object_count")
-        if isinstance(oc, bool):
-            errors.append(f"PROJECTION_RR_OBJECT_COUNT_IS_BOOL")
+        if type(oc) is bool or isinstance(oc, bool):
+            errors.append("PROJECTION_RR_OBJECT_COUNT_IS_BOOL")
         elif not isinstance(oc, int) or oc < 0:
             errors.append(f"PROJECTION_RR_OBJECT_COUNT_INVALID: {oc!r}")
 
@@ -601,18 +630,22 @@ def validate_epistemic_projection(
         if not isinstance(wc, list):
             errors.append("PROJECTION_RR_WARNING_CODES_NOT_LIST")
         else:
+            if len(wc) != len(set(wc)):
+                errors.append("PROJECTION_RR_WARNING_CODES_DUPLICATE")
             for w in wc:
-                if not isinstance(w, str):
-                    errors.append(f"PROJECTION_RR_WARNING_CODE_NOT_STR: {w!r}")
+                if not isinstance(w, str) or not _WARNING_CODE_RE.match(w):
+                    errors.append(f"PROJECTION_RR_WARNING_CODE_INVALID: {w!r}")
 
         # evidence_refs must be list[str]
         rr_ev = rr.get("evidence_refs", [])
         if not isinstance(rr_ev, list):
             errors.append("PROJECTION_RR_EVIDENCE_NOT_LIST")
         else:
+            if len(rr_ev) != len(set(rr_ev)):
+                errors.append("PROJECTION_RR_EVIDENCE_DUPLICATES")
             for ref in rr_ev:
-                if not isinstance(ref, str):
-                    errors.append(f"PROJECTION_RR_EVIDENCE_NOT_STR: {ref!r}")
+                if not isinstance(ref, str) or ref not in available_material_refs:
+                    errors.append(f"PROJECTION_RR_EVIDENCE_UNKNOWN: {ref!r}")
 
     return errors
 

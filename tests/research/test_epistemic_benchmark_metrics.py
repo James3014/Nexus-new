@@ -18,7 +18,7 @@ from nexus.research.epistemic_benchmark.metrics import (
     compute_all_metrics,
     _build_alias_to_case_private,
 )
-from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, load_run_manifest
+from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, load_public_run_manifest
 
 
 # ---------------------------------------------------------------------------
@@ -30,13 +30,22 @@ from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, lo
 def populated_run(tmp_path_factory):
     """Prepare a run dir and import a deterministic set of observations."""
     base = tmp_path_factory.mktemp("metrics_run")
-    run_dir = str(base)
-    run_id = prepare_benchmark_run(output_dir=run_dir, seed=99999, corpus_version="v0")
-    manifest = load_run_manifest(run_dir)
+    run_dir = str(base / "run")
+    priv_path = str(base / "_run_private_context.json")
+    prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=99999,
+        corpus_version="v0",
+    )
+    manifest = load_public_run_manifest(run_dir)
     real_run_id = manifest["benchmark_run_id"]
 
-    # Build alias->case_id map
-    alias_to_case = _build_alias_to_case_private(manifest)
+    # Build alias->case_id map from private context
+    with open(priv_path) as f:
+        import json as _json
+        private_ctx = _json.load(f)
+    alias_to_case = _build_alias_to_case_private(private_ctx)
     case_to_aliases = {}
     for alias, case_id in alias_to_case.items():
         case_to_aliases.setdefault(case_id, {})[_get_arm_of_alias(run_dir, alias)] = alias
@@ -99,6 +108,7 @@ def populated_run(tmp_path_factory):
 
     return {
         "run_dir": run_dir,
+        "priv_path": priv_path,
         "manifest": manifest,
         "alias_to_case": alias_to_case,
         "oracles": oracles,
@@ -122,8 +132,9 @@ def _get_arm_of_alias(run_dir: str, alias: str) -> str:
 def test_decision_accuracy(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -140,8 +151,9 @@ def test_decision_accuracy(populated_run):
 def test_false_acceptance(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     m = metrics["arm_metrics"]["standard_review"]
     # We added an extra ACCEPT on DEFECTIVE case EBR-002
@@ -158,8 +170,9 @@ def test_false_acceptance(populated_run):
 def test_false_rejection(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     m = metrics["arm_metrics"]["strong_protocol"]
     # We added a REJECT on CLEAN case EBR-001
@@ -176,8 +189,9 @@ def test_false_rejection(populated_run):
 def test_appropriate_abstention(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     # All arms should have appropriate abstention for INDETERMINATE cases
     m = metrics["arm_metrics"]["standard_review"]
@@ -195,8 +209,9 @@ def test_appropriate_abstention(populated_run):
 def test_over_abstention(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     m = metrics["arm_metrics"]["epistemic_workflow"]
     oar = m.get("over_abstention_rate")
@@ -212,8 +227,9 @@ def test_over_abstention(populated_run):
 def test_defect_recall(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -231,8 +247,9 @@ def test_defect_recall(populated_run):
 def test_critical_defect_recall(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -249,8 +266,9 @@ def test_critical_defect_recall(populated_run):
 def test_brier_score(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -268,9 +286,9 @@ def test_brier_score(populated_run):
 def test_missing_confidence_excluded_from_brier(populated_run, tmp_path):
     """Obs with confidence=None must not affect brier_score."""
     run_dir = populated_run["run_dir"]
-    manifest = load_run_manifest(run_dir)
+    priv_path = populated_run["priv_path"]
+    manifest = load_public_run_manifest(run_dir)
     run_id = manifest["benchmark_run_id"]
-    alias_to_case = _build_alias_to_case_private(manifest)
 
     # Get an alias for standard_review
     arm = "standard_review"
@@ -294,7 +312,7 @@ def test_missing_confidence_excluded_from_brier(populated_run, tmp_path):
     # This obs may already exist; either way, check Brier sample count
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -310,8 +328,9 @@ def test_missing_confidence_excluded_from_brier(populated_run, tmp_path):
 def test_median_duration(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -328,8 +347,9 @@ def test_median_duration(populated_run):
 def test_p95_duration(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -346,8 +366,9 @@ def test_p95_duration(populated_run):
 def test_token_totals(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -365,8 +386,9 @@ def test_token_totals(populated_run):
 def test_cost_totals(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
@@ -384,8 +406,9 @@ def test_decision_agreement(populated_run):
     """Multi-reviewer cases should produce non-None agreement."""
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     m = metrics["arm_metrics"]["standard_review"]
     agreement = m.get("decision_agreement")
@@ -402,8 +425,9 @@ def test_decision_agreement(populated_run):
 def test_paired_deltas(populated_run):
     from nexus.research.epistemic_benchmark.observations import load_valid_observations
     run_dir = populated_run["run_dir"]
+    priv_path = populated_run["priv_path"]
     valid_obs, _ = load_valid_observations(run_dir)
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, priv_path)
 
     comps = metrics["comparisons"]
     assert len(comps) == 3, f"Expected 3 comparisons, got {len(comps)}"
@@ -433,9 +457,15 @@ def test_paired_deltas(populated_run):
 def test_missing_cases_visible(tmp_path):
     """Run with no observations still reports missing cases correctly."""
     run_dir = str(tmp_path / "empty_run")
-    prepare_benchmark_run(output_dir=run_dir, seed=77777, corpus_version="v0")
+    priv_path = str(tmp_path / "_empty_run_private_context.json")
+    prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=77777,
+        corpus_version="v0",
+    )
 
-    metrics = compute_all_metrics(run_dir, [])
+    metrics = compute_all_metrics(run_dir, [], priv_path)
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
         assert m["_assigned_cases"] == 18, f"Expected 18 assigned cases, got {m['_assigned_cases']}"
@@ -451,11 +481,17 @@ def test_missing_cases_visible(tmp_path):
 def test_invalid_observations_not_scored(tmp_path):
     """Invalid obs are not included in metrics computation."""
     run_dir = str(tmp_path / "invalid_obs_run")
-    prepare_benchmark_run(output_dir=run_dir, seed=55555, corpus_version="v0")
+    priv_path = str(tmp_path / "_invalid_obs_run_private_context.json")
+    prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=55555,
+        corpus_version="v0",
+    )
 
     # compute_all_metrics only takes valid_observations as input
     # Passing no observations means 0 scored
-    metrics = compute_all_metrics(run_dir, [])
+    metrics = compute_all_metrics(run_dir, [], priv_path)
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
         m = metrics["arm_metrics"][arm_name]
         assert m["observation_count"] == 0

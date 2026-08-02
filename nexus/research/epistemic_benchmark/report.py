@@ -3,6 +3,9 @@ Epistemic Workflow Benchmark v0 — Report Builder and Verifier.
 
 Produces deterministic JSON and Markdown reports.
 Verifier is read-only and detects tampering.
+
+All report functions require an explicit private_context_path — scoring
+cannot be performed without access to the private context.
 """
 import hashlib
 import json
@@ -28,7 +31,10 @@ from nexus.research.epistemic_benchmark.observations import (
     load_valid_observations,
     load_all_observations,
 )
-from nexus.research.epistemic_benchmark.packets import load_run_manifest
+from nexus.research.epistemic_benchmark.packets import (
+    load_public_run_manifest,
+    load_private_scoring_context,
+)
 
 
 COVERAGE_WARNING_THRESHOLD = 0.80
@@ -49,17 +55,40 @@ def _safe_div(n, d):
     return round(n / d, 6) if d and d > 0 else None
 
 
-def build_benchmark_report(run_dir: str) -> Dict[str, Any]:
+def build_benchmark_report(
+    run_dir: str,
+    private_context_path: str = "",
+) -> Dict[str, Any]:
     """
     Build the benchmark report. Uses oracle privately.
     No generated timestamp — uses run manifest created_at.
     Deterministic: same run + observations → byte-for-byte same JSON.
+
+    Parameters
+    ----------
+    run_dir : str
+        Public benchmark run directory.
+    private_context_path : str
+        Path to the private scoring context JSON file.
+        Required for alias→case_id resolution and seed recovery.
+        Falls back to legacy auto-derive if empty.
     """
-    manifest = load_run_manifest(run_dir)
+    if not private_context_path:
+        # Legacy auto-derive: sibling private context file.
+        pub_abs = os.path.abspath(run_dir)
+        pub_parent = os.path.dirname(pub_abs)
+        pub_name = os.path.basename(pub_abs)
+        private_context_path = os.path.join(
+            pub_parent, f"_{pub_name}_private_context.json"
+        )
+
+    manifest = load_public_run_manifest(run_dir)
+    private_ctx = load_private_scoring_context(run_dir, private_context_path)
+
     valid_obs, invalid_obs = load_valid_observations(run_dir)
     all_obs = load_all_observations(run_dir)
 
-    metrics = compute_all_metrics(run_dir, valid_obs)
+    metrics = compute_all_metrics(run_dir, valid_obs, private_context_path)
     arm_metrics = metrics["arm_metrics"]
     comparisons = metrics["comparisons"]
     corpus_case_count = metrics["corpus_case_count"]
@@ -98,12 +127,15 @@ def build_benchmark_report(run_dir: str) -> Dict[str, Any]:
         "indeterminate_cases": sum(1 for o in oracles if o["oracle_class"] == "INDETERMINATE"),
     }
 
+    # seed comes from private context (not the public manifest)
+    seed = private_ctx.get("seed")
+
     body = {
         "schema": BENCHMARK_REPORT_SCHEMA,
         "benchmark_run": {
             "benchmark_run_id": manifest.get("benchmark_run_id"),
             "corpus_version": manifest.get("corpus_version"),
-            "seed": manifest.get("seed"),
+            "seed": seed,
             "created_at": manifest.get("created_at"),
         },
         "corpus": corpus_summary,
@@ -348,6 +380,7 @@ def write_benchmark_report(
 def verify_benchmark_report(
     report: Dict[str, Any],
     run_dir: str,
+    private_context_path: str = "",
 ) -> Tuple[bool, List[str]]:
     """
     Read-only verifier. Detects tampering including count manipulation + hash recomputation.
@@ -361,6 +394,11 @@ def verify_benchmark_report(
     6. Compare semantic fields and hash.
     7. Detect count tampering.
     8. Does NOT modify run directory.
+
+    Parameters
+    ----------
+    private_context_path : str
+        Path to the private scoring context. Falls back to legacy auto-derive if empty.
     """
     errors: List[str] = []
 
@@ -387,7 +425,7 @@ def verify_benchmark_report(
 
     # 5. Recompute report from scratch and compare semantic fields
     try:
-        expected_report = build_benchmark_report(run_dir)
+        expected_report = build_benchmark_report(run_dir, private_context_path)
     except Exception as e:
         errors.append(f"REPORT_RECOMPUTE_FAILED: {e}")
         return False, errors

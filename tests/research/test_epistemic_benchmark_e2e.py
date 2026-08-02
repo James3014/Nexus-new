@@ -224,7 +224,7 @@ def test_missing_obs_not_counted_as_correct(tmp_path):
     run_dir, priv_path, manifest = _prepare(tmp_path, seed=24680, subdir="missing_run")
 
     # Import NO observations
-    report = build_benchmark_report(run_dir)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     # All arms must show 0 observation_count
     for arm_name in ("standard_review", "strong_protocol", "epistemic_workflow"):
@@ -332,7 +332,7 @@ def test_full_e2e_pipeline(tmp_path):
     assert imported == 18 * 3, f"Expected 54 imported observations, got {imported}"
 
     # Step 5: Build report
-    report = build_benchmark_report(run_dir)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     assert report is not None
 
     # Claim ceiling
@@ -350,7 +350,7 @@ def test_full_e2e_pipeline(tmp_path):
         assert fw not in md_lower, f"Forbidden word found: {fw!r}"
 
     # Step 6: Verify report
-    valid, errors = verify_benchmark_report(report, run_dir)
+    valid, errors = verify_benchmark_report(report, run_dir, private_context_path=priv_path)
     assert valid, f"E2E: Report verification failed: {errors}"
 
     # Step 7: Write and read back
@@ -363,7 +363,7 @@ def test_full_e2e_pipeline(tmp_path):
     assert loaded["report_sha256"] == report["report_sha256"]
 
     # Determinism: rebuild and compare hashes
-    report2 = build_benchmark_report(run_dir)
+    report2 = build_benchmark_report(run_dir, private_context_path=priv_path)
     assert report2["report_sha256"] == report["report_sha256"]
 
 
