@@ -57,7 +57,8 @@ def _safe_div(n, d):
 
 def build_benchmark_report(
     run_dir: str,
-    private_context_path: str = "",
+    *,
+    private_context_path: str,
 ) -> Dict[str, Any]:
     """
     Build the benchmark report. Uses oracle privately.
@@ -69,16 +70,13 @@ def build_benchmark_report(
     run_dir : str
         Public benchmark run directory.
     private_context_path : str
-        Path to the private scoring context JSON file.
-        Required for alias→case_id resolution and seed recovery.
-        Must be supplied explicitly by the caller (ERB-R2A.2).
+        Required keyword-only argument. Path to the private scoring
+        context JSON file. Auto-derivation from run name, parent
+        directory, sibling filenames, or environment variables is
+        forbidden (ERB-R2A.2: Explicit Private Scoring Authority).
     """
     if not private_context_path:
-        raise ValueError(
-            "private_context_path is required and must be supplied explicitly. "
-            "Auto-derivation from the public run directory name is not permitted "
-            "(ERB-R2A.2: Explicit Private Scoring Authority)."
-        )
+        raise ValueError("PRIVATE_CONTEXT_REQUIRED")
 
     manifest = load_public_run_manifest(run_dir)
     private_ctx = load_private_scoring_context(run_dir, private_context_path)
@@ -86,7 +84,7 @@ def build_benchmark_report(
     valid_obs, invalid_obs = load_valid_observations(run_dir)
     all_obs = load_all_observations(run_dir)
 
-    metrics = compute_all_metrics(run_dir, valid_obs, private_context_path)
+    metrics = compute_all_metrics(run_dir, valid_obs, private_context_path=private_context_path)
     arm_metrics = metrics["arm_metrics"]
     comparisons = metrics["comparisons"]
     corpus_case_count = metrics["corpus_case_count"]
@@ -378,7 +376,8 @@ def write_benchmark_report(
 def verify_benchmark_report(
     report: Dict[str, Any],
     run_dir: str,
-    private_context_path: str = "",
+    *,
+    private_context_path: str,
 ) -> Tuple[bool, List[str]]:
     """
     Read-only verifier. Detects tampering including count manipulation + hash recomputation.
@@ -396,7 +395,10 @@ def verify_benchmark_report(
     Parameters
     ----------
     private_context_path : str
-        Path to the private scoring context. Must be supplied explicitly (ERB-R2A.2).
+        Required keyword-only argument. Path to the private scoring
+        context. Auto-derivation from run name, parent directory,
+        sibling filenames, or environment variables is forbidden
+        (ERB-R2A.2: Explicit Private Scoring Authority).
     """
     errors: List[str] = []
 
@@ -423,7 +425,7 @@ def verify_benchmark_report(
 
     # 5. Recompute report from scratch and compare semantic fields
     try:
-        expected_report = build_benchmark_report(run_dir, private_context_path)
+        expected_report = build_benchmark_report(run_dir, private_context_path=private_context_path)
     except Exception as e:
         errors.append(f"REPORT_RECOMPUTE_FAILED: {e}")
         return False, errors

@@ -181,7 +181,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         markdown_output = base + ".md"
 
     try:
-        report = build_benchmark_report(run_dir, private_context_path)
+        report = build_benchmark_report(run_dir, private_context_path=private_context_path)
         write_benchmark_report(report, json_output, markdown_output)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -208,7 +208,7 @@ def _cmd_verify_report(args: argparse.Namespace) -> int:
         print(f"ERROR: Cannot load report: {e}", file=sys.stderr)
         return 1
 
-    valid, errors = verify_benchmark_report(report, run_dir, private_context_path)
+    valid, errors = verify_benchmark_report(report, run_dir, private_context_path=private_context_path)
     if not valid:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)

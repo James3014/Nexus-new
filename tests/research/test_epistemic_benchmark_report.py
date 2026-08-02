@@ -102,8 +102,8 @@ def report_run(tmp_path_factory):
 def test_deterministic_json(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report1 = build_benchmark_report(run_dir, priv_path)
-    report2 = build_benchmark_report(run_dir, priv_path)
+    report1 = build_benchmark_report(run_dir, private_context_path=priv_path)
+    report2 = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     json1 = json.dumps(report1, sort_keys=True)
     json2 = json.dumps(report2, sort_keys=True)
@@ -118,7 +118,7 @@ def test_deterministic_json(report_run):
 def test_deterministic_markdown(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     md1 = render_benchmark_markdown(report)
     md2 = render_benchmark_markdown(report)
     assert md1 == md2
@@ -132,7 +132,7 @@ def test_deterministic_markdown(report_run):
 def test_report_hash(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     sha = report.get("report_sha256", "")
     assert len(sha) == 64, f"Expected 64-char hex SHA256, got {len(sha)}: {sha!r}"
 
@@ -149,7 +149,7 @@ def test_report_hash(report_run):
 def test_claim_ceiling_exact(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     assert report.get("claim_ceiling") == CLAIM_CEILING_TEXT, (
         f"Claim ceiling mismatch.\nExpected: {CLAIM_CEILING_TEXT!r}\n"
         f"Got: {report.get('claim_ceiling')!r}"
@@ -164,7 +164,7 @@ def test_claim_ceiling_exact(report_run):
 def test_limitations_present(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     lims = report.get("limitations", [])
     lims_str = " ".join(lims).lower()
     for req_lim in REQUIRED_LIMITATIONS:
@@ -190,7 +190,7 @@ def test_low_coverage_warning(tmp_path):
         corpus_version="v0",
     )
 
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     md = render_benchmark_markdown(report)
     assert "INCOMPLETE BENCHMARK COVERAGE" in md, (
         "Expected INCOMPLETE BENCHMARK COVERAGE in Markdown when coverage < 80%"
@@ -205,7 +205,7 @@ def test_low_coverage_warning(tmp_path):
 def test_no_winner_language(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     md = render_benchmark_markdown(report)
     md_lower = md.lower()
 
@@ -222,7 +222,7 @@ def test_no_winner_language(report_run):
 def test_no_statistical_significance(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     report_str = json.dumps(report)
     for fw in FORBIDDEN_REPORT_WORDS:
         if fw.lower() not in ("winner", "proven better", "production ready"):
@@ -240,7 +240,7 @@ def test_count_tamper_recomputed_hash_rejected(report_run):
     """Attacker tampers count AND recomputes hash — verifier must still catch it."""
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     tampered = dict(report)
     coverage_copy = {k: dict(v) for k, v in report.get("coverage", {}).items()}
@@ -254,7 +254,7 @@ def test_count_tamper_recomputed_hash_rejected(report_run):
     body_without_hash = {k: v for k, v in tampered.items() if k != "report_sha256"}
     tampered["report_sha256"] = compute_canonical_sha256(body_without_hash)
 
-    valid, errors = verify_benchmark_report(tampered, run_dir, priv_path)
+    valid, errors = verify_benchmark_report(tampered, run_dir, private_context_path=priv_path)
     assert not valid, "Verifier must catch count tampering even after hash recompute"
     assert any("TAMPER" in e or "COUNT" in e or "MISMATCH" in e for e in errors)
 
@@ -268,10 +268,10 @@ def test_observation_tamper_detected(report_run, tmp_path):
     """Deleting an observation after report is generated — verifier must catch it."""
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     # Verify passes on original
-    valid, errors = verify_benchmark_report(report, run_dir, priv_path)
+    valid, errors = verify_benchmark_report(report, run_dir, private_context_path=priv_path)
     # Accept either pass or pre-existing hash mismatch; main thing is logic runs
     # (Some test environments rerun this and already have observation changes)
     # The key test is that verify_benchmark_report runs without exception
@@ -308,7 +308,7 @@ def test_packet_structure(report_run):
 def test_report_identity_fields(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
     manifest = load_public_run_manifest(run_dir)
 
     assert report["benchmark_run"]["benchmark_run_id"] == manifest["benchmark_run_id"]
@@ -327,7 +327,7 @@ def test_report_identity_fields(report_run):
 def test_verify_is_read_only(report_run):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     # Record mtimes before
     mtimes_before = {}
@@ -336,7 +336,7 @@ def test_verify_is_read_only(report_run):
             p = os.path.join(root, fname)
             mtimes_before[p] = os.path.getmtime(p)
 
-    verify_benchmark_report(report, run_dir, priv_path)
+    verify_benchmark_report(report, run_dir, private_context_path=priv_path)
 
     # Check no files changed
     for path, mtime in mtimes_before.items():
@@ -352,7 +352,7 @@ def test_verify_is_read_only(report_run):
 def test_atomic_dual_output(report_run, tmp_path):
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     json_out = str(tmp_path / "report.json")
     md_out = str(tmp_path / "report.md")
@@ -380,7 +380,7 @@ def test_existing_outputs_survive_failure(report_run, tmp_path):
     """If write fails halfway, existing files should be preserved."""
     run_dir = report_run["run_dir"]
     priv_path = report_run["priv_path"]
-    report = build_benchmark_report(run_dir, priv_path)
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
     json_out = str(tmp_path / "existing.json")
     md_out = str(tmp_path / "existing.md")
