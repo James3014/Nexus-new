@@ -1,7 +1,7 @@
 ---
-artifact_authority: draft-successor
+artifact_authority: current
 owner: James Chen
-status: DRAFT_PENDING_OWNER_ACTIVATION
+status: active, implementation contract
 purpose: Define the single machine-readable contract for Nexus runtime phases without creating a second router or development lifecycle.
 source: /Users/jameschen/.codex/attachments/c7cbb20c-e2c7-42f8-a943-be66aef5099d/pasted-text-1.txt
 ---
