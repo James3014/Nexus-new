@@ -17,6 +17,7 @@ from nexus.research.epistemic_benchmark.contracts import (
 from nexus.research.epistemic_benchmark.observations import (
     build_synthetic_observation,
     import_observation,
+    load_observation_inventory,
 )
 from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, load_public_run_manifest
 from nexus.research.epistemic_benchmark.metrics import _build_alias_to_case_private
@@ -79,7 +80,7 @@ def report_run(tmp_path_factory):
             benchmark_run_id=run_id,
             arm=arm,
             case_alias=alias,
-            observation_id=f"obs-{arm[:3]}-{case_id.lower()}-{suffix}",
+            observation_id=f"OBS-{arm[:3]}-{case_id.lower()}-{suffix}",
             decision=decision,
             packet_sha256=pkt.get("packet_sha256"),
             cited_evidence_refs=[refs[0]] if refs else [],
@@ -403,3 +404,39 @@ def test_existing_outputs_survive_failure(report_run, tmp_path):
     with open(json_out) as f:
         loaded = json.load(f)
     assert loaded["report_sha256"] == original_sha, "Original JSON should be preserved after write failure"
+
+
+# ---------------------------------------------------------------------------
+# ERB-R2B1.1 RED-05: Invalid observation attribution in report
+# ---------------------------------------------------------------------------
+
+
+def test_red_05_malformed_inventory_report_attribution(tmp_path):
+    """Malformed JSON in a legal arm/alias directory must be counted by the report."""
+    run_dir = str(tmp_path / "red05_run")
+    priv_path = str(tmp_path / "_red05_priv.json")
+    prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=505,
+        corpus_version="v0",
+    )
+
+    arm = "standard_review"
+    files = sorted(os.listdir(os.path.join(run_dir, "packets", arm)))
+    alias = files[0].replace(".json", "")
+    obs_dir = os.path.join(run_dir, "observations", arm, alias)
+    os.makedirs(obs_dir, exist_ok=True)
+    with open(os.path.join(obs_dir, "bad_obs.json"), "w") as f:
+        f.write("{invalid json syntax...")
+
+    inventory = load_observation_inventory(run_dir)
+    assert len(inventory.get("invalid", [])) == 1, (
+        f"expected exactly 1 invalid entry, got {len(inventory.get('invalid', []))}"
+    )
+
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    assert report["coverage"][arm]["invalid_observations"] == 1, (
+        f"expected 1 invalid observation in {arm} coverage, got "
+        f"{report['coverage'][arm]['invalid_observations']}"
+    )

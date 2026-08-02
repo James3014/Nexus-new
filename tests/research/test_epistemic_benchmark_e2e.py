@@ -242,7 +242,7 @@ def test_synthetic_obs_explicitly_labelled():
         benchmark_run_id="test-run",
         arm="standard_review",
         case_alias="alias-001",
-        observation_id="obs-synth-001",
+        observation_id="OBS-synth-001",
         decision="ACCEPT",
     )
     assert obs["evaluator"]["provider"] == "synthetic-test"
@@ -320,7 +320,7 @@ def test_full_e2e_pipeline(tmp_path):
                 benchmark_run_id=real_run_id,
                 arm=arm,
                 case_alias=alias,
-                observation_id=f"obs-e2e-{arm[:3]}-{case_id.lower()}",
+                observation_id=f"OBS-e2e-{arm[:3]}-{case_id.lower()}",
                 decision=oracle["oracle_decision"],
                 packet_sha256=pkt.get("packet_sha256"),
                 cited_evidence_refs=[refs[0]] if refs else [],

@@ -70,7 +70,7 @@ def populated_run(tmp_path_factory):
             benchmark_run_id=real_run_id,
             arm=arm,
             case_alias=alias,
-            observation_id=f"obs-{arm[:3]}-{case_id.lower()}-{obs_id_suffix}",
+            observation_id=f"OBS-{arm[:3]}-{case_id.lower()}-{obs_id_suffix}",
             decision=decision,
             packet_sha256=pkt_sha256,
             cited_evidence_refs=[refs[0]] if refs else [],
@@ -306,7 +306,7 @@ def test_missing_confidence_excluded_from_brier(populated_run, tmp_path):
         benchmark_run_id=run_id,
         arm=arm,
         case_alias=alias,
-        observation_id="obs-noconf-metrics-001",
+        observation_id="OBS-noconf-metrics-001",
         decision="REJECT",
         confidence=None,  # no confidence
         cited_evidence_refs=[refs[0]] if refs else [],

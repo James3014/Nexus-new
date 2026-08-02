@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -815,6 +816,27 @@ def _is_timezone_aware_iso8601(ts: str) -> bool:
     return bool(_ISO8601_RE.match(ts))
 
 
+def _parse_timezone_aware_timestamp(ts: str) -> Optional[datetime]:
+    """
+    Parse a timezone-aware ISO-8601 timestamp into a datetime.
+
+    Normalizes a trailing 'Z' to '+00:00' before parsing. Returns None when the
+    string is not timezone-aware, when the calendar date is invalid, when the
+    timezone offset is invalid, or when a leap second (seconds==60) is not
+    representable — the caller must reject rather than guess.
+    """
+    if not isinstance(ts, str) or not _is_timezone_aware_iso8601(ts):
+        return None
+    normalized = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed
+
+
 def _contains_forbidden_keys(obj: Any) -> Optional[str]:
     """Recursively scan data structures for any forbidden keys."""
     if isinstance(obj, dict):
@@ -849,6 +871,16 @@ def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] =
     forbidden_key = _contains_forbidden_keys(obs)
     if forbidden_key:
         errors.append(f"OBS_FORBIDDEN_KEYS: {[forbidden_key]}")
+
+    # Exact schema value (not just presence of the key)
+    if obs.get("schema") != BENCHMARK_OBSERVATION_SCHEMA:
+        errors.append(f"OBS_SCHEMA_INVALID: {obs.get('schema')!r}")
+
+    # Identity fields must be exact non-empty strings (bool/int/null/list/dict are invalid)
+    for id_field in ("observation_id", "benchmark_run_id", "case_alias", "schema"):
+        val = obs.get(id_field)
+        if not isinstance(val, str) or isinstance(val, bool) or not val:
+            errors.append(f"OBS_IDENTITY_FIELD_INVALID: {id_field}={val!r}")
 
     # packet_sha256: 64-char lowercase hex
     pkt_sha = obs.get("packet_sha256")
@@ -923,12 +955,23 @@ def validate_observation(obs: Dict[str, Any], packet: Optional[Dict[str, Any]] =
 
         start_ts = execution.get("started_at", "")
         comp_ts = execution.get("completed_at", "")
+        start_dt = None
+        comp_dt = None
         for ts_name, ts_val in (("started_at", start_ts), ("completed_at", comp_ts)):
             if not isinstance(ts_val, str) or not _is_timezone_aware_iso8601(ts_val):
                 errors.append(f"OBS_TIMESTAMP_NOT_AWARE: {ts_name}={ts_val!r}")
-        if isinstance(start_ts, str) and isinstance(comp_ts, str) and _is_timezone_aware_iso8601(start_ts) and _is_timezone_aware_iso8601(comp_ts):
-            if comp_ts < start_ts:
-                errors.append(f"OBS_COMPLETED_BEFORE_STARTED: completed={comp_ts!r} started={start_ts!r}")
+                continue
+            dt = _parse_timezone_aware_timestamp(ts_val)
+            if dt is None:
+                errors.append(f"OBS_TIMESTAMP_INVALID: {ts_name}={ts_val!r}")
+                continue
+            if ts_name == "started_at":
+                start_dt = dt
+            else:
+                comp_dt = dt
+        # Compare actual instants, never raw strings.
+        if start_dt is not None and comp_dt is not None and comp_dt < start_dt:
+            errors.append(f"OBS_COMPLETED_BEFORE_STARTED: completed={comp_ts!r} started={start_ts!r}")
     else:
         errors.append("OBS_EXECUTION_NOT_DICT")
 

@@ -6,9 +6,13 @@ and load_observation_inventory.
 Oracle is never read during import. Correctness is never computed here.
 No overwrite parameter or mechanism exists (ERB-R2B1).
 """
+import fcntl
 import json
 import os
+import re
 import tempfile
+import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from nexus.research.epistemic_benchmark.contracts import (
@@ -32,6 +36,18 @@ BENCHMARK_DUPLICATE_OBSERVATION = "BENCHMARK_DUPLICATE_OBSERVATION"
 BENCHMARK_DUPLICATE_EVALUATOR_OBSERVATION = "BENCHMARK_DUPLICATE_EVALUATOR_OBSERVATION"
 BENCHMARK_OBSERVATION_INVENTORY_INVALID = "BENCHMARK_OBSERVATION_INVENTORY_INVALID"
 
+OBS_PATH_COMPONENT_INVALID = "OBS_PATH_COMPONENT_INVALID"
+OBS_DESTINATION_OUTSIDE_RUN = "OBS_DESTINATION_OUTSIDE_RUN"
+OBS_IMPORT_LOCK_TIMEOUT = "OBS_IMPORT_LOCK_TIMEOUT"
+OBS_IMPORT_INTERNAL_ERROR = "OBS_IMPORT_INTERNAL_ERROR"
+OBS_SYMLINK_COMPONENT = "OBS_SYMLINK_COMPONENT"
+OBS_INVENTORY_MANIFEST_INVALID = "OBS_INVENTORY_MANIFEST_INVALID"
+OBSERVATION_LOCK_FILENAME = ".observation-import.lock"
+IMPORT_LOCK_TIMEOUT_SECONDS = 10.0
+
+_OBSERVATION_ID_RE = re.compile(r"^OBS-[A-Za-z0-9][A-Za-z0-9._-]{0,126}$")
+_CASE_ALIAS_RE = re.compile(r"^CASE-[0-9A-F]{16}$")
+
 
 def _observation_dir(run_dir: str, arm: str, case_alias: str) -> str:
     return os.path.join(run_dir, "observations", arm, case_alias)
@@ -39,6 +55,136 @@ def _observation_dir(run_dir: str, arm: str, case_alias: str) -> str:
 
 def _observation_path(run_dir: str, arm: str, case_alias: str, observation_id: str) -> str:
     return os.path.join(_observation_dir(run_dir, arm, case_alias), f"{observation_id}.json")
+
+
+def _validate_symlink_components(run_dir: str, arm: str, case_alias: str) -> List[str]:
+    """Reject any existing symlink component in the destination chain.
+
+    Uses os.path.islink (lstat-based) on run_dir, run_dir/observations,
+    run_dir/observations/<arm>, and run_dir/observations/<arm>/<case_alias>.
+    Missing components are allowed (they will be created as real directories);
+    a component that exists as a symlink is rejected with OBS_SYMLINK_COMPONENT.
+    """
+    errors: List[str] = []
+    components = [
+        run_dir,
+        os.path.join(run_dir, "observations"),
+        os.path.join(run_dir, "observations", arm),
+        os.path.join(run_dir, "observations", arm, case_alias),
+    ]
+    for component in components:
+        if os.path.islink(component):
+            errors.append(f"{OBS_SYMLINK_COMPONENT}: {component!r}")
+    return errors
+
+
+def _validate_import_path(run_dir: str, arm: str, case_alias: str, observation_id: str) -> List[str]:
+    """Validate path components before any directory or temp file is created.
+    Returns a list of stable error codes; empty means the path is safe."""
+    errors: List[str] = []
+
+    if (
+        not isinstance(observation_id, str)
+        or not _OBSERVATION_ID_RE.match(observation_id)
+        or len(observation_id) > 127
+        or ".." in observation_id
+    ):
+        errors.append(f"{OBS_PATH_COMPONENT_INVALID}: observation_id={observation_id!r}")
+
+    if arm not in {e.value for e in BenchmarkArm}:
+        errors.append(f"{OBS_PATH_COMPONENT_INVALID}: arm={arm!r}")
+
+    if not isinstance(case_alias, str) or not _CASE_ALIAS_RE.match(case_alias):
+        errors.append(f"{OBS_PATH_COMPONENT_INVALID}: case_alias={case_alias!r}")
+
+    if errors:
+        return errors
+
+    # Symlink component rejection: refuse any existing symlink in the chain
+    # before any lock, directory, or temp file is created.
+    errors.extend(_validate_symlink_components(run_dir, arm, case_alias))
+
+    # Root containment: the resolved observations root must itself remain a
+    # descendant of the resolved run root (so a symlinked observations root
+    # cannot redirect writes outside the run), and the resolved destination
+    # must remain a descendant of the resolved observation root.
+    resolved_run_root = os.path.realpath(os.path.abspath(run_dir))
+    resolved_observation_root = os.path.realpath(
+        os.path.abspath(os.path.join(run_dir, "observations"))
+    )
+    if not (
+        resolved_observation_root == resolved_run_root
+        or resolved_observation_root.startswith(resolved_run_root + os.sep)
+    ):
+        errors.append(
+            f"{OBS_DESTINATION_OUTSIDE_RUN}: observations root resolves outside run root"
+        )
+
+    # Independent containment check: resolved destination must remain a
+    # descendant of the resolved observation root.
+    destination = _observation_path(run_dir, arm, case_alias, observation_id)
+    resolved_destination = os.path.realpath(os.path.abspath(destination))
+    if not (
+        resolved_destination == resolved_observation_root
+        or resolved_destination.startswith(resolved_observation_root + os.sep)
+    ):
+        errors.append(f"{OBS_DESTINATION_OUTSIDE_RUN}: destination={destination!r}")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Cross-thread / cross-process import lock
+# ---------------------------------------------------------------------------
+
+_import_critical_section = threading.Lock()
+
+
+def _lock_path(run_dir: str) -> str:
+    return os.path.join(run_dir, "observations", OBSERVATION_LOCK_FILENAME)
+
+
+def _acquire_import_lock(run_dir: str, timeout_seconds: float) -> Optional[int]:
+    """Acquire process-local (threading.Lock) and cross-process (flock) lock.
+    Returns an open lock fd on success, None on timeout.
+    The caller MUST call _release_import_lock(fd) on success."""
+    if not _import_critical_section.acquire(timeout=timeout_seconds):
+        return None
+    lock_dir = os.path.join(run_dir, "observations")
+    try:
+        os.makedirs(lock_dir, exist_ok=True)
+        fd = os.open(_lock_path(run_dir), os.O_RDWR | os.O_CREAT, 0o644)
+    except Exception:
+        _import_critical_section.release()
+        raise
+    try:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd
+            except OSError:
+                if time.monotonic() >= deadline:
+                    os.close(fd)
+                    _import_critical_section.release()
+                    return None
+                time.sleep(0.005)
+    except Exception:
+        os.close(fd)
+        _import_critical_section.release()
+        raise
+
+
+def _release_import_lock(fd: Optional[int]) -> None:
+    """Release both the flock and the process-local lock. Safe to call once."""
+    try:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+    finally:
+        _import_critical_section.release()
 
 
 def _load_packet_for_alias(run_dir: str, arm: str, case_alias: str) -> Optional[Dict[str, Any]]:
@@ -53,12 +199,23 @@ def _load_packet_for_alias(run_dir: str, arm: str, case_alias: str) -> Optional[
         return None
 
 
+def _fsync_dir(directory: str) -> None:
+    """Fsync a directory to make a just-created entry durable."""
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _atomic_no_overwrite_write(path: str, data: Dict[str, Any]) -> None:
     """
     Atomic no-overwrite publishing.
     Creates destination directory if needed, writes data to temporary file,
     flushes and syncs to disk, then atomically links/moves using O_CREAT | O_EXCL
     or os.link to guarantee existing files are NEVER overwritten (no TOCTOU race).
+    On success the destination parent directory is fsynced. A failed cleanup of
+    the temporary file raises a stable error rather than being silently ignored.
     """
     dest_dir = os.path.dirname(path)
     os.makedirs(dest_dir, exist_ok=True)
@@ -74,6 +231,8 @@ def _atomic_no_overwrite_write(path: str, data: Dict[str, Any]) -> None:
         # macOS / POSIX atomic link / exclusive creation
         try:
             os.link(tmp_path, path)
+        except FileExistsError:
+            raise
         except (AttributeError, OSError):
             # Fallback for systems where os.link is restricted or cross-device
             fd_dst = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
@@ -82,14 +241,23 @@ def _atomic_no_overwrite_write(path: str, data: Dict[str, Any]) -> None:
                     f_dst.write(f_src.read())
                 f_dst.flush()
                 os.fsync(f_dst.fileno())
+
+        _fsync_dir(dest_dir)
     except FileExistsError:
         raise FileExistsError(f"DESTINATION_EXISTS: {path}")
     finally:
         if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+            last_err = None
+            for _attempt in range(2):
+                try:
+                    os.remove(tmp_path)
+                    last_err = None
+                    break
+                except OSError as e:
+                    last_err = e
+                    time.sleep(0.01)
+            if last_err is not None:
+                raise OSError(f"OBS_TMP_CLEANUP_FAILED: {tmp_path}: {last_err}")
 
 
 # ---------------------------------------------------------------------------
@@ -190,12 +358,13 @@ def verify_observation(
 def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
     """
     Build a complete inventory of all files under run_dir/observations/.
-    Returns dict with keys: valid, invalid, unexpected_files.
+    Returns dict with keys: valid, invalid, unexpected_files, global_failures.
     No exceptions swallowed. All files are accounted for deterministically.
     """
     valid: List[Dict[str, Any]] = []
     invalid: List[Dict[str, Any]] = []
     unexpected_files: List[Dict[str, Any]] = []
+    global_failures: List[str] = []
 
     obs_root = os.path.join(run_dir, "observations")
     if not os.path.exists(obs_root):
@@ -203,21 +372,30 @@ def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
             "valid": [],
             "invalid": [],
             "unexpected_files": [],
+            "global_failures": [],
         }
 
     # Tracking global duplicate detection across the entire run
     seen_obs_ids: Dict[str, str] = {}  # obs_id -> relative_path
     seen_evaluators: Dict[Tuple[str, str, str, str, str, str, str], str] = {}  # tuple -> relative_path
 
-    # Check public run manifest run_id for evaluator tuple binding
+    # Check public run manifest run_id for evaluator tuple binding.
+    # A manifest that cannot be loaded is surfaced, never silently ignored.
     manifest_run_id = None
     try:
         m = load_public_run_manifest(run_dir)
         manifest_run_id = m.get("benchmark_run_id")
-    except Exception:
-        pass
+    except Exception as e:
+        global_failures.append(f"{OBS_INVENTORY_MANIFEST_INVALID}: {e}")
 
     valid_arms = {e.value for e in BenchmarkArm}
+
+    # Unexpected directories (empty, unknown arm/alias, deep, symlink) are
+    # recorded, never dropped.
+    unexpected_dirs: Dict[str, Tuple[str, str, str]] = {}
+
+    def _unexpected_dir(rel_dir, dir_arm, dir_alias, reason):
+        unexpected_dirs[rel_dir] = (dir_arm, dir_alias, reason)
 
     # Walk directory structure deterministically
     for root, dirs, files in os.walk(obs_root):
@@ -227,26 +405,56 @@ def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
 
         rel_dir = os.path.relpath(root, obs_root)
         dir_parts = [] if rel_dir == "." else rel_dir.split(os.sep)
+        depth = len(dir_parts)
 
         inferred_arm = dir_parts[0] if len(dir_parts) >= 1 else ""
         inferred_alias = dir_parts[1] if len(dir_parts) >= 2 else ""
+
+        # Unexpected directory detection (including empty nested directories).
+        if depth == 1:
+            if inferred_arm not in valid_arms:
+                _unexpected_dir(rel_dir, inferred_arm, "", "UNKNOWN_ARM_DIRECTORY")
+        elif depth >= 2 and dir_parts[0] in valid_arms:
+            if not _CASE_ALIAS_RE.match(inferred_alias or ""):
+                _unexpected_dir(rel_dir, inferred_arm, inferred_alias, "UNKNOWN_ALIAS_DIRECTORY")
+            elif depth > 2:
+                _unexpected_dir(rel_dir, inferred_arm, inferred_alias, "DEPTH_EXCEEDS_ARM_ALIAS")
+
+        # Symlink directories are unexpected and must not be descended into.
+        for d in list(dirs):
+            if os.path.islink(os.path.join(root, d)):
+                _unexpected_dir(os.path.relpath(os.path.join(root, d), run_dir),
+                                inferred_arm, inferred_alias, "SYMLINK_DIRECTORY_NOT_ALLOWED")
+                dirs.remove(d)
 
         for fname in files:
             full_path = os.path.join(root, fname)
             rel_file_path = os.path.relpath(full_path, run_dir)
 
+            # The import lock file lives inside observations/ and is not an
+            # observation; it must never appear in the inventory.
+            if fname == OBSERVATION_LOCK_FILENAME:
+                continue
+
+            file_arm = inferred_arm if depth >= 1 else ""
+            file_alias = inferred_alias if depth >= 2 else ""
+
             # Check symlink or path escape
             if os.path.islink(full_path):
                 unexpected_files.append({
                     "relative_path": rel_file_path,
+                    "arm": file_arm,
+                    "case_alias": file_alias,
                     "reason": "SYMLINK_NOT_ALLOWED",
                 })
                 continue
 
             # Non-JSON or unexpected path depth
-            if not fname.endswith(".json") or len(dir_parts) != 2:
+            if not fname.endswith(".json") or depth != 2:
                 unexpected_files.append({
                     "relative_path": rel_file_path,
+                    "arm": file_arm,
+                    "case_alias": file_alias,
                     "reason": "UNEXPECTED_FILE_OR_DIRECTORY_STRUCTURE",
                 })
                 continue
@@ -255,6 +463,8 @@ def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
             if inferred_arm not in valid_arms:
                 invalid.append({
                     "relative_path": rel_file_path,
+                    "arm": inferred_arm,
+                    "case_alias": inferred_alias,
                     "inferred_arm": inferred_arm,
                     "inferred_alias": inferred_alias,
                     "failure_codes": [f"UNKNOWN_ARM_DIRECTORY: {inferred_arm!r}"],
@@ -273,6 +483,8 @@ def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
             if file_err is not None or not isinstance(obs, dict):
                 invalid.append({
                     "relative_path": rel_file_path,
+                    "arm": inferred_arm,
+                    "case_alias": inferred_alias,
                     "inferred_arm": inferred_arm,
                     "inferred_alias": inferred_alias,
                     "failure_codes": [file_err or "ROOT_NOT_DICT"],
@@ -327,8 +539,12 @@ def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
                         seen_evaluators[ev_tuple] = rel_file_path
 
             if failures:
+                # When content parsed, attribute by content; otherwise fall
+                # back to the path-derived arm/alias so report counts work.
                 invalid.append({
                     "relative_path": rel_file_path,
+                    "arm": obs_arm or inferred_arm,
+                    "case_alias": obs_alias or inferred_alias,
                     "inferred_arm": inferred_arm,
                     "inferred_alias": inferred_alias,
                     "failure_codes": failures,
@@ -343,15 +559,26 @@ def load_observation_inventory(run_dir: str) -> Dict[str, Any]:
                     "observation": obs,
                 })
 
+    # Materialize unexpected directory records (including empty / deep ones).
+    for rel_dir, (dir_arm, dir_alias, reason) in sorted(unexpected_dirs.items()):
+        unexpected_files.append({
+            "relative_path": os.path.join("observations", rel_dir),
+            "arm": dir_arm,
+            "case_alias": dir_alias,
+            "reason": reason,
+        })
+
     # Sort all sections by relative_path ascending for determinism
     valid.sort(key=lambda x: x["relative_path"])
     invalid.sort(key=lambda x: x["relative_path"])
     unexpected_files.sort(key=lambda x: x["relative_path"])
+    global_failures.sort()
 
     return {
         "valid": valid,
         "invalid": invalid,
         "unexpected_files": unexpected_files,
+        "global_failures": global_failures,
     }
 
 
@@ -372,6 +599,9 @@ def import_observation(
     - Does not compute correctness.
     - Atomic no-overwrite write.
     - No allow_overwrite parameter exists.
+    - Path components validated before any directory or temp file is created.
+    - The whole critical section (inventory scan, duplicate check, verify,
+      write) runs under a cross-thread and cross-process lock per run.
     - Full inventory pre-check: fail closed if inventory invalid or duplicate.
 
     Returns (success, errors).
@@ -386,63 +616,91 @@ def import_observation(
     if not obs_id:
         return False, ["OBS_ID_MISSING"]
 
-    # Pre-inventory check: fail closed if existing inventory contains invalid files
-    # or if obs_id / evaluator tuple is already present
-    inventory = load_observation_inventory(run_dir)
-    if inventory.get("invalid") or inventory.get("unexpected_files"):
-        # Check if invalid contains corrupt state that blocks safe import
-        inv_errs = [item["failure_codes"] for item in inventory.get("invalid", [])]
-        # Return inventory invalid status
-        return False, [BENCHMARK_OBSERVATION_INVENTORY_INVALID, f"Existing inventory contains invalid entries: {inv_errs}"]
+    # Path safety: fast-fail before any lock, directory, or temp file creation.
+    path_errs = _validate_import_path(run_dir, arm, case_alias, obs_id)
+    if path_errs:
+        return False, path_errs
 
-    # Check for duplicate observation_id globally across valid items
-    for item in inventory.get("valid", []):
-        if item.get("observation_id") == obs_id:
-            return False, [BENCHMARK_DUPLICATE_OBSERVATION]
+    fd = _acquire_import_lock(run_dir, IMPORT_LOCK_TIMEOUT_SECONDS)
+    if fd is None:
+        return False, [OBS_IMPORT_LOCK_TIMEOUT]
 
-    # Check for duplicate evaluator tuple
-    ev = observation.get("evaluator", {})
-    if isinstance(ev, dict):
-        new_ev_tuple = (
-            str(observation.get("benchmark_run_id", "")),
-            str(arm),
-            str(case_alias),
-            str(ev.get("provider", "")),
-            str(ev.get("model_id", "")),
-            str(ev.get("evaluator_id", "")),
-            str(ev.get("prompt_version", "")),
-        )
-        for item in inventory.get("valid", []):
-            v_obs = item.get("observation", {})
-            v_ev = v_obs.get("evaluator", {})
-            if isinstance(v_ev, dict):
-                existing_tuple = (
-                    str(v_obs.get("benchmark_run_id", "")),
-                    str(v_obs.get("arm", "")),
-                    str(v_obs.get("case_alias", "")),
-                    str(v_ev.get("provider", "")),
-                    str(v_ev.get("model_id", "")),
-                    str(v_ev.get("evaluator_id", "")),
-                    str(v_ev.get("prompt_version", "")),
-                )
-                if new_ev_tuple == existing_tuple:
-                    return False, [BENCHMARK_DUPLICATE_EVALUATOR_OBSERVATION]
-
-    # Verify observation
-    valid, errors = verify_observation(observation, run_dir)
-    if not valid:
-        return False, errors
-
-    dest_path = _observation_path(run_dir, arm, case_alias, obs_id)
-
+    # Every path after lock acquisition is wrapped in a single try/finally so
+    # the lock is always released exactly once, including on unexpected
+    # exceptions (no scattered manual _release() branches, no leaks).
     try:
-        _atomic_no_overwrite_write(dest_path, observation)
-    except FileExistsError:
-        return False, [BENCHMARK_DUPLICATE_OBSERVATION]
-    except Exception as e:
-        return False, [f"OBS_WRITE_ERROR: {e}"]
+        # Under-lock recheck: symlink components and root containment can change
+        # between the pre-check above and the moment the lock is held.
+        path_errs = _validate_import_path(run_dir, arm, case_alias, obs_id)
+        if path_errs:
+            return False, path_errs
 
-    return True, []
+        # Fail closed on an invalid public run before any inventory scan or write.
+        ok_run, run_errs = validate_public_run_integrity(run_dir)
+        if not ok_run:
+            return False, [f"PUBLIC_RUN_INTEGRITY_FAIL: {e}" for e in run_errs]
+
+        # Pre-inventory check: fail closed if existing inventory contains invalid files
+        # or if obs_id / evaluator tuple is already present
+        inventory = load_observation_inventory(run_dir)
+        if inventory.get("invalid") or inventory.get("unexpected_files") or inventory.get("global_failures"):
+            # Check if invalid contains corrupt state that blocks safe import
+            inv_errs = [item["failure_codes"] for item in inventory.get("invalid", [])]
+            # Return inventory invalid status
+            return False, [BENCHMARK_OBSERVATION_INVENTORY_INVALID, f"Existing inventory contains invalid entries: {inv_errs}"]
+
+        # Check for duplicate observation_id globally across valid items
+        for item in inventory.get("valid", []):
+            if item.get("observation_id") == obs_id:
+                return False, [BENCHMARK_DUPLICATE_OBSERVATION]
+
+        # Check for duplicate evaluator tuple
+        ev = observation.get("evaluator", {})
+        if isinstance(ev, dict):
+            new_ev_tuple = (
+                str(observation.get("benchmark_run_id", "")),
+                str(arm),
+                str(case_alias),
+                str(ev.get("provider", "")),
+                str(ev.get("model_id", "")),
+                str(ev.get("evaluator_id", "")),
+                str(ev.get("prompt_version", "")),
+            )
+            for item in inventory.get("valid", []):
+                v_obs = item.get("observation", {})
+                v_ev = v_obs.get("evaluator", {})
+                if isinstance(v_ev, dict):
+                    existing_tuple = (
+                        str(v_obs.get("benchmark_run_id", "")),
+                        str(v_obs.get("arm", "")),
+                        str(v_obs.get("case_alias", "")),
+                        str(v_ev.get("provider", "")),
+                        str(v_ev.get("model_id", "")),
+                        str(v_ev.get("evaluator_id", "")),
+                        str(v_ev.get("prompt_version", "")),
+                    )
+                    if new_ev_tuple == existing_tuple:
+                        return False, [BENCHMARK_DUPLICATE_EVALUATOR_OBSERVATION]
+
+        # Verify observation
+        valid, errors = verify_observation(observation, run_dir)
+        if not valid:
+            return False, errors
+
+        dest_path = _observation_path(run_dir, arm, case_alias, obs_id)
+
+        try:
+            _atomic_no_overwrite_write(dest_path, observation)
+        except FileExistsError:
+            return False, [BENCHMARK_DUPLICATE_OBSERVATION]
+        except Exception as e:
+            return False, [f"OBS_WRITE_ERROR: {e}"]
+
+        return True, []
+    except Exception as e:
+        return False, [f"{OBS_IMPORT_INTERNAL_ERROR}: {type(e).__name__}"]
+    finally:
+        _release_import_lock(fd)
 
 
 def import_observation_from_file(
