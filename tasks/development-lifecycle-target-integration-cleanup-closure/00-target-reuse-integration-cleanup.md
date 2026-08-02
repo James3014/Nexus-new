@@ -4,7 +4,7 @@
 task_id: target-reuse-integration-cleanup-closure
 campaign_id: development-lifecycle-target-integration-cleanup-closure
 attempt_id: codex-target-integration-cleanup-20260802-a4
-status: ACTIVE_CORRECTIVE_ATTEMPT
+status: CANDIDATE_SETTLED
 prior_candidate: 9a32d2f96267b8a53778a138f557e1ab5be8bf63
 prior_verdict: REJECT_CANDIDATE
 owner_activation: granted_for_implementation_candidate
@@ -298,6 +298,51 @@ verification:
   adapter_raw_git_scan: zero_mutation_matches
   diff_check: passed
   deletion_audit: zero
+```
+
+## Durable finalization truth settlement
+
+```yaml
+settlement:
+  attempt_id: codex-target-integration-cleanup-20260802-a4
+  starting_target_head: 9a32d2f96267b8a53778a138f557e1ab5be8bf63
+  reopen_commit: dbdedc882
+  implementation_commit: 021d3947a
+  prior_candidate: 9a32d2f96267b8a53778a138f557e1ab5be8bf63
+  prior_verdict: REJECT_CANDIDATE
+  card_hash_before_settlement: 0b14a256b88840d5aa065eb7f80d96e1ed64238963538cdb7ea4c8162e8b605b
+  corrected:
+    post_apply_failure_typed_physical_truth: true
+    post_apply_merge_performed_persisted_true: true
+    post_apply_retry_forbidden: true
+    post_apply_cleanup_forbidden: true
+    pre_apply_retry_allowed: true
+    owner_finish_single_call_cleanup_or_retention: true
+    successful_status: INTEGRATED_AND_CLEANED
+    retained_status: INTEGRATED_TARGET_RETAINED
+    retained_reason_and_next_action: true
+    actionable_retention_not_archived: true
+    finalization_receipt_persisted: true
+    fresh_reload_receipt_equal: true
+    owner_finish_replay_idempotent: true
+    branch_and_candidate_ref_preserved: true
+  verification:
+    focused_finalization: "42 passed"
+    self_hosted_task_service: "126 passed"
+    authority_candidate_verifier: "113 passed"
+    compileall: passed
+    adapter_raw_git_mutation_matches: 0
+    diff_check: passed
+    deletion_audit: 0
+    real_git_post_apply_probe: passed
+    real_git_dirty_target_retention_probe: passed
+  authority_audit:
+    new_lifecycle_authority: false
+    new_integration_authority: false
+    new_cleanup_authority: false
+    new_verifier: false
+    new_receipt_store: false
+    planner_workforce_runtime_changed: false
 ```
 
 Final claim remains bounded to
