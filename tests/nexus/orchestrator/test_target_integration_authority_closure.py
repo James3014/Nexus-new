@@ -389,6 +389,9 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
     stored = service._read_state("task-1") or service._latest_archived_state("task-1")[1]
     assert stored["integration_receipt"]["post_apply_verified"] is True
     assert stored["integration_receipt"]["acceptance_receipt_hash"] == receipt.receipt_hash
+    fresh_integration = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    persisted_integration = fresh_integration._read_state("task-1") or fresh_integration._latest_archived_state("task-1")[1]
+    assert persisted_integration["integration_receipt"] == result["integration_receipt"]
 
     cleanup = service.cleanup_tasks(task_id="task-1", dry_run=False)
     assert cleanup["decisions"][0]["cleanup_performed"] is True
