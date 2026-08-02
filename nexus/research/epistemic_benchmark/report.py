@@ -71,15 +71,13 @@ def build_benchmark_report(
     private_context_path : str
         Path to the private scoring context JSON file.
         Required for alias→case_id resolution and seed recovery.
-        Falls back to legacy auto-derive if empty.
+        Must be supplied explicitly by the caller (ERB-R2A.2).
     """
     if not private_context_path:
-        # Legacy auto-derive: sibling private context file.
-        pub_abs = os.path.abspath(run_dir)
-        pub_parent = os.path.dirname(pub_abs)
-        pub_name = os.path.basename(pub_abs)
-        private_context_path = os.path.join(
-            pub_parent, f"_{pub_name}_private_context.json"
+        raise ValueError(
+            "private_context_path is required and must be supplied explicitly. "
+            "Auto-derivation from the public run directory name is not permitted "
+            "(ERB-R2A.2: Explicit Private Scoring Authority)."
         )
 
     manifest = load_public_run_manifest(run_dir)
@@ -398,7 +396,7 @@ def verify_benchmark_report(
     Parameters
     ----------
     private_context_path : str
-        Path to the private scoring context. Falls back to legacy auto-derive if empty.
+        Path to the private scoring context. Must be supplied explicitly (ERB-R2A.2).
     """
     errors: List[str] = []
 

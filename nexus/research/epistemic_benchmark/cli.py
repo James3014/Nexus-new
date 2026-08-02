@@ -172,6 +172,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 
     run_dir = args.run_dir
     json_output = args.json_output
+    private_context_path = args.private_context
     markdown_output = getattr(args, "markdown_output", None)
 
     if markdown_output is None:
@@ -180,7 +181,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         markdown_output = base + ".md"
 
     try:
-        report = build_benchmark_report(run_dir)
+        report = build_benchmark_report(run_dir, private_context_path)
         write_benchmark_report(report, json_output, markdown_output)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -198,6 +199,7 @@ def _cmd_verify_report(args: argparse.Namespace) -> int:
 
     run_dir = args.run_dir
     report_path = args.input
+    private_context_path = args.private_context
 
     try:
         with open(report_path, "r", encoding="utf-8") as f:
@@ -206,7 +208,7 @@ def _cmd_verify_report(args: argparse.Namespace) -> int:
         print(f"ERROR: Cannot load report: {e}", file=sys.stderr)
         return 1
 
-    valid, errors = verify_benchmark_report(report, run_dir)
+    valid, errors = verify_benchmark_report(report, run_dir, private_context_path)
     if not valid:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -250,12 +252,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # evaluate
     p_eval = subparsers.add_parser("evaluate", help="Evaluate benchmark and write reports")
     p_eval.add_argument("--run-dir", required=True, help="Run directory")
+    p_eval.add_argument("--private-context", required=True, help="Path to private scoring context JSON")
     p_eval.add_argument("--json-output", required=True, help="Output path for JSON report")
     p_eval.add_argument("--markdown-output", default=None, help="Output path for Markdown report")
 
     # verify-report
     p_verify = subparsers.add_parser("verify-report", help="Verify a benchmark report")
     p_verify.add_argument("--run-dir", required=True, help="Run directory")
+    p_verify.add_argument("--private-context", required=True, help="Path to private scoring context JSON")
     p_verify.add_argument("--input", required=True, help="Path to report JSON file")
 
     args = parser.parse_args(argv)

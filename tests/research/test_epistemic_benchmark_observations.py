@@ -32,8 +32,15 @@ from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run
 def run_dir(tmp_path_factory):
     """Prepare a real run directory for observation import tests."""
     base = tmp_path_factory.mktemp("obs_run")
-    prepare_benchmark_run(output_dir=str(base), seed=12345, corpus_version="v0")
-    return str(base)
+    run_dir = str(base / "run")
+    priv_path = str(base / "_run_private_context.json")
+    prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=12345,
+        corpus_version="v0",
+    )
+    return run_dir
 
 
 def _get_first_alias(run_dir: str, arm: str) -> tuple:

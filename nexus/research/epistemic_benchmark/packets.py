@@ -334,6 +334,9 @@ def prepare_benchmark_run(
     Seed is NEVER written to the public manifest or packets.
     Blinding key is NEVER written to logs or stdout.
 
+    private_context_path is REQUIRED — callers must supply an explicit path.
+    Auto-derivation from the public run name is not permitted (ERB-R2A.2).
+
     Returns the public manifest.
     """
     import datetime
@@ -346,15 +349,14 @@ def prepare_benchmark_run(
     if public_output_dir is None:
         raise ValueError("public_output_dir is required")
 
-    # Legacy compat: auto-derive private_context_path if not provided
-    # Place it as a sibling of the public run directory to satisfy the
-    # "outside public run" constraint. Legacy callers (observations/metrics/
-    # report tests) do not need to inspect the private context.
+    # ERB-R2A.2: private_context_path must be supplied explicitly by the caller.
+    # Auto-derivation from public run name, parent directory, sibling filenames,
+    # or environment variables is forbidden.
     if private_context_path is None:
-        _pub_parent = os.path.dirname(os.path.abspath(public_output_dir))
-        _pub_name = os.path.basename(os.path.abspath(public_output_dir))
-        private_context_path = os.path.join(
-            _pub_parent, f"_{_pub_name}_private_context.json"
+        raise ValueError(
+            "private_context_path is required and must be supplied explicitly. "
+            "Auto-derivation from the public run directory name is not permitted "
+            "(ERB-R2A.2: Explicit Private Scoring Authority)."
         )
 
     if created_at is None:

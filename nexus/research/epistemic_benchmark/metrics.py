@@ -398,18 +398,14 @@ def compute_all_metrics(
         Pre-validated observations (output of load_valid_observations).
     private_context_path : str
         Path to the private scoring context JSON file.
-        Required for alias→case_id resolution. Fail-closed if empty.
+        Required for alias→case_id resolution.
+        Must be supplied explicitly by the caller (ERB-R2A.2).
     """
     if not private_context_path:
-        # Legacy auto-derive: find sibling private context file.
-        # Preserved for backward compat with tests that use prepare_benchmark_run
-        # with auto-derived private_context_path.
-        import os
-        pub_abs = os.path.abspath(run_dir)
-        pub_parent = os.path.dirname(pub_abs)
-        pub_name = os.path.basename(pub_abs)
-        private_context_path = os.path.join(
-            pub_parent, f"_{pub_name}_private_context.json"
+        raise ValueError(
+            "private_context_path is required and must be supplied explicitly. "
+            "Auto-derivation from the public run directory name is not permitted "
+            "(ERB-R2A.2: Explicit Private Scoring Authority)."
         )
 
     private_ctx = load_private_scoring_context(run_dir, private_context_path)
