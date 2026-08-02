@@ -22,7 +22,12 @@ from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.skill_store import SkillStore
 from nexus.events.transport import NexusEventBus
 from nexus.events.store import EventStore
-from nexus.events.contracts import NexusEvent, build_lifecycle_hook_event, build_phase_transition_event
+from nexus.events.contracts import (
+    NexusEvent,
+    build_lifecycle_hook_event,
+    build_phase_observer_event,
+    build_phase_transition_event,
+)
 from nexus.telemetry.otel_config import init_otel
 from nexus.telemetry.tracer import NexusTracer
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
@@ -32,7 +37,12 @@ from nexus.core.outcome_schema import NexusOutcomeV2
 from nexus.core.handoff_bundle import HandoffBundleWriter
 from nexus.core.blackboard import Blackboard
 from nexus.engine.phase_plugin import PhaseRegistry, PhasePlugin, PhaseResult, PhaseExecutor
-from nexus.engine.phase_handshake import record_phase_artifacts, validate_required_artifacts
+from nexus.engine.phase_handshake import (
+    build_phase_receipt,
+    record_phase_artifacts,
+    validate_phase_receipt,
+    validate_required_artifacts,
+)
 from nexus.engine.runtime_phase_contract import (
     RUNTIME_PHASE_FLOW,
     RuntimePhase,
@@ -164,6 +174,60 @@ class NexusPipeline(
             ctx.state.metadata["runtime_status"] = target.value
         return source, target
 
+    def _emit_phase_observer(self, ctx: PipelineContext, phase: str, hook: str, **payload: Any) -> None:
+        """Emit telemetry hooks without allowing observers to change authority."""
+
+        try:
+            ctx.event_store.append(
+                build_phase_observer_event(
+                    task_id=ctx.task_id,
+                    phase=phase,
+                    hook=hook,
+                    payload=payload,
+                )
+            )
+        except Exception as exc:  # observer telemetry is explicitly fail-open
+            logger.debug("phase_observer_failed hook=%s phase=%s: %s", hook, phase, exc)
+
+    def _record_phase_receipt(
+        self,
+        ctx: PipelineContext,
+        *,
+        phase: str,
+        status: str,
+        transition: str,
+        output_payload: Any,
+        block_class: str = "",
+        next_action: str = "",
+    ) -> dict[str, Any]:
+        attempts = ctx.state.metadata.setdefault("phase_attempts", {})
+        phase_attempt = int(attempts.get(phase, 0)) + 1
+        attempts[phase] = phase_attempt
+        receipt = build_phase_receipt(
+            task_id=ctx.task_id,
+            attempt_id=str(ctx.state.metadata.get("attempt_id") or f"{ctx.task_id}:attempt"),
+            action_id=str(ctx.state.metadata.get("action_id") or f"{ctx.task_id}:{phase}"),
+            phase=phase,
+            phase_attempt=phase_attempt,
+            input_payload={"task_id": ctx.task_id, "phase": phase, "attempt": phase_attempt},
+            output_payload=output_payload,
+            authority_revision=str(
+                ctx.state.metadata.get("authority_revision")
+                or ctx.state.metadata.get("workspace_revision")
+                or "runtime-phase-contract-v1"
+            ),
+            status=status,
+            transition=transition,
+            evidence_refs=tuple(ctx.state.metadata.get("evidence_refs") or ()),
+            verifier_refs=tuple(ctx.state.metadata.get("verifier_refs") or ()),
+            timeout_telemetry=dict(ctx.state.metadata.get("timeout_telemetry") or {}),
+            block_class=block_class,
+            next_action=next_action,
+        )
+        validate_phase_receipt(receipt)
+        ctx.state.metadata.setdefault("phase_receipts", []).append(receipt)
+        return receipt
+
     @staticmethod
     def _formulation_phase_order(plugins: dict[str, PhasePlugin], ctx: PipelineContext) -> list[str]:
         """Return P→D with optional X; the caller records X→D resume."""
@@ -287,18 +351,30 @@ class NexusPipeline(
             self._advance_runtime_phase(ctx, RuntimePhase.C, audit_passed=True, reason="audit_passed_crystallize_entry")
         plugin = next((item for item in self.registry.get_ordered_plugins() if item.name == "C"), None)
         if plugin is not None and plugin.should_run(ctx):
+            self._emit_phase_observer(ctx, "C", "on_phase_start")
             result = plugin.execute(self, ctx)
             mutations = dict(getattr(result, "mutations", None) or {})
             ctx.state.metadata["composition_crystallize_phase_status"] = str(getattr(result, "status", ""))
             ctx.state.metadata["composition_crystallize_phase_mutations"] = mutations
+            self._record_phase_receipt(
+                ctx,
+                phase="C",
+                status=str(getattr(result, "status", "FAILED")),
+                transition="C:start->end",
+                output_payload=mutations,
+                next_action="terminal_outcome",
+            )
+            self._emit_phase_observer(ctx, "C", "on_phase_end", status=str(getattr(result, "status", "")))
             if self._crystallize_side_effects_present(ctx):
                 ctx.state.metadata["composition_crystallize_side_effects_verified"] = True
                 return
+            self._emit_phase_observer(ctx, "C", "on_phase_fail", reason="missing_terminal_outcome_side_effects")
             ctx.state.metadata["composition_crystallize_side_effects_verified"] = False
             ctx.state.metadata["composition_crystallize_failure_reason"] = "missing_terminal_outcome_side_effects"
             ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
             return
         ctx.state.metadata["composition_crystallize_phase_status"] = "MISSING"
+        self._emit_phase_observer(ctx, "C", "on_phase_block", reason="missing_crystallize_executor")
         ctx.state.metadata["composition_crystallize_failure_reason"] = "missing_crystallize_executor"
         ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
 
@@ -465,6 +541,7 @@ class NexusPipeline(
         """Run one P/D/X plugin after the contract gate accepts its entry."""
 
         self._advance_runtime_phase(ctx, plugin.name, reason="formulation_phase_entry")
+        self._emit_phase_observer(ctx, plugin.name, "on_phase_start")
         logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
         ctx.event_store.append(
             build_phase_transition_event(
@@ -486,8 +563,17 @@ class NexusPipeline(
                     payload={"status": result.status},
                 )
             )
+            self._record_phase_receipt(
+                ctx,
+                phase=plugin.name,
+                status=result.status,
+                transition=f"{plugin.name}:start->end",
+                output_payload=result.mutations,
+            )
+            self._emit_phase_observer(ctx, plugin.name, "on_phase_end", status=result.status)
             if result.status in {"FAILED", "fail"}:
                 logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
+                self._emit_phase_observer(ctx, plugin.name, "on_phase_fail", status=result.status)
                 ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
                 return False
             return True
@@ -495,6 +581,7 @@ class NexusPipeline(
             veto_str = str(veto_err)
             if veto_str.startswith("SEMANTIC_HANDSHAKE_MISSING_ARTIFACT"):
                 logger.error("🛑 [Pipeline] Semantic handshake failed: %s", veto_err)
+                self._emit_phase_observer(ctx, plugin.name, "on_phase_block", reason=veto_str)
                 ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
                 ctx.state.metadata["semantic_handshake_failed"] = True
                 ctx.state.metadata["semantic_handshake_reason"] = veto_str
@@ -502,6 +589,7 @@ class NexusPipeline(
             raise
         except Exception as exc:
             logger.exception("Unhandled failure in plugin %s: %s", plugin.name, exc)
+            self._emit_phase_observer(ctx, plugin.name, "on_phase_fail", reason=str(exc))
             ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
             return False
 

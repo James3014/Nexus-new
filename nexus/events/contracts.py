@@ -5,6 +5,21 @@ import time
 from dataclasses import dataclass, field, asdict
 
 
+PHASE_OBSERVER_HOOKS = frozenset(
+    {
+        "on_phase_start",
+        "on_phase_end",
+        "on_phase_fail",
+        "on_phase_retry",
+        "on_phase_block",
+        "on_phase_cancel",
+        "on_phase_timeout",
+        "on_phase_reconcile",
+        "on_task_terminal",
+    }
+)
+
+
 @dataclass(frozen=True)
 class NexusEvent:
     """不可變的系統事件"""
@@ -38,3 +53,13 @@ def build_phase_transition_event(*, task_id: str, phase: str, transition: str, p
         event_type="phase_transition",
         payload={"transition": transition, **dict(payload or {})},
     )
+
+
+def build_phase_observer_event(
+    *, task_id: str, phase: str, hook: str, payload: Dict[str, Any] | None = None
+) -> NexusEvent:
+    """Build one symmetric observer event; observer failures remain fail-open."""
+
+    if hook not in PHASE_OBSERVER_HOOKS:
+        raise ValueError(f"unknown_phase_observer_hook:{hook}")
+    return build_lifecycle_hook_event(task_id=task_id, phase=phase, hook=hook, payload=payload)

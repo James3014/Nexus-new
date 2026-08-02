@@ -54,6 +54,11 @@ class PipelineRepairMixin:
         ctx.state.metadata["runtime_phase"] = phase
         ctx.state.current_phase = phase
 
+    def _phase_observer(self, ctx: PipelineContextProtocol, phase: str, hook: str, **payload: Any) -> None:
+        observer = getattr(self, "_emit_phase_observer", None)
+        if callable(observer):
+            observer(ctx, phase, hook, **payload)
+
     @staticmethod
     def _is_rejected_repair_status(status: Any) -> bool:
         return str(status or "").strip().upper() in REJECTED_REPAIR_STATUSES
@@ -1691,6 +1696,7 @@ class PipelineRepairMixin:
             repair_attempts += 1
             ctx.state.retry_count = max(ctx.state.retry_count, repair_attempts - 1)
             self._enter_runtime_phase(ctx, "R", reason="repair_attempt_entry")
+            self._phase_observer(ctx, "R", "on_phase_start", phase_attempt=repair_attempts)
             logger.info(f"🛠️ [Pipeline] Repair Attempt {repair_attempts}/{max_retries}")
             if rlm_loop is not None and not rlm_loop.prepare_iteration(
                 project_root=Path(getattr(self.engine, "project_root", Path.cwd())),
@@ -1701,6 +1707,17 @@ class PipelineRepairMixin:
 
             # Step 1: Repair
             r_out = self._execute_single_repair(ctx, tracer, repair_attempts)
+            record_receipt = getattr(self, "_record_phase_receipt", None)
+            if callable(record_receipt):
+                record_receipt(
+                    ctx,
+                    phase="R",
+                    status=str(r_out.get("status") or "FAILED"),
+                    transition="R:start->end",
+                    output_payload=r_out.get("result") or {},
+                    next_action="audit",
+                )
+            self._phase_observer(ctx, "R", "on_phase_end", status=str(r_out.get("status") or "FAILED"))
             if rlm_loop is not None:
                 rlm_loop.record_repair(
                     iteration=repair_attempts,
@@ -1711,6 +1728,7 @@ class PipelineRepairMixin:
 
             # Step 2: Audit
             self._enter_runtime_phase(ctx, "A", reason="audit_entry")
+            self._phase_observer(ctx, "A", "on_phase_start", phase_attempt=repair_attempts)
             eval_ctx = AuditEvalContext(
                 tracer=tracer,
                 repair_attempts=repair_attempts,
@@ -1726,6 +1744,23 @@ class PipelineRepairMixin:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()
                 ctx.state.metadata["rlm_budget_state"] = budget_state.to_dict()
+
+            if callable(record_receipt):
+                record_receipt(
+                    ctx,
+                    phase="A",
+                    status=str(a_out.get("status") or ("SUCCESS" if a_out.get("audit_success") else "FAILED")),
+                    transition="A:start->end",
+                    output_payload=a_out,
+                    block_class="" if a_out.get("audit_success") else "RECOVERABLE_BLOCK",
+                    next_action="crystallize" if a_out.get("audit_success") else "repair_or_replan",
+                )
+            self._phase_observer(
+                ctx,
+                "A",
+                "on_phase_end" if a_out.get("audit_success") else "on_phase_fail",
+                status=str(a_out.get("status") or "FAILED"),
+            )
 
             if a_out["audit_success"]:
                 success = True
@@ -1750,13 +1785,16 @@ class PipelineRepairMixin:
                 
                 if replan_ok:
                     logger.warning("🔄 Escalation triggered successful replan, resetting repair cycle.")
+                    self._phase_observer(ctx, "R", "on_phase_retry", reason="replan")
                     self._enter_runtime_phase(ctx, "D", reason="audit_rejection_replan")
                     repair_attempts = 0
                     continue
                     
                 if break_auto:
+                    self._phase_observer(ctx, "A", "on_phase_block", reason="escalation_boundary")
                     # Escalation might have reached max_retries or failed replan
                     break
+                self._phase_observer(ctx, "R", "on_phase_retry", reason="audit_rejected")
                 logger.warning("🔄 Audit Rejected. Retrying repair cycle...")
                 continue
             else:
@@ -1769,14 +1807,27 @@ class PipelineRepairMixin:
         """Simulates repair loop in Dry Run mode."""
         ctx.state.retry_count = 0
         self._enter_runtime_phase(ctx, "R", reason="dry_run_repair_entry")
+        self._phase_observer(ctx, "R", "on_phase_start", phase_attempt=1)
         r_dec_id = self._register_phase_decision(ctx, "R", "dry-run-repair")
         self._mock_dry_run_state(ctx)
 
         self.engine._add_step_to_history(
             ctx.state, "R", metadata={"status": "executed", "decision_id": r_dec_id, "skill_id": "dry-run-repair", "attempt": 1, "dry_run_mode": True}
         )
+        record_receipt = getattr(self, "_record_phase_receipt", None)
+        if callable(record_receipt):
+            record_receipt(
+                ctx,
+                phase="R",
+                status="SUCCESS",
+                transition="R:start->end",
+                output_payload={"dry_run_mode": True},
+                next_action="audit",
+            )
+        self._phase_observer(ctx, "R", "on_phase_end", status="SUCCESS")
 
         self._enter_runtime_phase(ctx, "A", reason="dry_run_audit_entry")
+        self._phase_observer(ctx, "A", "on_phase_start", phase_attempt=1)
         a_out = self._run_composition_audit_phase(
             ctx,
             {
@@ -1785,6 +1836,21 @@ class PipelineRepairMixin:
                 "current_decision_id": r_dec_id,
                 "current_skill_id": "dry-run-repair",
             },
+        )
+        if callable(record_receipt):
+            record_receipt(
+                ctx,
+                phase="A",
+                status=str((a_out or {}).get("status") or ("SUCCESS" if not a_out or a_out.get("audit_success") else "FAILED")),
+                transition="A:start->end",
+                output_payload=a_out or {"dry_run_mode": True},
+                next_action="crystallize" if not a_out or a_out.get("audit_success") else "human_review",
+            )
+        self._phase_observer(
+            ctx,
+            "A",
+            "on_phase_end" if not a_out or a_out.get("audit_success") else "on_phase_fail",
+            status=str((a_out or {}).get("status") or "SUCCESS"),
         )
         if a_out is not None and not bool(a_out.get("audit_success")):
             return False
