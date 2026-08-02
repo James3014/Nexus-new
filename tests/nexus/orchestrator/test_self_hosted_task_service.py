@@ -57,7 +57,15 @@ def _request(tmp_path: Path, **overrides):
     return values
 
 
-def _closure_context(task_id: str, candidate: str, attempt_id: str = "attempt-1"):
+def _closure_context(
+    task_id: str,
+    candidate: str,
+    attempt_id: str = "attempt-1",
+    *,
+    candidate_tree_sha: str = "d" * 40,
+    candidate_state_hash: str = "e" * 64,
+    candidate_receipt_hash: str = "f" * 64,
+):
     acceptance = ExternalAcceptanceReceipt(
         schema="nexus.external_acceptance_receipt.v1", task_id=task_id,
         attempt_id=attempt_id, candidate_commit=candidate, receipt_hash="b" * 64,
@@ -66,8 +74,8 @@ def _closure_context(task_id: str, candidate: str, attempt_id: str = "attempt-1"
     authorization = IntegrationAuthorizationEnvelope(
         schema="nexus.integration_authorization.v1", task_id=task_id,
         campaign_id="campaign", attempt_id=attempt_id, task_card_hash="c" * 64,
-        candidate_commit=candidate, candidate_tree_sha="d" * 40,
-        candidate_state_hash="e" * 64, candidate_receipt_hash="f" * 64,
+        candidate_commit=candidate, candidate_tree_sha=candidate_tree_sha,
+        candidate_state_hash=candidate_state_hash, candidate_receipt_hash=candidate_receipt_hash,
         acceptance_receipt_hash=acceptance.receipt_hash, reviewer_id="reviewer-1",
         verifier_artifact_hash="1" * 64, canonical_root="/tmp/repo",
         canonical_branch="nexus/integration/main", expected_canonical_head="a" * 40,
@@ -1693,7 +1701,12 @@ def test_owner_finish_approves_exact_binding_then_integrates_once(tmp_path, monk
         candidate_tree_sha="b" * 40,
         candidate_state_hash="c" * 64,
         verified_receipt_hash="d" * 64,
-        **_closure_context("owner-finish-canary", "a" * 40),
+        **_closure_context(
+            "owner-finish-canary", "a" * 40,
+            candidate_tree_sha="b" * 40,
+            candidate_state_hash="c" * 64,
+            candidate_receipt_hash="d" * 64,
+        ),
     )
 
     assert result["status"] == "INTEGRATED"
@@ -1744,7 +1757,18 @@ def test_owner_finish_ten_candidate_matrix_archives_each_terminal(tmp_path, monk
             "attempts": [{"attempt_id": f"attempt-{index}"}],
         })
 
-        result = service.owner_finish(task_id, **binding, **_closure_context(task_id, binding["candidate_commit_sha"], f"attempt-{index}"))
+        result = service.owner_finish(
+            task_id,
+            **binding,
+            **_closure_context(
+                task_id,
+                binding["candidate_commit_sha"],
+                f"attempt-{index}",
+                candidate_tree_sha=binding["candidate_tree_sha"],
+                candidate_state_hash=binding["candidate_state_hash"],
+                candidate_receipt_hash=binding["verified_receipt_hash"],
+            ),
+        )
 
         assert result["status"] == "INTEGRATED"
         assert not service._state_path(task_id).exists()

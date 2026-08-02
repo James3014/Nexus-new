@@ -3394,6 +3394,16 @@ class SelfHostedTaskService:
             return "external acceptance binding mismatch"
         if authorization.task_id != state.get("task_id") or authorization.candidate_commit != packet.get("candidate_commit_sha"):
             return "cleanup authorization candidate mismatch"
+        if authorization.attempt_id not in {"", str(state.get("attempt_id") or "")}:
+            return "cleanup authorization attempt mismatch"
+        if authorization.acceptance_receipt_hash != acceptance.receipt_hash:
+            return "cleanup authorization acceptance mismatch"
+        if state.get("task_card_hash") and authorization.task_card_hash != state.get("task_card_hash"):
+            return "cleanup authorization task card mismatch"
+        if authorization.candidate_tree_sha != str(packet.get("candidate_tree_sha") or ""):
+            return "cleanup authorization candidate tree mismatch"
+        if authorization.candidate_state_hash != str(packet.get("candidate_state_hash") or ""):
+            return "cleanup authorization candidate state mismatch"
         if "CLEANUP_OWNED_TARGET" not in authorization.action_set or not authorization.cleanup_requested:
             return "cleanup authorization does not include CLEANUP_OWNED_TARGET"
         grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
@@ -3402,6 +3412,10 @@ class SelfHostedTaskService:
         receipt = state.get("integration_receipt") if isinstance(state.get("integration_receipt"), Mapping) else None
         if not receipt or not receipt.get("verifier_passed") or not receipt.get("merge_performed") or not receipt.get("post_apply_verified"):
             return "post-apply integration receipt is missing or incomplete"
+        if receipt.get("acceptance_receipt_hash") != acceptance.receipt_hash:
+            return "integration receipt acceptance mismatch"
+        if receipt.get("authorization_hash") != authorization.authorization_hash:
+            return "integration receipt authorization mismatch"
         integration_sha = str(receipt.get("integration_commit_sha") or "")
         candidate_sha = str(packet.get("candidate_commit_sha") or "")
         if not integration_sha or integration_sha != str(state.get("integration_result_sha") or ""):
@@ -3411,6 +3425,12 @@ class SelfHostedTaskService:
         candidate_ref = str(state.get("candidate_ref") or "")
         if not candidate_ref:
             return "candidate durable ref is missing"
+        if authorization.durable_ref != candidate_ref:
+            return "cleanup authorization durable ref mismatch"
+        if Path(authorization.canonical_root).resolve() != controller:
+            return "cleanup authorization canonical root mismatch"
+        if str(state.get("integration_branch") or authorization.canonical_branch) != authorization.canonical_branch:
+            return "cleanup authorization integration branch mismatch"
         try:
             if manager._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller) != candidate_sha:
                 return "candidate durable ref mismatch"
@@ -3430,6 +3450,10 @@ class SelfHostedTaskService:
         decisions = []
         for item in ids:
             state = (self._read_state_snapshot(item) if dry_run else self._read_state(item)) or {}
+            if not dry_run and not self._state_path(item).exists():
+                _, archived = self._latest_archived_state(item)
+                if archived and archived.get("status") == "INTEGRATED":
+                    state = self._reactivate_archived_state(item, archived)
             if not state:
                 decisions.append({"task_id": item, "cleanup_decision": "ALREADY_REMOVED", "cleanup_blocker": "task state not found", "cleanup_performed": False})
                 continue
@@ -3630,6 +3654,15 @@ class SelfHostedTaskService:
                 candidate_ref=state.get("candidate_ref"),
                 dry_run=dry_run,
             )
+            cleanup_receipt = asdict(cleanup)
+            cleanup_receipt_hash = hashlib.sha256(
+                json.dumps(
+                    cleanup_receipt,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
             decision = {
                 "task_id": item,
                 "status": state.get("status"),
@@ -3638,6 +3671,8 @@ class SelfHostedTaskService:
                 "cleanup_performed": cleanup.performed,
                 "cleanup_eligible": cleanup.eligible,
                 "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                "cleanup_receipt": cleanup_receipt,
+                "cleanup_receipt_hash": cleanup_receipt_hash,
             }
             decisions.append(decision)
             if not dry_run:
@@ -4252,6 +4287,29 @@ class SelfHostedTaskService:
                     raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
                 if authorization_obj.task_id != task_id or authorization_obj.candidate_commit != candidate_commit_sha:
                     raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
+                expected_authorization = {
+                    "attempt_id": str(state.get("attempt_id") or ""),
+                    "task_card_hash": str(state.get("task_card_hash") or grant.get("task_card_hash") or ""),
+                    "candidate_tree_sha": candidate_tree_sha,
+                    "candidate_state_hash": candidate_state_hash,
+                    "candidate_receipt_hash": verified_receipt_hash,
+                }
+                authorization_values = {
+                    "attempt_id": authorization_obj.attempt_id,
+                    "task_card_hash": authorization_obj.task_card_hash,
+                    "candidate_tree_sha": authorization_obj.candidate_tree_sha,
+                    "candidate_state_hash": authorization_obj.candidate_state_hash,
+                    "candidate_receipt_hash": authorization_obj.candidate_receipt_hash,
+                }
+                authorization_drift = [
+                    key for key, expected_value in expected_authorization.items()
+                    if str(authorization_values[key]) != str(expected_value)
+                ]
+                if authorization_drift:
+                    raise RuntimeError(
+                        "INTEGRATION_AUTHORIZATION_BINDING_MISMATCH: "
+                        + ", ".join(authorization_drift)
+                    )
                 if authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash:
                     raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
                 external_acceptance = acceptance_obj.to_dict()

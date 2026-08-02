@@ -2,6 +2,7 @@
 
 import subprocess
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -391,4 +392,11 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
 
     cleanup = service.cleanup_tasks(task_id="task-1", dry_run=False)
     assert cleanup["decisions"][0]["cleanup_performed"] is True
+    cleanup_receipt = cleanup["decisions"][0]["cleanup_receipt"]
+    fresh = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    persisted = fresh._read_state("task-1") or fresh._latest_archived_state("task-1")[1]
+    assert persisted["cleanup_receipt"] == cleanup_receipt
+    assert persisted["cleanup_receipt_hash"] == hashlib.sha256(
+        json.dumps(cleanup_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
     assert not target.exists()
