@@ -20,6 +20,12 @@ repair_attempt_a3:
   source_rejection: ERP-00 independent acceptance A2
   repair_class: pre_existing_contract_mismatch
   independent_acceptance: pending
+ratification_attempt_a4:
+  attempt_id: erp00-agy-gemini36-medium-a4
+  status: owner_authorized
+  purpose: exact_a3_scope_and_lineage_ratification
+  source_candidate_sha: 0980f19fff24697e2f30fd90c0027b00fda03bde
+  independent_acceptance: pending
 ---
 
 # Task Card ERP-00: Nexus Epistemic Research Profile Foundation
@@ -87,10 +93,71 @@ Establish the first version of the Epistemic Research Profile foundation inside 
   `test_research_isolation.py` contract.
 - The repair may reuse `has_design_fields()` from
   `nexus.research.research_facts`.
-- This attempt may modify only the A3 allowed paths.
+- The exact A3 paths are recorded in the owner-authorized A4 ratification section below.
 - No Epistemic Profile contract, adapter, authority, runtime, routing,
   acceptance, integration, push, ERP-01, or public-claim changes are authorized.
 - Output remains an implementer Candidate pending independent acceptance.
+
+## Owner-authorized A3 Candidate Ratification — A4
+
+### Reason
+
+The A3 execution packet restricted mutation to three exact paths, but the
+Git-tracked Task Card did not enumerate those paths. The owner now explicitly
+adopts and ratifies the exact immutable A3 Candidate identified below.
+
+This ratification does not claim that the original A3 mutation had complete
+pre-mutation Git authority. It creates a new owner-authorized lineage closure
+for the current exact physical Candidate and does not rewrite prior history.
+
+### Ratified Candidate Identity
+
+- Base SHA:
+  `b4b52ffd94b30549f77aac64719efb1539050082`
+- A3 authority commit:
+  `a3edf0b2c24d6ccc449468f48440e77e2dfa84e8`
+- A3 repair commit / Candidate SHA:
+  `0980f19fff24697e2f30fd90c0027b00fda03bde`
+- A3 full diff SHA-256:
+  `141694d5c5bd9a22688a2e57c1c30ebe1d438f6b997ac201e08f36d99f5038d4`
+- A3 behavioral diff SHA-256:
+  `ab37505818fc95fc01d3889c0817fdff3e608e65998d0271cde62e004b5fe1f0`
+
+### Exact Ratified A3 Paths
+
+The owner ratifies only the following A3 paths:
+
+1. `tasks/epistemic-research-profile-foundation/00-nexus-epistemic-profile-foundation.md`
+2. `nexus/research/contamination_guard.py`
+3. `tests/research/test_research_isolation.py`
+
+No other path is included or implicitly authorized.
+
+### Ratified Behavioral Scope
+
+The adopted A3 behavior is limited to:
+
+- Reusing `has_design_fields()` from
+  `nexus.research.research_facts`.
+- Detecting top-level prohibited design fields as `design_field`.
+- Preserving existing text-term contamination detection.
+- Preserving order while removing duplicate detected signals.
+- Adding a field-only regression test using
+  `patch_plan: candidate_001`.
+
+The ratification does not authorize recursive field scanning, modification of
+`DESIGN_TERMS`, changes to Epistemic Profile contracts, runtime wiring,
+routing, workforce changes, acceptance authority, integration, push, public
+claims, production claims, or ERP-01.
+
+### A4 Scope
+
+A4 may modify only this Task Card. A4 must not modify production code, tests,
+specifications, campaign index, nested Research Ledger, runtime state, or
+governance cores.
+
+A4 output is an authority/lineage Candidate only. Independent acceptance is
+still required.
 
 ## Tests & Verification
 - TDD required (RED evidence before production implementation).
