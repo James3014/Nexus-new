@@ -2,10 +2,23 @@
 
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: VERIFIED_CANDIDATE
 task_id: runtime-development-lifecycle-mapping
 commit_required: true
 AUTO_CHAIN: false
+candidate_commit: f9bba16b549b57787dd7ae7dc4f46e588e142be9
+claim_ceiling: IMPLEMENTER_VERIFIED_RUNTIME_DEVELOPMENT_MAPPING_CANDIDATE
+
+verification_receipt:
+  base_head: e30ccb9df6a2e879c4d5cda0403f976c292656e9
+  card_hash_at_execution: 9d16050bed08f2e2d0868038db505ebce274b9ac40c2ea5a05aabce46d033529
+  focused_tests: 3 passed
+  affected_service_tests: 5 passed
+  affected_receipt_tests: 3 passed
+  diff_check: PASS
+  full_service_file: DEFERRED_ENVIRONMENT_TERMINATION_AFTER_PARTIAL_RUN
+  evidence_scope: shared_task_attempt_action_identity_and_separate_candidate_integration_claims
+  external_acceptance: DEFERRED_EXTERNAL_ACCEPTANCE
 
 ## Objective
 
