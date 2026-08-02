@@ -3,8 +3,10 @@
 ```yaml
 task_id: target-reuse-integration-cleanup-closure
 campaign_id: development-lifecycle-target-integration-cleanup-closure
-attempt_id: codex-target-integration-cleanup-20260802-a2
-status: ACTIVE_OWNER_RESUMED
+attempt_id: codex-target-integration-cleanup-20260802-a3
+status: ACTIVE_CORRECTIVE_ATTEMPT
+prior_candidate: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+prior_verdict: REJECT_CANDIDATE
 owner_activation: granted_for_implementation_candidate
 auto_chain: false
 source_base:
@@ -135,6 +137,54 @@ IMPLEMENTER_VERIFIED_TARGET_REUSE_INTEGRATION_CLEANUP_CANDIDATE
 
 This Candidate does not claim independent acceptance, canonical integration,
 live Target cleanup, push, or production/public readiness.
+
+## Corrective closure requirements
+
+```yaml
+prior_rejection_defects:
+  - integration_without_external_acceptance_or_owner_authorization
+  - forged_cleanup_decision_could_remove_worktree
+  - adapter_owned_a_second_git_integration_and_cleanup_executor
+  - dirty_canonical_hash_could_be_accepted_as_clean
+  - multiple_active_targets_raised_untyped_value_error
+  - receipt_test_did_not_reload_a_fresh_service
+  - post_apply_verification_was_missing
+corrective_attempt:
+  attempt_id: codex-target-integration-cleanup-20260802-a3
+  starting_target_head: 657a2e9f13df7073c33b8c00c75c6f26a95c4bfe
+  canonical_observed_head: ba6b7c1f7bd0817e759ce68ff73687afb5ff81f8
+  canonical_drift: true
+  reuse_target_without_rebase_or_reset: true
+  claim_ceiling: IMPLEMENTER_VERIFIED_TARGET_REUSE_INTEGRATION_CLEANUP_CANDIDATE
+```
+
+## Corrective scope freeze
+
+```yaml
+production:
+  - nexus/contracts/target_integration_lifecycle.py
+  - nexus/orchestrator/target_integration_lifecycle.py
+  - nexus/orchestrator/governed_integration.py
+  - nexus/orchestrator/self_hosted_task_service.py
+  - nexus/orchestrator/worktree_manager.py
+tests:
+  - tests/contracts/test_target_integration_lifecycle.py
+  - tests/nexus/orchestrator/test_target_integration_lifecycle.py
+  - tests/nexus/orchestrator/test_target_integration_git_canary.py
+  - tests/nexus/orchestrator/test_target_integration_authority_closure.py
+  - tests/nexus/orchestrator/test_governed_integration.py
+  - tests/nexus/orchestrator/test_self_hosted_task_service.py
+  - tests/nexus/orchestrator/test_worktree_manager.py
+governance:
+  - tasks/development-lifecycle-target-integration-cleanup-closure/INDEX.md
+  - tasks/development-lifecycle-target-integration-cleanup-closure/00-target-reuse-integration-cleanup.md
+conditional_scope:
+  path: nexus/orchestrator/self_hosted_task_service.py
+  failing_test: corrective authority and fresh-reload receipt tests
+  direct_dependency: existing owner_finish/approve_promotion/integrate_approved/cleanup_tasks state path
+  reason: expose the existing authoritative persistence and owner execution sequence
+  authority_impact: none
+```
 
 ## Settlement evidence
 
