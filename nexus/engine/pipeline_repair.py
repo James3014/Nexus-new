@@ -34,6 +34,26 @@ class AuditEvalContext:
 class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""
 
+    def _enter_runtime_phase(self, ctx: PipelineContextProtocol, phase: str, *, reason: str) -> None:
+        """Enter R/A through NexusPipeline's contract guard.
+
+        The fallback keeps narrow legacy mixin harnesses usable; production
+        NexusPipeline always supplies ``_advance_runtime_phase``.
+        """
+
+        advance = getattr(self, "_advance_runtime_phase", None)
+        if callable(advance):
+            if "runtime_phase" not in ctx.state.metadata:
+                # Legacy direct mixin harnesses enter R without the S/P/D
+                # pipeline preamble; real pipeline contexts always bind S.
+                ctx.state.metadata["runtime_phase"] = "D"
+                ctx.state.metadata["runtime_phase_assumed"] = True
+            advance(ctx, phase, reason=reason)
+            return
+        ctx.state.metadata.setdefault("runtime_phase", "D")
+        ctx.state.metadata["runtime_phase"] = phase
+        ctx.state.current_phase = phase
+
     @staticmethod
     def _is_rejected_repair_status(status: Any) -> bool:
         return str(status or "").strip().upper() in REJECTED_REPAIR_STATUSES
@@ -1670,7 +1690,7 @@ class PipelineRepairMixin:
 
             repair_attempts += 1
             ctx.state.retry_count = max(ctx.state.retry_count, repair_attempts - 1)
-            ctx.state.current_phase = "R"
+            self._enter_runtime_phase(ctx, "R", reason="repair_attempt_entry")
             logger.info(f"🛠️ [Pipeline] Repair Attempt {repair_attempts}/{max_retries}")
             if rlm_loop is not None and not rlm_loop.prepare_iteration(
                 project_root=Path(getattr(self.engine, "project_root", Path.cwd())),
@@ -1690,6 +1710,7 @@ class PipelineRepairMixin:
                 )
 
             # Step 2: Audit
+            self._enter_runtime_phase(ctx, "A", reason="audit_entry")
             eval_ctx = AuditEvalContext(
                 tracer=tracer,
                 repair_attempts=repair_attempts,
@@ -1729,6 +1750,7 @@ class PipelineRepairMixin:
                 
                 if replan_ok:
                     logger.warning("🔄 Escalation triggered successful replan, resetting repair cycle.")
+                    self._enter_runtime_phase(ctx, "D", reason="audit_rejection_replan")
                     repair_attempts = 0
                     continue
                     
@@ -1746,7 +1768,7 @@ class PipelineRepairMixin:
     def _execute_dry_run_repair(self, ctx: PipelineContextProtocol) -> bool:
         """Simulates repair loop in Dry Run mode."""
         ctx.state.retry_count = 0
-        ctx.state.current_phase = "R"
+        self._enter_runtime_phase(ctx, "R", reason="dry_run_repair_entry")
         r_dec_id = self._register_phase_decision(ctx, "R", "dry-run-repair")
         self._mock_dry_run_state(ctx)
 
@@ -1754,6 +1776,7 @@ class PipelineRepairMixin:
             ctx.state, "R", metadata={"status": "executed", "decision_id": r_dec_id, "skill_id": "dry-run-repair", "attempt": 1, "dry_run_mode": True}
         )
 
+        self._enter_runtime_phase(ctx, "A", reason="dry_run_audit_entry")
         a_out = self._run_composition_audit_phase(
             ctx,
             {
@@ -1766,7 +1789,6 @@ class PipelineRepairMixin:
         if a_out is not None and not bool(a_out.get("audit_success")):
             return False
 
-        ctx.state.current_phase = "A"
         a_dec_id = self._register_phase_decision(ctx, "A", "audit-review")
         self.engine._add_step_to_history(
             ctx.state, "A", metadata={"status": "APPROVED", "decision_id": a_dec_id, "skill_id": "audit-review", "dry_run_mode": True}

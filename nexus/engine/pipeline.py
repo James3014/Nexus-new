@@ -33,6 +33,12 @@ from nexus.core.handoff_bundle import HandoffBundleWriter
 from nexus.core.blackboard import Blackboard
 from nexus.engine.phase_plugin import PhaseRegistry, PhasePlugin, PhaseResult, PhaseExecutor
 from nexus.engine.phase_handshake import record_phase_artifacts, validate_required_artifacts
+from nexus.engine.runtime_phase_contract import (
+    RUNTIME_PHASE_FLOW,
+    RuntimePhase,
+    RuntimeStatus,
+    validate_transition,
+)
 
 # Mixins 導入
 from nexus.engine.pipeline_stages import PipelineStagesMixin
@@ -41,12 +47,12 @@ from nexus.engine.pipeline_crystal import PipelineCrystalMixin
 from nexus.engine.pipeline_research import PipelineResearchMixin
 
 logger = logging.getLogger(__name__)
-CANONICAL_STAGE_FLOW = ["S", "P", "X", "D", "R", "A", "C"]
+CANONICAL_STAGE_FLOW = [phase.value for phase in RUNTIME_PHASE_FLOW]
 STAGE_DESCRIPTIONS = {
     "S": "cold_start_seed",
     "P": "plan",
-    "X": "research_xray",
     "D": "diagnose",
+    "X": "research_xray",
     "R": "repair",
     "A": "audit_acceptance",
     "C": "crystallize",
@@ -113,7 +119,7 @@ class NexusPipeline(
     - Round 13-20: Bayesian health scoring & Dynamic lifecycle hooks.
     """
     
-    PHASE_PRIORITY_MAP = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40, "C": 50}
+    PHASE_PRIORITY_MAP = {"P": 10, "D": 20, "X": 30, "R": 40, "A": 50, "C": 60}
 
     def __init__(self, engine):
         self.engine = engine
@@ -128,6 +134,45 @@ class NexusPipeline(
     def _mark_stage(self, state: NexusState, stage: str, status: str) -> None:
         self._init_stage_status(state)
         state.metadata["stage_status"][stage] = status
+
+    def _advance_runtime_phase(
+        self,
+        ctx: PipelineContext,
+        destination: RuntimePhase | RuntimeStatus | str,
+        *,
+        audit_passed: bool | None = None,
+        reason: str = "",
+    ) -> tuple[RuntimePhase, RuntimePhase | RuntimeStatus]:
+        """Guard one runtime transition before a phase executor is called."""
+
+        source_value = str(ctx.state.metadata.get("runtime_phase") or RuntimePhase.S.value)
+        source, target = validate_transition(
+            source_value,
+            destination,
+            audit_passed=audit_passed,
+        )
+        receipt = {
+            "from": source.value,
+            "to": target.value,
+            "reason": reason or "phase_entry",
+        }
+        ctx.state.metadata.setdefault("runtime_phase_transitions", []).append(receipt)
+        if isinstance(target, RuntimePhase):
+            ctx.state.metadata["runtime_phase"] = target.value
+            ctx.state.current_phase = target.value
+        else:
+            ctx.state.metadata["runtime_status"] = target.value
+        return source, target
+
+    @staticmethod
+    def _formulation_phase_order(plugins: dict[str, PhasePlugin], ctx: PipelineContext) -> list[str]:
+        """Return P→D with optional X; the caller records X→D resume."""
+
+        order = ["P", "D"]
+        research = plugins.get("X")
+        if research is not None and research.should_run(ctx):
+            order.append("X")
+        return order
 
     def _register_default_plugins(self):
         """Registers standard phases using the core PHASES_MAP (MUSE-PLUGIN-2.0)."""
@@ -238,6 +283,8 @@ class NexusPipeline(
 
     def _run_crystallize_phase(self, ctx: PipelineContext, success: bool, tracer: Any) -> None:
         ctx.state.metadata["pipeline_success"] = success
+        if success and ctx.state.metadata.get("runtime_phase") == RuntimePhase.A.value:
+            self._advance_runtime_phase(ctx, RuntimePhase.C, audit_passed=True, reason="audit_passed_crystallize_entry")
         plugin = next((item for item in self.registry.get_ordered_plugins() if item.name == "C"), None)
         if plugin is not None and plugin.should_run(ctx):
             result = plugin.execute(self, ctx)
@@ -293,6 +340,8 @@ class NexusPipeline(
         state.metadata["effort_level"] = str(kwargs.get("effort", context.get("effort_level", "unknown") if context else "unknown"))
         if context:
             state.metadata.update(context)
+        state.metadata.setdefault("runtime_phase", RuntimePhase.S.value)
+        state.metadata.setdefault("runtime_phase_transitions", [])
             
         # [NEW: P-1] Claims Pre-flight Guard
         try:
@@ -412,6 +461,50 @@ class NexusPipeline(
             
         return success
 
+    def _run_formulation_plugin(self, plugin: PhasePlugin, ctx: PipelineContext) -> bool:
+        """Run one P/D/X plugin after the contract gate accepts its entry."""
+
+        self._advance_runtime_phase(ctx, plugin.name, reason="formulation_phase_entry")
+        logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
+        ctx.event_store.append(
+            build_phase_transition_event(
+                task_id=ctx.task_id,
+                phase=plugin.name,
+                transition="start",
+                payload={"name": plugin.name},
+            )
+        )
+        try:
+            validate_required_artifacts(phase=plugin, blackboard=ctx.blackboard)
+            result = plugin.execute(self, ctx)
+            record_phase_artifacts(phase=plugin, result=result, blackboard=ctx.blackboard)
+            ctx.event_store.append(
+                build_phase_transition_event(
+                    task_id=ctx.task_id,
+                    phase=plugin.name,
+                    transition="end",
+                    payload={"status": result.status},
+                )
+            )
+            if result.status in {"FAILED", "fail"}:
+                logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
+                ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                return False
+            return True
+        except RuntimeError as veto_err:
+            veto_str = str(veto_err)
+            if veto_str.startswith("SEMANTIC_HANDSHAKE_MISSING_ARTIFACT"):
+                logger.error("🛑 [Pipeline] Semantic handshake failed: %s", veto_err)
+                ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                ctx.state.metadata["semantic_handshake_failed"] = True
+                ctx.state.metadata["semantic_handshake_reason"] = veto_str
+                return False
+            raise
+        except Exception as exc:
+            logger.exception("Unhandled failure in plugin %s: %s", plugin.name, exc)
+            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+            return False
+
     def _run_pipeline_inner(self, task_id: str, trace_id: str, span_id: str, task_desc: str, task_type: str = "bug", context: Optional[Dict] = None, tracer: Any = None, **kwargs) -> bool:
         """執行核心 P-X-D-R-A-C 管線 (Sprint 13 R15 Plugin-driven)"""
         ctx = self._init_pipeline_state(task_id, trace_id, span_id, task_desc, task_type, context, **kwargs)
@@ -427,25 +520,33 @@ class NexusPipeline(
             spec_binding.get("verify_commands_count", 0),
         )
         
-        # 1. 執行線性階段 (P -> X -> D)
+        # 1. Execute the contract order P -> D -> X -> D (optional X).
         pxd_attempts = 0
         MAX_PXD_RETRIES = 2
         
         while pxd_attempts < MAX_PXD_RETRIES and success:
             pxd_attempts += 1
             pxd_veto = False
+            executed_formulation_phases: list[str] = []
             
             is_direct_mode = bool(ctx.state.metadata.get("direct_mode", False))
             if is_direct_mode:
-                logger.info("⚡ [Pipeline] Direct Mode active: Bypassing P-X-D formulation phases.")
+                logger.info("⚡ [Pipeline] Direct Mode active: Bypassing formulation executors.")
+                self._advance_runtime_phase(ctx, RuntimePhase.P, reason="direct_mode_virtual_plan")
+                self._advance_runtime_phase(ctx, RuntimePhase.D, reason="direct_mode_virtual_diagnose")
                 break
-                
-            for plugin in self.registry.get_ordered_plugins():
-                if plugin.name in ("P", "X", "D"):
-                    if not plugin.should_run(ctx):
-                        logger.info("⏩ Skipping phase: %s", plugin.name)
-                        continue
-                        
+            plugins = {plugin.name: plugin for plugin in self.registry.get_ordered_plugins()}
+            for phase_name in ("P", "D"):
+                plugin = plugins.get(phase_name)
+                if plugin is None or not plugin.should_run(ctx):
+                    logger.info("⏩ Skipping phase: %s", phase_name)
+                    continue
+
+                executed_formulation_phases.append(plugin.name)
+                if not self._run_formulation_plugin(plugin, ctx):
+                    success = False
+                    break
+                if False:  # legacy inline executor path retained for history
                     logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
                     
                     ctx.event_store.append(
@@ -503,8 +604,20 @@ class NexusPipeline(
                         ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
                         break
             
+            if not pxd_veto and success:
+                research_plugin = plugins.get("X")
+                if research_plugin is not None and research_plugin.should_run(ctx):
+                    executed_formulation_phases.append("X")
+                    if not self._run_formulation_plugin(research_plugin, ctx):
+                        success = False
+                    else:
+                        # X returns control to the same D phase. The
+                        # continuation is a guarded state boundary; D's
+                        # executor remains single-run for compatibility.
+                        self._advance_runtime_phase(ctx, RuntimePhase.D, reason="research_resume_boundary")
+
             if not pxd_veto:
-                break  # P-X-D 全部通過或 terminal failure，跳出
+                break  # P-D-X-D 全部通過或 terminal failure，跳出
             
         # 2. 執行複雜循環階段 (R/A)
         if success:
