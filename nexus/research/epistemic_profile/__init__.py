@@ -26,6 +26,11 @@ from nexus.research.epistemic_profile.contracts import (
     EpistemicScopeAlignment,
     EpistemicVerificationResult,
 )
+from nexus.research.epistemic_profile.io import (
+    load_epistemic_profile_export,
+    verify_epistemic_profile_export,
+    write_epistemic_receipt,
+)
 
 __all__ = [
     "EPISTEMIC_ARTIFACT_REF_SCHEMA",
@@ -48,4 +53,7 @@ __all__ = [
     "build_epistemic_claim_evidence_read_model",
     "build_epistemic_verification_result",
     "build_epistemic_receipt_extension",
+    "load_epistemic_profile_export",
+    "verify_epistemic_profile_export",
+    "write_epistemic_receipt",
 ]

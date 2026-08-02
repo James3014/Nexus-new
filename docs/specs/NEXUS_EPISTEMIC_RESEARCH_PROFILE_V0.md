@@ -98,3 +98,35 @@ In future milestones, research efficacy will be evaluated across:
 3. Nexus + Epistemic Research Profile.
 
 This ERP-00 foundation does NOT claim that Epistemic Research Profile has improved research quality or reduced errors.
+
+---
+
+## G. Read-Only Export Bridge Operator Demo
+
+```bash
+# 1. Research Ledger Export
+cd /Users/jameschen/Workspace/nexus/research-ledger
+
+PYTHONPATH=src ../.venv/bin/python3 -m research_ledger.cli \
+  run-gate-a-synthetic \
+  --state-dir /tmp/research-ledger-demo-state
+
+PYTHONPATH=src ../.venv/bin/python3 -m research_ledger.cli \
+  export-nexus-profile \
+  --state-dir /tmp/research-ledger-demo-state \
+  --run-id run_s1 \
+  --task-id demo-task \
+  --attempt-id demo-attempt \
+  --profile-id demo-profile \
+  --output /tmp/research-ledger-epistemic-export.json
+```
+
+```bash
+# 2. Nexus Strict Verification & Receipt Export
+cd /Users/jameschen/Workspace/nexus
+
+.venv/bin/python3 -m nexus.research.epistemic_profile.cli \
+  verify-export \
+  --input /tmp/research-ledger-epistemic-export.json \
+  --output /tmp/nexus-epistemic-receipt.json
+```
