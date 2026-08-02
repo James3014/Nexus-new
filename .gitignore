@@ -73,6 +73,9 @@ scratch/qwen3b_s2t_adapter.tar.gz
 .tmp/
 .mimocode/
 
+# Nested experimental Research Ledger lab repository
+/research-ledger/
+
 # Nexus local generated/cache/debug artifacts
 .hypothesis/
 **/target/
