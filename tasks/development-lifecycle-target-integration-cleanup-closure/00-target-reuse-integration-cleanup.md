@@ -135,3 +135,31 @@ IMPLEMENTER_VERIFIED_TARGET_REUSE_INTEGRATION_CLEANUP_CANDIDATE
 
 This Candidate does not claim independent acceptance, canonical integration,
 live Target cleanup, push, or production/public readiness.
+
+## Settlement evidence
+
+```yaml
+implementation_commit: ab7dca3f8a0d805bc442f1d2d211dc9a6a6e8f14
+canonical_unchanged: true
+target_branch: nexus/task/target-integration-cleanup-closure
+focused_tests: 8_passed
+affected_regressions:
+  lifecycle_action: 9_passed
+  candidate_commit: 13_passed
+  candidate_verifier: 19_passed
+  governed_integration: 5_passed
+  worktree_cleanup_and_lease: 11_passed
+  self_hosted_cleanup_promotion_integration_retry: 28_passed
+real_git_canary:
+  staging_failure_canonical_unchanged: true
+  conflict_canonical_unchanged: true
+  dirty_canonical_blocked: true
+  verified_apply_passed: true
+  owned_cleanup_passed: true
+authority_audit:
+  new_lifecycle_authority: false
+  new_integration_authority: false
+  new_verifier: false
+  new_receipt_store: false
+  planner_workforce_runtime_changed: false
+```
