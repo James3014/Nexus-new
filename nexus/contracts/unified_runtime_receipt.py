@@ -25,6 +25,88 @@ FAILURE_CLASSES = frozenset(
 )
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
+RUNTIME_DEVELOPMENT_MAPPING_SCHEMA = "nexus.runtime_development_mapping.v1"
+
+
+def build_runtime_development_mapping(
+    *,
+    task_id: str,
+    attempt_id: str,
+    action_id: str,
+    runtime_terminal_state: str,
+    development_status: str,
+    runtime_success: bool,
+    candidate_status: str = "NOT_CREATED",
+    candidate_accepted: bool = False,
+    integration_status: str = "NOT_INTEGRATED",
+    integrated: bool = False,
+    runtime_receipt_ref: str = "",
+    development_receipt_ref: str = "",
+) -> dict[str, Any]:
+    mapping = {
+        "schema": RUNTIME_DEVELOPMENT_MAPPING_SCHEMA,
+        "identity": {
+            "task_id": str(task_id),
+            "attempt_id": str(attempt_id),
+            "action_id": str(action_id),
+        },
+        "runtime": {
+            "task_id": str(task_id),
+            "run_attempt_id": str(attempt_id),
+            "entry_action_id": str(action_id),
+            "terminal_state": str(runtime_terminal_state),
+            "success": bool(runtime_success),
+            "receipt_ref": str(runtime_receipt_ref),
+        },
+        "development": {
+            "task_id": str(task_id),
+            "attempt_id": str(attempt_id),
+            "action_id": str(action_id),
+            "status": str(development_status),
+            "candidate_status": str(candidate_status),
+            "candidate_accepted": bool(candidate_accepted),
+            "integration_status": str(integration_status),
+            "integrated": bool(integrated),
+            "receipt_ref": str(development_receipt_ref),
+        },
+        "claim_boundaries": {
+            "runtime_success_implies_candidate_acceptance": False,
+            "candidate_acceptance_implies_integration": False,
+            "integration_implies_production_claim": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+        },
+    }
+    validate_runtime_development_mapping(mapping)
+    return mapping
+
+
+def validate_runtime_development_mapping(mapping: Mapping[str, Any]) -> None:
+    if mapping.get("schema") != RUNTIME_DEVELOPMENT_MAPPING_SCHEMA:
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_SCHEMA_INVALID")
+    identity = mapping.get("identity")
+    runtime = mapping.get("runtime")
+    development = mapping.get("development")
+    boundaries = mapping.get("claim_boundaries")
+    if not all(isinstance(value, Mapping) for value in (identity, runtime, development, boundaries)):
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_SHAPE_INVALID")
+    for field in ("task_id", "attempt_id", "action_id"):
+        value = str(identity.get(field) or "")
+        if not value or str(runtime.get("run_attempt_id" if field == "attempt_id" else "entry_action_id" if field == "action_id" else "task_id") or "") != value:
+            raise ValueError(f"RUNTIME_DEVELOPMENT_MAPPING_IDENTITY_MISMATCH:{field}")
+        if str(development.get(field) or "") != value:
+            raise ValueError(f"RUNTIME_DEVELOPMENT_MAPPING_IDENTITY_MISMATCH:{field}")
+    if bool(development.get("integrated")) and not bool(development.get("candidate_accepted")):
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_INTEGRATION_REQUIRES_ACCEPTANCE")
+    if any(boundaries.get(field) is not False for field in (
+        "runtime_success_implies_candidate_acceptance",
+        "candidate_acceptance_implies_integration",
+        "integration_implies_production_claim",
+        "public_claim_allowed",
+        "production_ready",
+    )):
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_CLAIM_BOUNDARY_INVALID")
+
 
 def _stable_reason_code(value: Any, *, default: str) -> str:
     text = str(value or "").strip().lower()

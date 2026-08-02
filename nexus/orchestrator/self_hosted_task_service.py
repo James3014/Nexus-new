@@ -45,6 +45,7 @@ from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
 from nexus.contracts.lifecycle_action import ContractKind, validate_owner_inline_contract
+from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
@@ -835,6 +836,23 @@ class SelfHostedTaskService:
                     "candidate_state_hash", "verified_receipt_hash",
                 ):
                     state[field] = packet.get(field)
+            action_id = str(state.get("action_id") or f"action-{state.get('attempt_id') or task_id}")
+            promotion_status = str(state.get("promotion_status") or "NOT_CREATED")
+            integrated = state.get("status") == "INTEGRATED" or promotion_status == "INTEGRATED"
+            state["runtime_development_mapping"] = build_runtime_development_mapping(
+                task_id=str(state.get("task_id") or task_id),
+                attempt_id=str(state.get("attempt_id") or attempt_id or "attempt-unknown"),
+                action_id=action_id,
+                runtime_terminal_state=str(state.get("runtime_terminal_state") or state.get("status") or "UNKNOWN"),
+                development_status=str(state.get("status") or "UNKNOWN"),
+                runtime_success=str(state.get("verification_verdict") or "").upper() == "PROVEN",
+                candidate_status=str(state.get("candidate_status") or promotion_status),
+                candidate_accepted=promotion_status in {"APPROVED", "INTEGRATED"},
+                integration_status=promotion_status,
+                integrated=integrated,
+                runtime_receipt_ref=str(state.get("verified_receipt_hash") or ""),
+                development_receipt_ref=str(state.get("verified_receipt_hash") or ""),
+            )
 
         return self._mutate_state(task_id, mutate)
 
@@ -3684,6 +3702,7 @@ class SelfHostedTaskService:
             "execution": state.get("execution"),
             "candidate": state.get("candidate"),
             "verified_receipt": state.get("verified_receipt"),
+            "runtime_development_mapping": state.get("runtime_development_mapping"),
             "error": state.get("error"),
         }
 
