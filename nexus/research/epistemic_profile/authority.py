@@ -49,29 +49,39 @@ def default_epistemic_authority_boundary() -> EpistemicAuthorityBoundary:
     return EpistemicAuthorityBoundary()
 
 
+CANONICAL_AUTHORITY_MAP = {
+    "identity_authority": ("nexus.lifecycle", "EP_AUTHORITY_IDENTITY_OVERRIDE"),
+    "task_authority": ("nexus.task_card", "EP_AUTHORITY_TASK_OVERRIDE"),
+    "receipt_authority": ("nexus.receipt", "EP_AUTHORITY_RECEIPT_OVERRIDE"),
+    "claim_boundary_authority": ("nexus.evidence.claim_boundary", "EP_AUTHORITY_CLAIM_BOUNDARY_OVERRIDE"),
+    "claim_evidence_authority": ("nexus.contracts.claim_evidence_read_model", "EP_AUTHORITY_CLAIM_EVIDENCE_OVERRIDE"),
+    "replay_authority": ("nexus.replay", "EP_AUTHORITY_REPLAY_OVERRIDE"),
+    "acceptance_authority": ("nexus.acceptance", "EP_AUTHORITY_ACCEPTANCE_OVERRIDE"),
+    "integration_authority": ("owner_or_formal_integrator", "EP_AUTHORITY_INTEGRATION_AUTHORITY_OVERRIDE"),
+    "profile_domain_authority": ("nexus.research.epistemic_profile", "EP_AUTHORITY_PROFILE_DOMAIN_OVERRIDE"),
+}
+
+PERMISSION_FLAG_MAP = {
+    "profile_may_update_runtime": "EP_AUTHORITY_RUNTIME_UNLOCK",
+    "profile_may_approve_candidate": "EP_AUTHORITY_CANDIDATE_APPROVAL_UNLOCK",
+    "profile_may_integrate": "EP_AUTHORITY_INTEGRATION_UNLOCK",
+    "profile_may_push": "EP_AUTHORITY_PUSH_UNLOCK",
+    "profile_may_unlock_public_claim": "EP_AUTHORITY_PUBLIC_CLAIM_UNLOCK",
+    "profile_may_unlock_public_benchmark": "EP_AUTHORITY_PUBLIC_BENCHMARK_UNLOCK",
+    "profile_may_claim_production_ready": "EP_AUTHORITY_PRODUCTION_UNLOCK",
+}
+
+
 def validate_epistemic_authority_payload(payload: Mapping[str, Any]) -> tuple[str, ...]:
     blockers: list[str] = []
-    receipt_auth = payload.get("receipt_authority", "nexus.receipt")
-    if receipt_auth != "nexus.receipt":
-        blockers.append("EP_AUTHORITY_RECEIPT_OVERRIDE")
 
-    acceptance_auth = payload.get("acceptance_authority", "nexus.acceptance")
-    if acceptance_auth != "nexus.acceptance":
-        blockers.append("EP_AUTHORITY_ACCEPTANCE_OVERRIDE")
+    for field_name, (expected_val, blocker) in CANONICAL_AUTHORITY_MAP.items():
+        val = payload.get(field_name, expected_val)
+        if val != expected_val:
+            blockers.append(blocker)
 
-    if bool(payload.get("profile_may_update_runtime", False)):
-        blockers.append("EP_AUTHORITY_RUNTIME_UNLOCK")
-
-    if bool(payload.get("profile_may_unlock_public_claim", False)):
-        blockers.append("EP_AUTHORITY_PUBLIC_CLAIM_UNLOCK")
-
-    if bool(payload.get("profile_may_unlock_public_benchmark", False)):
-        blockers.append("EP_AUTHORITY_PUBLIC_BENCHMARK_UNLOCK")
-
-    if bool(payload.get("profile_may_integrate", False)):
-        blockers.append("EP_AUTHORITY_INTEGRATION_UNLOCK")
-
-    if bool(payload.get("profile_may_claim_production_ready", False)):
-        blockers.append("EP_AUTHORITY_PRODUCTION_UNLOCK")
+    for flag_name, blocker in PERMISSION_FLAG_MAP.items():
+        if bool(payload.get(flag_name, False)):
+            blockers.append(blocker)
 
     return tuple(blockers)

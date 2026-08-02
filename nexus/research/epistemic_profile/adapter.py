@@ -12,77 +12,126 @@ from nexus.research.epistemic_profile.contracts import (
     EpistemicVerificationResult,
 )
 
+ALLOWED_COMPLETION_STATUSES = {
+    "NOT_APPLICABLE",
+    "PASS",
+    "SUCCESS",
+    "FAIL",
+    "FAILED",
+    "ERROR",
+    "RETURN",
+    "BLOCKED",
+}
+
+FAILING_COMPLETION_STATUSES = {
+    "FAIL",
+    "FAILED",
+    "ERROR",
+    "RETURN",
+    "BLOCKED",
+}
+
 
 def validate_epistemic_profile_input(inp: EpistemicProfileInput) -> tuple[str, ...]:
     blockers: list[str] = []
 
-    if not inp.task_id or not inp.task_id.strip():
+    if not getattr(inp, "task_id", None) or not str(inp.task_id).strip():
         blockers.append("EP_MISSING_TASK_ID")
-    if not inp.attempt_id or not inp.attempt_id.strip():
+    if not getattr(inp, "attempt_id", None) or not str(inp.attempt_id).strip():
         blockers.append("EP_MISSING_ATTEMPT_ID")
-    if not inp.profile_id or not inp.profile_id.strip():
+    if not getattr(inp, "profile_id", None) or not str(inp.profile_id).strip():
         blockers.append("EP_MISSING_PROFILE_ID")
-    if not inp.run_id or not inp.run_id.strip():
+    if not getattr(inp, "run_id", None) or not str(inp.run_id).strip():
         blockers.append("EP_MISSING_RUN_ID")
-    if not inp.masked_brief_ref or not inp.masked_brief_ref.strip():
+    if not getattr(inp, "masked_brief_ref", None) or not str(inp.masked_brief_ref).strip():
         blockers.append("EP_MISSING_MASKED_BRIEF_REF")
-    if not inp.position_commitment_ref or not inp.position_commitment_ref.strip():
+    if not getattr(inp, "position_commitment_ref", None) or not str(inp.position_commitment_ref).strip():
         blockers.append("EP_MISSING_POSITION_COMMITMENT_REF")
 
-    comp_status = str(inp.completion_status or "NOT_APPLICABLE").upper()
-    if comp_status in {"FAIL", "FAILED", "ERROR"}:
+    comp_status = str(getattr(inp, "completion_status", "") or "NOT_APPLICABLE").upper()
+    if comp_status not in ALLOWED_COMPLETION_STATUSES:
+        blockers.append("EP_INVALID_COMPLETION_STATUS")
+    elif comp_status in FAILING_COMPLETION_STATUSES:
         blockers.append("EP_COMPLETION_STATUS_FAILED")
-    if comp_status in {"PASS", "SUCCESS"} and not (inp.completion_envelope_ref and inp.completion_envelope_ref.strip()):
+    elif comp_status in {"PASS", "SUCCESS"} and not (getattr(inp, "completion_envelope_ref", None) and str(inp.completion_envelope_ref).strip()):
         blockers.append("EP_MISSING_COMPLETION_ENVELOPE_REF")
 
-    if not inp.records:
+    records = getattr(inp, "records", None)
+    if not records:
         blockers.append("EP_MISSING_EVIDENCE_RECORDS")
+    else:
+        for rec in records:
+            if getattr(rec, "run_id", None) != getattr(inp, "run_id", None):
+                blockers.append("EP_CROSS_RUN_RECORD")
 
-    for rec in inp.records:
-        if rec.run_id != inp.run_id:
-            blockers.append("EP_CROSS_RUN_RECORD")
-        if not rec.artifact or not rec.artifact.artifact_id or not rec.artifact.artifact_id.strip():
-            blockers.append("EP_MISSING_ARTIFACT_REF")
-        if not rec.extraction_ref or not rec.extraction_ref.strip():
-            blockers.append("EP_MISSING_EXTRACTION_REF")
-        if not rec.assessment_ref or not rec.assessment_ref.strip():
-            blockers.append("EP_MISSING_ASSESSMENT_REF")
-        if rec.evidence_hash_status != "PASS":
-            blockers.append("EP_EVIDENCE_HASH_STATUS_FAILED")
-        if rec.evidence_seal_status != "PASS":
-            blockers.append("EP_EVIDENCE_SEAL_STATUS_FAILED")
-        if rec.blockers:
-            blockers.extend(rec.blockers)
+            claim_id = getattr(rec, "claim_id", None)
+            if not claim_id or not str(claim_id).strip():
+                blockers.append("EP_MISSING_CLAIM_ID")
+
+            art = getattr(rec, "artifact", None)
+            if not art or not getattr(art, "artifact_id", None) or not str(art.artifact_id).strip():
+                blockers.append("EP_MISSING_ARTIFACT_REF")
+
+            if not art or not getattr(art, "relative_ref", None) or not str(art.relative_ref).strip():
+                blockers.append("EP_MISSING_ARTIFACT_RELATIVE_REF")
+
+            ext_ref = getattr(rec, "extraction_ref", None)
+            if not ext_ref or not str(ext_ref).strip():
+                blockers.append("EP_MISSING_EXTRACTION_REF")
+
+            asm_ref = getattr(rec, "assessment_ref", None)
+            if not asm_ref or not str(asm_ref).strip():
+                blockers.append("EP_MISSING_ASSESSMENT_REF")
+
+            if getattr(rec, "evidence_hash_status", "PASS") != "PASS":
+                blockers.append("EP_EVIDENCE_HASH_STATUS_FAILED")
+            if getattr(rec, "evidence_seal_status", "PASS") != "PASS":
+                blockers.append("EP_EVIDENCE_SEAL_STATUS_FAILED")
+
+            rec_blockers = getattr(rec, "blockers", ())
+            if rec_blockers:
+                blockers.extend(rec_blockers)
 
     return tuple(dict.fromkeys(blockers))
 
 
 def build_epistemic_claim_evidence_read_model(inp: EpistemicProfileInput) -> dict[str, Any]:
+    input_blockers = validate_epistemic_profile_input(inp)
     generic_records = []
     evidence_bundle_refs = []
     receipt_refs = []
 
-    for rec in inp.records:
-        rec_blockers = []
-        if rec.evidence_hash_status != "PASS":
+    records = getattr(inp, "records", ()) or ()
+    for rec in records:
+        rec_blockers = list(input_blockers)
+        if getattr(rec, "evidence_hash_status", "PASS") != "PASS":
             rec_blockers.append("evidence_hash_verification_failed")
-        if rec.evidence_seal_status != "PASS":
+        if getattr(rec, "evidence_seal_status", "PASS") != "PASS":
             rec_blockers.append("evidence_seal_verification_failed")
-        if rec.blockers:
-            rec_blockers.extend(rec.blockers)
+        rec_custom_blockers = getattr(rec, "blockers", ())
+        if rec_custom_blockers:
+            rec_blockers.extend(rec_custom_blockers)
 
-        evidence_bundle_refs.extend([rec.extraction_ref, rec.assessment_ref])
-        receipt_refs.extend(rec.receipt_refs)
+        ext_ref = getattr(rec, "extraction_ref", "") or ""
+        asm_ref = getattr(rec, "assessment_ref", "") or ""
+        if ext_ref:
+            evidence_bundle_refs.append(ext_ref)
+        if asm_ref:
+            evidence_bundle_refs.append(asm_ref)
 
+        rec_receipts = getattr(rec, "receipt_refs", ()) or ()
+        receipt_refs.extend(rec_receipts)
+
+        claim_id = getattr(rec, "claim_id", "unknown")
         generic_records.append({
-            "name": f"epistemic_record_{rec.claim_id}",
+            "name": f"epistemic_record_{claim_id}",
             "delivery_status": "PASS" if not rec_blockers else "RETURN",
             "trust_status": "PASS" if not rec_blockers else "FAIL",
             "provider_token_cleanliness": "not_applicable",
-            "evidence_refs": [rec.extraction_ref, rec.assessment_ref],
-            "receipt_refs": list(rec.receipt_refs),
-            "evidence_seal_status": rec.evidence_seal_status,
-            "evidence_hash_status": rec.evidence_hash_status,
+            "evidence_refs": [r for r in [ext_ref, asm_ref] if r],
+            "receipt_refs": list(rec_receipts),
+            "evidence_seal_status": getattr(rec, "evidence_seal_status", "PASS"),
+            "evidence_hash_status": getattr(rec, "evidence_hash_status", "PASS"),
             "blockers": rec_blockers,
         })
 
@@ -92,9 +141,16 @@ def build_epistemic_claim_evidence_read_model(inp: EpistemicProfileInput) -> dic
         evidence_bundle_refs=evidence_bundle_refs,
         receipt_refs=receipt_refs,
         sealed_evidence_required=False,
-        completion_status=inp.completion_status,
-        completion_envelope_ref=inp.completion_envelope_ref,
+        completion_status=getattr(inp, "completion_status", "NOT_APPLICABLE"),
+        completion_envelope_ref=getattr(inp, "completion_envelope_ref", ""),
     )
+
+    if input_blockers:
+        existing_blockers = model_dict.get("blockers", [])
+        combined = tuple(dict.fromkeys(list(input_blockers) + list(existing_blockers)))
+        model_dict["blockers"] = list(combined)
+        model_dict["status"] = "RETURN"
+
     return model_dict
 
 
@@ -107,15 +163,21 @@ def build_epistemic_verification_result(inp: EpistemicProfileInput) -> Epistemic
 
     evidence_refs = []
     receipt_refs = []
-    for rec in inp.records:
-        evidence_refs.extend([rec.extraction_ref, rec.assessment_ref])
-        receipt_refs.extend(rec.receipt_refs)
+    records = getattr(inp, "records", ()) or ()
+    for rec in records:
+        ext_ref = getattr(rec, "extraction_ref", "")
+        asm_ref = getattr(rec, "assessment_ref", "")
+        if ext_ref:
+            evidence_refs.append(ext_ref)
+        if asm_ref:
+            evidence_refs.append(asm_ref)
+        receipt_refs.extend(getattr(rec, "receipt_refs", ()) or ())
 
     status = EpistemicIntegrityStatus.PASS if not all_blockers else EpistemicIntegrityStatus.RETURN
 
     return EpistemicVerificationResult(
         status=status,
-        records_checked=len(inp.records),
+        records_checked=len(records),
         evidence_refs=tuple(dict.fromkeys(evidence_refs)),
         receipt_refs=tuple(dict.fromkeys(receipt_refs)),
         blockers=all_blockers,
@@ -128,9 +190,9 @@ def build_epistemic_receipt_extension(inp: EpistemicProfileInput) -> EpistemicRe
     boundary = ClaimBoundary()
 
     return EpistemicReceiptExtension(
-        profile_id=inp.profile_id,
-        run_id=inp.run_id,
-        records_checked=len(inp.records),
+        profile_id=getattr(inp, "profile_id", ""),
+        run_id=getattr(inp, "run_id", ""),
+        records_checked=ver_res.records_checked,
         evidence_refs=ver_res.evidence_refs,
         receipt_refs=ver_res.receipt_refs,
         blockers=ver_res.blockers,

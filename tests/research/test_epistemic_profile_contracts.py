@@ -52,12 +52,38 @@ def test_reject_traversal_in_artifact_ref():
         )
 
 
+def test_reject_empty_relative_ref():
+    with pytest.raises(ValueError, match="relative_ref"):
+        EpistemicArtifactRef(
+            artifact_id="art_001",
+            content_sha256="a" * 64,
+            relative_ref="  ",
+        )
+
+
 def test_reject_invalid_sha256():
     with pytest.raises(ValueError, match="64-character lowercase hex"):
         EpistemicArtifactRef(
             artifact_id="art_001",
             content_sha256="INVALID_HASH",
             relative_ref="artifacts/art_001.txt",
+        )
+
+
+def test_reject_empty_claim_id():
+    art = EpistemicArtifactRef(
+        artifact_id="art_001",
+        content_sha256="a" * 64,
+        relative_ref="artifacts/art_001.txt",
+    )
+    with pytest.raises(ValueError, match="claim_id"):
+        EpistemicEvidenceRecord(
+            run_id="run_001",
+            claim_id="  ",
+            artifact=art,
+            extraction_ref="ext_001",
+            assessment_ref="asm_001",
+            cannot_establish_present=True,
         )
 
 

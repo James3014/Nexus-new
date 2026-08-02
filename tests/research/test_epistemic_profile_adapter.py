@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from nexus.contracts.claim_evidence_read_model import CLAIM_EVIDENCE_READ_MODEL_SCHEMA
 from nexus.evidence.claim_boundary import ClaimBoundary
 from nexus.research.epistemic_profile.adapter import (
@@ -69,6 +71,65 @@ def test_uses_existing_claim_evidence_read_model_schema():
     assert read_model["schema"] == CLAIM_EVIDENCE_READ_MODEL_SCHEMA
 
 
+def test_missing_claim_id_fails_closed():
+    inp = _make_valid_input()
+    bad_rec = EpistemicEvidenceRecord(
+        run_id="run_001",
+        claim_id="clm_temp",
+        artifact=EpistemicArtifactRef(
+            artifact_id="art_001",
+            content_sha256="a" * 64,
+            relative_ref="artifacts/art_001.txt",
+        ),
+        extraction_ref="ext_001",
+        assessment_ref="asm_001",
+        cannot_establish_present=True,
+    )
+    object.__setattr__(bad_rec, "claim_id", "  ")
+    object.__setattr__(inp, "records", (bad_rec,))
+
+    blockers = validate_epistemic_profile_input(inp)
+    assert "EP_MISSING_CLAIM_ID" in blockers
+
+    res = build_epistemic_verification_result(inp)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_MISSING_CLAIM_ID" in res.blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+    assert "EP_MISSING_CLAIM_ID" in read_model["blockers"]
+
+
+def test_missing_artifact_relative_ref_fails_closed():
+    inp = _make_valid_input()
+    bad_art = EpistemicArtifactRef(
+        artifact_id="art_001",
+        content_sha256="a" * 64,
+        relative_ref="artifacts/art_001.txt",
+    )
+    object.__setattr__(bad_art, "relative_ref", "  ")
+    bad_rec = EpistemicEvidenceRecord(
+        run_id="run_001",
+        claim_id="clm_001",
+        artifact=bad_art,
+        extraction_ref="ext_001",
+        assessment_ref="asm_001",
+        cannot_establish_present=True,
+    )
+    object.__setattr__(inp, "records", (bad_rec,))
+
+    blockers = validate_epistemic_profile_input(inp)
+    assert "EP_MISSING_ARTIFACT_RELATIVE_REF" in blockers
+
+    res = build_epistemic_verification_result(inp)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_MISSING_ARTIFACT_RELATIVE_REF" in res.blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+    assert "EP_MISSING_ARTIFACT_RELATIVE_REF" in read_model["blockers"]
+
+
 def test_missing_artifact_ref_fails_closed():
     inp = _make_valid_input()
     bad_art = EpistemicArtifactRef(
@@ -93,6 +154,9 @@ def test_missing_artifact_ref_fails_closed():
     res = build_epistemic_verification_result(inp)
     assert res.status == EpistemicIntegrityStatus.RETURN
 
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+
 
 def test_missing_extraction_ref_fails_closed():
     inp = _make_valid_input()
@@ -113,6 +177,9 @@ def test_missing_extraction_ref_fails_closed():
 
     blockers = validate_epistemic_profile_input(inp)
     assert "EP_MISSING_EXTRACTION_REF" in blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
 
 
 def test_missing_assessment_ref_fails_closed():
@@ -135,6 +202,9 @@ def test_missing_assessment_ref_fails_closed():
     blockers = validate_epistemic_profile_input(inp)
     assert "EP_MISSING_ASSESSMENT_REF" in blockers
 
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+
 
 def test_cross_run_record_fails_closed():
     inp = _make_valid_input()
@@ -154,6 +224,37 @@ def test_cross_run_record_fails_closed():
 
     blockers = validate_epistemic_profile_input(inp)
     assert "EP_CROSS_RUN_RECORD" in blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+
+
+def test_banana_completion_status_fails_closed():
+    inp = _make_valid_input()
+    object.__setattr__(inp, "completion_status", "BANANA")
+
+    blockers = validate_epistemic_profile_input(inp)
+    assert "EP_INVALID_COMPLETION_STATUS" in blockers
+
+    res = build_epistemic_verification_result(inp)
+    assert res.status == EpistemicIntegrityStatus.RETURN
+    assert "EP_INVALID_COMPLETION_STATUS" in res.blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+    assert "EP_INVALID_COMPLETION_STATUS" in read_model["blockers"]
+
+
+@pytest.mark.parametrize("failing_status", ["FAIL", "FAILED", "ERROR", "RETURN", "BLOCKED"])
+def test_failing_completion_statuses_produce_blocker(failing_status):
+    inp = _make_valid_input()
+    object.__setattr__(inp, "completion_status", failing_status)
+
+    blockers = validate_epistemic_profile_input(inp)
+    assert "EP_COMPLETION_STATUS_FAILED" in blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
 
 
 def test_hash_failure_fails_closed():
@@ -177,6 +278,9 @@ def test_hash_failure_fails_closed():
     assert res.status == EpistemicIntegrityStatus.RETURN
     assert "EP_EVIDENCE_HASH_STATUS_FAILED" in res.blockers
 
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+
 
 def test_seal_failure_fails_closed():
     inp = _make_valid_input()
@@ -199,6 +303,9 @@ def test_seal_failure_fails_closed():
     assert res.status == EpistemicIntegrityStatus.RETURN
     assert "EP_EVIDENCE_SEAL_STATUS_FAILED" in res.blockers
 
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
+
 
 def test_existing_record_blocker_propagates():
     inp = _make_valid_input()
@@ -220,6 +327,9 @@ def test_existing_record_blocker_propagates():
     res = build_epistemic_verification_result(inp)
     assert res.status == EpistemicIntegrityStatus.RETURN
     assert "custom_record_blocker" in res.blockers
+
+    read_model = build_epistemic_claim_evidence_read_model(inp)
+    assert read_model["status"] == "RETURN"
 
 
 def test_evidence_refs_preserved():

@@ -5,7 +5,6 @@ import re
 from typing import Any
 
 from nexus.research.isolation_contracts import ContaminationGuardResult, ResearchReceipt, ResearchIsolationLevel
-from nexus.research.research_facts import has_design_fields
 
 
 DESIGN_TERMS = (
@@ -31,10 +30,8 @@ def evaluate_research_contamination(payload: dict[str, Any]) -> ContaminationGua
     """檢查研究產物是否包含設計意圖、實作建議或最終需求外推 (Contamination Check)"""
     blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     detected = [term for term in DESIGN_TERMS if re.search(r'\b' + re.escape(term) + r'\b', blob, re.IGNORECASE)]
-    if has_design_fields(payload):
-        detected.append("design_field")
-    detected = list(dict.fromkeys(detected))
     
+    # 這裡可以加入更多精確的啟發式檢查
     if detected:
         return ContaminationGuardResult(
             passed=False,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from nexus.research.epistemic_profile.authority import (
     EpistemicAuthorityBoundary,
     default_epistemic_authority_boundary,
@@ -20,66 +22,82 @@ def test_default_authority_points_to_nexus_authorities():
     assert boundary.profile_domain_authority == "nexus.research.epistemic_profile"
 
 
-def test_profile_cannot_become_receipt_authority():
-    payload = {"receipt_authority": "nexus.research.epistemic_profile"}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_RECEIPT_OVERRIDE" in blockers
+@pytest.mark.parametrize(
+    "field_name, invalid_value, expected_blocker",
+    [
+        ("identity_authority", "attacker.identity", "EP_AUTHORITY_IDENTITY_OVERRIDE"),
+        ("task_authority", "attacker.task", "EP_AUTHORITY_TASK_OVERRIDE"),
+        ("receipt_authority", "nexus.research.epistemic_profile", "EP_AUTHORITY_RECEIPT_OVERRIDE"),
+        ("claim_boundary_authority", "attacker.claim_boundary", "EP_AUTHORITY_CLAIM_BOUNDARY_OVERRIDE"),
+        ("claim_evidence_authority", "attacker.claim_evidence", "EP_AUTHORITY_CLAIM_EVIDENCE_OVERRIDE"),
+        ("replay_authority", "attacker.replay", "EP_AUTHORITY_REPLAY_OVERRIDE"),
+        ("acceptance_authority", "nexus.research.epistemic_profile", "EP_AUTHORITY_ACCEPTANCE_OVERRIDE"),
+        ("integration_authority", "attacker.integrator", "EP_AUTHORITY_INTEGRATION_AUTHORITY_OVERRIDE"),
+        ("profile_domain_authority", "attacker.profile_domain", "EP_AUTHORITY_PROFILE_DOMAIN_OVERRIDE"),
+    ],
+)
+def test_all_authority_string_fields_must_match_canonical_value(field_name, invalid_value, expected_blocker):
+    boundary = default_epistemic_authority_boundary().to_dict()
+    boundary[field_name] = invalid_value
+    blockers = validate_epistemic_authority_payload(boundary)
+    assert expected_blocker in blockers
 
 
-def test_profile_cannot_become_acceptance_authority():
-    payload = {"acceptance_authority": "nexus.research.epistemic_profile"}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_ACCEPTANCE_OVERRIDE" in blockers
+@pytest.mark.parametrize(
+    "flag_name, expected_blocker",
+    [
+        ("profile_may_update_runtime", "EP_AUTHORITY_RUNTIME_UNLOCK"),
+        ("profile_may_approve_candidate", "EP_AUTHORITY_CANDIDATE_APPROVAL_UNLOCK"),
+        ("profile_may_integrate", "EP_AUTHORITY_INTEGRATION_UNLOCK"),
+        ("profile_may_push", "EP_AUTHORITY_PUSH_UNLOCK"),
+        ("profile_may_unlock_public_claim", "EP_AUTHORITY_PUBLIC_CLAIM_UNLOCK"),
+        ("profile_may_unlock_public_benchmark", "EP_AUTHORITY_PUBLIC_BENCHMARK_UNLOCK"),
+        ("profile_may_claim_production_ready", "EP_AUTHORITY_PRODUCTION_UNLOCK"),
+    ],
+)
+def test_all_permission_flags_must_fail_closed_when_true(flag_name, expected_blocker):
+    boundary = default_epistemic_authority_boundary().to_dict()
+    boundary[flag_name] = True
+    blockers = validate_epistemic_authority_payload(boundary)
+    assert expected_blocker in blockers
 
 
-def test_profile_cannot_update_runtime():
-    payload = {"profile_may_update_runtime": True}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_RUNTIME_UNLOCK" in blockers
-
-
-def test_profile_cannot_unlock_public_claim():
-    payload = {"profile_may_unlock_public_claim": True}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_PUBLIC_CLAIM_UNLOCK" in blockers
-
-
-def test_profile_cannot_unlock_public_benchmark():
-    payload = {"profile_may_unlock_public_benchmark": True}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_PUBLIC_BENCHMARK_UNLOCK" in blockers
-
-
-def test_profile_cannot_approve_integration():
-    payload = {"profile_may_integrate": True}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_INTEGRATION_UNLOCK" in blockers
-
-
-def test_profile_cannot_claim_production_readiness():
-    payload = {"profile_may_claim_production_ready": True}
-    blockers = validate_epistemic_authority_payload(payload)
-    assert "EP_AUTHORITY_PRODUCTION_UNLOCK" in blockers
-
-
-def test_multiple_simultaneous_overrides_return_all_stable_blockers():
+def test_adversarial_full_override_payload_returns_all_blockers():
     payload = {
-        "receipt_authority": "override",
-        "acceptance_authority": "override",
+        "identity_authority": "attacker",
+        "task_authority": "attacker",
+        "receipt_authority": "attacker",
+        "claim_boundary_authority": "attacker",
+        "claim_evidence_authority": "attacker",
+        "replay_authority": "attacker",
+        "acceptance_authority": "attacker",
+        "integration_authority": "attacker",
+        "profile_domain_authority": "attacker",
         "profile_may_update_runtime": True,
+        "profile_may_approve_candidate": True,
+        "profile_may_integrate": True,
+        "profile_may_push": True,
         "profile_may_unlock_public_claim": True,
         "profile_may_unlock_public_benchmark": True,
-        "profile_may_integrate": True,
         "profile_may_claim_production_ready": True,
     }
     blockers = validate_epistemic_authority_payload(payload)
-    assert len(blockers) == 7
+    assert len(blockers) == 16
+    assert "EP_AUTHORITY_IDENTITY_OVERRIDE" in blockers
+    assert "EP_AUTHORITY_TASK_OVERRIDE" in blockers
     assert "EP_AUTHORITY_RECEIPT_OVERRIDE" in blockers
+    assert "EP_AUTHORITY_CLAIM_BOUNDARY_OVERRIDE" in blockers
+    assert "EP_AUTHORITY_CLAIM_EVIDENCE_OVERRIDE" in blockers
+    assert "EP_AUTHORITY_REPLAY_OVERRIDE" in blockers
     assert "EP_AUTHORITY_ACCEPTANCE_OVERRIDE" in blockers
+    assert "EP_AUTHORITY_INTEGRATION_AUTHORITY_OVERRIDE" in blockers
+    assert "EP_AUTHORITY_PROFILE_DOMAIN_OVERRIDE" in blockers
     assert "EP_AUTHORITY_RUNTIME_UNLOCK" in blockers
+    assert "EP_AUTHORITY_CANDIDATE_APPROVAL_UNLOCK" in blockers
+    assert "EP_AUTHORITY_INTEGRATION_UNLOCK" in blockers
+    assert "EP_AUTHORITY_PUSH_UNLOCK" in blockers
     assert "EP_AUTHORITY_PUBLIC_CLAIM_UNLOCK" in blockers
     assert "EP_AUTHORITY_PUBLIC_BENCHMARK_UNLOCK" in blockers
-    assert "EP_AUTHORITY_INTEGRATION_UNLOCK" in blockers
     assert "EP_AUTHORITY_PRODUCTION_UNLOCK" in blockers
 
 

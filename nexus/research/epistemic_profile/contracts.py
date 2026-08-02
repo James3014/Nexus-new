@@ -46,8 +46,10 @@ class EpistemicArtifactRef:
     def __post_init__(self) -> None:
         if not self.artifact_id or not self.artifact_id.strip():
             raise ValueError("artifact_id must be non-empty")
-        if not _SHA256_HEX_RE.match(self.content_sha256):
+        if not self.content_sha256 or not _SHA256_HEX_RE.match(self.content_sha256):
             raise ValueError("content_sha256 must be a 64-character lowercase hex string")
+        if not self.relative_ref or not self.relative_ref.strip():
+            raise ValueError("relative_ref must be a non-empty relative reference")
         if self.relative_ref.startswith("/"):
             raise ValueError("relative_ref must be a relative reference, not absolute")
         if ".." in self.relative_ref.split("/"):
@@ -83,6 +85,8 @@ class EpistemicEvidenceRecord:
     def __post_init__(self) -> None:
         if not self.run_id or not self.run_id.strip():
             raise ValueError("run_id must be non-empty")
+        if not self.claim_id or not self.claim_id.strip():
+            raise ValueError("claim_id must be non-empty")
         if not self.extraction_ref or not self.extraction_ref.strip():
             raise ValueError("extraction_ref must be non-empty")
         if not self.assessment_ref or not self.assessment_ref.strip():
