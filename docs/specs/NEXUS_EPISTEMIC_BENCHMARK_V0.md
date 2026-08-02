@@ -2,7 +2,7 @@
 
 **Schema**: `nexus.epistemic_benchmark_report.v0`  
 **Status**: Candidate — awaiting independent acceptance (ERB-01-INDEPENDENT-ACCEPTANCE)  
-**Implementation commit**: feat(research): add epistemic benchmark evaluation and reports
+**Implementation commit**: fix(research): make benchmark scoring replayable and paired
 
 ---
 
