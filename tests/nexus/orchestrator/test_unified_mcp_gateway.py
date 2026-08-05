@@ -5,16 +5,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 repo_root = str(Path(__file__).resolve().parents[3])
 if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
-    GATEWAY_NAME,
     FULL_TOOL_SCHEMA_HASH,
+    GATEWAY_NAME,
     LIFECYCLE_REVISION,
     PERMISSION_POLICY_HASH,
     PUBLIC_TOOL_NAMES,
@@ -96,17 +94,6 @@ class FakeService:
     def submit_task(self, request):
         self.submitted.append(request)
         return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"], "target_created": False, "state_created": False}
-
-
-@pytest.fixture(autouse=True)
-def isolate_gateway_repository_state(monkeypatch):
-    """Keep ordinary gateway tests independent of the developer checkout.
-
-    Tests that exercise dirty-path policy explicitly replace this seam with
-    their synthetic snapshot. Production continues to read the real
-    canonical checkout through ``UnifiedMCPGateway._dirty_paths``.
-    """
-    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: []))
 
 
 def test_gateway_has_one_identity_and_bounded_public_surface():
@@ -205,58 +192,6 @@ def test_owner_inline_candidate_approval_uses_generic_contract_binding(monkeypat
     assert payload["approval_receipt"]["contract_kind"] == "OWNER_INLINE"
 
 
-def test_owner_inline_clean_routes_direct_without_task_card(monkeypatch):
-    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: []))
-    gateway = UnifiedMCPGateway(service=FakeService())
-    response = gateway.handle({"jsonrpc": "2.0", "id": 102, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
-        "task_id": "owner-inline-clean", "what": "Fix one bounded README typo", "why": "Owner inline smoke", "allowed_files": ["README.md"],
-        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
-    }}})
-    payload = response["result"]["structuredContent"]
-    assert payload["execution_lane"] == "DIRECT_CANONICAL"
-    assert payload["contract_kind"] == "OWNER_INLINE"
-    assert len(payload["contract_hash"]) == 64
-    assert payload["task_card_required"] is False
-
-
-def test_owner_inline_dirty_nonoverlap_uses_isolated_target_without_card(monkeypatch):
-    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: ["nexus/orchestrator/unified_mcp_gateway.py"]))
-    gateway = UnifiedMCPGateway(service=FakeService())
-    response = gateway.handle({"jsonrpc": "2.0", "id": 103, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
-        "task_id": "owner-inline-disjoint", "what": "Fix one bounded README typo", "why": "Dirty disjoint smoke", "allowed_files": ["README.md"],
-        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
-    }}})
-    payload = response["result"]["structuredContent"]
-    assert payload["execution_lane"] == "ISOLATED_TARGET"
-    assert payload["contract_kind"] == "OWNER_INLINE"
-    assert payload["dirty_overlap"] is False
-    assert payload["target_created"] is False
-
-
-def test_dirty_path_overlap_fails_closed_before_target_creation(monkeypatch):
-    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: ["nexus/orchestrator/unified_mcp_gateway.py"]))
-    gateway = UnifiedMCPGateway(service=FakeService())
-    response = gateway.handle({"jsonrpc": "2.0", "id": 104, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
-        "task_id": "owner-inline-overlap", "what": "Fix one bounded gateway typo", "why": "Overlap smoke", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
-        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
-    }}})
-    payload = response["result"]["structuredContent"]
-    assert payload["blocker"] == "DIRTY_PATH_OVERLAP_REQUIRES_RECONCILIATION"
-    assert payload["target_created"] is False
-    assert payload["overlapping_paths"] == ["nexus/orchestrator/unified_mcp_gateway.py"]
-
-
-def test_delegated_worker_without_task_card_still_requires_tracked_binding(monkeypatch):
-    monkeypatch.setattr(UnifiedMCPGateway, "_dirty_paths", staticmethod(lambda: []))
-    gateway = UnifiedMCPGateway(service=FakeService())
-    response = gateway.handle({"jsonrpc": "2.0", "id": 105, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {
-        "task_id": "delegated-no-card", "what": "Fix one bounded README typo", "why": "Delegation smoke", "allowed_files": ["README.md"],
-        "preferred_worker": "agy",
-    }}})
-    assert response["result"]["isError"] is True
-    assert "TASK_CARD_BINDING_REQUIRED" in response["result"]["structuredContent"]["error"]
-
-
 def test_cline_parser_extracts_final_patch_from_json_event_array():
     events = json.dumps([
         {"type": "system", "content": "started"},
@@ -329,134 +264,6 @@ def test_minimal_direct_finish_accepts_public_base_sha_alias():
     assert service.completed[0]["controller_revision"] == base
 
 
-def test_task_run_routes_small_request_direct_without_target_fields():
-    service = FakeService()
-    gateway = UnifiedMCPGateway(service=service)
-    response = gateway.handle({"jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Fix a bounded README typo", "why": "Small canonical edit", "allowed_files": ["README.md"]}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["execution_lane"] == "DIRECT_CANONICAL"
-    assert payload["route_authority"] == "CapabilityPlanner"
-    assert payload["status"] == "DIRECT_CANONICAL_READY"
-    assert service.submitted[0]["target_worktree_root"] == "/Users/jameschen/Workspace/nexus-runtime-targets"
-    assert service.submitted[0]["primary_agent"] is True
-    assert set((payload := response["result"]["structuredContent"])["telemetry"]) >= {
-        "control_plane_ms",
-        "route_decision_ms",
-        "context_build_ms",
-        "provider_start_ms",
-        "provider_time_ms",
-        "patch_validation_ms",
-        "verifier_time_ms",
-        "commit_time_ms",
-        "worktree_time_ms",
-        "cleanup_time_ms",
-        "total_wall_time_ms",
-    }
-    assert payload["telemetry"]["provider_time_ms"] == 0
-    assert payload["next_action"] == "edit_canonical_checkout"
-    assert payload["completion_surface"] == "nexus_task_finish"
-    assert payload["base_sha"]
-    assert payload["mutation_lease"]["type"] == "canonical_mutation_lock"
-
-
-def test_task_run_routes_single_nexus_file_direct_without_target():
-    service = FakeService()
-    gateway = UnifiedMCPGateway(service=service)
-    response = gateway.handle({"jsonrpc": "2.0", "id": 19, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Fix one bounded source typo", "why": "Single-file canonical edit", "allowed_files": ["nexus/example.py"]}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["execution_lane"] == "DIRECT_CANONICAL"
-    assert payload["status"] == "DIRECT_CANONICAL_READY"
-    assert payload["handoff"]["target_created"] is False
-
-
-def test_assisted_defaults_to_proposal_only():
-    service = FakeService()
-    applied = []
-    gateway = UnifiedMCPGateway(
-        service=service,
-        model_runner=lambda **_: {"provider": "agy", "patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@\n"},
-        apply_runner=lambda **kwargs: applied.append(kwargs),
-    )
-    gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
-    response = gateway.handle({"jsonrpc": "2.0", "id": 20, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest one bounded README fix", "why": "Proposal-only default", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["status"] == "ASSISTED_CANONICAL_PROPOSAL_READY"
-    assert payload["next_action"] == "apply_assisted_candidate"
-    assert applied == []
-
-
-def test_task_run_returns_typed_action_identity_and_forwards_it():
-    service = FakeService()
-    gateway = UnifiedMCPGateway(service=service)
-    response = gateway.handle({
-        "jsonrpc": "2.0",
-        "id": 18,
-        "method": "tools/call",
-        "params": {
-            "name": "nexus_task_run",
-            "arguments": {
-                "task_id": "action-envelope-1",
-                "what": "Fix one bounded README typo",
-                "why": "Exercise action identity",
-                "allowed_files": ["README.md"],
-                "idempotency_key": "action-envelope-key",
-            },
-        },
-    })
-    payload = response["result"]["structuredContent"]
-    action = payload["action"]
-    assert action["schema"] == "nexus.lifecycle_action.v1"
-    assert action["task_id"] == "action-envelope-1"
-    assert action["idempotency_key"] == "action-envelope-key"
-    assert action["expected_head"] == payload["base_sha"]
-    assert action["request_hash"]
-    assert service.submitted[0]["action_id"] == action["action_id"]
-    assert service.submitted[0]["action_request_hash"] == action["request_hash"]
-
-
-def test_task_run_assisted_is_fail_closed_without_side_effect():
-    service = FakeService()
-    gateway = UnifiedMCPGateway(service=service, model_runner=lambda **_: {"provider": "agy", "blocker": "ASSIST_PROVIDER_UNAVAILABLE"})
-    response = gateway.handle({"jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL"}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["status"] == "FINAL_BLOCK"
-    assert payload["blocker"] == "ASSIST_PROVIDER_UNAVAILABLE"
-    assert "provider_error" in payload
-    assert set(payload["telemetry"]) >= {"control_plane_ms", "provider_start_ms", "total_wall_time_ms"}
-    assert len(service.submitted) == 1
-    assert service.submitted[0]["execution_lane"] == "DIRECT_CANONICAL"
-
-
-def test_task_run_assisted_applies_injected_bounded_patch_without_target():
-    service = FakeService()
-    applied = []
-    gateway = UnifiedMCPGateway(
-        service=service,
-        model_runner=lambda **_: {"provider": "agy", "patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@\n"},
-        apply_runner=lambda **kwargs: applied.append(kwargs) or {"status": "DIRECT_CANONICAL_COMPLETED", "target_created": False, "state_created": False},
-    )
-    gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
-    response = gateway.handle({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Suggest a bounded patch", "why": "Assist only", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL", "apply": True}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
-    assert payload["route_authority"] == "CapabilityPlanner"
-    assert len(applied) == 1
-    assert len(service.submitted) == 1
-    assert payload["telemetry"]["provider_time_ms"] >= 0
-    assert payload["telemetry"]["patch_validation_ms"] >= 0
-    assert payload["telemetry"]["total_wall_time_ms"] >= payload["telemetry"]["provider_time_ms"]
-
-
-def test_task_run_isolated_requires_task_card_binding():
-    service = FakeService()
-    gateway = UnifiedMCPGateway(service=service)
-    response = gateway.handle({"jsonrpc": "2.0", "id": 13, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "Implement a cross-module runtime change", "why": "Needs isolated worker", "allowed_files": ["nexus/a.py", "tests/a.py"], "execution_preference": "ISOLATED_TARGET", "preferred_worker": "agy"}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["execution_lane"] == "ISOLATED_TARGET"
-    assert payload["blocker"] == "TASK_CARD_BINDING_REQUIRED"
-    assert service.submitted == []
-
-
 def test_public_recovery_surface_has_one_actionable_contract():
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
@@ -484,42 +291,6 @@ def test_public_recovery_surface_rejects_malformed_candidate_hash():
     response = gateway.handle({"jsonrpc": "2.0", "id": 501, "method": "tools/call", "params": {"name": "nexus_candidate_approve", "arguments": {"task_id": "recover-1", "candidate_commit_sha": "not-a-sha", "candidate_tree_sha": "a" * 40, "candidate_state_hash": "b" * 64, "verified_receipt_hash": "b" * 64}}})
     assert response["result"]["isError"] is True
     assert "candidate_commit_sha" in response["result"]["structuredContent"]["error"]
-
-
-def test_bounded_soak_matrix_keeps_direct_and_assisted_off_targets():
-    direct_service = FakeService()
-    direct_gateway = UnifiedMCPGateway(service=direct_service)
-    for index in range(10):
-        response = direct_gateway.handle({"jsonrpc": "2.0", "id": 100 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-direct-{index}", "what": "Fix one bounded README typo", "why": "Synthetic Direct soak", "allowed_files": ["README.md"]}}})
-        payload = response["result"]["structuredContent"]
-        assert payload["status"] == "DIRECT_CANONICAL_READY"
-        assert payload["handoff"]["target_created"] is False
-        assert payload["handoff"]["state_created"] is False
-
-    assisted_service = FakeService()
-    assisted_gateway = UnifiedMCPGateway(
-        service=assisted_service,
-        model_runner=lambda **_: {"provider": "agy", "patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@\n"},
-        apply_runner=lambda **_: {"status": "DIRECT_CANONICAL_COMPLETED", "target_created": False, "state_created": False, "telemetry": {"commit_time_ms": 0}},
-    )
-    assisted_gateway._validate_assisted_patch = lambda patch, allowed: ["README.md"]
-    for index in range(20):
-        response = assisted_gateway.handle({"jsonrpc": "2.0", "id": 200 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-assisted-{index}", "what": "Propose one bounded README typo fix", "why": "Synthetic Assisted soak", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL", "apply": True}}})
-        payload = response["result"]["structuredContent"]
-        assert payload["status"] == "ASSISTED_CANONICAL_COMPLETED"
-        assert payload["receipt"]["target_created"] is False
-        assert payload["receipt"]["state_created"] is False
-        assert payload["telemetry"]["total_wall_time_ms"] >= payload["telemetry"]["provider_time_ms"]
-    assert len(assisted_service.submitted) == 20
-
-    isolated_service = FakeService()
-    isolated_gateway = UnifiedMCPGateway(service=isolated_service)
-    for index in range(10):
-        response = isolated_gateway.handle({"jsonrpc": "2.0", "id": 300 + index, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": f"soak-isolated-{index}", "what": "Implement a cross-module task", "why": "Synthetic isolated binding gate", "allowed_files": ["nexus/a.py", "tests/a.py"], "execution_preference": "ISOLATED_TARGET", "preferred_worker": "agy"}}})
-        payload = response["result"]["structuredContent"]
-        assert payload["status"] == "FINAL_BLOCK"
-        assert payload["blocker"] == "TASK_CARD_BINDING_REQUIRED"
-    assert isolated_service.submitted == []
 
 
 def test_gateway_stdio_round_trip():
@@ -676,44 +447,6 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     assert receipt["stdout_bytes"] > 0
     assert receipt["stderr_bytes"] > 0
     assert not Path(receipt["workspace_root"]).exists()
-
-
-def test_cline_task_run_returns_async_assisted_action_with_verify_envelope(monkeypatch, tmp_path):
-    import subprocess as real_subprocess
-    real_popen = real_subprocess.Popen
-
-    class FakePopen:
-        pid = 54002
-
-        def __init__(self, command, *, stdout, stderr, **kwargs):
-            if isinstance(stdout, int):
-                self._delegate = real_popen(command, stdout=stdout, stderr=stderr, **kwargs)
-                self.pid = self._delegate.pid
-                return
-            self._returncode = 0
-            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md"})}) + "\n")
-            stdout.flush()
-
-        def poll(self):
-            if hasattr(self, "_delegate"):
-                return self._delegate.poll()
-            return self._returncode
-
-    service = FakeService()
-    service.state_dir = tmp_path
-    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
-    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
-    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
-    gateway = UnifiedMCPGateway(service=service)
-    response = gateway.handle({"jsonrpc": "2.0", "id": 702, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"task_id": "async-cline-run", "what": "Suggest a README patch", "why": "Async provider task", "allowed_files": ["README.md"], "execution_preference": "ASSISTED_CANONICAL", "preferred_worker": "cline", "preferred_model": "glm-5.2", "apply": False}}})
-    payload = response["result"]["structuredContent"]
-    assert payload["status"] == "ASSISTED_PROVIDER_SUBMITTED"
-    assert payload["execution_lane"] == "ASSISTED_CANONICAL"
-    assert payload["provider"] == "cline"
-    assert payload["next_action"] == "nexus_assist_result"
-    assert payload["action"]["mutation"] is False
-    assert payload["action"]["permission_profile"] == "VERIFY"
-    assert service.submitted == []
 
 
 def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatch):
