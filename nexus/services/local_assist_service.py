@@ -42,7 +42,7 @@ from nexus.services.local_heal.local_model_provider import (
 REQUEST_SCHEMA = "nexus.local_assist.request.v1"
 RESPONSE_SCHEMA = "nexus.local_assist.response.v1"
 ALLOWED_ACTIONS = {"advisor", "candidate", "verified-subtask"}
-ALLOWED_TOPOLOGIES = {"single_local_model", "local_cascade"}
+ALLOWED_TOPOLOGIES = {"single_local_model", "local_cascade", "localheal_pipeline"}
 REQUIRED_PLANNER_FIELDS = {
     "route_truth_source",
     "execution_topology",
@@ -494,6 +494,7 @@ class LocalAssistService:
             ledger_provider = RecordingLocalModelProvider(provider)
 
         local_outputs: dict[str, Any] = {}
+        world_c_receipt: dict[str, Any] = {}
         candidate_summary: dict[str, Any] = {
             "candidate_count": 0,
             "candidate_hashes": [],
@@ -727,6 +728,8 @@ class LocalAssistService:
                     if isinstance(executor_response.raw_model_metadata, Mapping)
                     else {}
                 )
+                if isinstance(_exec_meta.get("world_c_receipt"), Mapping):
+                    world_c_receipt = dict(_exec_meta["world_c_receipt"])
                 local_outputs = {
                     "reasoning_summary": executor_response.reasoning_summary,
                     "candidate_patch": candidate_patch,
@@ -764,7 +767,33 @@ class LocalAssistService:
                         output_delivered = False
                         fallback_reason = "candidate_hash_not_proven"
                     if request.action == "verified-subtask" and output_delivered:
-                        verifier_summary = self._verify_candidate(request, candidate_summary)
+                        if str(planner_snapshot.get("execution_topology")) == "localheal_pipeline":
+                            from nexus.services.local_heal.world_c_receipt import (
+                                validate_world_c_receipt,
+                            )
+
+                            world_c_valid, world_c_errors = validate_world_c_receipt(
+                                world_c_receipt
+                            )
+                            world_c_verifier = (
+                                world_c_receipt.get("authoritative_verifier", {})
+                                if isinstance(world_c_receipt, Mapping)
+                                else {}
+                            )
+                            verifier_summary = {
+                                "verifier_reached": bool(world_c_verifier.get("invoked")),
+                                "verifier_status": "pass" if world_c_valid else "failed",
+                                "verifier_error": "" if world_c_valid else ",".join(world_c_errors),
+                                "source": "HealOrchestrator.VerificationPhase",
+                                "world_c_receipt_hash": str(
+                                    world_c_receipt.get("receipt_hash") or ""
+                                ),
+                                "evidence_refs": list(
+                                    world_c_verifier.get("evidence_refs") or []
+                                ),
+                            }
+                        else:
+                            verifier_summary = self._verify_candidate(request, candidate_summary)
                         if verifier_summary.get("verifier_status") != "pass":
                             output_delivered = False
                             fallback_reason = "verifier_failed_or_blocked"
@@ -860,6 +889,8 @@ class LocalAssistService:
         }
         local_outputs["concise_summary"] = verified_artifact["concise_summary"]
         local_outputs["verified_artifact"] = verified_artifact
+        if world_c_receipt:
+            local_outputs["world_c_receipt"] = world_c_receipt
 
         # Shared evidence consumption proof (P3) — only IDs actually serialized into
         # the Local provider/executor prompt at assembly time. Never reverse-infer
@@ -987,6 +1018,7 @@ class LocalAssistService:
             "fallback_reason": fallback_reason,
             "canonical_execution": canonical_execution_payload,
             "local_model_invocation_authority": local_authority_payload,
+            "world_c_receipt": world_c_receipt,
         }
         receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")

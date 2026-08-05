@@ -177,6 +177,13 @@ class HealOrchestrator:
                 ctx.op.final_patch = resp["candidate_text"]
                 ctx.op.local_model_called = resp["local_model_called"]
                 res = PhaseResult(success=True)
+                from nexus.services.local_heal.world_c_receipt import record_world_c_phase_result
+
+                record_world_c_phase_result(
+                    ctx,
+                    f"patch_attempt_{ctx.op.attempt}",
+                    res,
+                )
             else:
                 res = self.phase_runner.run_phase(self.patch_phase, f"patch_attempt_{ctx.op.attempt}", ctx, ledger)
             
@@ -203,7 +210,7 @@ class HealOrchestrator:
                         ctx.op.last_stderr_tail = getattr(receipt, "stderr_tail", "")
                     ctx.op.last_failure_class = "VERIFIER_FAIL"
                 self._handle_verification_failure(ctx, v_res)
-                if ctx.op.solve_eligible:
+                if getattr(ctx.op, "solve_eligible", False):
                     ctx.gov.gate_exit = "verification"
                     break
 
@@ -931,6 +938,9 @@ class HealOrchestrator:
         self._attach_memory_influence_trace(ctx)
         self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
+        from nexus.services.local_heal.world_c_receipt import build_world_c_receipt
+
+        ctx.op._world_c_receipt = build_world_c_receipt(ctx)
 
         # RRL3: Attach evidence harness (write-only observability)
         self._attach_evidence_harness(ctx)

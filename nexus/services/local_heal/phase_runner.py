@@ -14,14 +14,21 @@ class PhaseRunner:
                 ledger.end_phase(pt, success=True)
             else:
                 ledger.end_phase(pt, success=False, error=res.failure_reason[:200])
+            from nexus.services.local_heal.world_c_receipt import record_world_c_phase_result
+
+            record_world_c_phase_result(ctx, phase_name, res)
             return res
         except Exception as exc:
             import traceback
             error_msg = f"{type(exc).__name__}:{exc}"
             ledger.end_phase(pt, success=False, error=error_msg[:200])
-            return PhaseResult(
+            result = PhaseResult(
                 success=False, 
                 exit_layer=phase.__class__.__name__, 
                 failure_reason=error_msg,
                 error_metadata={"traceback": traceback.format_exc()}
             )
+            from nexus.services.local_heal.world_c_receipt import record_world_c_phase_result
+
+            record_world_c_phase_result(ctx, phase_name, result)
+            return result

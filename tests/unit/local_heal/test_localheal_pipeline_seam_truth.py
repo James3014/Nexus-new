@@ -37,11 +37,12 @@ def _build_request(
     dry_run: bool = False,
     selected_capabilities: tuple[str, ...] = ("repair_loop", "ddtree", "autoreason"),
     evidence_refs: tuple[str, ...] = ("e1",),
+    repo_root: str = "/tmp/test_repo",
 ):
     return LocalModelExecutorRequest(
         task_id="t_seam_1",
         problem_statement="fix bug in foo",
-        repo_root="/tmp/test_repo",
+        repo_root=repo_root,
         target_file="foo.py",
         selected_capabilities=selected_capabilities,
         evidence_refs=evidence_refs,
@@ -77,7 +78,7 @@ def _build_provider_mock(output_text: str = "def foo_func():\n    return 42\n"):
 class TestLocalhealPipelineTopologyBridgeInvocation:
     """Test 1: Verify topology routes through bridge, not full pipeline."""
 
-    def test_localheal_pipeline_topology_reports_bridge_invocation(self):
+    def test_localheal_pipeline_topology_reports_bridge_invocation(self, tmp_path):
         """LocalHealPipelineCapabilityExecutor is invoked, NOT HealPipeline/Orchestrator."""
         provider = _build_provider_mock()
 
@@ -85,7 +86,9 @@ class TestLocalhealPipelineTopologyBridgeInvocation:
             "nexus.services.local_heal.local_model_executor.build_local_model_provider_from_signal_snapshot",
             return_value=provider,
         ):
-            result = LocalModelExecutor.run(_build_request(), provider=provider)
+            result = LocalModelExecutor.run(
+                _build_request(repo_root=str(tmp_path)), provider=provider
+            )
 
         assert result.invoked is True
         assert result.raw_model_metadata.get("execution_topology") == "localheal_pipeline"
@@ -98,16 +101,10 @@ class TestLocalhealPipelineTopologyBridgeInvocation:
         # Bridge WAS invoked
         assert bridge_invoked is True, "LocalHealPipelineCapabilityExecutor must be invoked"
 
-        # Bridge does real work when modules are importable (instantiation, protocol parse)
-        # But this is NOT full pipeline execution (no .run(), no orchestrator repair loop)
-        assert actual_execution is True, (
-            "localheal_pipeline_actual_execution should be True — bridge does real work"
-        )
-
-        # Availability-only is False when modules are importable
-        assert availability_only is False, (
-            "localheal_pipeline_availability_only should be False — modules are importable"
-        )
+        # Invoking the bridge is insufficient without a valid five-stage receipt.
+        assert actual_execution is False
+        assert availability_only is True
+        assert result.raw_model_metadata.get("world_c_receipt_valid") is False
 
 
 class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
@@ -313,7 +310,7 @@ class TestLocalhealPipelineTopologySingleLocalModelNotAffected:
 class TestLocalhealPipelineTopologyModelCallBypassesPipeline:
     """Test 6: Model call goes through provider, NOT through pipeline retry loop."""
 
-    def test_model_call_goes_through_provider(self):
+    def test_model_call_goes_through_provider(self, tmp_path):
         """provider.generate() is called — through pipeline orchestrator."""
         provider = _build_provider_mock()
 
@@ -321,7 +318,9 @@ class TestLocalhealPipelineTopologyModelCallBypassesPipeline:
             "nexus.services.local_heal.local_model_executor.build_local_model_provider_from_signal_snapshot",
             return_value=provider,
         ):
-            result = LocalModelExecutor.run(_build_request(), provider=provider)
+            result = LocalModelExecutor.run(
+                _build_request(repo_root=str(tmp_path)), provider=provider
+            )
 
         # provider.generate() was called (at least once — pipeline may call it multiple times)
         assert provider.generate.call_count >= 1
@@ -542,8 +541,9 @@ class TestHealPipelineRunInvocationTruth:
 
                 # .run() IS now called (B1)
                 pipeline_run_mock.assert_called_once()
-                # actual_execution reflects .run() success
-                assert result.telemetries.get("localheal_pipeline_actual_execution") is True
+                # A mocked run without a stage-native receipt is fail-closed.
+                assert result.telemetries.get("localheal_pipeline_actual_execution") is False
+                assert result.telemetries.get("world_c_receipt_valid") is False
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
 
     def test_localheal_pipeline_actual_execution_false_when_run_raises(self):
@@ -606,7 +606,7 @@ class TestHealPipelineRunInvocationTruth:
                 # Retry was NOT invoked
                 assert result.telemetries.get("semantic_retry_invoked") is False
 
-    def test_full_executor_calls_healpipeline_run(self):
+    def test_full_executor_calls_healpipeline_run(self, tmp_path):
         """End-to-end: LocalModelExecutor.run with localheal_pipeline DOES call HealPipeline.run()."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -624,7 +624,9 @@ class TestHealPipelineRunInvocationTruth:
         ):
             with patch.object(HealPipeline, "__init__", return_value=None):
                 with patch.object(HealPipeline, "run", pipeline_run_mock):
-                    result = LocalModelExecutor.run(_build_request(), provider=provider)
+                    result = LocalModelExecutor.run(
+                        _build_request(repo_root=str(tmp_path)), provider=provider
+                    )
 
                     # .run() IS now called through the full executor path (B1)
                     pipeline_run_mock.assert_called_once()
@@ -717,7 +719,8 @@ class TestPipelineTelemetrySemanticsB2:
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
                 assert result.telemetries.get("localheal_pipeline_run_success") is True
-                assert result.telemetries.get("localheal_pipeline_actual_execution") is True
+                assert result.telemetries.get("localheal_pipeline_actual_execution") is False
+                assert result.telemetries.get("world_c_receipt_valid") is False
 
     def test_semantic_retry_invoked_requires_orchestrator_telemetry(self):
         """semantic_retry_invoked must come from orchestrator, not retry_available."""

@@ -4391,6 +4391,9 @@ class UnifiedRuntime:
             receipt["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
             receipt["local_model_invocation_authority"] = local_model_invocation_authority
+        from nexus.contracts.root_receipt import build_root_receipt
+
+        receipt["root_receipt"] = build_root_receipt(receipt)
         attach_failure_diagnostics(receipt)
         # RC-1: additive JSON-safe receipt_base + acyclic run_anchor hash DAG
         attach_r3_receipt_base(receipt)
@@ -4549,6 +4552,9 @@ class UnifiedRuntime:
 
         finalized["claim_boundary"] = claim_boundary
         finalized["finalization"] = {"verifier": "observed_payload", "learning": "observed_payload"}
+        from nexus.contracts.root_receipt import build_root_receipt
+
+        finalized["root_receipt"] = build_root_receipt(finalized)
         attach_failure_diagnostics(finalized)
         # RC-1: recompute receipt_base after finalization mutations (still acyclic)
         attach_r3_receipt_base(finalized)

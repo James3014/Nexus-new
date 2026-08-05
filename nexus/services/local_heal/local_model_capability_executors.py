@@ -343,6 +343,10 @@ class LocalHealPipelineCapabilityExecutor:
         pipeline_run_success = False
         pipeline_result_ctx = None
         orchestrator_run_reachable = False
+        world_c_receipt: dict = {}
+        world_c_receipt_valid = False
+        world_c_receipt_errors: list[str] = []
+        world_c_workspace_path = ""
         _last_provider_diag: dict = {}  # Initialized here so always defined even if heal_pipeline unavailable
 
         if modules.get("heal_pipeline"):
@@ -549,9 +553,20 @@ class LocalHealPipelineCapabilityExecutor:
                 _candidate_cap = int(_armor_controls.get("candidate_cap", 3) or 3)
                 _max_tries = max(1, _candidate_cap)
 
+                from nexus.services.local_heal.pipeline_isolation import prepare_world_c_workspace
+
+                world_c_workspace = prepare_world_c_workspace(
+                    ctx.source_root,
+                    ctx.task_id,
+                    target_file=ctx.target_file,
+                    repro_script=repro_script,
+                )
+                world_c_workspace_path = str(world_c_workspace)
+                route_ctx["world_c_source_root"] = str(ctx.source_root)
+                route_ctx["world_c_workspace_path"] = world_c_workspace_path
                 heal_ctx = LegacyHealContext(
                     instance_id=ctx.task_id,
-                    repo_dir=_Path(ctx.source_root),
+                    repo_dir=world_c_workspace,
                     problem_statement=ctx.problem_statement,
                     repair_specification=str(route_ctx.get("repair_specification", "") or ""),
                     route_context=route_ctx,
@@ -568,12 +583,22 @@ class LocalHealPipelineCapabilityExecutor:
                     pipeline_run_success = True
                     path_a_actual_execution = True
                     orchestrator_run_reachable = True
+                    from nexus.services.local_heal.world_c_receipt import validate_world_c_receipt
+
+                    candidate_receipt = getattr(pipeline_result_ctx, "_world_c_receipt", {})
+                    if isinstance(candidate_receipt, dict):
+                        world_c_receipt = dict(candidate_receipt)
+                    world_c_receipt_valid, world_c_receipt_errors = validate_world_c_receipt(
+                        world_c_receipt
+                    )
                 except Exception as run_exc:
                     path_a_failure_reason = f"pipeline_run_error: {str(run_exc)[:200]}"
                     path_a_actual_execution = False
 
-            except Exception:
-                path_a_failure_reason = "pipeline_instantiation_error"
+            except Exception as exc:
+                path_a_failure_reason = (
+                    f"pipeline_instantiation_error:{type(exc).__name__}:{str(exc)[:200]}"
+                )
 
         # 5. CommitteeOrchestrator availability
         if modules.get("committee_orchestrator"):
@@ -584,7 +609,9 @@ class LocalHealPipelineCapabilityExecutor:
             invoked_modules.append("evaluation_gate")
 
         # B2: actual_execution requires pipeline.run() success, not just instantiation
-        actual_execution = pipeline_run_success and len(invoked_modules) >= 2
+        actual_execution = pipeline_run_success and world_c_receipt_valid
+        if pipeline_run_success and not world_c_receipt_valid and not path_a_failure_reason:
+            path_a_failure_reason = "world_c_receipt_invalid:" + ",".join(world_c_receipt_errors)
 
         # Extract pipeline result if available
         pipeline_final_patch = ""
@@ -624,11 +651,17 @@ class LocalHealPipelineCapabilityExecutor:
             failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
             model_decisions = getattr(pipeline_result_ctx, "model_decisions", []) or []
 
-            reproduction_reached = bool(repro_evidence) or skipped_repro
-            planning_reached = plan is not None and (isinstance(plan, dict) and plan.get("search_symbols")) or (hasattr(plan, "search_symbols") and plan.search_symbols)
-            localization_reached = bool(localized_files)
-            patch_synthesis_reached = planning_reached and localization_reached
-            verification_reached = bool(evaluation_report)
+            stage_map = {
+                str(stage.get("name") or ""): stage
+                for stage in world_c_receipt.get("stages", [])
+                if isinstance(stage, dict)
+            }
+
+            reproduction_reached = bool(stage_map.get("reproduction", {}).get("completed"))
+            planning_reached = bool(stage_map.get("planning", {}).get("completed"))
+            localization_reached = bool(stage_map.get("localization", {}).get("completed"))
+            patch_synthesis_reached = bool(stage_map.get("patch_synthesis", {}).get("completed"))
+            verification_reached = bool(stage_map.get("verification", {}).get("completed"))
 
             if patch_synthesis_reached and not final_patch and failure_reason:
                 phase_reached = "patch_synthesis_failed"
@@ -825,6 +858,10 @@ class LocalHealPipelineCapabilityExecutor:
                 "localheal_pipeline_actual_execution": actual_execution,
                 "localheal_pipeline_availability_only": not actual_execution,
                 "orchestrator_run_reachable": orchestrator_run_reachable,
+                "world_c_receipt": world_c_receipt,
+                "world_c_receipt_valid": world_c_receipt_valid,
+                "world_c_receipt_errors": world_c_receipt_errors,
+                "world_c_workspace_path": world_c_workspace_path,
                 "committee_orchestrator_available": modules.get("committee_orchestrator", False),
                 "committee_orchestrator_invoked": "committee_orchestrator" in invoked_modules,
                 "solid_search_replace_protocol_available": modules.get("solid_search_replace_protocol", False),

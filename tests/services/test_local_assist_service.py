@@ -21,6 +21,14 @@ from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
 from nexus.contracts.canonical_execution import CanonicalTaskContext
 from nexus.engine.canonical_execution import plan_canonical_task_bundle
 from nexus.services.unified_runtime import canonical_execution_identity
+from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
+from nexus.services.local_heal.interface import PhaseResult
+from nexus.services.local_heal.interface import LocalizedFile, RepairPlan
+from nexus.services.local_heal.world_c_receipt import (
+    WORLD_C_STAGES,
+    build_world_c_receipt,
+    record_world_c_phase_result,
+)
 
 
 def _snapshot() -> dict[str, object]:
@@ -221,6 +229,95 @@ def test_verified_subtask_requires_and_records_deterministic_verifier(tmp_path: 
     assert response.verifier_summary["verifier_status"] == "pass"
     assert response.claim_boundary["agent_consumed"] is False
     assert response.claim_boundary["value_measured"] is False
+
+
+def test_world_c_verified_subtask_reuses_pipeline_verifier_without_second_run(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target.py"
+    target.write_text("def target():\n    return 1\n", encoding="utf-8")
+    request = _request(tmp_path, "verified-subtask")
+    (tmp_path / "world-c-isolated").mkdir()
+    request = request.__class__(
+        **{
+            **request.__dict__,
+            "planner_snapshot": {
+                **request.planner_snapshot,
+                "execution_topology": "localheal_pipeline",
+            },
+        }
+    )
+    ctx = HealContext(
+        op=OperationalContext(
+            instance_id=request.task_id,
+            repo_dir=tmp_path,
+            problem_statement=request.task_statement,
+            route_context={
+                "signal_snapshot": dict(request.planner_snapshot),
+                "planner_decision_id": "plan-world-c",
+                "world_c_source_root": str(tmp_path),
+                "world_c_workspace_path": str(tmp_path / "world-c-isolated"),
+            },
+        ),
+        gov=GovernanceContext(),
+    )
+    ctx.op.task_id = request.task_id
+    for stage in WORLD_C_STAGES:
+        if stage == "reproduction":
+            ctx.op.repro_evidence = "reproduced"
+            ctx.op.reproduced = True
+        elif stage == "planning":
+            ctx.op.plan = RepairPlan(search_symbols=["target"], repair_strategy="edit")
+        elif stage == "localization":
+            ctx.op.localized_files = [LocalizedFile(path="target.py", content="return 1")]
+        elif stage == "patch_synthesis":
+            ctx.op.final_patch = "--- a/target.py\n+++ b/target.py\n@@ -1 +1 @@\n-a\n+b\n"
+        elif stage == "verification":
+            ctx.op.evaluation_report = "PASS"
+            ctx.op.solve_eligible = True
+        record_world_c_phase_result(ctx, stage, PhaseResult(success=True))
+    world_c = build_world_c_receipt(ctx)
+
+    def fake_executor(*_args, **_kwargs):
+        return LocalModelExecutorResponse(
+            invoked=True,
+            local_model_called=True,
+            candidate_patch=(
+                "--- a/target.py\n+++ b/target.py\n@@ -1,2 +1,2 @@\n"
+                " def target():\n-    return 1\n+    return 2\n"
+            ),
+            candidate_hash="candidate",
+            reasoning_summary="bounded repair",
+            raw_model_metadata={
+                "world_c_receipt": world_c,
+                "llm_call_ledger_records": [{"duration_sec": 0.1, "prompt_hash": "p"}],
+            },
+            provider="ollama",
+            model_name="qwen2.5-coder:7b",
+            error="",
+            timeout=False,
+            evidence_refs=request.evidence_refs,
+        )
+
+    verifier_calls = 0
+
+    def must_not_run_verifier(_request):
+        nonlocal verifier_calls
+        verifier_calls += 1
+        raise AssertionError("World C verifier must be projected, not rerun")
+
+    response = LocalAssistService(
+        provider=InjectedLocalModelProvider(lambda _: "unused"),
+        executor_runner=fake_executor,
+        apply_runner=_isolated_apply(tmp_path),
+        verifier_runner=must_not_run_verifier,
+    ).handle(request)
+
+    assert response.status == "SUCCEEDED"
+    assert verifier_calls == 0
+    assert response.verifier_summary["source"] == "HealOrchestrator.VerificationPhase"
+    assert response.verifier_summary["world_c_receipt_hash"] == world_c["receipt_hash"]
+    assert response.local_outputs["world_c_receipt"]["receipt_complete"] is True
 
 
 def test_executor_response_keeps_selected_and_invoked_distinct(tmp_path: Path) -> None:
