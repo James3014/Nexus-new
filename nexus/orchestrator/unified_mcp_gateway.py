@@ -7,42 +7,49 @@ must not need to know its Target paths or internal action names.
 
 from __future__ import annotations
 
+import ast
+import difflib
+import fcntl
 import hashlib
 import json
-import fcntl
-import difflib
 import os
 import re
-import signal
+import select
 import shlex
 import shutil
+import signal
+import stat
 import subprocess
+import sys
+import tempfile
 import threading
 import time
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
-from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionType,
     MutationDomain,
     PermissionProfile,
-    build_owner_inline_contract,
     build_action_envelope,
+    build_owner_inline_contract,
 )
-from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
-from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY, resolve_registered_provider_executable
-from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
+from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
     configure_runtime_manifest_hash,
     post_action_receipt_formatter,
     pre_action_guard,
     validate_approval_grant,
+)
+from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
+from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
+from nexus.services.unified_runtime import (
+    ONLINE_CLI_SPEC_REGISTRY,
+    resolve_registered_provider_executable,
 )
 
 GATEWAY_NAME = "nexus-mcp-gateway"
@@ -66,6 +73,13 @@ PERMISSION_POLICY_HASH = hashlib.sha256(
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
+MAX_SEARCH_FILE_BYTES = 1024 * 1024
+MAX_SEARCH_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_SEARCH_FILES = 10000
+MAX_SEARCH_SECONDS = 3
+MAX_SEARCH_LINE_BYTES = 4096
+MAX_SEARCH_STDERR_BYTES = 64 * 1024
+FRESHNESS_SEMANTICS_REVISION = "nexus.gateway_freshness.v3"
 CLINE_RUN_TIMEOUT_SECONDS = 60
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -76,6 +90,12 @@ PUBLIC_TOOL_NAMES: tuple[str, ...]
 TOOL_MANIFEST_REVISION: str
 FULL_TOOL_SCHEMA_HASH: str
 SERVER_REPO_HEAD_AT_START: str
+# Freeze the runtime source set and its digests once at gateway load so later
+# imports never change the freshness comparison baseline.
+RUNTIME_SOURCE_PATHS: tuple[Path, ...]
+RUNTIME_SOURCE_SHA256_AT_START: str
+ACTION_CONTRACT_SHA256_AT_START: str
+PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 
 
 class GatewayInputError(ValueError):
@@ -106,6 +126,38 @@ def _safe_relative_path(value: Any, field: str = "path") -> Path:
     return resolved
 
 
+def _safe_search_target(value: Any) -> tuple[Path, Path]:
+    """Validate a search target fail-closed against symlink traversal.
+
+    Returns ``(lexical, resolved)`` where ``lexical`` stays inside the canonical
+    root and ``resolved`` is the on-disk target.  Every path component - the
+    intermediate directories and the final component - is checked with
+    ``lstat()``; any symlink rejects the request so a search can never read
+    through a link planted outside the canonical root.
+    """
+    raw = _text(value, "path", max_length=1024)
+    candidate = Path(raw)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise GatewayInputError("path must be a bounded relative path")
+    if ".git" in candidate.parts:
+        raise GatewayInputError("path cannot access .git")
+    lexical = CANONICAL_SOURCE_ROOT / candidate
+    current = CANONICAL_SOURCE_ROOT
+    for part in candidate.parts:
+        current = current / part
+        try:
+            if stat.S_ISLNK(os.lstat(current).st_mode):
+                raise GatewayInputError("search path cannot traverse symlinks")
+        except FileNotFoundError:
+            break
+    resolved = lexical.resolve()
+    try:
+        resolved.relative_to(CANONICAL_SOURCE_ROOT)
+    except ValueError as exc:
+        raise GatewayInputError("path escapes canonical root") from exc
+    return lexical, resolved
+
+
 def _git(*args: str, timeout: float = 3.0) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -124,6 +176,667 @@ def _bounded_text(value: str, field: str) -> str:
     if len(value.encode("utf-8")) > MAX_RESULT_BYTES:
         raise RuntimeError(f"{field} exceeds {MAX_RESULT_BYTES} bytes")
     return value
+
+
+def _bounded_match_line(line: str) -> tuple[str, bool]:
+    """Deterministically cap one search match line so a single oversized line
+    cannot blow through the response byte budget.
+
+    Returns ``(bounded_line, truncated)`` where ``truncated`` is true when the
+    line was trimmed to ``MAX_SEARCH_LINE_BYTES`` and must surface as a global
+    truncation flag.
+    """
+    encoded = line.encode("utf-8")
+    if len(encoded) <= MAX_SEARCH_LINE_BYTES:
+        return line, False
+    return encoded[:MAX_SEARCH_LINE_BYTES].decode("utf-8", errors="ignore"), True
+
+
+def _git_ls_files(*, root: Path, relative: str) -> list[str]:
+    """List Git-tracked and non-ignored untracked files under one relative path.
+
+    Parsing is NUL-safe: the ``-z`` flag emits each path name verbatim (newlines
+    and surrounding whitespace preserved) and non-UTF-8 names survive via
+    ``os.fsdecode`` surrogateescape.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--deduplicate", "-z", "--", relative],
+        cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=MAX_SEARCH_SECONDS, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip() or "git ls-files failed")
+    paths: list[str] = []
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        paths.append(os.fsdecode(raw))
+    return paths
+
+
+def _search_candidate_files(*, root: Path, target: Path) -> list[Path]:
+    """Return the ordered candidate files for a literal search target.
+
+    A single regular file scans only that file.  A directory resolves to the
+    Git-tracked and non-ignored untracked file list so the search never runs an
+    unbounded whole-filesystem recursion.
+    """
+    root_resolved = root.resolve()
+    target_resolved = target.resolve()
+    try:
+        target_resolved.relative_to(root_resolved)
+    except ValueError:
+        return []
+    if not target_resolved.is_symlink() and target_resolved.is_file():
+        return [target_resolved]
+    try:
+        relative = str(target_resolved.relative_to(root_resolved)) or "."
+    except ValueError:
+        return []
+    candidates: list[Path] = []
+    for raw in _git_ls_files(root=root_resolved, relative=relative):
+        raw_path = root_resolved / raw
+        if raw_path.is_symlink():
+            continue
+        resolved = raw_path.resolve()
+        try:
+            resolved.relative_to(root_resolved)
+        except ValueError:
+            continue
+        candidates.append(resolved)
+    candidates.sort(key=lambda path: path.relative_to(root_resolved).as_posix())
+    return candidates
+
+
+def _searchable_file(*, root: Path, candidate: Path) -> bool:
+    """Re-validate one candidate file before reading it."""
+    if candidate.is_symlink():
+        return False
+    if ".git" in candidate.parts:
+        return False
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    if not candidate.is_file():
+        return False
+    try:
+        if candidate.stat().st_size > MAX_SEARCH_FILE_BYTES:
+            return False
+    except OSError:
+        return False
+    return True
+
+
+def _display_search_path(path: Path, *, root: Path) -> str:
+    """Render a canonical-relative path safely when its name bytes are not UTF-8.
+
+    Non-UTF-8 filename bytes are escaped deterministically (e.g. ``caf\xe9.txt``)
+    so the displayed path never contains surrogate code points, survives UTF-8
+    re-encoding, and stays JSON-serializable.
+    """
+    relative = path.relative_to(root)
+    raw = os.fsencode(relative)
+    return raw.decode("utf-8", errors="backslashreplace")
+
+
+def _literal_matches_in_file(*, root: Path, candidate: Path, pattern: str) -> tuple[list[str], bool]:
+    """Literal substring match over one UTF-8 file, skipping unreadable or
+    binary content.  Output lines use ``relative/path.py:line:content`` and
+    ``truncated`` is true when any matching line was capped."""
+    try:
+        raw = candidate.read_bytes()
+    except OSError:
+        return [], False
+    if b"\x00" in raw:
+        return [], False
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return [], False
+    relative = _display_search_path(candidate, root=root)
+    found: list[str] = []
+    truncated = False
+    for lineno, line in enumerate(text.split("\n"), start=1):
+        if pattern not in line:
+            continue
+        if line.endswith("\r"):
+            line = line[:-1]
+        bounded, line_truncated = _bounded_match_line(f"{relative}:{lineno}:{line}")
+        truncated = truncated or line_truncated
+        found.append(bounded)
+    return found, truncated
+
+
+def _python_literal_search(
+    *,
+    root: Path,
+    target: Path,
+    pattern: str,
+) -> tuple[list[str], bool]:
+    """Standard-library literal search fallback used when ripgrep is absent.
+
+    Enforces the named search resource limits and returns ``(matches, truncated)``
+    where the match lines are always canonical-root-relative.
+    """
+    root_resolved = root.resolve()
+    candidates = _search_candidate_files(root=root_resolved, target=target)
+    deadline = time.monotonic() + MAX_SEARCH_SECONDS
+    matches: list[str] = []
+    output_bytes = 0
+    scanned = 0
+    total_bytes = 0
+    truncated = False
+    for candidate in candidates:
+        if len(matches) >= MAX_SEARCH_RESULTS:
+            truncated = True
+            break
+        if scanned >= MAX_SEARCH_FILES:
+            truncated = True
+            break
+        if time.monotonic() >= deadline:
+            truncated = True
+            break
+        scanned += 1
+        if not _searchable_file(root=root_resolved, candidate=candidate):
+            continue
+        try:
+            size = candidate.stat().st_size
+        except OSError:
+            continue
+        if total_bytes + size > MAX_SEARCH_TOTAL_BYTES:
+            truncated = True
+            break
+        total_bytes += size
+        file_matches, file_truncated = _literal_matches_in_file(root=root_resolved, candidate=candidate, pattern=pattern)
+        truncated = truncated or file_truncated
+        for matched in file_matches:
+            if len(matches) >= MAX_SEARCH_RESULTS:
+                truncated = True
+                break
+            matched_bytes = len(matched.encode("utf-8"))
+            if output_bytes + matched_bytes > MAX_RESULT_BYTES:
+                truncated = True
+                break
+            matches.append(matched)
+            output_bytes += matched_bytes
+        if truncated:
+            break
+    return matches, truncated
+
+
+def _bounded_rg_matches(lines: list[str]) -> tuple[list[str], bool]:
+    """Apply the same result and byte caps to ripgrep output lines."""
+    matches: list[str] = []
+    truncated = bool(len(lines) > MAX_SEARCH_RESULTS)
+    output_bytes = 0
+    for line in lines:
+        if len(matches) >= MAX_SEARCH_RESULTS:
+            truncated = True
+            break
+        bounded, line_truncated = _bounded_match_line(line)
+        truncated = truncated or line_truncated
+        matched_bytes = len(bounded.encode("utf-8"))
+        if output_bytes + matched_bytes > MAX_RESULT_BYTES:
+            truncated = True
+            break
+        matches.append(bounded)
+        output_bytes += matched_bytes
+    return matches, truncated
+
+
+def _terminate_and_reap_search_process(process: subprocess.Popen) -> str:
+    """Force a search child to exit and reap it, failing closed on refusal.
+
+    Returns one of ``already_exited``, ``sigterm``, or ``sigkill`` describing
+    the action actually taken so the caller only accepts a return code when it
+    matches the signal this helper really sent.  terminate -> wait(0.5) ->
+    kill -> wait(1.0) bounds the total wait; if the process still refuses to
+    die the second wait timeout raises so a leaked child can never pass as a
+    successful cleanup.
+
+    If the child exits between ``poll`` and ``terminate``/``kill``
+    (``ProcessLookupError``) it is reaped with a bounded ``wait`` and reported
+    as ``already_exited`` rather than falsely claiming a signal was sent.
+    """
+    if process.poll() is not None:
+        process.wait()
+        return "already_exited"
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        process.wait()
+        return "already_exited"
+    try:
+        process.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            process.wait()
+            return "already_exited"
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("search process cleanup failed") from None
+        return "sigkill"
+    return "sigterm"
+
+
+def _run_rg_literal_search(
+    *,
+    executable: str,
+    root: Path,
+    relative: str,
+    pattern: str,
+) -> tuple[list[str], bool]:
+    """Run one literal ripgrep search under hard process-level resource limits.
+
+    Reads stdout and stderr in bounded binary chunks (never ``communicate()``
+    or a whole ``stdout.read()``) with ``select``-bounded reads so
+    ``MAX_SEARCH_SECONDS`` is enforced while the process runs, and counts raw
+    streamed bytes so ``MAX_RESULT_BYTES`` caps the process output itself.  The
+    stderr pipe is drained simultaneously (never left to backpressure) and
+    retained only up to ``MAX_SEARCH_STDERR_BYTES`` for error reporting.
+
+    The process is never force-terminated just because its pipes reached EOF:
+    a normally exiting child that outlives its last output gets a bounded
+    natural ``wait`` for its own exit.  Only a result limit, an output-byte
+    limit, or the deadline may force termination, and the caller only accepts
+    a forced exit whose return code matches the signal the helper actually
+    sent.  A returning ``_terminate_and_reap_search_process`` of
+    ``already_exited`` is classified by the natural return-code rules instead.
+    A genuine ripgrep failure (exit code outside the normal 0=matches /
+    1=no-matches contract, an unforced signal exit, or a cleanup failure)
+    raises ``RuntimeError`` and is never masked by the Python fallback or by a
+    truncated-read state.
+    """
+    process = subprocess.Popen(
+        [
+            executable,
+            "-n",
+            "--fixed-strings",
+            "--no-heading",
+            "--color",
+            "never",
+            "--with-filename",
+            "--max-count",
+            str(MAX_SEARCH_RESULTS),
+            "--",
+            pattern,
+            relative,
+        ],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+    )
+    stdout_fd = process.stdout.fileno()
+    stderr_fd = process.stderr.fileno()
+    deadline = time.monotonic() + MAX_SEARCH_SECONDS
+    matches: list[str] = []
+    raw_output_bytes = 0
+    truncated = False
+    rejected_match_line = False
+    line_buffer = bytearray()
+    stderr_bytes = bytearray()
+    stderr_overflow = False
+    forced_termination = False
+    termination_reason: str | None = None
+    termination_method: str | None = None
+    stdout_open = True
+    stderr_open = True
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                returncode = process.poll()
+                if returncode is not None:
+                    process.wait()
+                    break
+                truncated = True
+                forced_termination = True
+                termination_reason = "deadline"
+                break
+            if len(matches) >= MAX_SEARCH_RESULTS:
+                truncated = True
+                forced_termination = True
+                termination_reason = "result_limit"
+                break
+            if raw_output_bytes > MAX_RESULT_BYTES:
+                truncated = True
+                forced_termination = True
+                termination_reason = "output_byte_limit"
+                break
+            active_fds: list[int] = []
+            if stdout_open:
+                active_fds.append(stdout_fd)
+            if stderr_open:
+                active_fds.append(stderr_fd)
+            if not active_fds:
+                natural_remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    process.wait(timeout=natural_remaining)
+                except subprocess.TimeoutExpired:
+                    truncated = True
+                    forced_termination = True
+                    termination_reason = "deadline"
+                break
+            readable, _, _ = select.select(active_fds, [], [], min(remaining, 0.1))
+            if not readable:
+                continue
+            for fd in readable:
+                if fd == stdout_fd:
+                    try:
+                        chunk = os.read(stdout_fd, 64 * 1024)
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
+                        stdout_open = False
+                        continue
+                    raw_output_bytes += len(chunk)
+                    if raw_output_bytes > MAX_RESULT_BYTES:
+                        truncated = True
+                        forced_termination = True
+                        termination_reason = "output_byte_limit"
+                        break
+                    line_buffer.extend(chunk)
+                    while b"\n" in line_buffer:
+                        raw_line, _, rest = line_buffer.partition(b"\n")
+                        line_buffer = bytearray(rest)
+                        if rejected_match_line:
+                            continue
+                        if len(matches) >= MAX_SEARCH_RESULTS:
+                            truncated = True
+                            rejected_match_line = True
+                            continue
+                        bounded, line_truncated = _bounded_match_line(
+                            raw_line.decode("utf-8", errors="replace")
+                        )
+                        truncated = truncated or line_truncated
+                        matches.append(bounded)
+                else:
+                    try:
+                        chunk = os.read(stderr_fd, 64 * 1024)
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
+                        stderr_open = False
+                        continue
+                    room = MAX_SEARCH_STDERR_BYTES - len(stderr_bytes)
+                    if room > 0:
+                        stderr_bytes.extend(chunk[:room])
+                    if len(chunk) > room:
+                        stderr_overflow = True
+            if termination_reason is not None:
+                break
+        if line_buffer and not truncated:
+            bounded, line_truncated = _bounded_match_line(
+                bytes(line_buffer).decode("utf-8", errors="replace")
+            )
+            truncated = truncated or line_truncated
+            if len(matches) >= MAX_SEARCH_RESULTS:
+                truncated = True
+            else:
+                matches.append(bounded)
+        if forced_termination:
+            termination_method = _terminate_and_reap_search_process(process)
+        else:
+            assert process.returncode is not None
+    finally:
+        for cleanup_stream in (process.stdout, process.stderr):
+            try:
+                cleanup_stream.close()
+            except Exception:
+                pass
+
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+    if stderr_overflow:
+        stderr_text += "[stderr truncated]"
+    stderr_text = stderr_text.strip()
+
+    returncode = process.returncode
+    if forced_termination:
+        if termination_method == "already_exited":
+            if returncode not in (0, 1):
+                raise RuntimeError(stderr_text or f"search failed (exit {returncode})")
+        elif termination_method == "sigterm":
+            if returncode != -signal.SIGTERM:
+                raise RuntimeError(stderr_text or "search process exited unexpectedly")
+        elif termination_method == "sigkill":
+            if returncode != -signal.SIGKILL:
+                raise RuntimeError(stderr_text or "search process exited unexpectedly")
+        else:  # pragma: no cover - defensive; helper only returns documented values
+            raise RuntimeError("search process cleanup failed")
+    elif returncode not in (0, 1):
+        raise RuntimeError(stderr_text or f"search failed (exit {returncode})")
+    return matches, truncated
+
+
+def _loaded_runtime_source_paths() -> tuple[Path, ...]:
+    """Collect the Nexus Python modules already loaded inside the canonical repo.
+
+    The comparison set must be frozen at gateway start; later imports of other
+    modules must never change it.
+    """
+    root_resolved = CANONICAL_SOURCE_ROOT.resolve()
+    paths: list[Path] = []
+    for module in sorted(sys.modules.values(), key=lambda value: str(getattr(value, "__name__", ""))):
+        name = str(getattr(module, "__name__", ""))
+        if name != "nexus" and not name.startswith("nexus."):
+            continue
+        file_path = getattr(module, "__file__", None)
+        if not file_path:
+            continue
+        candidate = Path(file_path)
+        if candidate.suffix != ".py":
+            continue
+        if "__pycache__" in candidate.parts or candidate.suffix == ".pyc":
+            continue
+        if "tests" in candidate.parts:
+            continue
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root_resolved)
+        except ValueError:
+            continue
+        paths.append(resolved)
+    return tuple(sorted(set(paths), key=lambda path: path.as_posix()))
+
+
+def _hash_source_paths(paths: tuple[Path, ...], *, root: Path = CANONICAL_SOURCE_ROOT) -> str:
+    """Deterministic SHA-256 over relative path + file bytes for a frozen set.
+
+    A missing or unreadable file contributes a distinct marker so any change,
+    including deletion, surfaces as runtime source drift.
+    """
+    root_resolved = root.resolve()
+    digest = hashlib.sha256()
+    for path in paths:
+        resolved = Path(path).resolve()
+        try:
+            relative = resolved.relative_to(root_resolved)
+        except ValueError:
+            relative = Path(resolved.name)
+        digest.update(relative.as_posix().encode("utf-8"))
+        digest.update(b"\x00")
+        try:
+            data = resolved.read_bytes()
+        except OSError:
+            digest.update(b"\x00missing\x00")
+            continue
+        digest.update(b"\x00len=%d\x00" % len(data))
+        digest.update(hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
+# Directly define the public action schema or permission semantics.  Implementation
+# changes (for example ``_search``) must not alter the action contract fingerprint.
+ACTION_CONTRACT_TOP_LEVEL_CONSTANTS = (
+    "PERMISSION_POLICY",
+    "PERMISSION_POLICY_REVISION",
+    "TASK_CONTRACT_REVISION",
+    "LIFECYCLE_REVISION",
+    "LIFECYCLE_STATE_SCHEMA_REVISION",
+)
+
+
+def _action_contract_digest(source: str) -> Optional[str]:
+    """Non-executing AST fingerprint of the public action contract.
+
+    Hashes the assignment expression of each named top-level constant plus the
+    body of ``UnifiedMCPGateway.tool_specs``.  Returns ``None`` when the source
+    cannot be parsed (fail closed).
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    collected: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            else:
+                targets = [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in ACTION_CONTRACT_TOP_LEVEL_CONSTANTS:
+                    collected[target.id] = ast.dump(node.value, include_attributes=False)
+        elif isinstance(node, ast.ClassDef) and node.name == "UnifiedMCPGateway":
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and member.name == "tool_specs":
+                    collected["UnifiedMCPGateway.tool_specs"] = ast.dump(member, include_attributes=False)
+    if not collected:
+        return None
+    digest = hashlib.sha256()
+    for key in sorted(collected):
+        digest.update(key.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(collected[key].encode("utf-8"))
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
+def _action_contract_fingerprint(
+    *,
+    root: Path = CANONICAL_SOURCE_ROOT,
+    source: Optional[str] = None,
+) -> tuple[str, bool, tuple[str, ...]]:
+    """Return ``(sha256, ok, reasons)`` for the action contract.
+
+    ``ok=False`` means the contract cannot be evaluated and review must fail
+    closed; ``reasons`` carries the explicit cause for ``reload_reasons``.
+    """
+    if source is None:
+        source_path = root / "nexus" / "orchestrator" / "unified_mcp_gateway.py"
+        try:
+            source = source_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return "", False, (f"action_contract_source_unreadable:{exc.__class__.__name__}",)
+    digest = _action_contract_digest(source)
+    if digest is None:
+        return "", False, ("action_contract_source_unparseable",)
+    return digest, True, ()
+
+
+# Modules that define or enforce the permission policy.  Implementation changes
+# (for example ``_search``) must never alter the permission enforcement digest.
+PERMISSION_ENFORCEMENT_PATHS = (
+    "nexus/orchestrator/lifecycle_guards.py",
+    "nexus/contracts/lifecycle_action.py",
+)
+
+
+def _permission_enforcement_fingerprint(
+    *,
+    root: Path = CANONICAL_SOURCE_ROOT,
+) -> tuple[str, bool, tuple[str, ...]]:
+    """Non-executing AST fingerprint of the permission enforcement surface.
+
+    Hashes the full syntax tree of every module that defines or enforces the
+    permission policy without importing or executing them.  ``ok=False`` means
+    the enforcement contract cannot be evaluated and permission review must
+    fail closed; ``reasons`` carries the explicit cause for ``review_reasons``.
+    """
+    digest = hashlib.sha256()
+    for relative in PERMISSION_ENFORCEMENT_PATHS:
+        source_path = root / relative
+        try:
+            source = source_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return "", False, (f"permission_enforcement_source_unreadable:{exc.__class__.__name__}",)
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError):
+            return "", False, (f"permission_enforcement_source_unparseable:{relative}",)
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(ast.dump(tree, include_attributes=False).encode("utf-8"))
+        digest.update(b"\x00")
+    return digest.hexdigest(), True, ()
+
+
+def _evaluate_freshness(
+    *,
+    repo_head_at_start: str,
+    repo_head_current: str,
+    runtime_sha_at_start: str,
+    runtime_sha_current: str,
+    action_sha_at_start: str,
+    action_sha_current: str,
+    permission_sha_at_start: str = "",
+    permission_sha_current: str = "",
+    action_contract_ok: bool = True,
+    action_contract_reasons: tuple[str, ...] = (),
+    permission_contract_ok: bool = True,
+    permission_contract_reasons: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Derive the freshness semantics for ``nexus_gateway_status``.
+
+    ``repository_drift`` is informational only; only runtime source drift
+    triggers ``reload_required``.  ``reload_reasons`` therefore reports the
+    runtime reload decision alone (``runtime_source_changed``).  Action
+    definition changes, permission enforcement changes, or a fail-closed
+    contract evaluation are review-only concerns: they surface only in
+    ``review_reasons`` and never in ``reload_reasons``.
+    """
+    repository_drift = bool(repo_head_at_start != repo_head_current)
+    runtime_source_drift = bool(runtime_sha_at_start != runtime_sha_current)
+    reload_required = bool(runtime_source_drift)
+    action_definition_changed = bool(action_sha_at_start != action_sha_current)
+    permission_changed = bool(permission_sha_at_start != permission_sha_current)
+    action_definition_review_required = bool(not action_contract_ok or action_definition_changed)
+    permission_review_required = bool(not permission_contract_ok or permission_changed)
+    action_review_required = bool(action_definition_review_required or permission_review_required)
+    reload_reasons: list[str] = []
+    review_reasons: list[str] = []
+    if not action_contract_ok:
+        review_reasons.extend(action_contract_reasons)
+    if action_definition_changed:
+        review_reasons.append("action_definition_changed")
+    if not permission_contract_ok:
+        review_reasons.extend(permission_contract_reasons)
+    if permission_changed:
+        review_reasons.append("permission_enforcement_changed")
+    if runtime_source_drift:
+        reload_reasons.append("runtime_source_changed")
+    return {
+        "repository_drift": repository_drift,
+        "runtime_source_sha256_at_start": runtime_sha_at_start,
+        "runtime_source_sha256_current": runtime_sha_current,
+        "runtime_source_drift": runtime_source_drift,
+        "action_definition_sha256_at_start": action_sha_at_start,
+        "action_definition_sha256_current": action_sha_current,
+        "action_contract_sha256_at_start": action_sha_at_start,
+        "action_contract_sha256_current": action_sha_current,
+        "permission_enforcement_sha256_at_start": permission_sha_at_start,
+        "permission_enforcement_sha256_current": permission_sha_current,
+        "action_definition_review_required": action_definition_review_required,
+        "permission_review_required": permission_review_required,
+        "action_review_required": action_review_required,
+        "review_reasons": review_reasons,
+        "reload_required": reload_required,
+        "reload_reasons": reload_reasons,
+    }
 
 
 class UnifiedMCPGateway:
@@ -1340,6 +2053,22 @@ class UnifiedMCPGateway:
                 continue
             if isinstance(job, Mapping) and job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
                 pending_actions += 1
+        action_sha_current, action_contract_ok, action_contract_reasons = _action_contract_fingerprint()
+        permission_sha_current, permission_contract_ok, permission_contract_reasons = _permission_enforcement_fingerprint()
+        freshness = _evaluate_freshness(
+            repo_head_at_start=SERVER_REPO_HEAD_AT_START,
+            repo_head_current=current_head,
+            runtime_sha_at_start=RUNTIME_SOURCE_SHA256_AT_START,
+            runtime_sha_current=_hash_source_paths(RUNTIME_SOURCE_PATHS),
+            action_sha_at_start=ACTION_CONTRACT_SHA256_AT_START,
+            action_sha_current=action_sha_current,
+            permission_sha_at_start=PERMISSION_ENFORCEMENT_SHA256_AT_START,
+            permission_sha_current=permission_sha_current,
+            action_contract_ok=action_contract_ok,
+            action_contract_reasons=action_contract_reasons,
+            permission_contract_ok=permission_contract_ok,
+            permission_contract_reasons=permission_contract_reasons,
+        )
         return {
             "schema": "nexus.mcp_gateway_status.v1",
             "public_app_name": PUBLIC_APP_NAME,
@@ -1357,7 +2086,8 @@ class UnifiedMCPGateway:
             "server_started_at": SERVER_STARTED_AT,
             "repo_head_at_start": SERVER_REPO_HEAD_AT_START,
             "repo_head_current": current_head,
-            "reload_required": bool(SERVER_REPO_HEAD_AT_START not in {"", "unknown"} and current_head != SERVER_REPO_HEAD_AT_START),
+            "freshness_semantics_revision": FRESHNESS_SEMANTICS_REVISION,
+            **freshness,
             "session_tracking": "unsupported",
             "active_sessions": None,
             "pending_actions": pending_actions,
@@ -1716,16 +2446,23 @@ class UnifiedMCPGateway:
 
     def _search(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         pattern = _text(arguments.get("pattern"), "pattern", max_length=200)
-        path = _safe_relative_path(arguments.get("path", "."), "path")
+        _, path = _safe_search_target(arguments.get("path", "."))
         relative = str(path.relative_to(CANONICAL_SOURCE_ROOT)) or "."
-        result = subprocess.run(
-            ["rg", "-n", "--fixed-strings", "--no-heading", "--color", "never", "--max-count", "200", pattern, relative],
-            cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=3, check=False,
-        )
-        if result.returncode not in (0, 1):
-            raise RuntimeError(result.stderr.strip() or "search failed")
-        output = result.stdout.splitlines()[:MAX_SEARCH_RESULTS]
-        return {"schema": "nexus.workspace_search.v1", "pattern": pattern, "path": relative, "matches": output, "truncated": len(result.stdout.splitlines()) > MAX_SEARCH_RESULTS}
+        rg = shutil.which("rg")
+        if rg is None:
+            matches, truncated = _python_literal_search(root=CANONICAL_SOURCE_ROOT, target=path, pattern=pattern)
+            backend = "python"
+        else:
+            try:
+                matches, truncated = _run_rg_literal_search(
+                    executable=rg, root=CANONICAL_SOURCE_ROOT, relative=relative, pattern=pattern
+                )
+            except FileNotFoundError:
+                matches, truncated = _python_literal_search(root=CANONICAL_SOURCE_ROOT, target=path, pattern=pattern)
+                backend = "python"
+            else:
+                backend = "ripgrep"
+        return {"schema": "nexus.workspace_search.v1", "pattern": pattern, "path": relative, "matches": matches, "truncated": truncated, "backend": backend}
 
     def _diff(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         base = arguments.get("base_revision")
@@ -2533,4 +3270,15 @@ try:
     SERVER_REPO_HEAD_AT_START = _git("rev-parse", "HEAD").strip() or "unknown"
 except Exception:
     SERVER_REPO_HEAD_AT_START = "unknown"
+# Freeze the runtime source comparison set and its digests at gateway load so
+# the freshness baseline never drifts just because a later import loads another
+# Nexus module.  A failed start fingerprint is treated as unknown and therefore
+# drifts against any readable current fingerprint (fail closed).
+RUNTIME_SOURCE_PATHS = _loaded_runtime_source_paths()
+try:
+    RUNTIME_SOURCE_SHA256_AT_START = _hash_source_paths(RUNTIME_SOURCE_PATHS)
+except Exception:
+    RUNTIME_SOURCE_SHA256_AT_START = ""
+ACTION_CONTRACT_SHA256_AT_START, _ACTION_CONTRACT_OK, _ACTION_CONTRACT_REASONS = _action_contract_fingerprint()
+PERMISSION_ENFORCEMENT_SHA256_AT_START, _PERMISSION_ENFORCEMENT_OK, _PERMISSION_ENFORCEMENT_REASONS = _permission_enforcement_fingerprint()
 configure_runtime_manifest_hash(TOOL_MANIFEST_REVISION)
