@@ -1,31 +1,35 @@
-import pytest
-from pathlib import Path
 import json
+from pathlib import Path
+
 from scripts.ops.agent_protocol_check import check_protocol
+
+ROOT = Path(__file__).resolve().parents[2]
+CURRENT_REQUIRED_TERMS = (
+    "Direct execution authority",
+    "Governed execution authority",
+    "Completion requires behavioral evidence",
+    "Report evidence in the final response",
+    "docs/agents/TASK_EXECUTION_CONTRACT.md",
+    "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
+    "CapabilityPlanner",
+)
+
+
+def _write_agents(path: Path, terms=CURRENT_REQUIRED_TERMS):
+    path.write_text("\n".join(terms), encoding="utf-8")
 
 
 def _write_contract(path: Path, *, forbidden=None, allowed=None, max_files=10):
     forbidden = forbidden or [".obsidian/"]
     allowed = allowed or ["."]
-    path.write_text(
-        f"""
-{{
-  "required_terms": [
-    "allowed_paths",
-    "forbidden_paths",
-    "max_files_touched",
-    "Semantic Completion Criteria",
-    "Evidence Reporting Format",
-    "Failure-to-Lesson Writeback"
-  ],
-  "boundaries": {{
-    "allowed_paths": {json.dumps(allowed)},
-    "forbidden_paths": {json.dumps(forbidden)},
-    "max_files_touched": {max_files}
-  }}
-}}
-""".strip()
-    )
+    path.write_text(json.dumps({
+        "required_terms": list(CURRENT_REQUIRED_TERMS),
+        "boundaries": {
+            "allowed_paths": allowed,
+            "forbidden_paths": forbidden,
+            "max_files_touched": max_files,
+        },
+    }), encoding="utf-8")
 
 
 def _write_overlay_card(path: Path, *, forbidden=None, allowed=None, max_files=10):
@@ -45,28 +49,25 @@ def _write_overlay_card(path: Path, *, forbidden=None, allowed=None, max_files=1
     )
 
 
+def test_repository_contract_accepts_current_compact_agents(monkeypatch):
+    monkeypatch.chdir(ROOT)
+
+    assert check_protocol(contract_path=ROOT / "scripts/ops/agent_protocol_contract.json") == 0
+
+
 def test_protocol_missing_agents_md(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert check_protocol(contract_path=tmp_path / "contract.json") == 1
 
 def test_protocol_missing_terms(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("allowed_paths: /") # Missing others
+    _write_agents(tmp_path / "AGENTS.md", CURRENT_REQUIRED_TERMS[:1])
     _write_contract(tmp_path / "contract.json")
     assert check_protocol(contract_path=tmp_path / "contract.json") == 1
 
 def test_protocol_check_files_forbidden(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("""
-- **allowed_paths**: Project root
-- **forbidden_paths**: .obsidian/, secret/
-- **max_files_touched**: 5
-- Semantic Completion Criteria
-- Evidence Reporting Format
-- Failure-to-Lesson Writeback
-""")
+    _write_agents(tmp_path / "AGENTS.md")
     _write_contract(tmp_path / "contract.json", forbidden=[".obsidian/", "secret/"])
     # Hit forbidden
     assert check_protocol(check_files=[".obsidian/config"], contract_path=tmp_path / "contract.json") == 1
@@ -74,46 +75,20 @@ def test_protocol_check_files_forbidden(tmp_path, monkeypatch):
 
 def test_protocol_check_files_too_many(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("""
-- **allowed_paths**: Project root
-- **forbidden_paths**: .obsidian/
-- **max_files_touched**: 2
-- Semantic Completion Criteria
-- Evidence Reporting Format
-- Failure-to-Lesson Writeback
-""")
+    _write_agents(tmp_path / "AGENTS.md")
     _write_contract(tmp_path / "contract.json", max_files=2)
     assert check_protocol(check_files=["a.txt", "b.txt", "c.txt"], contract_path=tmp_path / "contract.json") == 1
 
 def test_protocol_check_files_pass(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("""
-- **allowed_paths**: Project root
-- **forbidden_paths**: .obsidian/
-- **max_files_touched**: 10
-- Semantic Completion Criteria
-- Evidence Reporting Format
-- Failure-to-Lesson Writeback
-""")
+    _write_agents(tmp_path / "AGENTS.md")
     _write_contract(tmp_path / "contract.json")
     assert check_protocol(check_files=["a.txt", "b.txt"], contract_path=tmp_path / "contract.json") == 0
 
 
 def test_protocol_check_files_strict_boundary_fail(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text(
-        """
-- **allowed_paths**: Project root
-- **forbidden_paths**: .obsidian/
-- **max_files_touched**: 10
-- Semantic Completion Criteria
-- Evidence Reporting Format
-- Failure-to-Lesson Writeback
-""".strip()
-    )
+    _write_agents(tmp_path / "AGENTS.md")
     _write_contract(tmp_path / "contract.json", allowed=["scripts/ops/"])
     assert (
         check_protocol(
@@ -127,19 +102,13 @@ def test_protocol_check_files_strict_boundary_fail(tmp_path, monkeypatch):
 
 def test_protocol_missing_baseline_fails_closed(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "AGENTS.md").write_text(
-        "allowed_paths forbidden_paths max_files_touched Semantic Completion Criteria "
-        "Evidence Reporting Format Failure-to-Lesson Writeback"
-    )
+    _write_agents(tmp_path / "AGENTS.md")
     assert check_protocol(contract_path=tmp_path / "missing.json") == 1
 
 
 def test_protocol_malformed_baseline_fails_closed(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "AGENTS.md").write_text(
-        "allowed_paths forbidden_paths max_files_touched Semantic Completion Criteria "
-        "Evidence Reporting Format Failure-to-Lesson Writeback"
-    )
+    _write_agents(tmp_path / "AGENTS.md")
     contract = tmp_path / "contract.json"
     contract.write_text("{not-json")
     assert check_protocol(contract_path=contract) == 1
@@ -147,10 +116,7 @@ def test_protocol_malformed_baseline_fails_closed(tmp_path, monkeypatch):
 
 def test_protocol_task_card_overlay_narrows_baseline(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "AGENTS.md").write_text(
-        "allowed_paths forbidden_paths max_files_touched Semantic Completion Criteria "
-        "Evidence Reporting Format Failure-to-Lesson Writeback"
-    )
+    _write_agents(tmp_path / "AGENTS.md")
     contract = tmp_path / "contract.json"
     _write_contract(contract, allowed=["."], forbidden=["packages/"], max_files=5)
     card = tmp_path / "card.md"

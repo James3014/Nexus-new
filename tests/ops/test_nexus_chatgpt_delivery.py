@@ -291,3 +291,18 @@ def test_skills_do_not_contain_contradictory_connector_blocked_rule_when_nexus_b
     assert "nexus.bash must be used for governed lifecycle operations" in launch_text
     assert "REPO_READY_CONNECTOR_BLOCKED applies only when neither native lifecycle tools nor nexus.bash with repo-owned CLI wrappers are available." in launch_text
     assert "nexus.bash must be used for governed lifecycle operations" in merge_text
+
+
+def test_task_launch_skill_exits_for_owner_authorized_direct_canonical_work():
+    launch_skill = (
+        Path(__file__).resolve().parents[2]
+        / ".agents"
+        / "skills"
+        / "nexus-task-launch"
+        / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    normalized = " ".join(launch_skill.replace("`", "").split())
+    assert "Use only after work is classified as governed" in normalized
+    assert "DIRECT_CANONICAL does not require a Task Card or lifecycle state" in normalized
+    assert "Code mutation must use the self-hosted lifecycle tools" not in normalized

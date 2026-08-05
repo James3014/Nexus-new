@@ -1,6 +1,6 @@
 # Claude bootstrap
 
-Read `AGENTS.md`, `MUSE_PROTO.md`, and the active Git-tracked Task Card from the current worktree first. Recover through formal lifecycle state and receipts; do not depend on a legacy sync command or another checkout.
+Read `AGENTS.md` and `MUSE_PROTO.md` from the current worktree first, then classify the execution lane. An explicit Owner-authorized bounded `DIRECT_CANONICAL` change does not require a Task Card or lifecycle state. Governed work resolves the active Git-tracked Task Card and recovers through formal lifecycle state and receipts; do not depend on a legacy sync command or another checkout.
 
 ## Agent skills
 

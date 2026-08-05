@@ -3,7 +3,9 @@
 Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 
 - Repository authority: this root `AGENTS.md`.
-- Task execution authority: the active Git-tracked Task Card under
+- Direct execution authority: an explicit current Owner request may authorize a
+  bounded `DIRECT_CANONICAL` change without a Task Card or lifecycle state.
+- Governed execution authority: the active Git-tracked Task Card under
   `tasks/<campaign-id>/`.
 - Response/domain overlay: `MUSE_PROTO.md`; it never grants mutation authority.
 
@@ -16,10 +18,14 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Before every task, run:
   `git rev-parse --show-toplevel`, `git branch --show-current`,
   `git status --short --branch`, and `git worktree list --porcelain`.
-- Read this file, the campaign `INDEX.md`, and only the current-frontier card;
-  verify the lifecycle task id, card path, and card hash before editing.
+- Classify the execution lane before mutation. For an eligible
+  `DIRECT_CANONICAL` change, read this file and the nearest relevant nested
+  authority, then freeze the request-derived file scope. For governed work,
+  read the campaign `INDEX.md` and only the current-frontier card, then verify
+  the lifecycle task id, card path, and card hash before editing.
 - Runtime state, reports, chat, and old worktrees cannot replace the Git-tracked
-  Task Card or silently rewrite it. `AUTO_CHAIN=false` unless the index says so.
+  Task Card for governed work or silently rewrite it. `AUTO_CHAIN=false` unless
+  the index says so.
 - If not anchored at the canonical root, stop mutation and re-anchor first.
 
 ## Safety and completion
@@ -30,17 +36,38 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Do not hand-edit lifecycle JSON. Use the formal lifecycle API, CLI, or
   service surface. Do not push, merge protected main, or delete refs without
   explicit authority.
-- Completion requires behavioral evidence, structural conformance, and any
-  card-defined receipt/verifier. A report or green subset is not solve truth.
+- Completion requires behavioral evidence, structural conformance, and the
+  applicable request- or card-defined verifier. A report or green subset is not
+  solve truth.
 - A local or delegated model produces a candidate only; it cannot approve,
   promote, integrate, push, claim production readiness, or clean up.
-- Workers may commit only their scoped card changes. Approval, integration,
-  push, cleanup, and production/public claims remain separate authorities.
+- Governed workers may commit only their scoped card changes. Approval,
+  integration, push, cleanup, and production/public claims remain separate
+  authorities.
 - Blocks are explicit: `RECOVERABLE_BLOCK` preserves the card for retry;
   `HARD_BLOCK` stops mutation until owner/spec authority resolves it. A block
   never promotes a Candidate or activates downstream work.
 
-## Task-card and artifact governance
+## Direct canonical execution
+
+- An explicit current Owner instruction to modify the repository authorizes
+  `DIRECT_CANONICAL` when the primary agent performs one bounded change in the
+  canonical checkout with a clear file scope and no overlap with unrelated
+  dirty state.
+- Eligible direct work does not require a Task Card, campaign, lifecycle state,
+  Target, Candidate, approval, or promotion receipt. Record the baseline, keep
+  the diff scoped, run relevant checks plus `git diff --check`, and report the
+  changed files and evidence in the final response.
+- Direct work becomes governed before mutation if it delegates implementation,
+  needs an isolated Target, crosses subsystems, changes route/lifecycle/workforce
+  authority, weakens security, changes a migration or schema, performs cleanup
+  or protected-branch/ref operations, creates a Candidate, or makes a
+  production/public claim.
+- Direct work does not commit, push, merge, delete, or continue into a successor
+  task unless the Owner grants that exact authority. If eligibility is unclear,
+  stop and report the specific escalation condition.
+
+## Governed task-card and artifact governance
 
 - Every active campaign has `tasks/<campaign-id>/INDEX.md` with authority,
   status, ordered cards, dependencies, frontier, and completed/blocked state.
@@ -64,7 +91,10 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 
 Load the smallest authoritative surface that matches the task:
 
-- Mutating task: `docs/agents/TASK_EXECUTION_CONTRACT.md` plus the active card.
+- Owner-authorized bounded direct mutation: this file plus the nearest relevant
+  nested authority; no Task Card or lifecycle state is required.
+- Governed mutation: `docs/agents/TASK_EXECUTION_CONTRACT.md` plus the active
+  card.
 - Model/provider selection, delegation, or routing: compact machine Workforce
   Admission receipt first; load the full policy/YAML only for policy changes,
   provider/model onboarding or calibration, promotion/demotion, admission

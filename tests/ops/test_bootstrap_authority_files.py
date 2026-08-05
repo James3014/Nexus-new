@@ -29,6 +29,10 @@ def test_bootstrap_files_use_current_worktree_authority():
         assert not any(token in content for token in FORBIDDEN_TOKENS), path
 
     assert "active Git-tracked Task Card" in contents["AGENTS.md"]
+    assert "DIRECT_CANONICAL" in contents["AGENTS.md"]
+    assert "does not require a Task Card" in contents["AGENTS.md"]
+    for path in ("GEMINI.md", "CLAUDE.md", "MEMORY.md", "SOUL.md", ".cursorrules"):
+        assert "DIRECT_CANONICAL" in contents[path], path
     assert "MUSE_PROTO.md` is only" in contents["MUSE_PROTO.md"]
     assert "../GEMINI.md" in contents[".gemini/GEMINI.md"]
 

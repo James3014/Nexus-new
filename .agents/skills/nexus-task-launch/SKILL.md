@@ -1,17 +1,27 @@
 ---
 name: nexus-task-launch
-description: Governed Nexus self-hosted task launch policy. Use for implementation work that must remain bounded, reviewable, and connector-driven.
+description: Governed Nexus self-hosted task launch policy. Use only after root AGENTS.md classifies work as governed because it needs delegation, an isolated Target, lifecycle orchestration, a Candidate handoff, or another governed condition. Do not use for eligible Owner-authorized DIRECT_CANONICAL changes.
 ---
 
 # Nexus governed task launch
 
-Read-only inspection may use the current checkout. Code mutation must use the
-self-hosted lifecycle tools; do not create an unmanaged worktree, manually
-create a branch, or use a direct connector edit/write operation.
+## Entry gate
+
+Use only after work is classified as governed under the root `AGENTS.md`. If an
+explicit current Owner request is eligible for `DIRECT_CANONICAL`, stop this
+skill and return execution to the primary agent in the canonical checkout.
+`DIRECT_CANONICAL` does not require a Task Card or lifecycle state.
+
+Read-only inspection may use the current checkout. After governed
+classification, mutation must use the self-hosted lifecycle tools; do not
+create an unmanaged worktree, manually create a branch, or use a direct
+connector edit/write operation.
 
 ## Required sequence
 
-1. Call `nexus_self_hosted_list_actionable_tasks` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted list-actionable` / `python -m scripts.ops.nexus_chatgpt_delivery actionable`) before any mutation. Record the returned task action and the current controller revision.
+For governed work only:
+
+1. Call `nexus_self_hosted_list_actionable_tasks` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted list-actionable` / `python -m scripts.ops.nexus_chatgpt_delivery actionable`) before governed mutation. Record the returned task action and the current controller revision.
 2. Call `nexus_self_hosted_submit_task` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted submit` / `python -m scripts.ops.nexus_chatgpt_delivery launch`) with one stable `task_id`, the exact bounded `allowed_files`, the immutable controller revision, and the selected target base. Do not create a `-v2` or `-v3` task ID; retries add only an `attempt_id`.
 3. Call `nexus_self_hosted_wait_task` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted wait`) and follow its action envelope until `ACTION_REQUIRED`, `FINAL_BLOCK`, or `TERMINAL`. A worker may edit only the declared target files and must return a candidate commit plus verifier evidence.
 

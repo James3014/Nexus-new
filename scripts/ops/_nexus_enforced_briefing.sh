@@ -33,6 +33,7 @@ fi
 
 INDEX_PATH="${NEXUS_TASK_INDEX:-tasks/bootstrap-authority-convergence/INDEX.md}"
 TASK_ID="${NEXUS_TASK_ID:-unknown}"
+EXECUTION_LANE="${NEXUS_EXECUTION_LANE:-GOVERNED}"
 if [[ "$TASK_ID" == "unknown" && -f "$INDEX_PATH" ]]; then
   TASK_ID="$(awk '/^## Current Frontier/{found=1; next} found && /`/{gsub(/`/, ""); print; exit}' "$INDEX_PATH" || true)"
   TASK_ID="${TASK_ID:-unknown}"
@@ -54,21 +55,23 @@ cat > "$OUT_FILE" <<EOF
 - branch: $BRANCH
 - head: $HEAD
 - dirty: $DIRTY_STATE
+- execution_lane: $EXECUTION_LANE
 - task_index: $INDEX_PATH
 - task_id: $TASK_ID
 - workforce_policy_sha256: $POLICY_HASH
-- startup_gate: python3 scripts/ops/nexus_startup_contract_check.py
+- startup_gate: python3 scripts/ops/nexus_startup_contract_check.py --execution-lane $EXECUTION_LANE
 - workforce_query: python3 scripts/engine/nexus_cli.py workforce status
 
 ## Authority
 - AGENTS.md is repository governance authority.
-- The active Git-tracked Task Card is execution authority.
+- An explicit current Owner request is execution authority for an eligible bounded DIRECT_CANONICAL change; it does not require a Task Card or lifecycle state.
+- The active Git-tracked Task Card is execution authority for governed work.
 - MUSE_PROTO.md is response/domain overlay only; it cannot override AGENTS.md or the Task Card.
 - Workforce route authority remains CapabilityPlanner; this briefing never selects a worker.
-- Missing or stale authority is NEXUS_BOOTSTRAP_INCOMPLETE and must block claims of active execution.
+- Missing or stale Task Card authority is NEXUS_BOOTSTRAP_INCOMPLETE for governed work; it does not block an eligible DIRECT_CANONICAL change.
 
 ## Required evidence
-- Verify worktree, branch, HEAD, dirty state, INDEX/card freshness, and policy hash before mutation.
+- Verify worktree, branch, HEAD, dirty state, execution-lane eligibility, and policy hash before mutation; verify INDEX/card freshness for governed work.
 - FAIL_CLOSED != SUCCESS; distinguish INFRA_INVALID from model or Nexus failure.
 - Capability claims require selected, invoked, evidence, gate, and contribution proof; selected-only is not a claim.
 - deterministic local rescue profile claims require their own evidence.
@@ -90,7 +93,7 @@ cat > "$OUT_FILE" <<EOF
 - Local Assist is advisory/candidate support, never verifier, approval, integration, push, or cleanup authority.
 
 ## Active marker
-Only after the startup gate and evidence are true may the agent report:
+Only after the lane-appropriate startup gate and evidence are true may the agent report:
 [NEXUS ACTIVE]
 
 Legacy protocol text is non-normative and requires explicit NEXUS_BRIEFING_MODE=legacy.

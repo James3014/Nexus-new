@@ -1,43 +1,34 @@
-import pytest
-from pathlib import Path
 import json
-from scripts.ops.agent_protocol_check import check_protocol
+from pathlib import Path
+
 import scripts.ops.agent_protocol_check as apc
+from scripts.ops.agent_protocol_check import check_protocol
+
+CURRENT_REQUIRED_TERMS = (
+    "Direct execution authority",
+    "Governed execution authority",
+    "Completion requires behavioral evidence",
+    "Report evidence in the final response",
+    "docs/agents/TASK_EXECUTION_CONTRACT.md",
+    "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
+    "CapabilityPlanner",
+)
 
 
 def _write_contract(path: Path, *, forbidden=None, allowed=None, max_files=10):
     forbidden = forbidden or [".obsidian/"]
     allowed = allowed or ["."]
-    path.write_text(
-        f"""
-{{
-  "required_terms": [
-    "allowed_paths",
-    "forbidden_paths",
-    "max_files_touched",
-    "Semantic Completion Criteria",
-    "Evidence Reporting Format",
-    "Failure-to-Lesson Writeback"
-  ],
-  "boundaries": {{
-    "allowed_paths": {json.dumps(allowed)},
-    "forbidden_paths": {json.dumps(forbidden)},
-    "max_files_touched": {max_files}
-  }}
-}}
-""".strip()
-    )
+    path.write_text(json.dumps({
+        "required_terms": list(CURRENT_REQUIRED_TERMS),
+        "boundaries": {
+            "allowed_paths": allowed,
+            "forbidden_paths": forbidden,
+            "max_files_touched": max_files,
+        },
+    }), encoding="utf-8")
 
 def _setup_agents_md(tmp_path):
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("""
-- **allowed_paths**: Project root
-- **forbidden_paths**: .obsidian/, secret/
-- **max_files_touched**: 5
-- Semantic Completion Criteria
-- Evidence Reporting Format
-- Failure-to-Lesson Writeback
-""")
+    (tmp_path / "AGENTS.md").write_text("\n".join(CURRENT_REQUIRED_TERMS), encoding="utf-8")
 
 def test_protocol_check_staged_pass(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

@@ -1,3 +1,3 @@
 # Current-worktree bootstrap rule
 
-Read `AGENTS.md`, `MUSE_PROTO.md`, and the active Git-tracked Task Card from the current worktree. Resolve all relative paths from the current worktree; never redirect to a fixed checkout or legacy protocol document. Freeze branch, HEAD, and dirty state before mutation, and report evidence at closeout.
+Read `AGENTS.md` and `MUSE_PROTO.md` from the current worktree, classify the execution lane, and resolve all relative paths from that worktree. An explicit Owner-authorized bounded `DIRECT_CANONICAL` change does not require a Task Card or lifecycle state; governed work resolves the active Git-tracked Task Card. Never redirect to a fixed checkout or legacy protocol document. Freeze branch, HEAD, and dirty state before mutation, and report evidence at closeout.

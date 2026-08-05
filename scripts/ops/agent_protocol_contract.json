@@ -1,12 +1,13 @@
 {
   "schema": "nexus.agent_protocol_contract.v1",
   "required_terms": [
-    "allowed_paths",
-    "forbidden_paths",
-    "max_files_touched",
-    "Semantic Completion Criteria",
-    "Evidence Reporting Format",
-    "Failure-to-Lesson Writeback"
+    "Direct execution authority",
+    "Governed execution authority",
+    "Completion requires behavioral evidence",
+    "Report evidence in the final response",
+    "docs/agents/TASK_EXECUTION_CONTRACT.md",
+    "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
+    "CapabilityPlanner"
   ],
   "boundaries": {
     "allowed_paths": ["."],

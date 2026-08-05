@@ -123,6 +123,45 @@ def test_startup_ack_binds_freshness_inputs(mock_project_root, monkeypatch):
     assert ack["policy_contract_sha256"] == startup._sha256(contract)
 
 
+def test_direct_canonical_skips_task_card_freshness_and_allows_dirty_baseline(mock_project_root, monkeypatch):
+    monkeypatch.setattr(
+        startup,
+        "check_worktree",
+        lambda root: {
+            "root_match": True,
+            "branch": "main",
+            "head": "c" * 40,
+            "clean": False,
+        },
+    )
+    monkeypatch.setattr(startup, "check_cli", lambda root: {cmd: True for cmd in startup.REQUIRED_SURFACES})
+
+    def unexpected_freshness(*args, **kwargs):
+        raise AssertionError("DIRECT_CANONICAL must not validate Task Card freshness")
+
+    monkeypatch.setattr(startup, "validate_task_authority", unexpected_freshness)
+    contract = mock_project_root / "contract.json"
+    contract.write_text("policy")
+    report_dir = mock_project_root / "reports"
+
+    result = run_check(
+        mock_project_root,
+        contract_path=contract,
+        report_dir=report_dir,
+        execution_lane="DIRECT_CANONICAL",
+    )
+
+    assert result == 0
+    report = json.loads((report_dir / "startup_contract_check_report.json").read_text())
+    ack = json.loads((report_dir / "startup_contract_ack.json").read_text())
+    assert report["task_authority"]["decision"] == "NOT_REQUIRED"
+    assert ack["execution_lane"] == "DIRECT_CANONICAL"
+    assert ack["authority_kind"] == "OWNER_DIRECT"
+    assert ack["direct_scope_overlap_check"] == "CALLER_VERIFICATION_REQUIRED"
+    assert ack["task_id"] is None
+    assert ack["task_card_hash"] is None
+
+
 def test_default_report_dir_is_external_to_source_checkout(mock_project_root, monkeypatch, tmp_path):
     monkeypatch.delenv("NEXUS_STARTUP_REPORT_DIR", raising=False)
     monkeypatch.delenv("NEXUS_MACHINE_STATE_DIR", raising=False)

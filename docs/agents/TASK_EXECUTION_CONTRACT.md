@@ -7,11 +7,27 @@ purpose: Conditional execution contract for governed Nexus task cards.
 
 # Task Execution Contract
 
-This is the L1 contract loaded for a mutating task. The active Git-tracked Task
-Card remains the task-specific authority; this document supplies the shared
-schema and gates.
+This is the L1 contract loaded for a governed mutating task. The active
+Git-tracked Task Card remains the task-specific authority; this document
+supplies the shared schema and gates. It is not required for an eligible
+Owner-authorized `DIRECT_CANONICAL` change.
 
-## Discovery and authority
+## Direct canonical boundary
+
+An explicit current Owner request may authorize the primary agent to make one
+bounded change directly in the canonical checkout without a Task Card or
+lifecycle state. The agent freezes the request-derived file scope, preserves
+unrelated dirty state, runs relevant checks plus `git diff --check`, and reports
+the exact changed files and evidence.
+
+Escalate to this governed contract before mutation when implementation is
+delegated, requires an isolated Target, crosses subsystems, changes
+route/lifecycle/workforce authority, weakens security, changes a migration or
+schema, performs cleanup or protected-branch/ref operations, creates a
+Candidate, or supports a production/public claim. Direct work does not commit,
+push, merge, delete, or auto-chain without exact Owner authority.
+
+## Governed discovery and authority
 
 1. Anchor at the canonical root and verify root, branch, status, and worktrees.
 2. Read `AGENTS.md`, the campaign `INDEX.md`, and only the current frontier card.

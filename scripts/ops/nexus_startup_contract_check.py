@@ -6,6 +6,7 @@
 import os
 import sys
 import json
+import argparse
 import hashlib
 import time
 import subprocess
@@ -35,6 +36,7 @@ REQUIRED_SURFACES = [
 DEFAULT_TASK_INDEX = "tasks/bootstrap-authority-convergence/INDEX.md"
 DEFAULT_POLICY_CONTRACT = "scripts/ops/agent_protocol_contract.json"
 DEFAULT_REPORT_DIR = "startup_hardening"
+VALID_EXECUTION_LANES = {"DIRECT_CANONICAL", "GOVERNED"}
 
 
 def _default_report_dir(project_root: Path) -> Path:
@@ -116,8 +118,14 @@ def run_check(
     state_dir: Path | None = None,
     contract_path: Path | None = None,
     report_dir: Path | None = None,
+    execution_lane: str | None = None,
 ):
     project_root = (project_root or Path(__file__).parent.parent.parent).resolve()
+    execution_lane = (execution_lane or os.getenv("NEXUS_EXECUTION_LANE") or "GOVERNED").strip().upper()
+    if execution_lane not in VALID_EXECUTION_LANES:
+        print(f"❌ Nexus Startup Contract FAILED: unsupported execution lane {execution_lane}")
+        return 1
+    governed = execution_lane == "GOVERNED"
     index_path = index_path or project_root / os.getenv("NEXUS_TASK_INDEX", DEFAULT_TASK_INDEX)
     if not index_path.is_absolute():
         index_path = project_root / index_path
@@ -135,7 +143,16 @@ def run_check(
     file_results = check_files(project_root)
     cli_results = check_cli(project_root)
 
-    freshness = validate_task_authority(project_root, index_path, state_dir=state_dir)
+    freshness = (
+        validate_task_authority(project_root, index_path, state_dir=state_dir)
+        if governed
+        else {
+            "decision": "NOT_REQUIRED",
+            "execution_lane": execution_lane,
+            "reason": "explicit_owner_authorized_bounded_direct_change",
+            "task_cards": [],
+        }
+    )
     policy_hash = _sha256(contract_path)
     policy = {"path": str(contract_path), "exists": policy_hash is not None, "sha256": policy_hash}
     all_passed = (
@@ -143,8 +160,8 @@ def run_check(
         and all(cli_results.values())
         and worktree["root_match"]
         and worktree["branch"] != "DETACHED"
-        and worktree["clean"]
-        and freshness["decision"] == "PASS"
+        and (worktree["clean"] or not governed)
+        and (freshness["decision"] == "PASS" if governed else freshness["decision"] == "NOT_REQUIRED")
         and policy["exists"]
     )
 
@@ -155,6 +172,13 @@ def run_check(
     )
     report = {
         "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        "execution_lane": execution_lane,
+        "authority_kind": "TRACKED_TASK_CARD" if governed else "OWNER_DIRECT",
+        "direct_scope_overlap_check": (
+            "CALLER_VERIFICATION_REQUIRED"
+            if not governed and not worktree["clean"]
+            else "NOT_REQUIRED"
+        ),
         "project_root": str(project_root),
         "file_check": file_results,
         "cli_check": cli_results,
@@ -180,14 +204,17 @@ def run_check(
             ).hexdigest()[:16],
             "status": "ENFORCED",
             "runner": os.getenv("NEXUS_RUNNER", "unknown"),
+            "execution_lane": execution_lane,
+            "authority_kind": "TRACKED_TASK_CARD" if governed else "OWNER_DIRECT",
+            "direct_scope_overlap_check": report["direct_scope_overlap_check"],
             "timestamp": report["timestamp"],
             "worktree_root": str(project_root),
             "branch": worktree["branch"],
             "head": worktree["head"],
-            "index_path": str(index_path),
-            "index_commit": freshness.get("index_commit"),
-            "task_id": current_frontier,
-            "task_card_hash": frontier_card.get("sha256") if frontier_card else None,
+            "index_path": str(index_path) if governed else None,
+            "index_commit": freshness.get("index_commit") if governed else None,
+            "task_id": current_frontier if governed else None,
+            "task_card_hash": frontier_card.get("sha256") if governed and frontier_card else None,
             "policy_contract_sha256": policy_hash,
         }
         try:
@@ -203,13 +230,20 @@ def run_check(
             if not res: print(f"  - Missing File: {f}")
         for cmd, res in cli_results.items():
             if not res: print(f"  - Missing CLI Surface: {cmd}")
-        if not worktree["root_match"] or worktree["branch"] == "DETACHED" or not worktree["clean"]:
-            print("  - Worktree identity is stale, detached, or dirty")
-        if freshness["decision"] == "BLOCK":
+        if not worktree["root_match"] or worktree["branch"] == "DETACHED" or (governed and not worktree["clean"]):
+            print("  - Worktree identity is stale, detached, or governed worktree is dirty")
+        if governed and freshness["decision"] == "BLOCK":
             print("  - Task authority freshness is BLOCK")
         if not policy["exists"]:
             print(f"  - Missing policy contract: {contract_path}")
         return 1
 
 if __name__ == "__main__":
-    sys.exit(run_check())
+    parser = argparse.ArgumentParser(description="Nexus startup contract checker")
+    parser.add_argument(
+        "--execution-lane",
+        choices=sorted(VALID_EXECUTION_LANES),
+        default=os.getenv("NEXUS_EXECUTION_LANE", "GOVERNED").upper(),
+    )
+    args = parser.parse_args()
+    sys.exit(run_check(execution_lane=args.execution_lane))
