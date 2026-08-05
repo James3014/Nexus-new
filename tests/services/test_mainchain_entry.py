@@ -7,8 +7,8 @@ import pytest
 
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.services.mainchain_entry import (
-    run_mainchain,
-    run_mainchain_replan,
+    run_mainchain as _product_run_mainchain,
+    run_mainchain_replan as _product_run_mainchain_replan,
     run_three_arm_structural,
     stamp_mainchain_route,
     summarize_arm_receipt,
@@ -17,6 +17,88 @@ from nexus.services.mainchain_entry import (
 from nexus.evidence.receipt_base import validate_receipt_base
 from nexus.services.online_nexus_context import NEXUS_CODEINTEL_MARKER, NEXUS_ROUTE_MARKER
 from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest, normalize_online_invoker_payload
+
+
+def _mainchain_workforce_binding(request: UnifiedRuntimeRequest) -> tuple[str, str, str, list[str]]:
+    """Return the policy-admitted Online identity for this test request."""
+    text = f"{request.task_type} {request.task_statement}".lower()
+    complex_task = any(
+        marker in text
+        for marker in ("architecture", "security", "integration", "cross-module", "runtime-closure")
+    )
+    if complex_task:
+        return (
+            "codex_luna",
+            "codex",
+            "gpt-5.6-luna",
+            ["governed_adapter", "independent_verification", "receipt"],
+        )
+    return (
+        "agy_flash",
+        "agy",
+        "gemini-3.6-flash-high",
+        ["task_card", "allowed_files", "mandatory_commands", "independent_verification"],
+    )
+
+
+def _admit_mainchain_request(request: UnifiedRuntimeRequest) -> UnifiedRuntimeRequest:
+    worker, _provider, _model, controls = _mainchain_workforce_binding(request)
+    route = dict(request.route)
+    route.update(
+        {
+            "workforce_admission_enabled": True,
+            "workforce_bindings": {
+                **dict(route.get("workforce_bindings") or {}),
+                "online": {
+                    "worker_id": worker,
+                    "controls": controls,
+                },
+            },
+        }
+    )
+    fields = {
+        field: getattr(request, field)
+        for field in request.__dataclass_fields__
+        if field != "route"
+    }
+    fields.update(route=route)
+    return UnifiedRuntimeRequest(**fields)
+
+
+def _tag_online_invoker(invoker: Any, provider: str) -> Any:
+    """Tag fixture invokers and normalize their payload to admitted provider."""
+    if not callable(invoker):
+        return invoker
+
+    def tagged(context: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(invoker(context))
+        payload["provider"] = provider
+        process = payload.get("process_evidence")
+        if isinstance(process, dict):
+            process["provider"] = provider
+        return payload
+
+    tagged.provider = provider  # type: ignore[attr-defined]
+    tagged.online_invoker_provider = provider  # type: ignore[attr-defined]
+    return tagged
+
+
+def run_mainchain(request: UnifiedRuntimeRequest, **kwargs: Any) -> dict[str, Any]:
+    admitted = _admit_mainchain_request(request)
+    provider = _mainchain_workforce_binding(admitted)[1]
+    if "online_invoker" in kwargs:
+        kwargs["online_invoker"] = _tag_online_invoker(kwargs["online_invoker"], provider)
+    return _product_run_mainchain(admitted, **kwargs)
+
+
+def run_mainchain_replan(
+    previous_receipt: dict[str, Any], request: UnifiedRuntimeRequest, **kwargs: Any
+) -> dict[str, Any]:
+    admitted = _admit_mainchain_request(request)
+    provider = _mainchain_workforce_binding(admitted)[1]
+    if "online_invoker" in kwargs:
+        kwargs["online_invoker"] = _tag_online_invoker(kwargs["online_invoker"], provider)
+    return _product_run_mainchain_replan(previous_receipt, admitted, **kwargs)
 
 
 class _PlannerLocal:
@@ -48,6 +130,7 @@ class _Local:
         tid = request["task_id"] if isinstance(request, dict) else request.task_id
         action = request.get("action") if isinstance(request, dict) else request.action
         return {
+            "schema": "nexus.local_assist.response.v1",
             "task_id": tid,
             "action": action,
             "local_model_invoked": True,
@@ -154,10 +237,12 @@ def test_three_arm_structural_distinguishable() -> None:
         task_type="repair",
         local_service=_Local(),
         local_request=local_req,
-        planner=_PlannerLocal(),
     )
     assert result["routing_surface_changed"] is False
     assert result["public_claim_allowed"] is False
+    assert result["benchmark_only"] is True
+    assert result["production_decision_writeback_allowed"] is False
+    assert result["production_route_mutated"] is False
     assert result["compare"]["bare_lacks_armor"] is True
     assert result["compare"]["nexus_has_armor"] is True
     assert result["compare"]["nexus_local_has_vap"] is True

@@ -46,13 +46,17 @@ def _args(scenario: str, *, live: bool = False) -> Namespace:
 def _enable_local_fixture(monkeypatch) -> None:
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_PROVIDER", "ollama")
-    monkeypatch.setenv("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b")
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_NAME", "qwen2.5-coder:7b-instruct")
     monkeypatch.setattr(scenarios, "_ollama_endpoint_available", lambda: True)
     monkeypatch.setattr(
         scenarios,
         "_build_local_service",
         lambda run_root: LocalAssistService(
-            provider=InjectedLocalModelProvider(lambda _: _PATCH),
+            provider=InjectedLocalModelProvider(
+                lambda _: _PATCH,
+                provider_identity="ollama",
+                model_identity="qwen2.5-coder:7b-instruct",
+            ),
             apply_runner=scenarios._isolated_apply_runner(run_root),
         ),
     )
@@ -241,7 +245,11 @@ def test_nexus_online_control_uses_canonical_receipt_with_injected_command(monke
         evidence_path = Path(artifact[key])
         assert evidence_path.is_file()
         assert evidence_path.is_relative_to(Path(report["run_root"]))
-    assert artifact["online_provider"] == args.provider
+    assert artifact["online_provider"] == "agy"
+    assert (
+        report["unified_receipt"]["gateway_invocation_authority"]["resolved_provider"]
+        == "agy"
+    )
     assert artifact["online_response_hash"] == hashlib.sha256(
         Path(artifact["online_stdout_path"]).read_bytes()
     ).hexdigest()
@@ -293,18 +301,30 @@ def test_hybrid_harness_executes_verified_subtask_before_online(monkeypatch, tmp
         encoding="utf-8"
     ) == "def scenario_response():\n    return 'NOT_COMPLETED'\n"
     capability_results = receipt["capability_results"]
-    assert all(capability_results[name]["status"] == "SUCCEEDED" for name in (
-        "memory", "semantic_searcher", "codeintel", "prompt_compression",
-    ))
+    # Only CapabilityPlanner-selected capabilities execute. The scenario's
+    # old caller-supplied route_decision no longer forces extra local edges.
+    expected_local_capabilities = {"memory", "repair_loop"}
+    assert expected_local_capabilities.issubset(capability_results), ",".join(
+        sorted(capability_results)
+    )
+    assert all(
+        capability_results[name]["status"] == "SUCCEEDED"
+        for name in expected_local_capabilities
+    )
     assert report["capability_runtime_complete"] is True
     assert report["capability_online_forwarded"] is True
-    assert all(report["capability_edges"][name]["delegated_to"] == "Local" for name in (
-        "memory", "semantic_searcher", "codeintel", "prompt_compression",
-    ))
+    selected_edges = [
+        edge for edge in report["capability_edges"].values() if edge["selected"]
+    ]
+    assert selected_edges
+    assert all(edge["delegated_to"] == "Local" for edge in selected_edges)
     assert receipt["context_trace"]["task_id"] == report["task_id"]
     assert receipt["context_trace"]["online_received_context"]["capability_context_forwarded"] is True
-    assert receipt["context_trace"]["online_received_context"]["compressed_context_applied"] is True
-    assert "online:grok:scenario-test-b:compressed_context_applied" in receipt["online"]["evidence_refs"]
+    assert receipt["context_trace"]["online_received_context"]["compressed_context_applied"] is False
+    assert (
+        "online:agy:scenario-test-b:capability_context_forwarded"
+        in receipt["online"]["evidence_refs"]
+    )
 
     verifier = receipt["verifier"]["response"]
     artifact_path = Path(verifier["verifier_artifact_path"])

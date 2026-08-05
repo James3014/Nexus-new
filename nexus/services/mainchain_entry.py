@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
+from nexus.engine.canonical_execution import plan_canonical_task_bundle
 from nexus.services.capability_registry import (
     build_default_mainchain_invokers,
     ensure_selected_coverage_invokers,
@@ -19,6 +20,7 @@ from nexus.services.online_nexus_context import (
 from nexus.services.unified_runtime import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
+    build_canonical_runtime_context,
     normalize_online_invoker_payload,
 )
 
@@ -112,7 +114,11 @@ def wrap_mainchain_online_invoker(
 ) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
     """Wrap Online invoker with true with_nexus armor when route requests it."""
     if force or with_nexus_armor_enabled(route):
-        return make_with_nexus_online_invoker(base_invoker, provider=provider)
+        wrapped = make_with_nexus_online_invoker(base_invoker, provider=provider)
+        for attribute in ("provider", "online_invoker_provider", "workforce_dispatcher"):
+            if hasattr(base_invoker, attribute):
+                setattr(wrapped, attribute, getattr(base_invoker, attribute))
+        return wrapped
     return base_invoker
 
 
@@ -146,6 +152,8 @@ def run_mainchain(
     with_nexus_armor: bool = True,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime with mainchain route stamps + with_nexus Online armor."""
+    if planner is not None:
+        raise ValueError("mainchain_planner_injection_forbidden")
     route = stamp_mainchain_route(
         request.route if isinstance(request.route, Mapping) else {},
         with_nexus_armor=with_nexus_armor,
@@ -156,6 +164,9 @@ def run_mainchain(
         )
         or "mainchain",
     )
+    canonical_bundle = request.canonical_planning_bundle
+    if canonical_bundle is None:
+        canonical_bundle = plan_canonical_task_bundle(build_canonical_runtime_context(request))
     # Frozen dataclass — rebuild request with stamped route.
     fields = {
         "task_id": request.task_id,
@@ -177,6 +188,7 @@ def run_mainchain(
         "skills": request.skills,
         "local_request": request.local_request,
         "evidence_refs": request.evidence_refs,
+        "canonical_planning_bundle": canonical_bundle,
         "schema": request.schema,
     }
     stamped = UnifiedRuntimeRequest(**fields)
@@ -191,7 +203,7 @@ def run_mainchain(
         codeintel=dict(stamped.codeintel) if isinstance(stamped.codeintel, Mapping) else {},
         enable=with_nexus_armor,
     )
-    return UnifiedRuntime(planner=planner, local_service=local_service).run(
+    return UnifiedRuntime(local_service=local_service).run(
         stamped,
         online_invoker=invoker,
         capability_invokers=caps,
@@ -215,6 +227,8 @@ def run_mainchain_replan(
     with_nexus_armor: bool = True,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime.run_replan with mainchain route stamps + with_nexus Online armor."""
+    if planner is not None:
+        raise ValueError("mainchain_planner_injection_forbidden")
     if not with_nexus_armor:
         raise ValueError("mainchain_replan_requires_nexus_armor")
 
@@ -322,7 +336,7 @@ def run_mainchain_replan(
         enable=True,
     )
 
-    return UnifiedRuntime(planner=planner, local_service=local_service).run_replan(
+    return UnifiedRuntime(local_service=local_service).run_replan(
         previous_receipt,
         stamped,
         online_invoker=invoker,
@@ -427,6 +441,8 @@ def run_three_arm_structural(
     workspace_revision: str = "three-arm-structural",
 ) -> dict[str, Any]:
     """Bare / Nexus / Nexus+L structural compare on real UnifiedRuntime (fixture Online)."""
+    if planner is not None:
+        raise ValueError("benchmark_planner_injection_forbidden")
     ci = dict(codeintel or {
         "scan_report_present": True,
         "impact_report_present": True,
@@ -440,7 +456,7 @@ def run_three_arm_structural(
         def invoker(context: Mapping[str, Any]) -> dict[str, Any]:
             prompts[arm] = str(context.get("online_prompt") or "")
             return normalize_online_invoker_payload(
-                provider="fixture",
+                provider="agy",
                 task_id=str(context.get("task_id") or ""),
                 invoked=True,
                 output_delivered=True,
@@ -451,6 +467,8 @@ def run_three_arm_structural(
                 evidence_refs=[f"online:{context.get('task_id')}:{arm}"],
             )
 
+        invoker.provider = "agy"  # type: ignore[attr-defined]
+        invoker.online_invoker_provider = "agy"  # type: ignore[attr-defined]
         return invoker
 
     def _v(context: Mapping[str, Any]) -> dict[str, Any]:
@@ -473,6 +491,17 @@ def run_three_arm_structural(
         "recommended_flow": "direct",
         "injected_transport": True,
         "online_policy": "auto",
+        "workforce_bindings": {
+            "online": {
+                "worker_id": "agy_flash",
+                "controls": [
+                    "task_card",
+                    "allowed_files",
+                    "mandatory_commands",
+                    "independent_verification",
+                ],
+            }
+        },
     }
 
     # Arm A — bare
@@ -487,7 +516,7 @@ def run_three_arm_structural(
         online_prompt=task_statement,
         codeintel=ci,
     )
-    bare_receipt = UnifiedRuntime(planner=planner).run(
+    bare_receipt = UnifiedRuntime().run(
         bare_req,
         online_invoker=_base("bare"),
         verifier=_v,
@@ -509,7 +538,6 @@ def run_three_arm_structural(
     nexus_receipt = run_mainchain(
         nexus_req,
         online_invoker=_base("nexus"),
-        planner=planner,
         verifier=_v,
         learning=_l,
         with_nexus_armor=True,
@@ -524,7 +552,24 @@ def run_three_arm_structural(
             task_statement=task_statement,
             task_type=task_type,
             route=stamp_mainchain_route(
-                {**route_common, "recommended_flow": "hybrid", "local_enabled": True},
+                {
+                    **route_common,
+                    "recommended_flow": "hybrid",
+                    "local_enabled": True,
+                    "workforce_bindings": {
+                        **route_common["workforce_bindings"],
+                        "local": {
+                            "worker_id": "local_coder_7b",
+                            "controls": [
+                                "small_scope",
+                                "parser",
+                                "compile",
+                                "focused_tests",
+                                "reversible_application",
+                            ],
+                        },
+                    },
+                },
                 product_entry="three_arm_nexus_local",
             ),
             online_enabled=True,
@@ -537,7 +582,6 @@ def run_three_arm_structural(
             nexus_l_req,
             online_invoker=_base("nexus_local"),
             local_service=local_service,
-            planner=planner,
             verifier=_v,
             learning=_l,
             with_nexus_armor=True,
@@ -546,6 +590,9 @@ def run_three_arm_structural(
     result = {
         "schema": "nexus.three_arm_structural.v1",
         "routing_surface_changed": False,
+        "benchmark_only": True,
+        "production_decision_writeback_allowed": False,
+        "production_route_mutated": False,
         "public_claim_allowed": False,
         "arms": {
             "bare": summarize_arm_receipt(bare_receipt, prompt=prompts.get("bare", "")),

@@ -18,6 +18,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from nexus.contracts.canonical_execution import (
+    CanonicalPlanningBundle,
+    CanonicalTaskContext,
+)
 from nexus.engine.capability_contracts import (
     EXECUTION_DEPTH_FULL,
     EXECUTION_DEPTH_LIGHT,
@@ -27,6 +31,7 @@ from nexus.engine.capability_contracts import (
     next_execution_depth_after_failure,
 )
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.engine.canonical_execution import replan_canonical_task_bundle
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import (
     RuntimeWorkforceAdmissionRecord,
@@ -493,22 +498,37 @@ def _build_gateway_invocation_authority(
             raise ValueError(effective_reason or "workforce_admission_effective_decision_not_allow")
 
         route = request.route
-        route_provider = _required_identity(route.get("provider"), "online_route_provider")
-        transport_binding = route.get("online_transport_binding")
-        if not isinstance(transport_binding, Mapping):
-            raise ValueError("online_transport_binding_missing")
-        transport_provider = _required_identity(
-            transport_binding.get("provider"), "online_transport_provider"
+        supplied_route_provider = route.get("provider")
+        route_provider = (
+            _required_identity(supplied_route_provider, "online_route_provider")
+            if supplied_route_provider is not None
+            else admitted["resolved_provider"]
         )
-        online_model_name = _required_identity(
-            request.online_model_name, "online_model_name"
+        transport_binding = route.get("online_transport_binding")
+        if transport_binding is None:
+            transport_provider = admitted["resolved_provider"]
+        elif isinstance(transport_binding, Mapping):
+            transport_provider = _required_identity(
+                transport_binding.get("provider"), "online_transport_provider"
+            )
+        else:
+            raise ValueError("online_transport_binding_missing")
+        online_model_name = (
+            _required_identity(request.online_model_name, "online_model_name")
+            if request.online_model_name is not None
+            else admitted["resolved_model"]
         )
         route_invoker_provider = route.get("online_invoker_provider")
         if route_invoker_provider is not None:
             route_invoker_provider = _required_identity(
                 route_invoker_provider, "online_invoker_provider"
             )
+        workforce_dispatcher = getattr(invoker, "workforce_dispatcher", False) is True
         callable_provider = _callable_provider_identity(invoker)
+        if workforce_dispatcher:
+            if callable_provider:
+                raise ValueError("workforce_dispatcher_provider_must_be_deferred")
+            callable_provider = admitted["resolved_provider"]
         if route_invoker_provider and callable_provider and route_invoker_provider != callable_provider:
             raise ValueError("online_invoker_provider_ambiguous")
         invoker_provider = route_invoker_provider or callable_provider
@@ -655,8 +675,16 @@ def _validate_local_admission_record(
     record_binding_hash = _required_identity(
         local_record.get("binding_hash"), "workforce_admission_record_binding_hash"
     )
+    demand_payload = local_record.get("demand")
+    if not isinstance(demand_payload, Mapping):
+        raise ValueError("workforce_admission_local_demand_missing")
     return {
-        "demand_id": str(local_record.get("demand", {}).get("demand_id") or ""),
+        "demand_id": str(demand_payload.get("demand_id") or ""),
+        "requested_role": _required_identity(
+            demand_payload.get("requested_role"),
+            "workforce_admission_local_requested_role",
+        ),
+        "mutation_intent": demand_payload.get("mutation_intent") is True,
         "resolved_worker_id": resolved_worker_id,
         "resolved_provider": resolved_provider,
         "resolved_model": resolved_model,
@@ -679,6 +707,8 @@ def _build_local_model_invocation_authority(
         "gate_passed": False,
         "failure_reason": "",
         "demand_id": "",
+        "requested_role": "",
+        "mutation_intent": False,
         "resolved_worker_id": "",
         "resolved_provider": "",
         "resolved_model": "",
@@ -804,6 +834,13 @@ def _validate_workforce_route(route: Mapping[str, Any]) -> None:
         reason = route.get("workforce_rebind_reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("workforce_rebind_reason_required")
+
+
+def _workforce_admission_required(request: UnifiedRuntimeRequest) -> bool:
+    return (
+        request.canonical_planning_bundle is not None
+        or request.route.get("workforce_admission_enabled") is True
+    )
 
 
 def _build_workforce_admission_lineage(
@@ -1088,6 +1125,69 @@ def _formal_local_runtime_lineage(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _formal_local_advisor_lineage(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a non-mutating Local advisor without pretending it ran an executor."""
+    action = str(payload.get("action") or "").strip()
+    claim_boundary = (
+        payload.get("claim_boundary")
+        if isinstance(payload.get("claim_boundary"), Mapping)
+        else {}
+    )
+    receipt_path = str(payload.get("receipt_path") or "")
+    physical_callable = str(payload.get("physical_callable") or "")
+    executor_invoked = payload.get("executor_invoked") is True
+    local_model_invoked = bool(payload.get("local_model_invoked", payload.get("invoked", False)))
+    output_delivered = payload.get("output_delivered") is True
+    provider_call_count = int(payload.get("provider_call_count") or 0)
+    model_call_count = int(
+        payload.get("model_call_count") or (provider_call_count if local_model_invoked else 0)
+    )
+    blockers: list[str] = []
+    fallback_reason = str(payload.get("fallback_reason") or "").strip()
+    if fallback_reason and fallback_reason not in {"candidate_not_delivered", "provider_not_invoked"}:
+        blockers.append(fallback_reason)
+    if payload.get("schema") != "nexus.local_assist.response.v1":
+        blockers.append("local_assist_response_schema_missing")
+    if action != "advisor":
+        blockers.append("local_action_not_advisor_bound")
+    if physical_callable != "LocalModelProvider.generate":
+        blockers.append("local_physical_callable_not_advisor")
+    if executor_invoked:
+        blockers.append("local_advisor_executor_forbidden")
+    if not local_model_invoked:
+        blockers.append("local_model_not_invoked")
+    if not output_delivered:
+        blockers.append("local_output_not_delivered")
+    if not receipt_path:
+        blockers.append("local_receipt_path_missing")
+    if claim_boundary.get("local_model_executor_invoked") is True:
+        blockers.append("local_advisor_claimed_executor")
+
+    gate_passed = not blockers
+    return {
+        "schema": "nexus.formal_local_runtime_lineage.v1",
+        "entrypoint": "UnifiedRuntime._run_local",
+        "service": "LocalAssistService.handle",
+        "executor": "",
+        "status": "ALLOW" if gate_passed else "BLOCKED",
+        "gate_passed": gate_passed,
+        "failure_reason": blockers[0] if blockers else "",
+        "blockers": blockers,
+        "action": action,
+        "physical_callable": physical_callable,
+        "executor_invoked": executor_invoked,
+        "local_model_invoked": local_model_invoked,
+        "output_delivered": output_delivered,
+        "provider_call_count": provider_call_count,
+        "model_call_count": model_call_count,
+        "candidate_isolation_status": "not_applicable",
+        "selected_candidate_hash": "",
+        "verifier_reached": False,
+        "verifier_status": "not_applicable",
+        "receipt_path": receipt_path,
+    }
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -1215,6 +1315,7 @@ class UnifiedRuntimeRequest:
     skills: tuple[Mapping[str, Any], ...] = ()
     local_request: Any = None
     evidence_refs: tuple[str, ...] = ()
+    canonical_planning_bundle: CanonicalPlanningBundle | None = None
     schema: str = REQUEST_SCHEMA
 
     def validate(self) -> None:
@@ -1233,6 +1334,55 @@ class UnifiedRuntimeRequest:
             raise ValueError("at_least_one_runtime_route_required")
         if self.local_enabled and self.local_request is None:
             raise ValueError("local_request_required")
+        if self.canonical_planning_bundle is not None:
+            if not isinstance(self.canonical_planning_bundle, CanonicalPlanningBundle):
+                raise TypeError("canonical_planning_bundle_must_be_CanonicalPlanningBundle")
+            expected_context = build_canonical_runtime_context(self)
+            if expected_context.context_hash != self.canonical_planning_bundle.context.context_hash:
+                raise ValueError("canonical_planning_bundle_request_binding_mismatch")
+
+
+def build_canonical_runtime_context(request: UnifiedRuntimeRequest) -> CanonicalTaskContext:
+    """Project only task facts accepted by the canonical planning seam."""
+    route_features: Mapping[str, Any] = {}
+    if isinstance(request.route, Mapping):
+        raw_features = request.route.get("route_features")
+        if isinstance(raw_features, Mapping):
+            route_features = raw_features
+    return CanonicalTaskContext(
+        task_id=request.task_id,
+        task_type=request.task_type,
+        task_desc=request.task_statement,
+        execution_channels=tuple(
+            channel
+            for channel, enabled in (
+                ("online", request.online_enabled),
+                ("local", request.local_enabled),
+            )
+            if enabled
+        ),
+        route_features=route_features,
+        pillars=request.pillars,
+        codeintel=request.codeintel,
+        phase_trace=request.phase_trace,
+        budget=request.budget,
+    )
+
+
+def canonical_execution_identity(bundle: CanonicalPlanningBundle) -> dict[str, Any]:
+    """JSON-safe identity shared unchanged by Online, Local, and receipts."""
+    payload = bundle.to_dict()
+    return {
+        "schema": "nexus.canonical_execution_identity.v1",
+        "task_id": bundle.context.task_id,
+        "context_hash": payload["context_hash"],
+        "plan_hash": payload["plan_hash"],
+        "decision_hash": payload["decision_hash"],
+        "projection_hash": payload["projection_hash"],
+        "execution_decision_authority": payload["execution_decision_authority"],
+        "execution_decision": payload["execution_decision"],
+        "canonical_execution_projection": payload["canonical_execution_projection"],
+    }
 
 
 @dataclass(frozen=True)
@@ -2609,7 +2759,10 @@ class UnifiedRuntime:
             raise ValueError("replan_request_not_trusted")
 
         if "workforce_admission" in previous_receipt:
-            if request.route.get("workforce_admission_enabled") is not True:
+            prior_canonical = previous_receipt.get("canonical_execution")
+            if not _workforce_admission_required(request) and not isinstance(
+                prior_canonical, Mapping
+            ):
                 raise ValueError("replan_workforce_admission_required")
 
         recomputed = build_execution_replan_request(
@@ -2654,6 +2807,16 @@ class UnifiedRuntime:
             attempt_number=2,
             max_attempts=2,
         )
+
+        prior_canonical = previous_receipt.get("canonical_execution")
+        if isinstance(prior_canonical, Mapping):
+            if request.canonical_planning_bundle is not None:
+                raise ValueError("canonical_replan_requires_fresh_planning_bundle")
+            replan_bundle = replan_canonical_task_bundle(
+                build_canonical_runtime_context(request),
+                authorization,
+            )
+            request = replace(request, canonical_planning_bundle=replan_bundle)
 
         return self._run_once(
             request=request,
@@ -2704,9 +2867,17 @@ class UnifiedRuntime:
         if replan_authorization is not None:
             planner_kwargs["replan_authorization"] = replan_authorization
 
-        plan = self._planner.plan(**planner_kwargs)
-        plan_payload = plan.to_dict()
-        plan_hash = _hash_json(plan_payload)
+        canonical_bundle = request.canonical_planning_bundle
+        if canonical_bundle is not None:
+            plan = canonical_bundle.plan
+            plan_payload = plan.to_dict()
+            plan_hash = canonical_bundle.plan_hash
+            canonical_execution = canonical_execution_identity(canonical_bundle)
+        else:
+            plan = self._planner.plan(**planner_kwargs)
+            plan_payload = plan.to_dict()
+            plan_hash = _hash_json(plan_payload)
+            canonical_execution = None
         # Single stable decision id from actual plan payload/hash — never invent
         # a second id downstream on receipt, context_trace, or capability rows.
         planner_decision_id = plan_hash
@@ -2783,6 +2954,11 @@ class UnifiedRuntime:
         # same plan_hash as planner stage (hash itself remains pre-stamp).
         plan_payload["plan_hash"] = plan_hash
         plan_payload["planner_decision_id"] = planner_decision_id
+        if canonical_execution is not None:
+            plan_payload["canonical_execution"] = canonical_execution
+            canonical_snapshot = dict(plan_payload.get("signal_snapshot") or {})
+            canonical_snapshot["canonical_execution"] = canonical_execution
+            plan_payload["signal_snapshot"] = canonical_snapshot
         planner_stage = _stage(
             "planner",
             status="SUCCEEDED",
@@ -2799,6 +2975,7 @@ class UnifiedRuntime:
             planner_decision_id=planner_decision_id,
             execution_depth=plan.execution_depth,
             execution_attempt=execution_attempt,
+            canonical_execution=canonical_execution or {},
         )
 
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
@@ -2806,7 +2983,7 @@ class UnifiedRuntime:
         workforce_admission_payload: dict[str, Any] | None = None
         gateway_invocation_authority: dict[str, Any] | None = None
         local_model_invocation_authority: dict[str, Any] | None = None
-        if request.route.get("workforce_admission_enabled") is True:
+        if _workforce_admission_required(request):
             signal_snapshot = plan_payload.get("signal_snapshot")
             raw_workforce_demands = (
                 signal_snapshot.get("workforce_demands")
@@ -2965,7 +3142,20 @@ class UnifiedRuntime:
                     "parent_receipt_hash": execution_attempt["parent_receipt_hash"],
                     "source_replan_request_id": execution_attempt["source_replan_request_id"],
                     "workforce_admission_lineage": workforce_lineage,
+                    "route": {
+                        key: request.route.get(key)
+                        for key in (
+                            "mainchain_entry",
+                            "mainchain_route_version",
+                            "route_freeze",
+                            "product_entry",
+                            "with_nexus_armor",
+                        )
+                        if isinstance(request.route, Mapping) and key in request.route
+                    },
                 }
+                if canonical_execution is not None:
+                    terminal_context_trace["canonical_execution"] = canonical_execution
                 if gateway_invocation_authority is not None:
                     terminal_context_trace["gateway_invocation_authority"] = gateway_invocation_authority
                 if local_model_invocation_authority is not None:
@@ -3029,10 +3219,13 @@ class UnifiedRuntime:
                     },
                     "public_claim_allowed": False,
                 }
+                if canonical_execution is not None:
+                    terminal_receipt["canonical_execution"] = canonical_execution
                 if gateway_invocation_authority is not None:
                     terminal_receipt["gateway_invocation_authority"] = gateway_invocation_authority
                 if local_model_invocation_authority is not None:
                     terminal_receipt["local_model_invocation_authority"] = local_model_invocation_authority
+                attach_failure_diagnostics(terminal_receipt)
                 attach_r3_receipt_base(terminal_receipt)
                 if receipt_path is not None:
                     path = Path(receipt_path)
@@ -3042,7 +3235,7 @@ class UnifiedRuntime:
                         json.dumps(terminal_receipt, indent=2, ensure_ascii=False),
                         encoding="utf-8",
                     )
-                return attach_failure_diagnostics(terminal_receipt)
+                return terminal_receipt
 
         capability_results: dict[str, dict[str, Any]] = {}
         postflight_names = {
@@ -3424,7 +3617,12 @@ class UnifiedRuntime:
             "online_prompt": effective_online_prompt,
             "online_payload": request.online_payload,
             "online_phase": request.online_phase,
-            "online_model_name": request.online_model_name,
+            "online_model_name": (
+                gateway_invocation_authority.get("resolved_model")
+                if isinstance(gateway_invocation_authority, Mapping)
+                and gateway_invocation_authority.get("gate_passed") is True
+                else request.online_model_name
+            ),
             "online_enabled": request.online_enabled,
             "online_output_schema": dict(request.online_output_schema or {}),
             "planner": plan_payload,
@@ -3448,6 +3646,8 @@ class UnifiedRuntime:
             "online_preflight_status": online_decision.preflight_status,
             "approved_online_providers": list(online_decision.approved_online_providers),
         }
+        if canonical_execution is not None:
+            context["canonical_execution"] = canonical_execution
         if gateway_invocation_authority is not None:
             context["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
@@ -4101,6 +4301,8 @@ class UnifiedRuntime:
                 or bool(vap_packet_hash and request.local_enabled),
             },
         }
+        if canonical_execution is not None:
+            context_trace["canonical_execution"] = canonical_execution
         if gateway_invocation_authority is not None:
             context_trace["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
@@ -4177,6 +4379,8 @@ class UnifiedRuntime:
             "treatment_fingerprint_d": treatment_fingerprint_d,
             "treatment_core_equal": treatment_core_equal,
         }
+        if canonical_execution is not None:
+            receipt["canonical_execution"] = canonical_execution
         if workforce_admission_payload is not None:
             context_trace["workforce_admission_lineage"] = workforce_lineage
             receipt["context_trace"] = context_trace
@@ -4360,7 +4564,7 @@ class UnifiedRuntime:
     def _run_local(self, request: UnifiedRuntimeRequest, plan: Mapping[str, Any]) -> dict[str, Any]:
         if not request.local_enabled:
             return _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
-        workforce_admission_enabled = request.route.get("workforce_admission_enabled") is True
+        workforce_admission_enabled = _workforce_admission_required(request)
         local_authority: Mapping[str, Any] | None = None
         if workforce_admission_enabled:
             candidate_authority = plan.get("local_model_invocation_authority")
@@ -4386,14 +4590,17 @@ class UnifiedRuntime:
                     task_id=request.task_id,
                     authority=local_authority,
                 )
-        local_authority_stage_fields = (
-            {
-                "context_trace": {"local_model_invocation_authority": dict(local_authority)},
-                "local_model_invocation_authority": dict(local_authority),
-            }
-            if local_authority is not None
-            else {}
-        )
+        local_context_trace: dict[str, Any] = {}
+        canonical_execution = plan.get("canonical_execution")
+        if isinstance(canonical_execution, Mapping):
+            local_context_trace["canonical_execution"] = dict(canonical_execution)
+        local_authority_stage_fields: dict[str, Any] = {}
+        if local_context_trace:
+            local_authority_stage_fields["context_trace"] = local_context_trace
+        if local_authority is not None:
+            local_context_trace["local_model_invocation_authority"] = dict(local_authority)
+            local_authority_stage_fields["context_trace"] = local_context_trace
+            local_authority_stage_fields["local_model_invocation_authority"] = dict(local_authority)
         selected = set(plan.get("selected_capabilities", []) or [])
         if "local_model_executor" not in selected:
             return _stage(
@@ -4486,7 +4693,12 @@ class UnifiedRuntime:
                 **local_authority_stage_fields,
             )
         payload = _mapping(response)
-        formal_lineage = _formal_local_runtime_lineage(payload) if workforce_admission_enabled else {}
+        formal_lineage: dict[str, Any] = {}
+        if workforce_admission_enabled:
+            if local_authority is not None and local_authority.get("mutation_intent") is False:
+                formal_lineage = _formal_local_advisor_lineage(payload)
+            else:
+                formal_lineage = _formal_local_runtime_lineage(payload)
         if formal_lineage and formal_lineage.get("gate_passed") is not True:
             lineage_fields = {
                 "formal_local_runtime_lineage": formal_lineage,
@@ -4626,8 +4838,7 @@ class UnifiedRuntime:
         if not request.online_enabled:
             return _stage("online", status="NOT_REQUESTED", reason="online_route_disabled")
 
-        route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
-        if route.get("workforce_admission_enabled") is True:
+        if _workforce_admission_required(request):
             authority = context.get("gateway_invocation_authority")
             if not isinstance(authority, Mapping):
                 authority = {
@@ -4684,6 +4895,24 @@ class UnifiedRuntime:
             payload = _mapping(invoker(context))
         except Exception as exc:
             return _stage("online", status="FAILED", reason=f"online_exception:{exc}")
+        response_provider_failure = ""
+        if _workforce_admission_required(request):
+            authority = context.get("gateway_invocation_authority")
+            admitted_provider = (
+                str(authority.get("resolved_provider") or "")
+                if isinstance(authority, Mapping)
+                else ""
+            )
+            response_provider = payload.get("provider")
+            if not isinstance(response_provider, str) or not response_provider.strip():
+                response_provider_failure = "online_response_provider_missing"
+            elif response_provider != admitted_provider:
+                response_provider_failure = "online_response_provider_mismatch"
+            if response_provider_failure:
+                payload = dict(payload)
+                payload["output_delivered"] = False
+                payload["gate_passed"] = False
+                payload["error"] = response_provider_failure
         response_task_id = str(payload.get("task_id", "") or "")
         task_identity_valid = not response_task_id or response_task_id == str(context.get("task_id", ""))
         invoked = bool(payload.get("invoked", False))
@@ -4699,7 +4928,11 @@ class UnifiedRuntime:
         refs = [str(ref) for ref in payload.get("evidence_refs", []) or []]
         return _stage(
             "online",
-            status="SUCCEEDED" if task_identity_valid and invoked and delivered else "FAILED",
+            status=(
+                "SUCCEEDED"
+                if task_identity_valid and not response_provider_failure and invoked and delivered
+                else "FAILED"
+            ),
             invoked=invoked,
             evidence_present=bool(refs or payload.get("provider_call_count", 0) or payload.get("error")),
             gate_passed=task_identity_valid and delivered and bool(payload.get("gate_passed", False)),
@@ -4708,7 +4941,11 @@ class UnifiedRuntime:
             task_id=str(context.get("task_id", "")),
             response_task_id=response_task_id,
             task_identity_shared=task_identity_valid,
-            reason="online_task_id_mismatch" if not task_identity_valid else "",
+            reason=(
+                "online_task_id_mismatch"
+                if not task_identity_valid
+                else response_provider_failure
+            ),
             context_trace={
                 "gateway_invocation_authority": dict(context.get("gateway_invocation_authority"))
                 if isinstance(context.get("gateway_invocation_authority"), Mapping)

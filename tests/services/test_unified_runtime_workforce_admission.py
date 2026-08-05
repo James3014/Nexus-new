@@ -130,6 +130,7 @@ def _request(route: dict[str, object], *, local: bool = False, online: bool = Tr
 def _online(context: dict[str, object]) -> dict[str, object]:
     return {
         "task_id": context["task_id"],
+        "provider": "codex",
         "invoked": True,
         "output_delivered": True,
         "gate_passed": True,

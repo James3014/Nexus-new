@@ -15,6 +15,7 @@ import subprocess
 import time
 from typing import Any, Callable, Mapping
 
+from nexus.contracts.canonical_execution import validate_canonical_execution_identity
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.local_heal.isolated_verifier import (
     IsolatedVerifierRequest,
@@ -372,7 +373,24 @@ class LocalAssistRequest:
             raise ValueError("planner_snapshot_missing:" + ",".join(missing))
         if self.planner_snapshot.get("route_truth_source") != "CapabilityPlanner":
             raise ValueError("invalid_route_truth_source")
-        if self.planner_snapshot.get("executor_provider") != "ollama":
+        canonical_execution = self.planner_snapshot.get("canonical_execution")
+        if canonical_execution is not None:
+            if not isinstance(canonical_execution, Mapping):
+                raise ValueError("canonical_execution_identity_must_be_mapping")
+            validate_canonical_execution_identity(canonical_execution)
+            if canonical_execution.get("task_id") != self.task_id:
+                raise ValueError("canonical_local_task_identity_mismatch")
+            authority = self.planner_snapshot.get("local_model_invocation_authority")
+            if not isinstance(authority, Mapping) or authority.get("gate_passed") is not True:
+                raise ValueError("canonical_local_invocation_authority_missing")
+            if (
+                self.planner_snapshot.get("executor_provider")
+                != authority.get("resolved_provider")
+                or self.planner_snapshot.get("executor_model")
+                != authority.get("resolved_model")
+            ):
+                raise ValueError("canonical_local_model_identity_mismatch")
+        elif self.planner_snapshot.get("executor_provider") != "ollama":
             raise ValueError("unknown_provider")
         if self.planner_snapshot.get("execution_topology") not in ALLOWED_TOPOLOGIES:
             raise ValueError("unsupported_execution_topology")
@@ -438,6 +456,14 @@ class LocalAssistService:
         request.validate()
         started = time.monotonic()
         planner_snapshot = dict(request.planner_snapshot)
+        canonical_execution = planner_snapshot.get("canonical_execution")
+        canonical_execution_payload = (
+            dict(canonical_execution) if isinstance(canonical_execution, Mapping) else {}
+        )
+        local_authority = planner_snapshot.get("local_model_invocation_authority")
+        local_authority_payload = (
+            dict(local_authority) if isinstance(local_authority, Mapping) else {}
+        )
         from nexus.services.local_substitution import (
             build_verified_local_artifact,
             evaluate_local_eligibility,
@@ -453,6 +479,15 @@ class LocalAssistService:
         )
         provider = self._provider or OllamaLocalModelProvider()
         raw_provider = provider
+        if canonical_execution_payload:
+            provider_identity = str(getattr(raw_provider, "provider_identity", "") or "")
+            model_identity = str(getattr(raw_provider, "model_identity", "") or "")
+            admitted_provider = str(local_authority_payload.get("resolved_provider") or "")
+            admitted_model = str(local_authority_payload.get("resolved_model") or "")
+            if provider_identity != admitted_provider:
+                raise ValueError("canonical_local_provider_adapter_identity_mismatch")
+            if model_identity and model_identity != admitted_model:
+                raise ValueError("canonical_local_provider_model_binding_mismatch")
         if isinstance(provider, RecordingLocalModelProvider):
             ledger_provider = provider
         else:
@@ -475,7 +510,9 @@ class LocalAssistService:
         executor_invoked = False
         physical_callable = ""
         output_delivered = False
-        provider_name = "ollama" if isinstance(raw_provider, OllamaLocalModelProvider) else "injected"
+        provider_name = str(getattr(raw_provider, "provider_identity", "") or "") or (
+            "ollama" if isinstance(raw_provider, OllamaLocalModelProvider) else "injected"
+        )
         resolved_model = str(planner_snapshot["executor_model"])
         fallback_reason = ""
         rollback_reference = ""
@@ -528,6 +565,8 @@ class LocalAssistService:
                 "claim_boundary": claim_boundary,
                 "fallback_reason": fallback_reason,
                 "provider_call_count": 0,
+                "canonical_execution": canonical_execution_payload,
+                "local_model_invocation_authority": local_authority_payload,
             }
             receipt_path.parent.mkdir(parents=True, exist_ok=True)
             receipt_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -544,6 +583,7 @@ class LocalAssistService:
                     "selected_action": request.action,
                     "planner_decision_id": planner_decision_id,
                     "eligibility": eligibility.to_dict(),
+                    "canonical_execution": canonical_execution_payload,
                 },
                 planner_selected=True,
                 local_model_invoked=False,
@@ -945,6 +985,8 @@ class LocalAssistService:
             "claim_boundary": claim_boundary,
             "rollback_reference": rollback_reference,
             "fallback_reason": fallback_reason,
+            "canonical_execution": canonical_execution_payload,
+            "local_model_invocation_authority": local_authority_payload,
         }
         receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -960,6 +1002,7 @@ class LocalAssistService:
                 "automatic_dispatch": False,
                 "selected_action": request.action,
                 "planner_decision_id": planner_decision_id,
+                "canonical_execution": canonical_execution_payload,
             },
             planner_selected=True,
             local_model_invoked=local_model_invoked,

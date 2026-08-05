@@ -18,6 +18,9 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.local_heal.local_model_executor import LocalModelExecutorResponse
 from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
 from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+from nexus.contracts.canonical_execution import CanonicalTaskContext
+from nexus.engine.canonical_execution import plan_canonical_task_bundle
+from nexus.services.unified_runtime import canonical_execution_identity
 
 
 def _snapshot() -> dict[str, object]:
@@ -51,6 +54,28 @@ def _request(tmp_path: Path, action: str = "advisor") -> LocalAssistRequest:
         mutation_policy="isolated_only",
         planner_snapshot=_snapshot(),
     )
+
+
+def _canonical_snapshot(*, authority_model: str = "qwen2.5-coder:7b") -> dict[str, object]:
+    bundle = plan_canonical_task_bundle(
+        CanonicalTaskContext(
+            task_id="assist-test-001",
+            task_type="local_assist",
+            task_desc="Inspect one bounded local target.",
+            execution_channels=("local",),
+        )
+    )
+    return {
+        **_snapshot(),
+        "canonical_execution": canonical_execution_identity(bundle),
+        "local_model_invocation_authority": {
+            "schema": "nexus.local_model_invocation_authority.v1",
+            "status": "ALLOW",
+            "gate_passed": True,
+            "resolved_provider": "ollama",
+            "resolved_model": authority_model,
+        },
+    }
 
 
 def _isolated_apply(tmp_path: Path):
@@ -89,6 +114,50 @@ def test_request_rejects_missing_planner_snapshot(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="missing_planner_snapshot"):
         LocalAssistService().handle(invalid)
+
+
+def test_canonical_local_identity_mismatch_fails_before_provider_call(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    invalid = request.__class__(
+        **{
+            **request.__dict__,
+            "planner_snapshot": _canonical_snapshot(authority_model="different-model"),
+        }
+    )
+    calls = 0
+
+    def provider_call(_prompt: str) -> str:
+        nonlocal calls
+        calls += 1
+        return "must not run"
+
+    with pytest.raises(ValueError, match="canonical_local_model_identity_mismatch"):
+        LocalAssistService(provider=InjectedLocalModelProvider(provider_call)).handle(invalid)
+
+    assert calls == 0
+
+
+def test_canonical_local_receipt_preserves_projection_and_admission_identity(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    canonical_snapshot = _canonical_snapshot()
+    request = request.__class__(
+        **{**request.__dict__, "planner_snapshot": canonical_snapshot}
+    )
+    provider = InjectedLocalModelProvider(
+        lambda _request: "diagnosis: bounded local evidence",
+        provider_identity="ollama",
+        model_identity="qwen2.5-coder:7b",
+    )
+
+    response = LocalAssistService(provider=provider).handle(request)
+
+    receipt = json.loads(Path(response.receipt_path).read_text(encoding="utf-8"))
+    assert receipt["canonical_execution"] == canonical_snapshot["canonical_execution"]
+    assert (
+        receipt["local_model_invocation_authority"]
+        == canonical_snapshot["local_model_invocation_authority"]
+    )
+    assert response.planner_decision["canonical_execution"] == canonical_snapshot["canonical_execution"]
 
 
 def test_advisor_records_invocation_and_delivery(tmp_path: Path) -> None:

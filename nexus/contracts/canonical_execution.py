@@ -10,17 +10,17 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import Any, Mapping
 
-if TYPE_CHECKING:
-    from nexus.engine.capability_contracts import CapabilityPlan
-
+from nexus.engine.capability_contracts import CapabilityPlan
 
 _CONTEXT_SCHEMA = "nexus.canonical_task_context.v1"
 _DECISION_SCHEMA = "nexus.execution_decision.v1"
 _PROJECTION_SCHEMA = "nexus.canonical_execution_projection.v1"
+_BUNDLE_SCHEMA = "nexus.canonical_planning_bundle.v1"
 _ROUTE_AUTHORITY = "CapabilityPlanner"
 _VALID_EXECUTION_DEPTHS = frozenset({"LIGHT", "STANDARD", "FULL"})
+_VALID_EXECUTION_CHANNELS = frozenset({"online", "local"})
 _ALLOWED_BUDGET_KEYS = frozenset({"max_cost", "scoring"})
 _ALLOWED_SCORING_KEYS = frozenset({"benefit_weight", "risk_weight", "cost_weight"})
 
@@ -46,8 +46,20 @@ def _forbidden_context_key(key: str) -> bool:
         "selected_capabilities",
         "selected_route",
     }
-    forbidden_fragments = ("lane", "lifecycle", "model", "provider", "route", "target", "worker", "world")
-    return normalized in exact or any(fragment in normalized for fragment in forbidden_fragments)
+    target_authority_keys = {
+        "isolated_target",
+        "target",
+        "target_id",
+        "target_path",
+        "target_ref",
+        "target_worktree",
+    }
+    forbidden_fragments = ("lane", "lifecycle", "model", "provider", "route", "worker", "world")
+    return (
+        normalized in exact
+        or normalized in target_authority_keys
+        or any(fragment in normalized for fragment in forbidden_fragments)
+    )
 
 
 def _freeze_json(value: Any, *, path: str) -> Any:
@@ -68,6 +80,24 @@ def _freeze_json(value: Any, *, path: str) -> Any:
             json.dumps(value, allow_nan=False)
         return value
     raise ValueError(f"canonical_context_value_not_json:{path}:{type(value).__name__}")
+
+
+def _freeze_plan_payload(value: Any, *, path: str) -> Any:
+    if isinstance(value, Mapping):
+        frozen: dict[str, Any] = {}
+        raw_keys = tuple(value.keys())
+        if any(not isinstance(raw_key, str) for raw_key in raw_keys):
+            raise ValueError(f"canonical_plan_key_must_be_string:{path}")
+        for raw_key in sorted(raw_keys):
+            frozen[raw_key] = _freeze_plan_payload(value[raw_key], path=f"{path}.{raw_key}")
+        return MappingProxyType(frozen)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_plan_payload(item, path=f"{path}[]") for item in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        if isinstance(value, float):
+            json.dumps(value, allow_nan=False)
+        return value
+    raise ValueError(f"canonical_plan_value_not_json:{path}:{type(value).__name__}")
 
 
 def _thaw_json(value: Any) -> Any:
@@ -94,6 +124,7 @@ class CanonicalTaskContext:
     task_id: str = ""
     task_type: str = ""
     task_desc: str = ""
+    execution_channels: tuple[str, ...] = ("online",)
     route_features: Mapping[str, Any] = field(default_factory=dict)
     pillars: Mapping[str, Any] = field(default_factory=dict)
     codeintel: Mapping[str, Any] = field(default_factory=dict)
@@ -106,6 +137,17 @@ class CanonicalTaskContext:
         _require_text(self.task_id, "task_id")
         _require_text(self.task_type, "task_type")
         _require_text(self.task_desc, "task_desc")
+        if isinstance(self.execution_channels, str) or not isinstance(
+            self.execution_channels, (list, tuple)
+        ):
+            raise ValueError("execution_channels_must_be_sequence")
+        channels = tuple(sorted({str(item).strip().lower() for item in self.execution_channels}))
+        if not channels:
+            raise ValueError("execution_channels_required")
+        unsupported = tuple(channel for channel in channels if channel not in _VALID_EXECUTION_CHANNELS)
+        if unsupported:
+            raise ValueError(f"unsupported_execution_channel:{unsupported[0]}")
+        object.__setattr__(self, "execution_channels", channels)
         for name in ("route_features", "pillars", "codeintel", "phase_trace", "budget"):
             value = getattr(self, name)
             if not isinstance(value, Mapping):
@@ -127,6 +169,7 @@ class CanonicalTaskContext:
             "task_id": self.task_id,
             "task_type": self.task_type,
             "task_desc": self.task_desc,
+            "execution_channels": list(self.execution_channels),
             "route_features": _thaw_json(self.route_features),
             "pillars": _thaw_json(self.pillars),
             "codeintel": _thaw_json(self.codeintel),
@@ -142,12 +185,49 @@ class CanonicalTaskContext:
         return {
             "task_desc": self.task_desc,
             "task_type": self.task_type,
-            "route": {"route_features": _thaw_json(self.route_features)},
+            "route": {
+                "route_features": _thaw_json(self.route_features),
+                "workforce_admission_enabled": True,
+                "online_enabled": "online" in self.execution_channels,
+                "local_enabled": "local" in self.execution_channels,
+            },
             "pillars": _thaw_json(self.pillars),
             "codeintel": _thaw_json(self.codeintel),
             "phase_trace": _thaw_json(self.phase_trace),
             "budget": _thaw_json(self.budget),
         }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CanonicalTaskContext":
+        if not isinstance(value, Mapping):
+            raise TypeError("canonical_task_context_wire_must_be_mapping")
+        allowed = {
+            "schema",
+            "task_id",
+            "task_type",
+            "task_desc",
+            "execution_channels",
+            "route_features",
+            "pillars",
+            "codeintel",
+            "phase_trace",
+            "budget",
+        }
+        unexpected = sorted(set(value) - allowed)
+        if unexpected:
+            raise ValueError(f"canonical_task_context_wire_field_forbidden:{unexpected[0]}")
+        return cls(
+            schema=str(value.get("schema") or ""),
+            task_id=str(value.get("task_id") or ""),
+            task_type=str(value.get("task_type") or ""),
+            task_desc=str(value.get("task_desc") or ""),
+            execution_channels=tuple(value.get("execution_channels") or ()),
+            route_features=value.get("route_features") or {},
+            pillars=value.get("pillars") or {},
+            codeintel=value.get("codeintel") or {},
+            phase_trace=value.get("phase_trace") or {},
+            budget=value.get("budget") or {},
+        )
 
 
 @dataclass(frozen=True)
@@ -237,6 +317,29 @@ class ExecutionDecision:
     def decision_hash(self) -> str:
         return _canonical_hash(self.to_dict())
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ExecutionDecision":
+        if not isinstance(value, Mapping):
+            raise TypeError("execution_decision_wire_must_be_mapping")
+        return cls(
+            schema=str(value.get("schema") or ""),
+            task_id=str(value.get("task_id") or ""),
+            context_hash=str(value.get("context_hash") or ""),
+            plan_hash=str(value.get("plan_hash") or ""),
+            authority=str(value.get("authority") or ""),
+            plan_schema_version=str(value.get("plan_schema_version") or ""),
+            planner_mode=str(value.get("planner_mode") or ""),
+            score=float(value.get("score", 0.0)),
+            selected_capabilities=tuple(value.get("selected_capabilities") or ()),
+            required_capabilities=tuple(value.get("required_capabilities") or ()),
+            conditional_capabilities=tuple(value.get("conditional_capabilities") or ()),
+            pending_capabilities=tuple(value.get("pending_capabilities") or ()),
+            forbidden_capabilities=tuple(value.get("forbidden_capabilities") or ()),
+            constraints=tuple(value.get("constraints") or ()),
+            execution_depth=str(value.get("execution_depth") or ""),
+            fallback_policy=str(value.get("fallback_policy") or ""),
+        )
+
 
 @dataclass(frozen=True)
 class CanonicalExecutionProjection:
@@ -299,6 +402,111 @@ class CanonicalExecutionProjection:
     def projection_hash(self) -> str:
         return _canonical_hash(self.to_dict())
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CanonicalExecutionProjection":
+        if not isinstance(value, Mapping):
+            raise TypeError("canonical_execution_projection_wire_must_be_mapping")
+        return cls(
+            schema=str(value.get("schema") or ""),
+            task_id=str(value.get("task_id") or ""),
+            context_hash=str(value.get("context_hash") or ""),
+            decision_hash=str(value.get("decision_hash") or ""),
+            plan_hash=str(value.get("plan_hash") or ""),
+            execution_decision_authority=str(
+                value.get("execution_decision_authority") or ""
+            ),
+            selected_capabilities=tuple(value.get("selected_capabilities") or ()),
+            constraints=tuple(value.get("constraints") or ()),
+            execution_depth=str(value.get("execution_depth") or ""),
+            fallback_policy=str(value.get("fallback_policy") or ""),
+        )
+
+
+@dataclass(frozen=True)
+class CanonicalPlanningBundle:
+    """One immutable planner result shared by every runtime consumer."""
+
+    context: CanonicalTaskContext
+    decision: ExecutionDecision
+    projection: CanonicalExecutionProjection
+    plan_payload: Mapping[str, Any]
+    schema: str = _BUNDLE_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema != _BUNDLE_SCHEMA:
+            raise ValueError(f"invalid_canonical_planning_bundle_schema:{self.schema}")
+        if not isinstance(self.context, CanonicalTaskContext):
+            raise TypeError("bundle_context_must_be_CanonicalTaskContext")
+        if not isinstance(self.decision, ExecutionDecision):
+            raise TypeError("bundle_decision_must_be_ExecutionDecision")
+        if not isinstance(self.projection, CanonicalExecutionProjection):
+            raise TypeError("bundle_projection_must_be_CanonicalExecutionProjection")
+        if not isinstance(self.plan_payload, Mapping):
+            raise TypeError("bundle_plan_payload_must_be_mapping")
+        object.__setattr__(
+            self,
+            "plan_payload",
+            _freeze_plan_payload(self.plan_payload, path="plan_payload"),
+        )
+        validate_canonical_execution_binding(self.context, self.decision, self.projection)
+        plan = self.plan
+        if self.plan_hash != self.decision.plan_hash:
+            raise ValueError("bundle_plan_hash_binding_mismatch")
+        expected_decision = ExecutionDecision.from_plan(self.context, plan)
+        if expected_decision.to_dict() != self.decision.to_dict():
+            raise ValueError("bundle_decision_plan_binding_mismatch")
+        expected_projection = CanonicalExecutionProjection.from_decision(self.decision)
+        if expected_projection.to_dict() != self.projection.to_dict():
+            raise ValueError("bundle_projection_decision_binding_mismatch")
+
+    @property
+    def plan(self) -> CapabilityPlan:
+        payload = _thaw_json(self.plan_payload)
+        return CapabilityPlan(**payload)
+
+    @property
+    def plan_hash(self) -> str:
+        return _canonical_hash(_thaw_json(self.plan_payload))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "context": self.context.to_dict(),
+            "context_hash": self.context.context_hash,
+            "plan_payload": _thaw_json(self.plan_payload),
+            "plan_hash": self.plan_hash,
+            "execution_decision": self.decision.to_dict(),
+            "decision_hash": self.decision.decision_hash,
+            "canonical_execution_projection": self.projection.to_dict(),
+            "projection_hash": self.projection.projection_hash,
+            "execution_decision_authority": self.decision.authority,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CanonicalPlanningBundle":
+        if not isinstance(value, Mapping):
+            raise TypeError("canonical_planning_bundle_wire_must_be_mapping")
+        bundle = cls(
+            schema=str(value.get("schema") or ""),
+            context=CanonicalTaskContext.from_dict(value.get("context") or {}),
+            decision=ExecutionDecision.from_dict(value.get("execution_decision") or {}),
+            projection=CanonicalExecutionProjection.from_dict(
+                value.get("canonical_execution_projection") or {}
+            ),
+            plan_payload=value.get("plan_payload") or {},
+        )
+        expected = bundle.to_dict()
+        for name in (
+            "context_hash",
+            "plan_hash",
+            "decision_hash",
+            "projection_hash",
+            "execution_decision_authority",
+        ):
+            if value.get(name) != expected[name]:
+                raise ValueError(f"canonical_planning_bundle_wire_{name}_mismatch")
+        return bundle
+
 
 def validate_canonical_execution_binding(
     context: CanonicalTaskContext,
@@ -323,3 +531,45 @@ def validate_canonical_execution_binding(
         raise ValueError("projection_constraints_binding_mismatch")
     if projection.execution_depth != decision.execution_depth:
         raise ValueError("projection_execution_depth_binding_mismatch")
+
+
+def validate_canonical_execution_identity(value: Mapping[str, Any]) -> None:
+    """Validate the JSON identity forwarded to Online and Local consumers."""
+    if not isinstance(value, Mapping):
+        raise ValueError("canonical_execution_identity_must_be_mapping")
+    if value.get("schema") != "nexus.canonical_execution_identity.v1":
+        raise ValueError("canonical_execution_identity_schema_invalid")
+    task_id = str(value.get("task_id") or "")
+    _require_text(task_id, "canonical_execution_task_id")
+    for name in ("context_hash", "plan_hash", "decision_hash", "projection_hash"):
+        _require_sha256(str(value.get(name) or ""), name)
+    if value.get("execution_decision_authority") != _ROUTE_AUTHORITY:
+        raise ValueError("canonical_execution_identity_authority_invalid")
+    decision = value.get("execution_decision")
+    projection = value.get("canonical_execution_projection")
+    if not isinstance(decision, Mapping) or not isinstance(projection, Mapping):
+        raise ValueError("canonical_execution_identity_payload_missing")
+    if _canonical_hash(decision) != value.get("decision_hash"):
+        raise ValueError("canonical_execution_identity_decision_hash_mismatch")
+    if _canonical_hash(projection) != value.get("projection_hash"):
+        raise ValueError("canonical_execution_identity_projection_hash_mismatch")
+    if decision.get("task_id") != task_id or projection.get("task_id") != task_id:
+        raise ValueError("canonical_execution_identity_task_mismatch")
+    if decision.get("context_hash") != value.get("context_hash"):
+        raise ValueError("canonical_execution_identity_context_mismatch")
+    if decision.get("plan_hash") != value.get("plan_hash"):
+        raise ValueError("canonical_execution_identity_plan_mismatch")
+    if decision.get("authority") != _ROUTE_AUTHORITY:
+        raise ValueError("canonical_execution_identity_decision_authority_mismatch")
+    if projection.get("context_hash") != value.get("context_hash"):
+        raise ValueError("canonical_execution_identity_projection_context_mismatch")
+    if projection.get("plan_hash") != value.get("plan_hash"):
+        raise ValueError("canonical_execution_identity_projection_plan_mismatch")
+    if projection.get("decision_hash") != value.get("decision_hash"):
+        raise ValueError("canonical_execution_identity_projection_decision_mismatch")
+    if projection.get("execution_decision_authority") != _ROUTE_AUTHORITY:
+        raise ValueError("canonical_execution_identity_projection_authority_mismatch")
+    if decision.get("fallback_policy") != "fail_closed" or projection.get(
+        "fallback_policy"
+    ) != "fail_closed":
+        raise ValueError("canonical_execution_identity_fallback_invalid")

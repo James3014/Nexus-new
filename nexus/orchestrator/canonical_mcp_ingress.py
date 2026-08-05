@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from nexus.contracts.canonical_execution import CanonicalTaskContext
-from nexus.engine.canonical_execution import plan_canonical_task
+from nexus.engine.canonical_execution import plan_canonical_task_bundle
 
 CALLER_ROUTE_OVERRIDE_FIELDS = frozenset(
     {
@@ -82,7 +82,9 @@ def plan_mcp_task(
         allowed_files=allowed_files,
         verifier_commands=verifier_commands,
     )
-    decision, projection = plan_canonical_task(context)
+    bundle = plan_canonical_task_bundle(context)
+    decision = bundle.decision
+    projection = bundle.projection
     return {
         "schema": "nexus.mcp_canonical_decision.v1",
         "status": "CANONICAL_DECISION_READY",
@@ -94,6 +96,7 @@ def plan_mcp_task(
         "decision_hash": decision.decision_hash,
         "canonical_execution_projection": projection.to_dict(),
         "projection_hash": projection.projection_hash,
+        "canonical_planning_bundle": bundle.to_dict(),
         "mutation_dispatched": False,
         "next_action": "continue_via_canonical_runtime",
     }

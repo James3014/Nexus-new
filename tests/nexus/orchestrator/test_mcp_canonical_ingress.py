@@ -104,10 +104,24 @@ def test_task_run_returns_canonical_decision_without_physical_dispatch() -> None
     assert service.submitted == []
 
 
+def test_task_run_carries_the_exact_plan_bundle_for_runtime_continuation() -> None:
+    payload = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))[
+        "structuredContent"
+    ]
+
+    bundle = payload["canonical_planning_bundle"]
+    assert bundle["schema"] == "nexus.canonical_planning_bundle.v1"
+    assert bundle["context_hash"] == payload["context_hash"]
+    assert bundle["plan_hash"] == payload["execution_decision"]["plan_hash"]
+    assert bundle["decision_hash"] == payload["decision_hash"]
+    assert bundle["projection_hash"] == payload["projection_hash"]
+    assert bundle["plan_payload"]["signal_snapshot"]["workforce_demands"]
+
+
 def test_mcp_and_direct_seam_produce_the_same_decision_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nexus.engine.canonical_execution import plan_canonical_task
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
     from nexus.orchestrator import canonical_mcp_ingress
 
     context = canonical_mcp_ingress.build_mcp_task_context(
@@ -116,22 +130,22 @@ def test_mcp_and_direct_seam_produce_the_same_decision_hash(
         why="Verify canonical ingress identity",
         allowed_files=["README.md"],
     )
-    direct_decision, direct_projection = plan_canonical_task(context)
+    direct_bundle = plan_canonical_task_bundle(context)
     planner_calls = 0
 
     def _counted_plan(canonical_context):
         nonlocal planner_calls
         planner_calls += 1
-        return plan_canonical_task(canonical_context)
+        return plan_canonical_task_bundle(canonical_context)
 
-    monkeypatch.setattr(canonical_mcp_ingress, "plan_canonical_task", _counted_plan)
+    monkeypatch.setattr(canonical_mcp_ingress, "plan_canonical_task_bundle", _counted_plan)
     result = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))
     payload = result["structuredContent"]
 
     assert result["isError"] is False
     assert planner_calls == 1
-    assert payload["decision_hash"] == direct_decision.decision_hash
-    assert payload["projection_hash"] == direct_projection.projection_hash
+    assert payload["decision_hash"] == direct_bundle.decision.decision_hash
+    assert payload["projection_hash"] == direct_bundle.projection.projection_hash
 
 
 def test_gateway_task_run_contains_no_route_authority_writer() -> None:

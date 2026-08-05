@@ -8,11 +8,16 @@ from pathlib import Path
 import pytest
 
 from nexus.contracts.canonical_execution import (
+    CanonicalPlanningBundle,
     CanonicalTaskContext,
     validate_canonical_execution_binding,
 )
-from nexus.engine.capability_contracts import CapabilityPlan
-from nexus.engine.canonical_execution import plan_canonical_task
+from nexus.engine.canonical_execution import (
+    plan_canonical_task,
+    plan_canonical_task_bundle,
+    replan_canonical_task_bundle,
+)
+from nexus.engine.capability_contracts import CapabilityPlan, ExecutionReplanAuthorization
 from nexus.engine.capability_planner import CapabilityPlanner
 
 
@@ -58,7 +63,10 @@ def test_canonical_task_context_plans_once_and_projects_only_planner_decision(mo
 
     assert len(planner.calls) == 1
     assert planner.calls[0]["route"] == {
-        "route_features": {"is_cross_module_task": False, "risk_score": 20}
+        "route_features": {"is_cross_module_task": False, "risk_score": 20},
+        "workforce_admission_enabled": True,
+        "online_enabled": True,
+        "local_enabled": False,
     }
     assert decision.authority == "CapabilityPlanner"
     assert decision.selected_capabilities == ("artifact_gate", "claim_gate")
@@ -69,6 +77,144 @@ def test_canonical_task_context_plans_once_and_projects_only_planner_decision(mo
     serialized = json.dumps(projection.to_dict(), sort_keys=True)
     for forbidden in ("execution_lane", "provider", "model", "target_worktree"):
         assert forbidden not in serialized
+
+
+def test_canonical_context_allows_code_target_facts_but_not_target_authority() -> None:
+    context = CanonicalTaskContext(
+        task_id="task-code-target-facts",
+        task_type="bugfix",
+        task_desc="Inspect one bounded symbol.",
+        codeintel={"target_file": "nexus/example.py", "target_symbol": "parse"},
+    )
+
+    assert context.to_dict()["codeintel"] == {
+        "target_file": "nexus/example.py",
+        "target_symbol": "parse",
+    }
+    with pytest.raises(ValueError, match="canonical_context_route_override_forbidden"):
+        CanonicalTaskContext(
+            task_id="task-target-authority",
+            task_type="bugfix",
+            task_desc="Reject a Target worktree selector.",
+            codeintel={"target_worktree": "/tmp/forged-target"},
+        )
+
+
+def test_canonical_planning_bundle_binds_the_exact_plan_without_replanning(monkeypatch):
+    context = CanonicalTaskContext(
+        task_id="task-bundle-1",
+        task_type="bugfix",
+        task_desc="Fix one bounded parser defect.",
+        route_features={"risk_score": 20},
+    )
+    planner = _RecordingPlanner()
+    monkeypatch.setattr(
+        CapabilityPlanner,
+        "plan",
+        lambda _self, **kwargs: planner.plan(**kwargs),
+    )
+
+    bundle = plan_canonical_task_bundle(context)
+
+    assert len(planner.calls) == 1
+    assert bundle.context is context
+    assert bundle.plan.to_dict()["selected_capabilities"] == ["artifact_gate", "claim_gate"]
+    assert bundle.decision.plan_hash == bundle.plan_hash
+    assert bundle.projection.plan_hash == bundle.plan_hash
+    assert bundle.to_dict()["projection_hash"] == bundle.projection.projection_hash
+
+
+def test_canonical_planning_bundle_cannot_be_mutated_or_rebound_to_another_plan(monkeypatch):
+    context = CanonicalTaskContext(
+        task_id="task-bundle-tamper",
+        task_type="bugfix",
+        task_desc="Keep the runtime plan bound.",
+    )
+    monkeypatch.setattr(CapabilityPlanner, "plan", lambda _self, **_kwargs: _RecordingPlanner().plan())
+    bundle = plan_canonical_task_bundle(context)
+    original_hash = bundle.plan_hash
+
+    detached_plan = bundle.plan
+    detached_plan.selected_capabilities.append("untrusted_override")
+
+    assert bundle.plan.selected_capabilities == ["artifact_gate", "claim_gate"]
+    assert bundle.plan_hash == original_hash
+    tampered_payload = bundle.to_dict()["plan_payload"]
+    tampered_payload["selected_capabilities"] = ["untrusted_override"]
+    with pytest.raises(ValueError, match="bundle_plan_hash_binding_mismatch"):
+        replace(bundle, plan_payload=tampered_payload)
+
+
+def test_canonical_context_requires_workforce_demands_for_available_execution_channels(monkeypatch):
+    context = CanonicalTaskContext(
+        task_id="task-workforce-channels",
+        task_type="bugfix",
+        task_desc="Run one shared Online and Local decision.",
+        execution_channels=("local", "online"),
+    )
+    planner = _RecordingPlanner()
+    monkeypatch.setattr(
+        CapabilityPlanner,
+        "plan",
+        lambda _self, **kwargs: planner.plan(**kwargs),
+    )
+
+    plan_canonical_task_bundle(context)
+
+    assert planner.calls[0]["route"] == {
+        "route_features": {},
+        "workforce_admission_enabled": True,
+        "online_enabled": True,
+        "local_enabled": True,
+    }
+
+
+def test_canonical_replan_builds_one_fresh_bundle_from_explicit_authorization(monkeypatch):
+    context = CanonicalTaskContext(
+        task_id="task-replan-bundle",
+        task_type="bugfix",
+        task_desc="Replan only after verified failure.",
+    )
+    authorization = ExecutionReplanAuthorization(
+        task_id=context.task_id,
+        workspace_revision="rev-replan-bundle",
+        source_planner_decision_id="1" * 64,
+        source_replan_request_id="sha256:" + "2" * 64,
+        source_receipt_hash="3" * 64,
+        source_run_anchor_hash="4" * 64,
+        requested_execution_depth="STANDARD",
+    )
+    planner = _RecordingPlanner()
+    monkeypatch.setattr(
+        CapabilityPlanner,
+        "plan",
+        lambda _self, **kwargs: planner.plan(**kwargs),
+    )
+
+    bundle = replan_canonical_task_bundle(context, authorization)
+
+    assert len(planner.calls) == 1
+    assert planner.calls[0]["replan_authorization"] is authorization
+    assert bundle.context.context_hash == context.context_hash
+    assert bundle.decision.plan_hash == bundle.plan_hash
+
+
+def test_canonical_planning_bundle_wire_round_trip_rejects_tamper(monkeypatch):
+    context = CanonicalTaskContext(
+        task_id="task-bundle-wire",
+        task_type="bugfix",
+        task_desc="Carry the exact plan across ingress.",
+    )
+    monkeypatch.setattr(CapabilityPlanner, "plan", lambda _self, **_kwargs: _RecordingPlanner().plan())
+    bundle = plan_canonical_task_bundle(context)
+
+    restored = CanonicalPlanningBundle.from_dict(bundle.to_dict())
+
+    assert restored.to_dict() == bundle.to_dict()
+    tampered = bundle.to_dict()
+    tampered["plan_payload"]["score"] = 999
+    with pytest.raises(ValueError, match="bundle_plan_hash_binding_mismatch"):
+        CanonicalPlanningBundle.from_dict(tampered)
 
 
 def test_caller_cannot_inject_an_alternate_planner_authority():

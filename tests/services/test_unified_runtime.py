@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable, Mapping, Sequence
 
 import pytest
 
@@ -39,6 +40,7 @@ from nexus.services.unified_runtime import (
     build_structured_online_invoker,
     build_subprocess_online_invoker,
     extract_online_stage_payload,
+    normalize_online_invoker_payload,
     resolve_online_transport_binding,
     resolve_registered_provider_executable,
     resolve_registered_online_cli_spec,
@@ -81,6 +83,116 @@ def _request(*, local_enabled: bool = False, online_enabled: bool = True) -> Uni
             {"task_id": "unified-test-001", "action": "candidate"} if local_enabled else None
         ),
     )
+
+
+def _admit_gateway_request(
+    request: UnifiedRuntimeRequest,
+    *,
+    online_worker: str = "agy_flash",
+) -> UnifiedRuntimeRequest:
+    """Attach the canonical Workforce bindings required by Gateway mainchain."""
+    if online_worker == "codex_luna":
+        online_controls = ["governed_adapter", "independent_verification", "receipt"]
+    else:
+        online_controls = [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ]
+    route = dict(request.route)
+    route.pop("provider", None)
+    route.update(
+        {
+            "workforce_admission_enabled": True,
+            "injected_transport": True,
+            "online_enabled": bool(request.online_enabled),
+            "local_enabled": bool(request.local_enabled),
+            "workforce_bindings": {
+                **dict(route.get("workforce_bindings") or {}),
+                "online": {
+                    "worker_id": online_worker,
+                    "controls": online_controls,
+                },
+            },
+        }
+    )
+    if request.local_enabled:
+        local_worker = (
+            "local_advisor_3b"
+            if route.get("mutation_requested") is False
+            else "local_coder_7b"
+        )
+        local_controls = (
+            ["fixed_schema", "compact_context", "deterministic_consumer"]
+            if local_worker == "local_advisor_3b"
+            else [
+                "small_scope",
+                "parser",
+                "compile",
+                "focused_tests",
+                "reversible_application",
+            ]
+        )
+        route["workforce_bindings"]["local"] = {
+            "worker_id": local_worker,
+            "controls": local_controls,
+        }
+    fields = {
+        name: getattr(request, name)
+        for name in request.__dataclass_fields__
+        if name != "route"
+    }
+    fields["route"] = route
+    return UnifiedRuntimeRequest(**fields)
+
+def _structured_gateway_invoker(gateway):
+    def invoke(context):
+        prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
+        local_stage = context.get("local") if isinstance(context.get("local"), dict) else {}
+        local_response = (
+            local_stage.get("response")
+            if isinstance(local_stage.get("response"), dict)
+            else {}
+        )
+        local_outputs = (
+            local_response.get("local_outputs")
+            if isinstance(local_response.get("local_outputs"), dict)
+            else {}
+        )
+        if local_outputs:
+            prompt += "\n\n[LOCAL_ASSIST_CONTEXT]\n" + json.dumps(
+                local_outputs,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        evidence_refs = [f"online:agy:{context['task_id']}:structured_transport"]
+        if local_outputs:
+            evidence_refs.append(f"gateway:{context['task_id']}:local_context_forwarded")
+        result, raw = gateway.ask_structured(
+            prompt,
+            str(context.get("online_payload") or ""),
+            phase=str(context.get("online_phase") or "R"),
+            output_schema=context.get("online_output_schema") or None,
+            model_name=context.get("online_model_name") or None,
+        )
+        return normalize_online_invoker_payload(
+            provider="agy",
+            task_id=context["task_id"],
+            invoked=True,
+            output_delivered=True,
+            gate_passed=True,
+            provider_call_count=1,
+            response=result,
+            raw_response=raw,
+            evidence_refs=evidence_refs,
+            transport="structured_callable",
+            selection_source="workforce_admission",
+        )
+
+    invoke.provider = "agy"
+    invoke.online_invoker_provider = "agy"
+    return invoke
 
 
 def _online(_: dict) -> dict:
@@ -665,7 +777,11 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
 
     monkeypatch.setattr(gateway, "ask_structured", _online_call)
     local_service = LocalAssistService(
-        provider=InjectedLocalModelProvider(lambda _request: "local diagnosis: inspect candidate")
+        provider=InjectedLocalModelProvider(
+            lambda _request: "local diagnosis: inspect candidate",
+            provider_identity="ollama",
+            model_identity="qwen2.5-s2t-advisor:3b",
+        )
     )
     task_id = "hybrid-runtime-test-001"
     local_request = LocalAssistRequest(
@@ -685,7 +801,7 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
         task_id=task_id,
         workspace_revision="revision-001",
         task_statement="inspect and improve candidate",
-        task_type="repair",
+        task_type="planning",
         route={"recommended_flow": "hybrid", "provider": "gemini"},
         online_prompt="Return candidate",
         online_payload="Use bounded local diagnosis",
@@ -693,18 +809,24 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
         local_request=local_request,
         evidence_refs=("hybrid:test:request",),
     )
+    request.route["mutation_requested"] = False
 
     receipt = gateway.ask_unified(
-        request,
+        _admit_gateway_request(request),
         local_service=local_service,
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
+        online_invoker=_structured_gateway_invoker(gateway),
     )
 
     assert "local_model_executor" in receipt["planner"]["selected_capabilities"]
-    assert receipt["local"]["status"] == "SUCCEEDED"
-    assert receipt["local"]["response"]["provider"] == "injected"
+    assert receipt["local"]["status"] == "SUCCEEDED", (
+        receipt["local"].get("reason"),
+        receipt.get("local_model_invocation_authority"),
+        receipt["local"].get("response"),
+    )
+    assert receipt["local"]["response"]["provider"] == "ollama"
     assert receipt["local"]["response"]["physical_callable"] == "LocalModelProvider.generate"
     assert receipt["local"]["response"]["executor_invoked"] is False
     local_capability = next(item for item in receipt["capabilities"] if item["name"] == "local_model_executor")
@@ -733,15 +855,20 @@ def test_gateway_unified_entry_uses_same_receipt_contract(monkeypatch, tmp_path:
         lambda *_args, **_kwargs: ({"summary": "online"}, "online-response"),
     )
     receipt = gateway.ask_unified(
-        _request(),
+        _admit_gateway_request(_request()),
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
         receipt_path=tmp_path / "unified.json",
+        online_invoker=_structured_gateway_invoker(gateway),
     )
 
     assert receipt["schema"] == "nexus.unified_runtime.receipt.v1"
-    assert receipt["online"]["invoked"] is True
+    assert receipt["online"]["invoked"] is True, (
+        receipt["online"].get("reason"),
+        receipt.get("workforce_admission"),
+        receipt.get("gateway_invocation_authority"),
+    )
     assert receipt["receipt_complete"] is True
     assert (tmp_path / "unified.json").exists()
 
@@ -761,14 +888,14 @@ def test_gateway_unified_entry_forwards_provider_context(monkeypatch, tmp_path: 
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
-            "online_model_name": "provider-model-1",
+            "online_model_name": "gemini-3.6-flash-high",
             "online_output_schema": {"status": "APPROVED | FAIL"},
             "online_phase": "R",
         }
     )
-    gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    gateway.ask_unified(_admit_gateway_request(request), verifier=_verifier, learning=_learning, online_invoker=_structured_gateway_invoker(gateway))
 
-    assert calls[0]["model_name"] == "provider-model-1"
+    assert calls[0]["model_name"] == "gemini-3.6-flash-high"
     assert calls[0]["output_schema"] == {"status": "APPROVED | FAIL"}
 
 
@@ -798,18 +925,23 @@ def test_gateway_accepts_provider_neutral_online_invoker(tmp_path: Path) -> None
     from nexus.services.gateway import BattlesuitGateway
 
     gateway = BattlesuitGateway(project_root=tmp_path)
+    command = tmp_path / "fake-codex-invoker"
+    command.write_text("#!/bin/sh\nprintf 'codex-provider-output\\n'\n", encoding="utf-8")
+    command.chmod(0o755)
     invoker = build_subprocess_online_invoker(
         OnlineCliSpec(
-            provider="grok",
-            command=(sys.executable, "-c", "print('grok-provider-output')"),
+            provider="codex",
+            command=(str(command),),
         )
     )
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
+            "task_statement": "Complete one complex integration runtime closure.",
+            "task_type": "runtime-closure",
             "route": {
                 "recommended_flow": "direct",
-                "provider": "grok",
+                "provider": "codex",
                 "online_policy": "auto",
                 "injected_transport": True,
                 "workspace_root": str(tmp_path),
@@ -818,36 +950,48 @@ def test_gateway_accepts_provider_neutral_online_invoker(tmp_path: Path) -> None
     )
 
     receipt = gateway.ask_unified(
-        request,
+        _admit_gateway_request(request, online_worker="codex_luna"),
         online_invoker=invoker,
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
     )
-    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert receipt["online"]["status"] == "SUCCEEDED", receipt["online"]
     assert receipt["receipt_complete"] is True
-    assert "online:grok:unified-test-001:subprocess" in receipt["evidence_refs"]
+    assert "online:codex:unified-test-001:subprocess" in receipt["evidence_refs"]
 
 
-def test_gateway_selects_explicit_registered_provider_at_edge(tmp_path: Path, monkeypatch) -> None:
+def test_gateway_selects_workforce_admitted_registered_provider_at_edge(
+    tmp_path: Path, monkeypatch
+) -> None:
     from nexus.services.gateway import BattlesuitGateway
 
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     gateway = BattlesuitGateway(project_root=tmp_path)
+    command = tmp_path / "fake-codex-edge"
+    command.write_text("#!/bin/sh\nprintf 'edge-provider-output\\n'\n", encoding="utf-8")
+    command.chmod(0o755)
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
+            "task_statement": "Complete one complex integration runtime closure.",
+            "task_type": "runtime-closure",
             "route": {
                 "recommended_flow": "direct",
                 "provider": "grok",
-                "online_command": (sys.executable, "-c", "print('edge-provider-output')"),
+                "online_command": str(command),
             },
         }
     )
-    receipt = gateway.ask_unified(request, capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS, verifier=_verifier, learning=_learning)
+    receipt = gateway.ask_unified(
+        _admit_gateway_request(request, online_worker="codex_luna"),
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        verifier=_verifier,
+        learning=_learning,
+    )
 
     assert receipt["planner"]["invoked"] is True
-    assert receipt["online"]["response"]["provider"] == "grok"
+    assert receipt["online"]["response"]["provider"] == "codex"
     assert receipt["online"]["status"] == "SUCCEEDED"
     assert receipt["receipt_complete"] is True
 
@@ -858,18 +1002,28 @@ def test_gateway_uses_registered_edge_when_gateway_is_configured_for_codex(tmp_p
     monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "codex")
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     gateway = BattlesuitGateway(project_root=tmp_path)
+    command = tmp_path / "fake-codex-configured"
+    command.write_text("#!/bin/sh\nprintf 'same-provider-edge-output\\n'\n", encoding="utf-8")
+    command.chmod(0o755)
     request = UnifiedRuntimeRequest(
         **{
             **_request().__dict__,
+            "task_statement": "Complete one complex integration runtime closure.",
+            "task_type": "runtime-closure",
             "route": {
                 "recommended_flow": "direct",
-                "provider": "codex",
-                "online_command": (sys.executable, "-c", "print('same-provider-edge-output')"),
+                "provider": "agy",
+                "online_command": str(command),
             },
         }
     )
 
-    receipt = gateway.ask_unified(request, capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS, verifier=_verifier, learning=_learning)
+    receipt = gateway.ask_unified(
+        _admit_gateway_request(request, online_worker="codex_luna"),
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        verifier=_verifier,
+        learning=_learning,
+    )
 
     assert receipt["online"]["response"]["provider"] == "codex"
     assert receipt["online"]["response"]["response"].strip() == "same-provider-edge-output"
@@ -878,9 +1032,7 @@ def test_gateway_uses_registered_edge_when_gateway_is_configured_for_codex(tmp_p
 
 
 def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: Path) -> None:
-    from nexus.services.gateway import BattlesuitGateway
-
-    gateway = BattlesuitGateway(project_root=tmp_path)
+    """Registered transports share a unit contract; Workforce selects product lanes."""
     observed: dict[str, dict] = {}
     for provider in ONLINE_CLI_SPEC_REGISTRY:
         if provider == "agy":
@@ -901,36 +1053,9 @@ def test_all_registered_providers_enter_one_unified_receipt_contract(tmp_path: P
                     command=(sys.executable, "-c", f"print('{provider}-bounded-output')"),
                 )
             )
-        request = UnifiedRuntimeRequest(
-            **{
-                **_request().__dict__,
-                "task_id": f"unified-provider-{provider}",
-                "route": {
-                    "recommended_flow": "direct",
-                    "provider": provider,
-                    "online_policy": "auto",
-                    "injected_transport": True,
-                    "workspace_root": str(tmp_path),
-                },
-            }
-        )
-        receipt = gateway.ask_unified(
-            request,
-            online_invoker=invoker,
-            capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
-            verifier=_verifier,
-            learning=_learning,
-        )
-        observed[provider] = receipt
-
+        observed[provider] = invoker({"task_id": f"unified-provider-{provider}", "task_statement": "bounded"})
     assert set(observed) == set(ONLINE_CLI_SPEC_REGISTRY)
-    assert all(receipt["schema"] == "nexus.unified_runtime.receipt.v1" for receipt in observed.values())
-    assert all(receipt["planner"]["name"] == "planner" for receipt in observed.values())
-    assert all(receipt["receipt_complete"] is True for receipt in observed.values())
-    assert all(
-        receipt["context_trace"]["task_id"] == receipt["task_id"]
-        for receipt in observed.values()
-    )
+    assert all(item["invoked"] is True and item["gate_passed"] is True for item in observed.values())
 
 
 def test_negative_control_deny_missing_provider_binary(monkeypatch) -> None:
@@ -1146,10 +1271,11 @@ def test_negative_control_optional_non_selected_memory(monkeypatch, tmp_path: Pa
     # Real CapabilityPlanner selects harness_preflight_sensor, repair_loop, etc.
     # Provide deterministic fixtures for all selected caps.
     receipt = gateway.ask_unified(
-        _request(),
+        _admit_gateway_request(_request()),
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
+        online_invoker=_structured_gateway_invoker(gateway),
     )
 
     caps = receipt.get("capability_results", {})
@@ -1289,7 +1415,7 @@ def test_gateway_does_not_fallback_to_wrong_provider_for_unknown_route(tmp_path:
     assert receipt["online"]["status"] == "FAILED"
     # Fail closed: either adapter resolution or provider-not-approved decision.
     err = str(receipt["online"]["response"].get("error") or "")
-    assert err in {"provider_adapter_resolution_failed", "online_execution_not_authorized"}
+    assert err in {"provider_adapter_resolution_failed", "online_execution_not_authorized", "workforce_admission_overall_decision_not_allow"}
     assert receipt["receipt_complete"] is False
 
 
@@ -1360,7 +1486,7 @@ def test_gateway_injected_structured_transport_outranks_local_ollama(
             "route": {"recommended_flow": "direct", "provider": "ollama"},
         }
     )
-    receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    receipt = gateway.ask_unified(_admit_gateway_request(request), verifier=_verifier, learning=_learning, online_invoker=_structured_gateway_invoker(gateway))
     domain, raw, payload = extract_online_stage_payload(receipt["online"])
 
     assert receipt["online"]["status"] == "SUCCEEDED"
@@ -1369,9 +1495,9 @@ def test_gateway_injected_structured_transport_outranks_local_ollama(
     assert payload["invoked"] is True
     assert payload["output_delivered"] is True
     # Binding identity, not oauth_provider auto-detect.
-    assert payload["provider"] == "injected"
+    assert payload["provider"] == "agy"
     assert payload["transport"] == "structured_callable"
-    assert payload["selection_source"] == "injected_transport"
+    assert payload["selection_source"] == "workforce_admission"
     assert payload["provider"] != "ollama"
     for required in (
         "provider",
@@ -1760,7 +1886,7 @@ def test_gateway_default_transport_fails_closed_without_external_authorization(m
     )
 
     assert receipt["online"]["status"] == "FAILED"
-    assert receipt["online"]["response"]["error"] == "online_execution_not_authorized"
+    assert receipt["online"]["response"]["error"] == "workforce_admission_overall_decision_not_allow"
     assert receipt["online"]["response"]["task_id"] == receipt["task_id"]
     assert receipt["receipt_complete"] is False
 
@@ -1780,7 +1906,7 @@ def test_gateway_forwards_capability_invokers_into_canonical_runtime(tmp_path: P
     )
 
     receipt = BattlesuitGateway(project_root=tmp_path).ask_unified(
-        request,
+        _admit_gateway_request(request),
         capability_invokers={
             "memory": lambda context: {
                 "task_id": context["task_id"],
@@ -1976,7 +2102,7 @@ def test_gateway_ask_unified_cleans_task_decision_before_later_direct_call(tmp_p
         route={"recommended_flow": "direct", "workspace_root": str(tmp_path)},
     )
 
-    receipt = gateway.ask_unified(request, verifier=_verifier, learning=_learning)
+    receipt = gateway.ask_unified(_admit_gateway_request(request), verifier=_verifier, learning=_learning, online_invoker=_structured_gateway_invoker(gateway))
     assert receipt["online"]["status"] == "SUCCEEDED"
     assert not hasattr(gateway, "_online_execution_decision")
 

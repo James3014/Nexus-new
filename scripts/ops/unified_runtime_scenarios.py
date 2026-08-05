@@ -421,6 +421,105 @@ def _build_agy_online_invoker(
             extra={"returncode": returncode, "stderr": stderr},
         )
 
+    invoke.provider = "agy"
+    invoke.online_invoker_provider = "agy"
+    return invoke
+
+
+def _build_injected_online_invoker(
+    command: tuple[str, ...] | list[str] | str,
+    *,
+    timeout_sec: float,
+    include_local_context: bool,
+):
+    """Build a deterministic fixture transport with an admitted test identity."""
+    from nexus.services.unified_runtime import normalize_online_invoker_payload
+
+    argv = [command] if isinstance(command, str) else [str(item) for item in command]
+
+    def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = str(context.get("task_id") or "")
+        prompt = str(context.get("online_prompt") or context.get("task_statement") or "")
+        local_context_forwarded = False
+        capability_context_forwarded = False
+        if include_local_context:
+            local_stage = context.get("local") if isinstance(context.get("local"), Mapping) else {}
+            if local_stage:
+                from nexus.services.local_substitution import build_online_safe_local_forward
+
+                safe = build_online_safe_local_forward(local_stage)
+                forward = safe.get("forward") if isinstance(safe, Mapping) else {}
+                if isinstance(forward, Mapping) and forward:
+                    prompt += "\n\n[LOCAL_ASSIST_CONTEXT]\n" + json.dumps(
+                        forward,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    local_context_forwarded = True
+            capability_results = context.get("capability_results")
+            if isinstance(capability_results, Mapping) and capability_results:
+                from nexus.services.unified_runtime import _capability_evidence_summary
+
+                prompt += "\n\n[CAPABILITY_EVIDENCE_SUMMARY]\n" + json.dumps(
+                    _capability_evidence_summary(capability_results),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+                capability_context_forwarded = True
+        try:
+            result = subprocess.run(
+                argv,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return normalize_online_invoker_payload(
+                provider="agy",
+                task_id=task_id,
+                invoked=True,
+                output_delivered=False,
+                gate_passed=False,
+                provider_call_count=1,
+                error="provider_timeout",
+                evidence_refs=[f"online:agy:{task_id}:injected_timeout"],
+                transport="structured_callable",
+                selection_source="injected_transport",
+                extra={"stderr": str(exc), "live_provider_claim": False},
+            )
+        stdout = str(result.stdout or "")
+        delivered = result.returncode == 0 and bool(stdout.strip())
+        evidence_refs = [f"online:agy:{task_id}:injected_subprocess"]
+        if local_context_forwarded:
+            evidence_refs.append(f"online:agy:{task_id}:local_context_forwarded")
+        if capability_context_forwarded:
+            evidence_refs.append(f"online:agy:{task_id}:capability_context_forwarded")
+        return normalize_online_invoker_payload(
+            provider="agy",
+            task_id=task_id,
+            invoked=True,
+            output_delivered=delivered,
+            gate_passed=delivered,
+            provider_call_count=1,
+            response=stdout,
+            raw_response=stdout,
+            error="" if delivered else "provider_subprocess_failed",
+            evidence_refs=evidence_refs,
+            transport="structured_callable",
+            selection_source="injected_transport",
+            extra={
+                "returncode": result.returncode,
+                "stderr": str(result.stderr or ""),
+                "live_provider_claim": False,
+            },
+        )
+
+    invoke.provider = "agy"
+    invoke.online_invoker_provider = "agy"
     return invoke
 
 
@@ -797,6 +896,30 @@ def _run_nexus(
     # runner — never a live provider claim. Real physical CLIs require a separate
     # product path with OnlineExecutionDecision.physical_invocation_allowed.
     injected_online = command is not None
+    online_enabled = report["scenario"] != "C"
+    admitted_online_provider = "agy"
+    workforce_bindings: dict[str, Any] = {}
+    if online_enabled:
+        workforce_bindings["online"] = {
+            "worker_id": "agy_flash",
+            "controls": [
+                "task_card",
+                "allowed_files",
+                "mandatory_commands",
+                "independent_verification",
+            ],
+        }
+    if local_enabled:
+        workforce_bindings["local"] = {
+            "worker_id": "local_coder_7b",
+            "controls": [
+                "small_scope",
+                "parser",
+                "compile",
+                "focused_tests",
+                "reversible_application",
+            ],
+        }
     route: dict[str, Any] = {
         "recommended_flow": (
             "hybrid"
@@ -805,9 +928,10 @@ def _run_nexus(
             if report["scenario"] == "C"
             else "direct"
         ),
-        "provider": provider,
         "online_command": command,
         "timeout_sec": timeout_sec,
+        "workforce_admission_enabled": True,
+        "workforce_bindings": workforce_bindings,
         # Scenario B/C must exercise the real Local capability edges. The
         # planner otherwise keeps them optional and a receipt would only
         # prove the generic local_model_executor path.
@@ -853,7 +977,7 @@ def _run_nexus(
         task_statement=task_statement,
         task_type="repair",
         route=route,
-        online_enabled=report["scenario"] != "C",
+        online_enabled=online_enabled,
         local_enabled=local_enabled,
         online_prompt=task_statement,
         online_payload="Return a concise answer to the harmless task.",
@@ -882,7 +1006,7 @@ def _run_nexus(
         task_workspace=task_workspace,
         workspace_revision=workspace_revision,
         task_statement=task_statement,
-        provider=provider,
+        provider=admitted_online_provider,
         injected_online=injected_online,
         local_required=local_enabled,
         online_required=request.online_enabled,
@@ -907,11 +1031,17 @@ def _run_nexus(
     )
     if request.online_enabled:
         online_invoker = (
-            _build_agy_online_invoker(
+            _build_injected_online_invoker(
+                command,
                 timeout_sec=timeout_sec,
                 include_local_context=local_enabled,
             )
-            if provider == "agy" and not injected_online
+            if injected_online and command is not None
+            else _build_agy_online_invoker(
+                timeout_sec=timeout_sec,
+                include_local_context=local_enabled,
+            )
+            if provider == "agy"
             else None
         )
         receipt = gateway.ask_unified(
@@ -971,14 +1101,17 @@ def _run_nexus(
                 )
     provider_call_count = online_provider_call_count + local_provider_call_count
     capability_summary = _capability_edge_summary(receipt)
+    selected_capability_edges = [
+        item for item in capability_summary.values() if item["selected"]
+    ]
     capability_runtime_complete = bool(
         local_enabled
+        and selected_capability_edges
         and all(
-            item["selected"]
-            and item["invoked"]
+            item["invoked"]
             and item["gate_passed"]
             and item["status"] == "SUCCEEDED"
-            for item in capability_summary.values()
+            for item in selected_capability_edges
         )
     )
     capability_online_forwarded = bool(
@@ -991,7 +1124,7 @@ def _run_nexus(
     report.update(
         {
             "task_id": task_id,
-            "provider": provider if request.online_enabled else "ollama",
+            "provider": admitted_online_provider if request.online_enabled else "ollama",
             "latency_sec": elapsed,
             "provider_call_count": provider_call_count,
             "online_provider_call_count": online_provider_call_count,

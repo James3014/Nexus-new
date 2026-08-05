@@ -418,7 +418,6 @@ class BattlesuitGateway:
             resolve_online_execution_decision,
         )
         from nexus.services.unified_runtime import (
-            UnifiedRuntime,
             _capability_evidence_summary,
             build_registered_online_invoker,
             normalize_online_invoker_payload,
@@ -429,30 +428,16 @@ class BattlesuitGateway:
         if not isinstance(route, Mapping):
             route = {}
         route = dict(route)
-        if route.get("workforce_admission_enabled") is True and bool(
-            getattr(request, "online_enabled", True)
-        ):
-            bindings = route.get("workforce_bindings")
-            online_binding = bindings.get("online") if isinstance(bindings, Mapping) else None
-            if isinstance(online_binding, Mapping):
-                admitted_provider = str(online_binding.get("provider") or "").strip().lower()
-                admitted_model = str(online_binding.get("model") or "").strip()
-                if admitted_provider:
-                    existing_provider = str(route.get("provider") or "").strip().lower()
-                    route.setdefault("provider", admitted_provider)
-                    if "online_transport_binding" not in route:
-                        route["online_transport_binding"] = {"provider": admitted_provider}
-                    if not existing_provider or existing_provider == admitted_provider:
-                        route.setdefault("online_invoker_provider", admitted_provider)
-                if admitted_model and not getattr(request, "online_model_name", None):
-                    try:
-                        object.__setattr__(request, "online_model_name", admitted_model)
-                    except Exception:
-                        pass
         requested_provider = str(route.get("provider", "") or "").strip().lower()
         gateway_provider = str(self.oauth_provider or "").strip().lower()
         bound_transport = getattr(self.ask_structured, "__func__", None)
         structured_injected = bound_transport is not self.__class__.ask_structured
+        defer_workforce_transport = (
+            online_invoker is None
+            and not requested_provider
+            and isinstance(route.get("workforce_bindings"), Mapping)
+            and bool(getattr(request, "online_enabled", True))
+        )
         binding = resolve_online_transport_binding(
             has_explicit_invoker=online_invoker is not None,
             structured_transport_injected=structured_injected,
@@ -477,7 +462,11 @@ class BattlesuitGateway:
                 ),
                 planner_online_needed=True,
                 injected_transport=bool(route.get("injected_transport")),
-                requested_provider=requested_provider or gateway_provider,
+                requested_provider=(
+                    requested_provider
+                    if defer_workforce_transport
+                    else requested_provider or gateway_provider
+                ),
             )
         route["online_execution_decision"] = prior.to_dict()
         route["online_policy"] = prior.online_policy
@@ -625,17 +614,81 @@ class BattlesuitGateway:
         )  # type: ignore[attr-defined]
         gateway_online_invoker.online_invoker_provider = gateway_online_invoker.provider  # type: ignore[attr-defined]
 
+        def workforce_admitted_online_invoker(context: Mapping[str, Any]) -> dict[str, Any]:
+            authority = context.get("gateway_invocation_authority")
+            if not isinstance(authority, Mapping) or authority.get("gate_passed") is not True:
+                return normalize_online_invoker_payload(
+                    provider="",
+                    task_id=str(context.get("task_id", "")),
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    error="workforce_admission_missing",
+                    evidence_refs=[f"gateway:{context.get('task_id')}:workforce_admission_missing"],
+                    transport="workforce_deferred",
+                    selection_source="workforce_admission",
+                )
+            admitted_provider = str(authority.get("resolved_provider") or "").strip().lower()
+            admitted_model = str(authority.get("resolved_model") or "").strip()
+            admitted_binding = resolve_online_transport_binding(
+                has_explicit_invoker=False,
+                structured_transport_injected=structured_injected,
+                route_provider=admitted_provider,
+                gateway_provider=gateway_provider,
+            )
+            if not admitted_binding.use_registered_cli:
+                return normalize_online_invoker_payload(
+                    provider=admitted_provider,
+                    task_id=str(context.get("task_id", "")),
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    error=admitted_binding.resolution_error or "admitted_transport_not_supported",
+                    evidence_refs=[f"gateway:{context.get('task_id')}:admitted_transport_not_supported"],
+                    transport=admitted_binding.transport,
+                    selection_source="workforce_admission",
+                )
+            try:
+                admitted_invoker = build_registered_online_invoker(
+                    admitted_provider,
+                    command=route.get("online_command") or route.get("command"),
+                    model_name=admitted_model,
+                    timeout_sec=float(route.get("timeout_sec", 120.0)),
+                )
+            except (TypeError, ValueError, OSError) as exc:
+                return normalize_online_invoker_payload(
+                    provider=admitted_provider,
+                    task_id=str(context.get("task_id", "")),
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    error="provider_adapter_resolution_failed",
+                    evidence_refs=[f"gateway:{context.get('task_id')}:provider_adapter_resolution_failed"],
+                    transport="registered_cli",
+                    selection_source="workforce_admission",
+                    extra={"reason": f"{exc.__class__.__name__}:{exc}"},
+                )
+            return admitted_invoker(context)
+
+        workforce_admitted_online_invoker.workforce_dispatcher = True  # type: ignore[attr-defined]
+
         runtime_online_invoker = online_invoker
         # P4: World A mainchain — optional with_nexus Online armor (no new topology).
         from nexus.services.mainchain_entry import (
-            merge_mainchain_capability_invokers,
             with_nexus_armor_enabled,
-            wrap_mainchain_online_invoker,
         )
 
         armor_on = with_nexus_armor_enabled(route)
         if runtime_online_invoker is None:
-            if binding.use_registered_cli:
+            if defer_workforce_transport:
+                runtime_online_invoker = workforce_admitted_online_invoker
+            elif binding.use_registered_cli:
                 command = None
                 if isinstance(route, Mapping):
                     command = route.get("online_command") or route.get("command")
