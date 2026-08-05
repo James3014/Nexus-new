@@ -189,7 +189,11 @@ def test_task_run_decision_does_not_probe_dirty_worktree(monkeypatch: pytest.Mon
     def _unexpected_snapshot(*_args: Any, **_kwargs: Any) -> bytes:
         raise AssertionError("dirty worktree is a post-decision containment fact")
 
-    monkeypatch.setattr(worktree_manager, "controller_status_bytes", _unexpected_snapshot)
+    monkeypatch.setattr(
+        worktree_manager.WorktreeManager,
+        "_status_bytes",
+        _unexpected_snapshot,
+    )
     result = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))
 
     assert result["isError"] is False

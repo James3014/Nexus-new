@@ -26,6 +26,7 @@ FAILURE_CLASSES = frozenset(
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 RUNTIME_DEVELOPMENT_MAPPING_SCHEMA = "nexus.runtime_development_mapping.v1"
+_RUNTIME_PHASES = frozenset({"S", "P", "D", "X", "R", "A", "C"})
 
 
 def build_runtime_development_mapping(
@@ -33,6 +34,7 @@ def build_runtime_development_mapping(
     task_id: str,
     attempt_id: str,
     action_id: str,
+    runtime_phase: str = "",
     runtime_terminal_state: str,
     development_status: str,
     runtime_success: bool,
@@ -43,6 +45,19 @@ def build_runtime_development_mapping(
     runtime_receipt_ref: str = "",
     development_receipt_ref: str = "",
 ) -> dict[str, Any]:
+    normalized_phase = str(runtime_phase or "").strip().upper()
+    if normalized_phase and normalized_phase not in _RUNTIME_PHASES:
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_RUNTIME_PHASE_INVALID")
+    normalized_terminal = str(runtime_terminal_state or "").strip().upper()
+    if not normalized_phase:
+        normalized_phase = "UNBOUND"
+        normalized_terminal = "UNBOUND"
+        runtime_success = False
+        runtime_receipt_ref = ""
+    elif bool(runtime_success) and not (
+        normalized_phase == "C" and normalized_terminal == "COMPLETE"
+    ):
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_RUNTIME_SUCCESS_REQUIRES_C_COMPLETE")
     mapping = {
         "schema": RUNTIME_DEVELOPMENT_MAPPING_SCHEMA,
         "identity": {
@@ -54,7 +69,8 @@ def build_runtime_development_mapping(
             "task_id": str(task_id),
             "run_attempt_id": str(attempt_id),
             "entry_action_id": str(action_id),
-            "terminal_state": str(runtime_terminal_state),
+            "phase": normalized_phase,
+            "terminal_state": normalized_terminal,
             "success": bool(runtime_success),
             "receipt_ref": str(runtime_receipt_ref),
         },
@@ -96,6 +112,20 @@ def validate_runtime_development_mapping(mapping: Mapping[str, Any]) -> None:
             raise ValueError(f"RUNTIME_DEVELOPMENT_MAPPING_IDENTITY_MISMATCH:{field}")
         if str(development.get(field) or "") != value:
             raise ValueError(f"RUNTIME_DEVELOPMENT_MAPPING_IDENTITY_MISMATCH:{field}")
+    runtime_phase = str(runtime.get("phase") or "").strip().upper()
+    runtime_terminal = str(runtime.get("terminal_state") or "").strip().upper()
+    if runtime_phase not in _RUNTIME_PHASES | {"UNBOUND"}:
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_RUNTIME_PHASE_INVALID")
+    if runtime_phase == "UNBOUND" and (
+        runtime_terminal != "UNBOUND"
+        or bool(runtime.get("success"))
+        or bool(str(runtime.get("receipt_ref") or ""))
+    ):
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_UNBOUND_RUNTIME_CLAIM_FORBIDDEN")
+    if bool(runtime.get("success")) and not (
+        runtime_phase == "C" and runtime_terminal == "COMPLETE"
+    ):
+        raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_RUNTIME_SUCCESS_REQUIRES_C_COMPLETE")
     if bool(development.get("integrated")) and not bool(development.get("candidate_accepted")):
         raise ValueError("RUNTIME_DEVELOPMENT_MAPPING_INTEGRATION_REQUIRES_ACCEPTANCE")
     if any(boundaries.get(field) is not False for field in (

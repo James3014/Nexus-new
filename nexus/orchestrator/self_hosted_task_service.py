@@ -858,18 +858,23 @@ class SelfHostedTaskService:
             action_id = str(state.get("action_id") or f"action-{state.get('attempt_id') or task_id}")
             promotion_status = str(state.get("promotion_status") or "NOT_CREATED")
             integrated = state.get("status") == "INTEGRATED" or promotion_status == "INTEGRATED"
+            runtime_phase = str(state.get("runtime_phase") or "").strip().upper()
+            runtime_terminal_state = str(state.get("runtime_terminal_state") or "").strip().upper()
             state["runtime_development_mapping"] = build_runtime_development_mapping(
                 task_id=str(state.get("task_id") or task_id),
                 attempt_id=str(state.get("attempt_id") or attempt_id or "attempt-unknown"),
                 action_id=action_id,
-                runtime_terminal_state=str(state.get("runtime_terminal_state") or state.get("status") or "UNKNOWN"),
+                runtime_phase=runtime_phase,
+                runtime_terminal_state=runtime_terminal_state,
                 development_status=str(state.get("status") or "UNKNOWN"),
-                runtime_success=str(state.get("verification_verdict") or "").upper() == "PROVEN",
+                runtime_success=(
+                    runtime_phase == "C" and runtime_terminal_state == "COMPLETE"
+                ),
                 candidate_status=str(state.get("candidate_status") or promotion_status),
                 candidate_accepted=promotion_status in {"APPROVED", "INTEGRATED"},
                 integration_status=promotion_status,
                 integrated=integrated,
-                runtime_receipt_ref=str(state.get("verified_receipt_hash") or ""),
+                runtime_receipt_ref=str(state.get("runtime_receipt_ref") or ""),
                 development_receipt_ref=str(state.get("verified_receipt_hash") or ""),
             )
 
@@ -2029,7 +2034,14 @@ class SelfHostedTaskService:
                 "archive_eligible": True,
             }, attempt_id=state.get("attempt_id"))
         if state.get("status") == "SUBMITTED" or state.get("status") in RESUMABLE_STATUSES:
-            return self._launch_worker(task_id, str(state.get("attempt_id")))
+            return {
+                **self._with_task_action(state),
+                "reconciliation_required": True,
+                "reconciliation_decision": "EXPLICIT_RESUME_REQUIRED",
+                "mutation_replayed": False,
+                "route_replanned": False,
+                "task_card_created": False,
+            }
         self._terminate_owned_processes(task_id)
         return self._checkpoint(
             task_id,
@@ -2091,6 +2103,21 @@ class SelfHostedTaskService:
         return states
 
     def resume_task(self, task_id: str) -> Optional[dict[str, Any]]:
+        state = self._read_state(task_id)
+        if state is None:
+            return None
+        if state.get("status") == "SUBMITTED" or state.get("status") in RESUMABLE_STATUSES:
+            attempt_id = str(state.get("attempt_id") or "")
+            if not attempt_id:
+                return {
+                    **self._with_task_action(state),
+                    "reconciliation_required": True,
+                    "reconciliation_decision": "BLOCKED_MISSING_ATTEMPT_ID",
+                    "mutation_replayed": False,
+                    "route_replanned": False,
+                    "task_card_created": False,
+                }
+            return self._launch_worker(task_id, attempt_id) or self._with_task_action(state)
         return self.reconcile_task(task_id)
 
     def wait_task(
@@ -2414,6 +2441,24 @@ class SelfHostedTaskService:
         attempt_id = str(request.get("attempt_id") or action.get("attempt_id") or f"attempt-{uuid4().hex}")
         idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or f"{task_id}:{self._request_hash(request)}")
         request_hash = str(request.get("action_request_hash") or action.get("request_hash") or self._request_hash(request))
+        canonical_execution = (
+            _jsonable(dict(request["canonical_execution_identity"]))
+            if isinstance(request.get("canonical_execution_identity"), Mapping)
+            else None
+        )
+        canonical_execution_hashes = (
+            {
+                name: str(canonical_execution.get(name) or "")
+                for name in (
+                    "context_hash",
+                    "plan_hash",
+                    "decision_hash",
+                    "projection_hash",
+                )
+            }
+            if canonical_execution is not None
+            else None
+        )
         if idempotency_key and self.state_dir.exists():
             for path in sorted(self.state_dir.glob("*.json")):
                 current = json.loads(path.read_text(encoding="utf-8"))
@@ -2435,6 +2480,9 @@ class SelfHostedTaskService:
                     "attempt_id": current.get("attempt_id"),
                     "idempotency_key": current.get("idempotency_key"),
                     "action_request_hash": current.get("action_request_hash"),
+                    "canonical_execution_identity": current.get(
+                        "canonical_execution_identity"
+                    ),
                     "task_action": current.get("task_action") or self._task_action_envelope(current),
                     "next_action": (current.get("task_action") or {}).get("next_action", "nexus_task_finish"),
                 }
@@ -2459,6 +2507,9 @@ class SelfHostedTaskService:
                 "attempt_id": state.get("attempt_id"),
                 "idempotency_key": state.get("idempotency_key"),
                 "action_request_hash": state.get("action_request_hash"),
+                "canonical_execution_identity": state.get(
+                    "canonical_execution_identity"
+                ),
                 "task_action": state.get("task_action") or self._task_action_envelope(state),
                 "next_action": (state.get("task_action") or {}).get("next_action", "nexus_task_finish"),
             }
@@ -2470,6 +2521,8 @@ class SelfHostedTaskService:
             "attempt_id": attempt_id,
             "idempotency_key": idempotency_key,
             "request_hash": request_hash,
+            "canonical_execution_identity": canonical_execution,
+            "canonical_execution_hashes": canonical_execution_hashes,
             "execution_lane": "DIRECT_CANONICAL",
             "intent": {
                 "status": "RECORDED",
@@ -2498,6 +2551,8 @@ class SelfHostedTaskService:
             "idempotency_key": idempotency_key,
             "action_request_hash": request_hash,
             "request_hash": request_hash,
+            "canonical_execution_identity": canonical_execution,
+            "canonical_execution_hashes": canonical_execution_hashes,
             "controller_worktree": str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT),
             "controller_revision": base,
             "contract_kind": str(request.get("contract_kind") or ContractKind.NONE.value),
@@ -2537,6 +2592,9 @@ class SelfHostedTaskService:
             "attempt_id": created_state.get("attempt_id"),
             "idempotency_key": created_state.get("idempotency_key"),
             "action_request_hash": created_state.get("action_request_hash"),
+            "canonical_execution_identity": created_state.get(
+                "canonical_execution_identity"
+            ),
             "next_action": "nexus_task_finish",
             "required_surface": "nexus_self_hosted_direct_complete",
             "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
@@ -2764,8 +2822,32 @@ class SelfHostedTaskService:
         ).hexdigest()
         return receipt
 
+    @staticmethod
+    def _resolve_current_execution_task_id(request: Mapping[str, Any]) -> str:
+        """Resolve durable identity before any route or Target decision."""
+        requested_task_id = str(request.get("task_id") or "").strip()
+        canonical_identity = request.get("canonical_execution_identity")
+        if canonical_identity is not None:
+            if not isinstance(canonical_identity, Mapping):
+                raise RuntimeError("CURRENT_EXECUTION_IDENTITY_INVALID")
+            from nexus.contracts.canonical_execution import (
+                validate_canonical_execution_identity,
+            )
+
+            try:
+                validate_canonical_execution_identity(canonical_identity)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"CURRENT_EXECUTION_IDENTITY_INVALID:{exc}") from exc
+            identity_task_id = str(canonical_identity.get("task_id") or "").strip()
+            if requested_task_id and requested_task_id != identity_task_id:
+                raise RuntimeError("CURRENT_EXECUTION_TASK_ID_MISMATCH")
+            return identity_task_id
+        if requested_task_id:
+            return requested_task_id
+        raise RuntimeError("CURRENT_EXECUTION_IDENTITY_REQUIRED")
+
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        task_id = str(request.get("task_id") or f"direct-{uuid4().hex[:12]}")
+        task_id = self._resolve_current_execution_task_id(request)
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
         if action and not self.ephemeral:
             # The service remains lifecycle authority; this synchronous guard
@@ -3376,11 +3458,20 @@ class SelfHostedTaskService:
 
     def lifecycle_status(self) -> dict[str, Any]:
         states = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(self.state_dir.glob("*.json"))] if self.state_dir.exists() else []
+
+        def has_active_target(state: Mapping[str, Any]) -> bool:
+            target_worktree = (state.get("lease") or {}).get("target_worktree")
+            return bool(
+                target_worktree
+                and state.get("status") not in TERMINAL_STATUSES
+                and Path(str(target_worktree)).is_dir()
+            )
+
         return {
             "canonical_state_root": str(self.state_dir),
             "tasks": len(states),
             "active_tasks": sum(state.get("status") not in TERMINAL_STATUSES for state in states),
-            "active_targets": sum(bool((state.get("lease") or {}).get("target_worktree")) and state.get("status") not in TERMINAL_STATUSES for state in states),
+            "active_targets": sum(has_active_target(state) for state in states),
         }
 
     def _cleanup_authority_blocker(
