@@ -27,7 +27,9 @@ def test_loader_loads_default_policy_successfully() -> None:
     assert snapshot.status == "current"
     assert snapshot.route_authority == "CapabilityPlanner"
     assert len(snapshot.declared_states) > 0
-    assert len(snapshot.workers) == 26
+    assert len(snapshot.workers) == 23
+    for retired_worker_id in ("local_ornith9b", "local_qwythos_v2_9b", "local_gemma12b"):
+        assert retired_worker_id not in snapshot.workers
     assert snapshot.policy_hash is not None
     assert len(snapshot.policy_hash) == 64  # SHA-256 hex length
 

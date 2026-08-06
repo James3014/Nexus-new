@@ -74,12 +74,14 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 | Local Advisor — `qwen2.5-s2t-advisor:3b` | Classification, extraction, compression, compact diagnosis | L0.5 | **Nexus-bounded only** | Available; 9/11 → 11/11 → 10/11 |
 | Local Coder — `qwen2.5-coder:7b-instruct` | Small bounded code candidate | L1 | Bounded exact contract | Available; 10/11 on every arm; no measured Nexus uplift |
 | Local Qwen3 — `qwen3:8b` | Bounded reasoning/code shadow candidate, counterexample search | L1 shadow | **Nexus-bounded** | Available; 11/11 → 11/11 → 10/11; Full context caused schema drift |
+| Local Qwen3.5 — `qwen3.5:9b` | Provisional bounded reasoning/review candidate, counterexample search | L1 ceiling | **Nexus-bounded** | Re-enabled 2026-08-06 with the official tag; two mutation-free repetitions scored 10/11 on all arms using API `think:false`; code assignment remains blocked pending counterexample and role-specific suites |
 
 ### Assignment consequences
 
 - The 3B model is the clearest measured Nexus-bounded uplift. It must not receive Full governance context or mutate code.
 - The 7B model remains a code **candidate** generator because previous repository evidence exists, but this benchmark did not prove uplift or self-verification.
 - Qwen3 8B is a stronger bounded shadow candidate than the current 9B reasoning models, but its latency and Full-context regression prevent default promotion.
+- Qwen3.5 9B is conditionally re-enabled for bounded reasoning/review and counterexample search only. It is not admitted for Full-context or code assignments until the counterexample and role-specific suites pass; its current evidence does not authorize a public claim.
 - OpenCode free models are subscription-free, not context-cheap. Typical calls carried roughly 20k+ fixed input tokens. They require isolated execution and external verification.
 - Grok may review or generate a bounded candidate, but cannot be the sole production-readiness adjudicator.
 - Agy should receive a locked task card, exact file scope, and mandatory commands. It should not own architecture authority.
@@ -104,7 +106,6 @@ These workers require explicit bounded scope, deterministic parsing, focused tes
 |---|---|
 | Direct Gemini CLI `gemini-3.6-flash` | Client rejected as unsupported; use Agy instead |
 | MiMo CLI `xiaomi/mimo-v2.5` | HTTP 402 insufficient account balance |
-| `ornith:9b` | Ollama HTTP 500 on all arms |
 
 Blocked models receive no active assignment. Their zero benchmark scores are not semantic model scores.
 
@@ -112,8 +113,9 @@ Blocked models receive no active assignment. Their zero benchmark scores are not
 
 | Model | Evidence | Re-enable gate |
 |---|---|---|
-| `nexus-qwen35-9b-q4km:latest` | Bare 10/11; API `think:false` is ignored by its `TEMPLATE {{ .Prompt }}` Modelfile, while prompt-level `/no_think` produced unstable empty Bounded/Full responses | Rebuild with template-level `IsThinkSet/Think` control plus a clean three-arm retest |
-| `nexus-qwythos-v2-9b-q4km:latest` | Bare and Full reached 10/11 with `/no_think`, but Bounded returned an empty one-token response; control remains unstable | Rebuild with template-level `IsThinkSet/Think` control plus a clean three-arm retest |
+| *none currently* | | |
+
+`nexus-qwen35-9b-q4km:latest` was retired on 2026-08-06 and replaced by the official `qwen3.5:9b` tag, which correctly consumes API `think:false`; `local_qwen35_9b` was re-enabled as `LOCAL_CONDITIONAL` with an L1 ceiling after two mutation-free three-arm repetitions (10/11 on all arms). Both repetitions missed the same implementation edge case, so the current evidence supports bounded reasoning/review and counterexample search only; code assignment remains blocked until counterexample and role-specific suites pass. `nexus-qwythos-v2-9b-q4km:latest` was removed from the local machine on 2026-08-06; the matrix roster records it under `excluded` with `local_model_removed_from_machine_after_protocol_failure`.
 
 ### Resource-risk or experiment-only
 
@@ -121,7 +123,6 @@ Blocked models receive no active assignment. Their zero benchmark scores are not
 |---|---|---|
 | `qwen2.5-coder:14b-instruct-q3_K_M` | 10/11 all arms; Full about 80 s | Disabled by default; no quality uplift over smaller workers |
 | `deepseek-r1-14b-q4km:latest` | 11/11 all arms; about 92/86/128 s | Explicit high-latency second-opinion experiment only |
-| `gemma4-coder-12b-q4km:latest` | 10/11 all arms; about 71/55/87 s | Explicit experiment only |
 | `opencode/big-pickle` | Bare/Bounded pass; Full envelope failure | Experiment only |
 | `opencode/nemotron-3-ultra-free` | Bare/Bounded pass; Full streaming failure | Experiment only |
 | `opencode/north-mini-code-free` | Bounded pass; Full envelope failure | Experiment only |

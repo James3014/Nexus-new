@@ -155,14 +155,6 @@ models:
     timeout_sec: 240
     resource_tier: local_medium
 
-  local_ornith9b:
-    cohort: required
-    provider: ollama
-    transport: ollama_http
-    model: ornith:9b
-    timeout_sec: 300
-    resource_tier: local_heavy
-
   local_qwythos9b:
     cohort: required
     provider: ollama
@@ -175,11 +167,10 @@ models:
     cohort: required
     provider: ollama
     transport: ollama_http
-    model: nexus-qwen35-9b-q4km:latest
-    timeout_sec: 180
+    model: qwen3.5:9b
+    timeout_sec: 300
     resource_tier: local_heavy
-    expected_current_blocker: thinking_not_disabled_in_runtime_provider
-    thinking_control: prompt_no_think
+    thinking_control: api
 
   local_qwen14b:
     cohort: required
@@ -255,16 +246,6 @@ models:
     timeout_sec: 300
     resource_tier: local_heavy
 
-  local_qwythos_v2_9b:
-    cohort: discovery
-    provider: ollama
-    transport: ollama_http
-    model: nexus-qwythos-v2-9b-q4km:latest
-    timeout_sec: 300
-    resource_tier: local_heavy
-    expected_current_blocker: thinking_not_disabled_in_runtime_provider
-    thinking_control: prompt_no_think
-
   local_deepseek_coder_v2_lite:
     cohort: discovery
     provider: ollama
@@ -281,14 +262,6 @@ models:
     timeout_sec: 300
     resource_tier: local_resource_risk
 
-  local_gemma12b:
-    cohort: discovery
-    provider: ollama
-    transport: ollama_http
-    model: gemma4-coder-12b-q4km:latest
-    timeout_sec: 300
-    resource_tier: local_resource_risk
-
 excluded:
   nomic_embed_text:
     model: nomic-embed-text:latest
@@ -299,3 +272,12 @@ excluded:
     reason: sdk_cli_not_model_worker
   full_vendor_catalogs:
     reason: catalog_presence_without_explicit_enrollment_or_cost_authority
+  local_gemma12b:
+    model: gemma4-coder-12b-q4km:latest
+    reason: local_model_removed_from_machine
+  local_qwythos_v2_9b:
+    model: nexus-qwythos-v2-9b-q4km:latest
+    reason: local_model_removed_from_machine_after_protocol_failure
+  local_ornith9b:
+    model: ornith:9b
+    reason: local_model_removed_from_machine

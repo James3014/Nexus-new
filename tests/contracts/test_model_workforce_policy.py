@@ -106,7 +106,6 @@ def test_required_remote_workers_have_current_fail_closed_states() -> None:
 
     assert workers["direct_gemini"]["state"] == "REGISTERED_BLOCKED"
     assert workers["mimo_cli"]["state"] == "REGISTERED_BLOCKED"
-    assert workers["local_ornith9b"]["state"] == "REGISTERED_BLOCKED"
 
 
 def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() -> None:
@@ -129,22 +128,47 @@ def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() 
     assert qwen3["preferred_context"] == "nexus_bounded"
     assert "full_context_default" in qwen3["forbidden_actions"]
 
-    assert workers["local_qwen35_9b"]["state"] == "DISABLED_PROTOCOL_FAILURE"
-    assert workers["local_qwythos_v2_9b"]["state"] == "DISABLED_PROTOCOL_FAILURE"
-    for worker_id in ("local_qwen35_9b", "local_qwythos_v2_9b"):
-        worker = workers[worker_id]
-        assert "template_level_thinking_control" in worker["reenable_requires"]
-        assert worker["autonomy"] == "L0"
+    qwen35 = workers["local_qwen35_9b"]
+    assert qwen35["state"] == "LOCAL_CONDITIONAL"
+    assert qwen35["model"] == "qwen3.5:9b"
+    assert qwen35["preferred_context"] == "nexus_bounded"
+    assert qwen35["roles"] == ["bounded_reasoning_candidate", "counterexample_search"]
+    assert qwen35["requires"] == [
+        "bounded_context",
+        "parser",
+        "external_verifier",
+        "counterexample_suite",
+        "role_specific_suite",
+    ]
+    assert "full_context_default" in qwen35["forbidden_actions"]
+    assert "claim_authority" in qwen35["forbidden_actions"]
+    assert "direct_apply" in qwen35["forbidden_actions"]
+    evidence = qwen35["requalification_evidence"]
+    assert evidence["date"] == "2026-08-06"
+    assert evidence["repetitions"] == 2
+    assert evidence["mutation_free_real_provider"] is True
+    assert evidence["arm_results"] == {
+        "bare": "10/11",
+        "nexus_bounded": "10/11",
+        "nexus_full": "10/11",
+    }
+    assert evidence["role_recommendation"] == "BOUNDED_REVIEW_AND_AUDIT"
+    assert evidence["autonomy_ceiling"] == "L1"
+    assert evidence["implementation_edge_failure"] == "normalize_status_success_label"
+    assert evidence["public_claim"] is False
 
     matrix_models = _yaml(MATRIX_PATH)["models"]
-    assert matrix_models["local_qwen35_9b"]["thinking_control"] == "prompt_no_think"
-    assert matrix_models["local_qwythos_v2_9b"]["thinking_control"] == "prompt_no_think"
+    assert matrix_models["local_qwen35_9b"]["thinking_control"] == "api"
+    matrix_excluded = _yaml(MATRIX_PATH)["excluded"]
+    assert "local_qwythos_v2_9b" in matrix_excluded
+    assert "local_gemma12b" in matrix_excluded
+    assert "local_ornith9b" in matrix_excluded
 
 
 def test_resource_risk_and_tool_discipline_models_are_not_default_workers() -> None:
     workers = _manifest()["workers"]
 
-    for worker_id in ("local_qwen14b", "local_deepseek14b", "local_gemma12b"):
+    for worker_id in ("local_qwen14b", "local_deepseek14b"):
         worker = workers[worker_id]
         assert worker["state"] == "DISABLED_RESOURCE_RISK"
         assert worker["autonomy"] == "L0"
@@ -227,6 +251,9 @@ def test_bare_results_cannot_be_used_as_final_worker_grade() -> None:
 
 def test_agents_must_read_both_model_workforce_authorities() -> None:
     agents = AGENTS_PATH.read_text(encoding="utf-8")
-    assert "docs/arch/MODEL_WORKFORCE_POLICY.md" in agents
-    assert "nexus/config/model_workforce.yaml" in agents
-    assert "Local model output is always a candidate" in agents
+    overlay_ref = "docs/agents/WORKFORCE_EXECUTION_OVERLAY.md"
+    assert overlay_ref in agents
+    overlay = (REPO_ROOT / overlay_ref).read_text(encoding="utf-8")
+    assert "docs/arch/MODEL_WORKFORCE_POLICY.md" in overlay
+    assert "nexus/config/model_workforce.yaml" in overlay
+    assert "Local output and delegated output are candidates" in overlay

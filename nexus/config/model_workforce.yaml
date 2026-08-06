@@ -363,14 +363,6 @@ workers:
     benchmark_ref: local_deepseek67b
     requires: [committee_isolation, external_verifier, no_full_context]
     forbidden_actions: [default_worker_assignment, claim_authority, direct_apply]
-  local_ornith9b:
-    provider: ollama
-    model: ornith:9b
-    state: REGISTERED_BLOCKED
-    availability: BLOCKED_OLLAMA_HTTP_500
-    autonomy: L0
-    roles: []
-    benchmark_ref: local_ornith9b
   local_qwythos9b:
     provider: ollama
     model: qwythos:9b
@@ -384,14 +376,34 @@ workers:
     forbidden_actions: [default_implementation, claim_authority, direct_apply]
   local_qwen35_9b:
     provider: ollama
-    model: nexus-qwen35-9b-q4km:latest
-    state: DISABLED_PROTOCOL_FAILURE
-    availability: INSTALLED
-    autonomy: L0
-    roles: []
+    model: qwen3.5:9b
+    state: LOCAL_CONDITIONAL
+    availability: AVAILABLE
+    autonomy: L1
+    default_route: false
+    roles: [bounded_reasoning_candidate, counterexample_search]
+    preferred_context: nexus_bounded
     benchmark_ref: local_qwen35_9b
-    blocker: custom_prompt_only_template_lacks_stable_thinking_control
-    reenable_requires: [template_level_thinking_control, clean_three_arm_retest]
+    requires: [bounded_context, parser, external_verifier, counterexample_suite, role_specific_suite]
+    forbidden_actions: [full_context_default, claim_authority, direct_apply]
+    requalification_evidence:
+      date: '2026-08-06'
+      repetitions: 2
+      mutation_free_real_provider: true
+      provider: ollama
+      model: qwen3.5:9b
+      arm_results: {bare: '10/11', nexus_bounded: '10/11', nexus_full: '10/11'}
+      result_json_sha256:
+        - a014c9dedb189ac83a668d6a09dcaed6109f959cf1ed4edfcc4acc8ece97e377
+        - f107f8d4e70f76154eb62a4ed88798889c7766b6d12e4cc6a8a5f2b36d81a4d3
+      stable_stdout_sha256:
+        bare: 6271b2935db71075316a6ceb08a2cd12fdea0cc14fa5eef7f0fa32fe5258019b
+        nexus_bounded: 49465db02e4d353949d95af36cc95113634be53c7c91ed5a6e1d46e8fa6bc809
+        nexus_full: 2c9b424b992bb2c22cd5a940a1072c11c16f36d4b0a3b85559a083a00507fa48
+      role_recommendation: BOUNDED_REVIEW_AND_AUDIT
+      autonomy_ceiling: L1
+      implementation_edge_failure: normalize_status_success_label
+      public_claim: false
   local_qwen14b:
     provider: ollama
     model: qwen2.5-coder:14b-instruct-q3_K_M
@@ -481,16 +493,6 @@ workers:
     benchmark_ref: local_qwen3_8b
     requires: [bounded_context, parser, focused_tests, external_verifier]
     forbidden_actions: [full_context_default, claim_authority, direct_apply]
-  local_qwythos_v2_9b:
-    provider: ollama
-    model: nexus-qwythos-v2-9b-q4km:latest
-    state: DISABLED_PROTOCOL_FAILURE
-    availability: INSTALLED
-    autonomy: L0
-    roles: []
-    benchmark_ref: local_qwythos_v2_9b
-    blocker: custom_prompt_only_template_lacks_stable_thinking_control
-    reenable_requires: [template_level_thinking_control, clean_three_arm_retest]
   local_deepseek_coder_v2_lite:
     provider: ollama
     model: deepseek-coder-v2:lite
@@ -510,16 +512,6 @@ workers:
     roles: [high_latency_second_opinion_experiment]
     benchmark_ref: local_deepseek14b
     reason: semantic_pass_but_three_arm_runtime_exceeds_300_seconds_on_16gb_host
-  local_gemma12b:
-    provider: ollama
-    model: gemma4-coder-12b-q4km:latest
-    state: DISABLED_RESOURCE_RISK
-    availability: AVAILABLE_EXPERIMENT_ONLY
-    autonomy: L0
-    roles: [explicit_experiment_only]
-    benchmark_ref: local_gemma12b
-    reason: no_uplift_and_high_latency_on_16gb_host
-
 non_workers:
   claude_cli:
     state: INSTALLED_NOT_CONNECTED
