@@ -4,13 +4,18 @@ import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence
 
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
 
 NEXUS_SALVAGE_BOT_NAME = "Nexus Salvage Bot"
 NEXUS_SALVAGE_BOT_EMAIL = "nexus-salvage-bot@nexus.local"
+_DIRECT_TERMINAL_STATUSES = frozenset({
+    "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
+    "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
+    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED", "INTEGRATED_AND_CLEANED",
+})
 
 
 @dataclass(frozen=True)
@@ -1355,6 +1360,105 @@ class WorktreeManager:
             worktrees=worktree_entries,
             inventory_hash=inv_hash,
         )
+
+    def audit_direct_completion(
+        self,
+        *,
+        controller_root: str | Path,
+        expected_head: str,
+        expected_branch: str,
+        allowed_files: Sequence[str] = (),
+        task_states: Optional[Dict[str, dict]] = None,
+    ) -> dict:
+        """Return a deterministic, read-only gate for direct completion.
+
+        Registered clean worktrees are informational. Only canonical drift,
+        active Target ownership, or dirty managed worktrees overlapping the
+        direct task's allowed scope block completion.
+        """
+        inventory = self.get_workspace_inventory(
+            controller_root=controller_root,
+            task_states=task_states,
+        )
+        registered_paths = {
+            str(Path(entry["worktree"]).resolve())
+            for entry in self._registered_worktrees(Path(controller_root).resolve())
+            if entry.get("worktree")
+        }
+        allowed = [str(path) for path in allowed_files if str(path).strip()]
+        states = task_states or {}
+        blockers: list[str] = []
+        if inventory.controller_head != expected_head:
+            blockers.append("canonical_head_mismatch")
+        if inventory.controller_branch != expected_branch:
+            blockers.append("canonical_branch_mismatch")
+        if inventory.controller_dirty:
+            blockers.append("canonical_dirty")
+
+        aux_records: list[dict[str, object]] = []
+        terminal = _DIRECT_TERMINAL_STATUSES
+        exempt = {"PENDING_HUMAN_APPROVAL", "APPROVED"}
+        for entry in inventory.worktrees:
+            if entry.path not in registered_paths or entry.path == inventory.controller_root:
+                continue
+            path = Path(entry.path)
+            changed: list[str] = []
+            if path.exists():
+                try:
+                    changed, untracked, deleted = self._parse_status(
+                        self._status_bytes(path)
+                    )
+                    changed = sorted(set(changed) | set(untracked) | set(deleted))
+                except Exception:
+                    changed = []
+            task_id = entry.task_id
+            state = states.get(task_id or "") if task_id else None
+            status = state.get("status") if state else None
+            active_target = bool(
+                task_id
+                and status not in terminal
+                and status not in exempt
+            )
+            overlap = [
+                path_name for path_name in changed
+                if any(
+                    path_name == boundary
+                    or boundary.endswith("/") and path_name.startswith(boundary)
+                    for boundary in allowed
+                )
+            ]
+            record_blockers: list[str] = []
+            if active_target:
+                record_blockers.append("active_target")
+                blockers.append(f"active_target:{entry.path}")
+            if entry.is_dirty and task_id and overlap:
+                record_blockers.append("dirty_allowed_overlap")
+                blockers.append(f"dirty_allowed_overlap:{entry.path}")
+            aux_records.append({
+                "path": entry.path,
+                "head": entry.head,
+                "branch": entry.branch,
+                "classification": entry.classification,
+                "is_dirty": entry.is_dirty,
+                "task_id": task_id,
+                "task_status": status,
+                "changed_files": changed,
+                "allowed_overlap": overlap,
+                "blockers": record_blockers,
+            })
+
+        return {
+            "schema": "nexus.direct_worktree_audit.v1",
+            "controller_root": inventory.controller_root,
+            "revision": inventory.controller_head,
+            "expected_revision": expected_head,
+            "branch": inventory.controller_branch,
+            "expected_branch": expected_branch,
+            "registered_count": len(registered_paths),
+            "aux_records": aux_records,
+            "blockers": sorted(set(blockers)),
+            "inventory_hash": inventory.inventory_hash,
+        }
 
     def plan_convergence(
         self,

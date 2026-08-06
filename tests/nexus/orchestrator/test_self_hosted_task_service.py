@@ -1812,6 +1812,44 @@ def test_direct_canonical_completion_verifies_scoped_commit_with_durable_state(t
     assert service.get_task("direct-complete")["status"] == "DIRECT_COMPLETED"
 
 
+def test_direct_completion_allows_clean_passive_registered_worktree_and_records_audit(tmp_path, monkeypatch):
+    controller = tmp_path / "canonical"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "branch", "-M", "nexus/integration/main")
+    _git(controller, "commit", "--allow-empty", "-m", "init")
+    base = _git(controller, "rev-parse", "HEAD")
+    passive = tmp_path / "passive"
+    _git(controller, "worktree", "add", "--detach", str(passive), base)
+    (controller / "src").mkdir()
+    (controller / "src" / "passive.py").write_text("value = 1\n", encoding="utf-8")
+    _git(controller, "add", "src/passive.py")
+    _git(controller, "commit", "-m", "direct with passive worktree")
+    head = _git(controller, "rev-parse", "HEAD")
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT", controller.resolve())
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = {
+        "task_id": "direct-passive-worktree",
+        "controller_repo_root": str(controller),
+        "controller_revision": base,
+        "allowed_files": ["src/passive.py"],
+        "verifier_commands": ["/usr/bin/true"],
+        "primary_agent": True,
+        "worker": "primary",
+        "execution_lane": "DIRECT_CANONICAL",
+    }
+    service.submit_task(request)
+
+    receipt = service.complete_direct_canonical(request, expected_commit_sha=head)
+
+    assert receipt["status"] == "DIRECT_CANONICAL_COMPLETED"
+    audit = receipt["worktree_audit"]
+    assert audit["registered_count"] == 2
+    assert audit["blockers"] == []
+    assert audit["revision"] == head
+    assert any(record["path"] == str(passive.resolve()) for record in audit["aux_records"])
+
+
 def test_direct_canonical_duplicate_finish_reuses_receipt_without_second_commit(tmp_path, monkeypatch):
     controller = tmp_path / "canonical"
     controller.mkdir()

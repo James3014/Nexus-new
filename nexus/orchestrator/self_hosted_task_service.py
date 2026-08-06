@@ -3124,22 +3124,28 @@ class SelfHostedTaskService:
         ).stdout.strip()
         if branch != CANONICAL_SOURCE_BRANCH:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: canonical branch drift")
-        worktrees = [
-            line.removeprefix("worktree ").strip()
-            for line in subprocess.run(
-                ["git", "worktree", "list", "--porcelain"], cwd=controller,
-                capture_output=True, text=True, check=False,
-            ).stdout.splitlines()
-            if line.startswith("worktree ")
-        ]
-        if worktrees != [str(controller.resolve())]:
-            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: registered worktree set is not canonical-only")
         head = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=controller,
             capture_output=True, text=True, check=False,
         ).stdout.strip()
         if expected_commit_sha and head != expected_commit_sha:
             raise RuntimeError("DIRECT_CANONICAL_COMMIT_MISMATCH: HEAD differs from expected commit")
+        worktree_manager = WorktreeManager(
+            root_dir=str(controller.parent / "nexus-runtime-targets"),
+            create_root=False,
+        )
+        worktree_audit = worktree_manager.audit_direct_completion(
+            controller_root=controller,
+            expected_head=head,
+            expected_branch=CANONICAL_SOURCE_BRANCH,
+            allowed_files=request.get("allowed_files") or (),
+            task_states=self._workspace_task_states(),
+        )
+        if worktree_audit["blockers"]:
+            raise RuntimeError(
+                "DIRECT_CANONICAL_BLOCKED: "
+                + ",".join(worktree_audit["blockers"])
+            )
         base = str(request.get("controller_revision") or "").strip()
         if len(base) != 40:
             raise RuntimeError("DIRECT_CANONICAL_REVISION_REQUIRED: controller_revision must be an exact SHA")
@@ -3207,6 +3213,7 @@ class SelfHostedTaskService:
             "candidate_created": False,
             "target_created": False,
             "state_created": False,
+            "worktree_audit": worktree_audit,
             "verifier_evidence": _jsonable(evidence),
             "telemetry": telemetry,
         }

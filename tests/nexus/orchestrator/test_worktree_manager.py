@@ -1087,6 +1087,58 @@ def test_active_or_retained_target_kept(sh2_repo):
     assert class_map[str(Path(lease.target_worktree).resolve())] == "KEEP_ACTIVE_OR_RETAINED"
 
 
+def test_direct_completion_audit_blocks_active_target(sh2_repo):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    contract = _contract(sh2_repo, task_id="direct-active")
+    lease = manager.create_lease(contract)
+    task_states = {
+        "direct-active": {
+            "task_id": "direct-active",
+            "status": "RUNNING",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+
+    audit = manager.audit_direct_completion(
+        controller_root=controller,
+        expected_head=_git(controller, "rev-parse", "HEAD"),
+        expected_branch="main",
+        allowed_files=["src/allowed.txt"],
+        task_states=task_states,
+    )
+
+    assert any(blocker.startswith("active_target:") for blocker in audit["blockers"])
+
+
+def test_direct_completion_audit_blocks_dirty_managed_overlap(sh2_repo):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    contract = _contract(sh2_repo, task_id="direct-dirty", allowed_files=["src/"])
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    (target / "src" / "allowed.txt").write_text("dirty\n", encoding="utf-8")
+    task_states = {
+        "direct-dirty": {
+            "task_id": "direct-dirty",
+            "status": "INTEGRATED",
+            "lease": lease.__dict__,
+            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+        }
+    }
+
+    audit = manager.audit_direct_completion(
+        controller_root=controller,
+        expected_head=_git(controller, "rev-parse", "HEAD"),
+        expected_branch="main",
+        allowed_files=["src/"],
+        task_states=task_states,
+    )
+
+    assert any(blocker.startswith("dirty_allowed_overlap:") for blocker in audit["blockers"]), audit
+
+
 def test_unique_commit_without_protection_is_blocked(sh2_repo):
     controller = sh2_repo["controller"]
     target_root = sh2_repo["target_root"]
