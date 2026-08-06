@@ -43,6 +43,20 @@ class RepositoryContractGate:
     AGENT_AUTHORITY_PATHS = ("AGENTS.md", "MUSE_PROTO.md")
     GENERATED_FACTS_PATH = "docs/arch/module-inventory.generated.json"
     CI_WORKFLOW_PREFIX = ".github/workflows/"
+    AUTHORITY_CHANGE_MARKER = "repository-authority-change.v1"
+    EFFECTIVE_ROUTE_TOKENS = (
+        "agent", "router", "wrapper", "planner", "controller", "gateway",
+        "selector", "dispatcher",
+    )
+    AUTHORITY_PATH_TOKENS = (
+        "orchestrator", "route", "router", "planner", "controller", "gateway",
+        "selector", "dispatcher", "execution",
+    )
+    AUTHORITY_BRANCH_TOKENS = (
+        "fallback", "dispatch", "routing", "route", "execution_lane",
+        "execution_topology", "world", "routemode", "canonical_root",
+        "state_root", "workspace_root", "source_root",
+    )
 
     def __init__(self, worktree_manager: WorktreeManager):
         self.worktree_manager = worktree_manager
@@ -69,6 +83,31 @@ class RepositoryContractGate:
         )
 
         findings.extend(self._authority_drift_findings(candidate_paths, base_inputs))
+        route_findings, route_blocking = self._effective_route_findings(
+            target=target,
+            contract=contract,
+            candidate_paths=candidate_paths,
+            current=current,
+        )
+        findings.extend(route_findings)
+        blocking_reasons.extend(route_blocking)
+
+        for field_name in ("target_head", "candidate_state_hash"):
+            if getattr(candidate, field_name) != getattr(current, field_name):
+                reason = f"integration_identity_recheck:{field_name}"
+                blocking_reasons.append(reason)
+                findings.append(
+                    RepositoryContractFinding(
+                        kind="integration_identity_recheck",
+                        severity="blocking",
+                        message="candidate identity changed between capture and integration-time recheck",
+                        evidence={
+                            "field": field_name,
+                            "candidate": str(getattr(candidate, field_name)),
+                            "current": str(getattr(current, field_name)),
+                        },
+                    )
+                )
 
         if not contract.verifier_commands:
             findings.append(
@@ -263,6 +302,78 @@ class RepositoryContractGate:
                                     },
                                 )
                             )
+
+        return findings, blocking_reasons
+
+    def _effective_route_findings(
+        self,
+        *,
+        target: Path,
+        contract: SelfHostedTaskContract,
+        candidate_paths: list[str],
+        current: CandidateDiffReceipt,
+    ) -> tuple[list[RepositoryContractFinding], list[str]]:
+        findings: list[RepositoryContractFinding] = []
+        blocking_reasons: list[str] = []
+        marked = self.AUTHORITY_CHANGE_MARKER in set(contract.protected_contracts)
+
+        def add(path: str, message: str, evidence: Mapping[str, str]) -> None:
+            kind = "authority_change_pending_human_verification" if marked else "effective_route_authority_change"
+            reason = f"{kind}:{path}"
+            blocking_reasons.append(reason)
+            findings.append(
+                RepositoryContractFinding(
+                    kind=kind,
+                    severity="blocking",
+                    path=path,
+                    message=message,
+                    evidence={**evidence, "authority_change_marker": str(marked).lower()},
+                )
+            )
+
+        for path in candidate_paths:
+            if not (path.startswith("nexus/") or path.startswith("scripts/")):
+                continue
+            stem = Path(path).stem.lower()
+            is_new = not self._base_path_exists(target, contract.target_base_revision, path)
+            if path.endswith(".py") and is_new and any(token in stem for token in self.EFFECTIVE_ROUTE_TOKENS):
+                # Preserve the legacy reason for the original three checks.
+                if not any(token in stem for token in ("agent", "router", "wrapper")):
+                    add(path, "new production module name can become a second control-plane authority", {"stem": stem})
+            if path.endswith(".py") and is_new and (target / path).exists():
+                try:
+                    tree = ast.parse((target / path).read_text(encoding="utf-8"), filename=path)
+                except (OSError, SyntaxError, UnicodeDecodeError):
+                    tree = None
+                if tree is not None:
+                    for node in ast.walk(tree):
+                        if not isinstance(node, ast.ClassDef):
+                            continue
+                        class_name = node.name.lower()
+                        if any(token in class_name for token in self.EFFECTIVE_ROUTE_TOKENS):
+                            if not class_name.endswith(("agent", "router", "wrapper")):
+                                add(f"{path}:{node.name}", "new production class name can become a second control-plane authority", {"class_name": node.name})
+            if is_new:
+                try:
+                    added = (target / path).read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    added = ""
+            else:
+                try:
+                    diff = self.worktree_manager._run_git(
+                        ["diff", "--unified=0", contract.target_base_revision, "--", path], cwd=target
+                    )
+                except RuntimeError:
+                    continue
+                added = "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+            if not any(token in path.lower() for token in self.AUTHORITY_PATH_TOKENS) and not (
+                path.startswith("nexus/config/") or any(token in path.lower() for token in self.AUTHORITY_BRANCH_TOKENS)
+            ):
+                continue
+            lowered = added.lower()
+            matched = sorted(token for token in self.AUTHORITY_BRANCH_TOKENS if token in lowered)
+            if matched:
+                add(path, "existing authority-sensitive file adds an effective route/fallback branch", {"matched_tokens": ",".join(matched)})
 
         return findings, blocking_reasons
 

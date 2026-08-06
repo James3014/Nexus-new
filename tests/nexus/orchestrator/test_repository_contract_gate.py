@@ -428,3 +428,106 @@ def test_existing_ast_class_modification_permitted(tmp_path):
 
     assert receipt.passed is True
     assert not [f for f in receipt.findings if f.kind in ("new_component_class_frozen", "new_component_module_frozen")]
+
+
+def test_effective_route_module_names_are_blocked(tmp_path):
+    names = ("planner", "controller", "gateway", "selector", "dispatcher")
+    for name in names:
+        (tmp_path / name).mkdir()
+        controller_root = tmp_path / name / "controller"
+        target_root = tmp_path / name / "targets"
+        target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
+        contract = _contract(
+            controller_root, target_root, task_id=f"new-{name}", target_sha=target_sha,
+            controller_sha=controller_sha, allowed_files=["bounded.txt", f"nexus/core/{name}.py"],
+            verifier_commands=["python3 -c 'print(\"pass\")'"],
+        )
+        controller, lease = _prepare(contract, target_root)
+        path = Path(lease.target_worktree, f"nexus/core/{name}.py")
+        path.parent.mkdir(parents=True)
+        path.write_text("x = 1\n", encoding="utf-8")
+        current = controller.collect_candidate(contract, lease)
+        receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
+        assert any(reason.startswith("effective_route_authority_change:") for reason in receipt.blocking_reasons)
+
+
+def test_authority_change_marker_remains_pending_human_verification(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
+    contract = _contract(
+        controller_root, target_root, task_id="marked-authority-change", target_sha=target_sha,
+        controller_sha=controller_sha, allowed_files=["bounded.txt", "nexus/core/planner.py"],
+        verifier_commands=["python3 -c 'print(\"pass\")'"],
+    ).model_copy(update={"protected_contracts": ["repository-authority-change.v1"]})
+    controller, lease = _prepare(contract, target_root)
+    path = Path(lease.target_worktree, "nexus/core/planner.py")
+    path.parent.mkdir(parents=True)
+    path.write_text("x = 1\n", encoding="utf-8")
+    current = controller.collect_candidate(contract, lease)
+    receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
+    assert receipt.passed is False
+    assert any(f.kind == "authority_change_pending_human_verification" for f in receipt.findings)
+
+
+def test_identity_recheck_blocks_candidate_head_drift(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
+    contract = _contract(
+        controller_root, target_root, task_id="identity-recheck", target_sha=target_sha,
+        controller_sha=controller_sha, allowed_files=["bounded.txt"], verifier_commands=[],
+    )
+    controller, lease = _prepare(contract, target_root)
+    current = controller.collect_candidate(contract, lease)
+    drifted = replace(current, target_head="1" * 40)
+    receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, drifted, current)
+    assert receipt.passed is False
+    assert "integration_identity_recheck:target_head" in receipt.blocking_reasons
+
+
+def test_existing_authority_file_route_branch_is_blocked(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    controller_root.mkdir()
+    _git(controller_root, "init")
+    _git(controller_root, "config", "user.email", "repository-contract@example.test")
+    _git(controller_root, "config", "user.name", "Repository Contract")
+    path = controller_root / "nexus/orchestrator/controller.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("def run(value):\n    return value\n", encoding="utf-8")
+    _git(controller_root, "add", ".")
+    _git(controller_root, "commit", "-m", "base")
+    target_sha = _git(controller_root, "rev-parse", "HEAD")
+    _git(controller_root, "commit", "--allow-empty", "-m", "controller")
+    controller_sha = _git(controller_root, "rev-parse", "HEAD")
+    contract = _contract(
+        controller_root, target_root, task_id="existing-route-branch", target_sha=target_sha,
+        controller_sha=controller_sha, allowed_files=["nexus/orchestrator/controller.py"],
+        verifier_commands=["python3 -c 'print(\"pass\")'"],
+    )
+    controller, lease = _prepare(contract, target_root)
+    Path(lease.target_worktree, "nexus/orchestrator/controller.py").write_text(
+        "def run(value, fallback=False):\n    if fallback:\n        return value\n    return value\n", encoding="utf-8"
+    )
+    current = controller.collect_candidate(contract, lease)
+    receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
+    assert any(reason.startswith("effective_route_authority_change:") for reason in receipt.blocking_reasons)
+
+
+def test_new_execution_topology_config_is_blocked(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
+    contract = _contract(
+        controller_root, target_root, task_id="new-execution-topology", target_sha=target_sha,
+        controller_sha=controller_sha, allowed_files=["bounded.txt", "nexus/config/execution_topology.yaml"],
+        verifier_commands=["python3 -c 'print(\"pass\")'"],
+    )
+    controller, lease = _prepare(contract, target_root)
+    path = Path(lease.target_worktree, "nexus/config/execution_topology.yaml")
+    path.parent.mkdir(parents=True)
+    path.write_text("execution_lane: alternate\nRouteMode: fallback\n", encoding="utf-8")
+    current = controller.collect_candidate(contract, lease)
+    receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
+    assert any(reason.startswith("effective_route_authority_change:") for reason in receipt.blocking_reasons)
