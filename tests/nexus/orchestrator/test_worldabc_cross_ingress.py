@@ -26,13 +26,25 @@ def test_mcp_cli_direct_normalizers_produce_equivalent_canonical_context() -> No
         allowed_files=_task()["allowed_files"],
         verifier_commands=_task()["verifier_commands"],
     )
-    cli = canonical_mcp_ingress.build_cli_execution_context(**_task(), workspace_revision="rev-worldabc-red")
-    direct = canonical_mcp_ingress.build_direct_execution_context(**_task(), workspace_revision="rev-worldabc-red")
+    cli = canonical_mcp_ingress.build_cli_execution_context(
+        **_task(),
+        workspace_revision="rev-worldabc-red",
+        execution_world="development_task",
+    )
+    direct = canonical_mcp_ingress.build_direct_execution_context(
+        **_task(),
+        workspace_revision="rev-worldabc-red",
+        execution_world="development_task",
+    )
     assert mcp["execution_world"] == cli["execution_world"] == direct["execution_world"] == "development_task"
     assert mcp["transport_ingress"] == "mcp"
     assert cli["transport_ingress"] == "cli"
     assert direct["transport_ingress"] == "direct"
-    assert mcp["canonical_context_hash"] == cli["canonical_context_hash"] == direct["canonical_context_hash"]
+    assert (
+        mcp["canonical_semantic_hash"]
+        == cli["canonical_semantic_hash"]
+        == direct["canonical_semantic_hash"]
+    )
 
 
 @pytest.mark.parametrize("field", ("execution_world", "execution_topology", "provider", "model", "execution_lane"))
@@ -48,7 +60,12 @@ def test_four_worlds_preserve_world_identity_through_shared_planner() -> None:
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
 
     decisions = {}
-    for world in ("development_task", "local_armor", "benchmark", "governance"):
+    for world in (
+        "product_runtime",
+        "benchmark_instrument",
+        "local_armor",
+        "development_task",
+    ):
         context = CanonicalTaskContext(
             task_id=f"world-{world}",
             task_type="bugfix",
@@ -60,11 +77,50 @@ def test_four_worlds_preserve_world_identity_through_shared_planner() -> None:
         decisions[world] = bundle.decision
         assert bundle.decision.execution_world == world
         assert bundle.projection.execution_world == world
-    assert set(decisions) == {"development_task", "local_armor", "benchmark", "governance"}
+    assert set(decisions) == {
+        "product_runtime",
+        "benchmark_instrument",
+        "local_armor",
+        "development_task",
+    }
 
 
 def test_unified_runtime_receipt_binds_local_armor_lineage_to_canonical_identity(tmp_path) -> None:
+    from nexus.contracts.canonical_execution import CanonicalTaskContext
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
     from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
+
+    context = CanonicalTaskContext(
+        task_id="worldabc-local-armor-red",
+        task_type="bugfix",
+        task_desc="bounded local armor probe",
+        execution_world="local_armor",
+        transport_ingress="direct",
+        execution_channels=("local",),
+        task_facts={"mutation_requested": True},
+        authority_inputs={
+            "direct_canonical_eligible": False,
+            "isolation_required": True,
+            "owner_authorized": True,
+        },
+    )
+    bundle = plan_canonical_task_bundle(context)
+
+    def local_service(local_request):
+        snapshot = local_request["planner_snapshot"]
+        return {
+            "task_id": "worldabc-local-armor-red",
+            "status": "SUCCEEDED",
+            "world_c_receipt": {
+                "execution_world": snapshot["execution_world"],
+                "canonical_execution_topology": snapshot[
+                    "canonical_execution_topology"
+                ],
+                "canonical_execution_hash": snapshot["canonical_execution"][
+                    "context_hash"
+                ],
+            },
+        }
 
     request = UnifiedRuntimeRequest(
         task_id="worldabc-local-armor-red",
@@ -74,12 +130,15 @@ def test_unified_runtime_receipt_binds_local_armor_lineage_to_canonical_identity
         route={"workspace_root": str(tmp_path)},
         online_enabled=False,
         local_enabled=True,
+        local_request={"task_id": "worldabc-local-armor-red"},
         canonical_context={
             "execution_world": "local_armor",
             "transport_ingress": "direct",
         },
+        canonical_planning_bundle=bundle,
     )
-    receipt = UnifiedRuntime().run(request, local_executor=lambda _req: {"status": "SUCCEEDED"})
+    receipt = UnifiedRuntime(local_service=local_service).run(request)
     assert receipt["canonical_execution"]["execution_world"] == "local_armor"
+    assert receipt["execution_world"] == "local_armor"
+    assert receipt["canonical_execution_topology"] == bundle.plan.execution_topology
     assert receipt["local"]["response"]["world_c_receipt"]["canonical_execution_hash"] == receipt["canonical_execution"]["context_hash"]
-

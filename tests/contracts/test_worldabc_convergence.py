@@ -12,8 +12,13 @@ from dataclasses import fields
 import pytest
 
 
-WORLDS = ("development_task", "local_armor", "benchmark", "governance")
-TOPOLOGIES = ("online", "local_only", "cloud_with_local_assist", "localheal_pipeline")
+WORLDS = (
+    "product_runtime",
+    "benchmark_instrument",
+    "local_armor",
+    "development_task",
+)
+TOPOLOGIES = ("DIRECT_CANONICAL", "ISOLATED_TARGET", "ASSISTED_CANONICAL")
 
 
 def _context(**overrides):
@@ -26,6 +31,12 @@ def _context(**overrides):
         "execution_world": "development_task",
         "transport_ingress": "mcp",
         "execution_channels": ("online", "local"),
+        "task_facts": {"mutation_requested": True},
+        "authority_inputs": {
+            "direct_canonical_eligible": False,
+            "isolation_required": True,
+            "owner_authorized": False,
+        },
     }
     payload.update(overrides)
     return CanonicalTaskContext(**payload)
@@ -62,10 +73,12 @@ def test_planner_decision_and_hybrid_route_bind_world_and_topology() -> None:
     context_world = _context().execution_world
     route = HybridRouteDecision(
         execution_world=context_world,
-        execution_topology=plan.signal_snapshot["execution_topology"],
+        execution_topology=plan.execution_topology,
     )
     assert isinstance(decision, ExecutionDecision)
     assert decision.execution_world == context_world
+    assert plan.execution_world == context_world
+    assert plan.execution_topology in TOPOLOGIES
     assert decision.execution_topology in TOPOLOGIES
     assert route.execution_world == context_world
     assert route.execution_topology == decision.execution_topology
@@ -74,23 +87,34 @@ def test_planner_decision_and_hybrid_route_bind_world_and_topology() -> None:
 def test_depth_and_topology_are_orthogonal_planner_outputs() -> None:
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
 
-    light_online = plan_canonical_task_bundle(
+    light_direct = plan_canonical_task_bundle(
         _context(
-            task_desc="simple bounded online repair",
+            task_desc="simple bounded direct repair",
             route_features={"impact_complexity": 0.0},
             execution_channels=("online",),
+            authority_inputs={
+                "direct_canonical_eligible": True,
+                "isolation_required": False,
+                "owner_authorized": True,
+            },
         )
     )
-    light_local = plan_canonical_task_bundle(
+    light_isolated = plan_canonical_task_bundle(
         _context(
-            task_desc="simple bounded local armor repair",
-            route_features={"impact_complexity": 0.0, "deterministic_verifier_available": True},
-            execution_channels=("local",),
+            task_desc="simple bounded isolated repair",
+            route_features={"impact_complexity": 0.0},
+            execution_channels=("online",),
+            authority_inputs={
+                "direct_canonical_eligible": False,
+                "isolation_required": True,
+                "owner_authorized": True,
+            },
         )
     )
-    assert light_online.decision.execution_depth == light_local.decision.execution_depth
-    assert light_online.decision.execution_topology != light_local.decision.execution_topology
-    assert light_online.decision.execution_topology != "mcp"
+    assert light_direct.decision.execution_depth == light_isolated.decision.execution_depth
+    assert light_direct.decision.execution_topology == "DIRECT_CANONICAL"
+    assert light_isolated.decision.execution_topology == "ISOLATED_TARGET"
+    assert light_direct.decision.execution_topology != "mcp"
 
 
 def test_world_identity_survives_context_roundtrip_and_identity_projection() -> None:
