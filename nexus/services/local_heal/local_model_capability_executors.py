@@ -377,10 +377,11 @@ class LocalHealPipelineCapabilityExecutor:
                         api_type = kwargs.get("api_type", "generate")
                         if user_prompt is not None:
                             prompt = f"{system_prompt_or_req}\n\n{user_prompt}"
-                            model_name = kwargs.get("model", "") or _pipeline_model_name
                         else:
                             prompt = getattr(system_prompt_or_req, "prompt", "") or str(system_prompt_or_req)
-                            model_name = getattr(system_prompt_or_req, "model_name", "") or kwargs.get("model", "") or _pipeline_model_name
+                        # Workforce Admission owns the exact model binding.  A
+                        # legacy HealPipeline default must not replace it.
+                        model_name = _pipeline_model_name
 
                         # Heuristic phase tag for optional route_context counter + ledger fallback.
                         # Always bind call_type so missing phase= kwargs cannot NameError.

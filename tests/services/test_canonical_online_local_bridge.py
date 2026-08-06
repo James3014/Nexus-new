@@ -6,9 +6,10 @@ from typing import Any
 
 import pytest
 
-from nexus.contracts.canonical_execution import CanonicalPlanningBundle
+from nexus.contracts.canonical_execution import CanonicalPlanningBundle, CanonicalTaskContext
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.engine.canonical_execution import plan_canonical_task_bundle
 from nexus.services.mainchain_entry import run_mainchain, run_mainchain_replan
 from nexus.services.unified_runtime import UnifiedRuntimeRequest, normalize_online_invoker_payload
 
@@ -706,17 +707,17 @@ def test_gateway_defers_transport_and_model_binding_until_after_admission(
     assert called["argv"][1:4] == ["exec", "-m", "gpt-5.6-luna"]
 
 
-def test_mcp_bundle_continues_through_runtime_without_replanning(monkeypatch) -> None:
-    from nexus.orchestrator.canonical_mcp_ingress import plan_mcp_task
-
-    mcp = plan_mcp_task(
+def test_canonical_bundle_continues_through_runtime_without_replanning(monkeypatch) -> None:
+    bundle = plan_canonical_task_bundle(CanonicalTaskContext(
         task_id="mcp-runtime-continuation",
-        what="Inspect one bounded parser behavior",
-        why="Prove the same decision reaches Online",
-        allowed_files=["README.md"],
-        verifier_commands=["python3 -m pytest -q"],
-    )
-    bundle = CanonicalPlanningBundle.from_dict(mcp["canonical_planning_bundle"])
+        task_type="repair",
+        task_desc="Inspect one bounded parser behavior",
+        execution_channels=("online",),
+        route_features={"bounded_allowed_file_count": 1},
+        codeintel={"allowed_files": ["README.md"]},
+        phase_trace={"request_why": "Prove the same decision reaches Online"},
+    ))
+    bundle = CanonicalPlanningBundle.from_dict(bundle.to_dict())
     context = bundle.context.to_dict()
     monkeypatch.setattr(
         CapabilityPlanner,
@@ -776,8 +777,8 @@ def test_mcp_bundle_continues_through_runtime_without_replanning(monkeypatch) ->
         with_nexus_armor=False,
     )
 
-    assert receipt["canonical_execution"]["decision_hash"] == mcp["decision_hash"]
-    assert receipt["canonical_execution"]["projection_hash"] == mcp["projection_hash"]
+    assert receipt["canonical_execution"]["decision_hash"] == bundle.decision.decision_hash
+    assert receipt["canonical_execution"]["projection_hash"] == bundle.projection.projection_hash
     assert online_context["canonical_execution"] == receipt["canonical_execution"]
 
 

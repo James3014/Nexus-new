@@ -1,5 +1,6 @@
 import hashlib
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,77 @@ def test_deduplicate_verifier_commands_merges_overlapping_pytest_manifests():
         "python3 -m pytest -q -p no:cacheprovider tests/a.py tests/shared.py tests/b.py",
         "python3 -c 'print(\"other\")'",
     )
+
+
+def test_build_verifier_request_parses_required_env_prefix_and_records_bounded_env(tmp_path):
+    venv_python = tmp_path / ".venv/bin/python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(sys.executable)
+    request = CandidateVerifier._build_verifier_request(
+        "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests/a.py",
+        str(tmp_path),
+    )
+
+    assert request.executable == str(venv_python)
+    assert request.argv == ("-m", "pytest", "-q", "tests/a.py")
+    assert request.env == {"PYTHONDONTWRITEBYTECODE": "1"}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "BAD-NAME=1 python -m pytest",
+        "FOO=one FOO=two python -m pytest",
+        "FOO='bad;value' python -m pytest",
+        "FOO='$(touch nope)' python -m pytest",
+        "python; -m pytest",
+        "python `touch nope`",
+        "../python -m pytest",
+        "FOO=1",
+        "FOO=1 =broken python -m pytest",
+    ],
+)
+def test_build_verifier_request_rejects_unsafe_command_formats(tmp_path, command):
+    with pytest.raises(ValueError):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("PYTHONPATH", "/tmp/injected"),
+        ("PYTHONHOME", "/tmp/injected"),
+        ("LD_PRELOAD", "/tmp/injected.so"),
+        ("DYLD_INSERT_LIBRARIES", "/tmp/injected.dylib"),
+        ("CUSTOM_FLAG", "ok"),
+    ],
+)
+def test_build_verifier_request_rejects_unapproved_environment_prefixes(tmp_path, name, value):
+    with pytest.raises(ValueError, match="unsupported verifier environment variable"):
+        CandidateVerifier._build_verifier_request(
+            f"{name}={value} {sys.executable} -c 'print(1)'",
+            str(tmp_path),
+        )
+
+
+@pytest.mark.parametrize(
+    ("command", "message"),
+    [
+        (lambda: f"BAD-NAME=1 {sys.executable} -c 'print(1)'", "malformed environment assignment"),
+        (lambda: "PYTHONDONTWRITEBYTECODE=1", "must contain an executable"),
+        (
+            lambda: f"PYTHONDONTWRITEBYTECODE=1 PYTHONDONTWRITEBYTECODE=0 {sys.executable} -c 'print(1)'",
+            "conflicting duplicate environment assignment",
+        ),
+        (lambda: f"PYTHONDONTWRITEBYTECODE=0 {sys.executable} -c 'print(1)'", "must be 1"),
+        (lambda: "../python -c 'print(1)'", "path traversal"),
+        (lambda: f"{sys.executable} -c 'print(1)' ; touch nope", "shell operators are not allowed"),
+        (lambda: "definitely-not-a-verifier-format --wat", "executable not found"),
+    ],
+)
+def test_build_verifier_request_negative_controls_are_specific(tmp_path, command, message):
+    with pytest.raises(ValueError, match=message):
+        CandidateVerifier._build_verifier_request(command(), str(tmp_path))
 
 
 @pytest.fixture

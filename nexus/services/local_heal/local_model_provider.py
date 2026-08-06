@@ -383,6 +383,16 @@ class AuthorityBoundLocalModelProvider(LocalModelProvider):
 
 
 class OllamaLocalModelProvider(LocalModelProvider):
+    def __init__(self, *, call_authorized: bool | None = None) -> None:
+        """Create the physical Ollama edge.
+
+        ``None`` preserves the legacy environment authorization contract.  A
+        boolean value is reserved for a validated canonical admission decision
+        supplied by the product runtime; it avoids translating that decision
+        into process-global environment state.
+        """
+        self._call_authorized = call_authorized
+
     @property
     def provider_identity(self) -> str:
         return "ollama"
@@ -392,8 +402,16 @@ class OllamaLocalModelProvider(LocalModelProvider):
         return "request_bound"
 
     def generate(self, request: LocalModelProviderRequest) -> LocalModelProviderResponse:
-        call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
-        provider_name = (os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER") or os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER") or "").lower()
+        if self._call_authorized is None:
+            call_allowed = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED") == "1"
+            provider_name = (
+                os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER")
+                or os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER")
+                or ""
+            ).lower()
+        else:
+            call_allowed = self._call_authorized
+            provider_name = "ollama" if call_allowed else ""
 
         if not call_allowed or provider_name != "ollama":
             return LocalModelProviderResponse(

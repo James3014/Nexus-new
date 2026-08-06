@@ -5,18 +5,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 import shlex
 import time
 from pathlib import Path
 from typing import Mapping, Optional
 
-from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, CliWorkerStatus, run_cli_worker
+from nexus.executors.cli_worker import (
+    CliWorkerRequest,
+    CliWorkerResult,
+    CliWorkerStatus,
+    bounded_environment_receipt,
+    run_cli_worker,
+)
 from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractFinding,
     RepositoryContractGate,
 )
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import CandidateDiffReceipt, TargetWorktreeLease, WorktreeManager
+
+
+_VERIFIER_ENV_ALLOWLIST = frozenset({"PYTHONDONTWRITEBYTECODE"})
 
 
 @dataclass(frozen=True)
@@ -30,6 +40,7 @@ class VerifierEvidence:
     executable_identity: str = ""
     executable_sha256: str = ""
     argv: tuple[str, ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
     cwd: str = ""
     process_group_id: Optional[int] = None
     process_group_killed: bool = False
@@ -87,15 +98,69 @@ class CandidateVerifier:
 
     @staticmethod
     def _build_verifier_request(command: str, target: str) -> CliWorkerRequest:
-        tokens = tuple(shlex.split(command))
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+            lexer.whitespace_split = True
+            tokens = tuple(lexer)
+        except ValueError as exc:
+            raise ValueError(f"malformed verifier command: {exc}") from exc
         if not tokens:
             raise ValueError("verifier command must contain an executable")
+        assignments: dict[str, str] = {}
+        assignment_pattern = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            match = assignment_pattern.fullmatch(token)
+            if match is None:
+                if "=" in token and index == 0:
+                    raise ValueError("malformed environment assignment")
+                break
+            name, value = match.groups()
+            if any(char in value for char in "\x00\r\n;&|<>()$`"):
+                raise ValueError("invalid environment assignment value")
+            if name not in _VERIFIER_ENV_ALLOWLIST:
+                raise ValueError(f"unsupported verifier environment variable: {name}")
+            if name in assignments and assignments[name] != value:
+                raise ValueError(f"conflicting duplicate environment assignment: {name}")
+            assignments[name] = value
+            index += 1
+        if index >= len(tokens):
+            raise ValueError("verifier command must contain an executable")
+        executable = tokens[index]
+        if (
+            executable in {";", "&&", "||", "|", "<", ">"}
+            or not executable.strip()
+            or executable.startswith("-")
+        ):
+            raise ValueError("verifier command must contain a safe executable")
+        executable_path = Path(executable)
+        if ".." in executable_path.parts:
+            raise ValueError("verifier executable path traversal is not allowed")
+        if not executable_path.is_absolute() and len(executable_path.parts) > 1:
+            executable = str(Path(target).resolve() / executable_path)
+        if any(token in {";", "&&", "||", "|", "<", ">"} for token in tokens[index + 1:]):
+            raise ValueError("shell operators are not allowed in verifier command")
+        verifier_args = tokens[index + 1 :]
+        for arg_index, token in enumerate(verifier_args):
+            if re.search(r"[\x00\r\n]", token):
+                raise ValueError("invalid verifier argument")
+            if any(char in token for char in ";&|<>()$`") and not (
+                arg_index > 0 and verifier_args[arg_index - 1] == "-c"
+            ):
+                raise ValueError("shell metacharacters are not allowed in verifier arguments")
+        for token in verifier_args:
+            if assignment_pattern.fullmatch(token):
+                raise ValueError("environment assignments must precede executable")
+        if "PYTHONDONTWRITEBYTECODE" in assignments and assignments["PYTHONDONTWRITEBYTECODE"] != "1":
+            raise ValueError("PYTHONDONTWRITEBYTECODE must be 1")
+        assignments.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         return CliWorkerRequest(
-            executable=tokens[0],
-            argv=tokens[1:],
+            executable=executable,
+            argv=tokens[index + 1 :],
             cwd=target,
             timeout_seconds=CandidateVerifier.VERIFIER_TIMEOUT_SECONDS,
-            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            env=assignments,
         )
 
     @staticmethod
@@ -122,6 +187,9 @@ class CandidateVerifier:
                     failures.append("executable_sha256_mismatch")
         if result.argv != request.argv:
             failures.append("argv_mismatch")
+        expected_env = bounded_environment_receipt(request.env)
+        if result.env != expected_env:
+            failures.append("env_mismatch")
         if result.cwd != request.cwd:
             failures.append("cwd_mismatch")
         if result.timed_out != (result.status is CliWorkerStatus.TIMED_OUT):
@@ -153,6 +221,7 @@ class CandidateVerifier:
                         executable_identity=result.executable_identity,
                         executable_sha256=result.executable_sha256,
                         argv=result.argv,
+                        env=result.env,
                         cwd=result.cwd,
                         process_group_id=result.process_group_id,
                         process_group_killed=result.process_group_killed,

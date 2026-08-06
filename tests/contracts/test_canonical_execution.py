@@ -100,6 +100,31 @@ def test_canonical_context_allows_code_target_facts_but_not_target_authority() -
         )
 
 
+def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
+    context = CanonicalTaskContext(
+        task_id="task-route-receipt-evidence",
+        task_type="audit",
+        task_desc="Carry observed route evidence without selecting a route.",
+        codeintel={
+            "formal_route_receipts": [
+                {
+                    "route": "mainchain",
+                    "evidence_present": True,
+                    "gate_passed": True,
+                }
+            ]
+        },
+    )
+
+    assert context.to_dict()["codeintel"]["formal_route_receipts"] == [
+        {
+            "route": "mainchain",
+            "evidence_present": True,
+            "gate_passed": True,
+        }
+    ]
+
+
 def test_canonical_planning_bundle_binds_the_exact_plan_without_replanning(monkeypatch):
     context = CanonicalTaskContext(
         task_id="task-bundle-1",

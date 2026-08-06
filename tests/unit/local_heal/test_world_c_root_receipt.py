@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 from nexus.contracts.root_receipt import (
@@ -7,9 +8,8 @@ from nexus.contracts.root_receipt import (
     build_world_c_verifier_projection,
     validate_root_receipt,
 )
-from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
-from nexus.services.local_heal.interface import PhaseResult
-from nexus.services.local_heal.interface import LocalizedFile, RepairPlan
+from nexus.services.local_heal.context import GovernanceContext, HealContext, OperationalContext
+from nexus.services.local_heal.interface import LocalizedFile, PhaseResult, RepairPlan
 from nexus.services.local_heal.pipeline_isolation import prepare_world_c_workspace
 from nexus.services.local_heal.world_c_receipt import (
     WORLD_C_STAGES,
@@ -217,6 +217,7 @@ def test_world_c_verifier_projection_reuses_the_physical_verifier_receipt(
     world_c = _complete_world_c(tmp_path)
     context = {
         "task_id": "world-c-1",
+        "capability_evidence_bundle": {"source_hash": "sha256:source"},
         "local": _stage(
             "local",
             response={"local_outputs": {"world_c_receipt": world_c}},
@@ -229,3 +230,41 @@ def test_world_c_verifier_projection_reuses_the_physical_verifier_receipt(
     assert projection["source"] == "HealOrchestrator.VerificationPhase"
     assert projection["world_c_receipt_hash"] == world_c["receipt_hash"]
     assert projection["evidence_refs"] == world_c["authoritative_verifier"]["evidence_refs"]
+    assert projection["verifier_status"] == "pass"
+    assert projection["source_hash"] == "sha256:source"
+    assert projection["verifier_artifact"] == world_c["receipt_hash"]
+
+
+def test_root_receipt_hash_tamper_fails_closed(tmp_path: Path) -> None:
+    world_c = _complete_world_c(tmp_path)
+    runtime = {
+        "task_id": "world-c-1",
+        "workspace_revision": "rev-1",
+        "planner_decision_id": "plan-1",
+        "canonical_execution": {"task_id": "world-c-1", "execution_id": "exec-1"},
+        "planner": {"planner_decision_id": "plan-1"},
+        "workforce_admission": {"aggregate_binding_hash": "sha256:workforce"},
+        "capability_evidence_bundle": {"source_hash": "sha256:source"},
+        "local": _stage(
+            "local",
+            response={"local_outputs": {"world_c_receipt": world_c}},
+        ),
+        "online": {"name": "online", "status": "NOT_REQUESTED"},
+        "verifier": _stage(
+            "verifier",
+            response={
+                "source": "HealOrchestrator.VerificationPhase",
+                "world_c_receipt_hash": world_c["receipt_hash"],
+            },
+        ),
+        "learning": _stage("learning"),
+        "capability_results": {},
+    }
+    root = build_root_receipt(runtime)
+    tampered = deepcopy(root)
+    tampered["planner_decision_id"] = "forged-plan"
+
+    valid, reasons = validate_root_receipt(tampered)
+
+    assert valid is False
+    assert "root_receipt_hash_mismatch" in reasons

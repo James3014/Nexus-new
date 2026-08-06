@@ -986,18 +986,44 @@ class CapabilityPlanner:
 
         if states.get("local_model_executor") in {"required", "conditional"}:
             signal_snapshot["selected_executor"] = "local_model"
-            signal_snapshot["executor_provider"] = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", "ollama")
-            signal_snapshot["executor_model"] = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
+            canonical_workforce = route.get("workforce_admission_enabled") is True
+            signal_snapshot["executor_provider"] = (
+                "workforce_admission"
+                if canonical_workforce
+                else os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER", "ollama")
+            )
+            signal_snapshot["executor_model"] = (
+                "workforce_admission"
+                if canonical_workforce
+                else os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
+            )
             signal_snapshot["local_executor_authority"] = "candidate_only"
             # P3 Fix: Critical signal_snapshot fields for executor consumption
-            signal_snapshot["protocol_mode"] = os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
+            signal_snapshot["protocol_mode"] = (
+                "unified_diff"
+                if canonical_workforce
+                else os.environ.get("NEXUS_PROTOCOL_MODE", "anchored_edit")
+            )
             signal_snapshot["model_call_allowed"] = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1") == "1"
             signal_snapshot["candidate_enabled"] = True
             signal_snapshot["mutation_allowed"] = True
             signal_snapshot["verifier_allowed"] = True
 
             # N2.8 topology metadata additions
-            topology = os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
+            route_features = (
+                route.get("route_features")
+                if isinstance(route.get("route_features"), dict)
+                else {}
+            )
+            topology = (
+                "localheal_pipeline"
+                if canonical_workforce
+                and bool(route_features.get("deterministic_verifier_available"))
+                and "repair" in str(task_type or "").lower()
+                else "single_local_model"
+                if canonical_workforce
+                else os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
+            )
             signal_snapshot["execution_topology"] = topology
 
             # P3-I2: Difficulty router — override topology based on task difficulty

@@ -119,7 +119,10 @@ class AsyncProcessExecutor:
 from nexus.app.oracle_dispatcher import OracleDispatcher
 from nexus.app.oracle_advisor import OracleAdvisor
 from nexus.app import research_flow_service
-from nexus.engine.canonical_task_seam import build_legacy_cli_service, execute_single_task_via_service
+from nexus.engine.canonical_task_seam import (
+    build_legacy_cli_service,
+    execute_canonical_product_task,
+)
 from nexus.engine.completion_contract import build_completion_envelope
 from nexus.engine.completion_contract import ensure_verified_completion
 from nexus.engine.completion_contract import write_completion_envelope
@@ -1116,7 +1119,28 @@ def delivery_receipt(receipt_path, as_json):
     show_default=True,
     help="Nexus-owned Online execution policy (deny|auto|require). Default deny is conservative.",
 )
-def run(task_id, complexity, output_file, report_file, local_assist_policy, online_policy):
+@click.option(
+    "--target-file",
+    "target_files",
+    multiple=True,
+    type=click.Path(path_type=Path, dir_okay=False),
+    help="Bounded repository-relative target file. Repeat for additional allowed files.",
+)
+@click.option(
+    "--verify-command",
+    default="",
+    help="Deterministic verifier command for the isolated World C pipeline.",
+)
+def run(
+    task_id,
+    complexity,
+    output_file,
+    report_file,
+    local_assist_policy,
+    online_policy,
+    target_files,
+    verify_command,
+):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
     from nexus.services.canonical_local_assist_policy import (
         build_canonical_policy_receipt,
@@ -1124,10 +1148,7 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy, onli
         normalize_local_assist_policy,
         write_canonical_policy_receipt,
     )
-    from nexus.services.online_execution_policy import (
-        build_online_execution_context_fields,
-        normalize_online_policy,
-    )
+    from nexus.services.online_execution_policy import normalize_online_policy
 
     try:
         policy_norm = normalize_local_assist_policy(local_assist_policy)
@@ -1154,50 +1175,15 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy, onli
         workspace_revision=revision,
         policy_source="cli",
     )
-    # Provider identity for physical Online CLI — resolve before authorization decision
-    # so require/auto is not sealed as require_policy_missing_provider.
-    oauth = str(os.environ.get("NEXUS_OAUTH_PROVIDER", "") or "").strip().lower()
-    if oauth in {"auto", "ollama", "local", ""}:
-        oauth = ""
-    online_fields = build_online_execution_context_fields(
-        online_policy=online_norm,
-        project_root=REPO_ROOT,
-        task_id=str(task_id),
-        workspace_revision=revision,
-        policy_source="cli",
-        requested_provider=oauth,
-    )
-    execution_context.update(online_fields)
+    execution_context["online_policy"] = online_norm
+    execution_context["online_policy_source"] = "cli"
     execution_context["product_entry"] = "nexus run"
-    if oauth:
-        execution_context["oauth_provider"] = oauth
-        execution_context["online_provider"] = oauth
-    # Bounded advisory files for Local Assist when not otherwise specified.
-    execution_context.setdefault(
-        "target_files",
-        ["docs/bench/local_assist/gate2_live_smoke_task.json"],
-    )
-    execution_context.setdefault(
-        "target_file",
-        "docs/bench/local_assist/gate2_live_smoke_task.json",
-    )
-    # Local Ollama gates for product advisor/shadow (fail-closed unless explicitly allowed).
-    if policy_norm.get("canonical_policy") in {"advisor", "shadow"}:
-        local_model = (
-            str(os.environ.get("NEXUS_LOCAL_MODEL_NAME") or "").strip()
-            or str(os.environ.get("NEXUS_LOCAL_MODEL") or "").strip()
-            or "qwen2.5-coder:7b-instruct"
-        )
-        execution_context.setdefault("local_assist_model", local_model)
-        # Enable physical Local model call only when operator has not denied it.
-        if os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "":
-            os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
-        if not str(os.environ.get("NEXUS_LOCAL_MODEL_PROVIDER") or "").strip():
-            os.environ["NEXUS_LOCAL_MODEL_PROVIDER"] = "ollama"
-        if not str(os.environ.get("NEXUS_LOCAL_MODEL_NAME") or "").strip():
-            os.environ["NEXUS_LOCAL_MODEL_NAME"] = local_model
-        if not str(os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER") or "").strip():
-            os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "ollama"
+    if target_files:
+        normalized_targets = [Path(path).as_posix() for path in target_files]
+        execution_context["target_files"] = normalized_targets
+        execution_context["target_file"] = normalized_targets[0]
+    if verify_command:
+        execution_context["verifier_command"] = verify_command
     policy_receipt = None
     policy_path = None
     if policy_norm["canonical_policy"] != "disabled":
@@ -1224,30 +1210,15 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy, onli
     if _task_requests_output_file(task_id) and not output_file:
         raise click.ClickException("Task requests file output. Please provide --output-file.")
     
-    from nexus.core.campaign_general import CampaignGeneral
-    from nexus.engine.cli_runner_async import campaign_master_loop
-    import asyncio
-
-    # 偵測史詩/宏觀任務
-    is_macro = len(task_id) < 200 and any(kw in task_id.lower() for kw in ["system", "app", "complete", "refactor all", "build a", "史詩"])
-    
-    runtime_ok = True
-    if is_macro:
-        click.secho("🗺️ [L4:Macro-Mode]史詩級任務偵測。啟動戰役大將 (Campaign-General)...", fg="magenta", bold=True)
-        commander = CampaignGeneral(REPO_ROOT)
-        task_nodes = commander.decompose_intent(task_id)
-        click.echo(f"   [L4] 戰役地圖已生成：{len(task_nodes)} 個戰術節點。")
-        
-        # 啟動異步調度循環
-        asyncio.run(campaign_master_loop(commander, task_nodes, REPO_ROOT))
-    else:
-        runtime_ok = bool(
-            execute_single_task_via_service(
-                task_id,
-                REPO_ROOT,
-                execution_context=execution_context,
-            )
+    try:
+        runtime_result = execute_canonical_product_task(
+            task_id,
+            REPO_ROOT,
+            execution_context=execution_context,
         )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise click.ClickException(f"canonical_product_runtime_failed_closed: {exc}") from exc
+    runtime_ok = bool(runtime_result)
 
     artifact_paths: list[str] = []
     if output_file:
@@ -1271,7 +1242,7 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy, onli
         command_name="run",
         task_name=task_id,
         runtime_ok=runtime_ok,
-        execution_path="cli->command_service->engine",
+        execution_path="cli->canonical_task_seam->mainchain",
         artifact_paths=artifact_paths,
         semantic_failures=direct_mode_audit["semantic_failures"],
         tests_run=direct_mode_audit["verify_results"],
@@ -1280,41 +1251,47 @@ def run(task_id, complexity, output_file, report_file, local_assist_policy, onli
         report_payload["direct_mode"] = direct_mode_audit["spec"]
         report_payload["changed_targets"] = direct_mode_audit["changed_targets"]
 
-    # Link pipeline report → Unified Runtime receipt (execution lineage only).
-    # Pipeline writes a durable pointer under .nexus/reports/run/ so the CLI
-    # does not invent a second invocation-truth schema.
-    runtime_meta: dict = {}
-    pointer_path = REPO_ROOT / ".nexus" / "reports" / "run" / f"{safe_task_id}.unified_runtime_pointer.json"
-    if pointer_path.is_file():
-        try:
-            runtime_meta = json.loads(pointer_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            runtime_meta = {}
+    # Consume the returned canonical receipt directly.  The legacy pipeline
+    # pointer is intentionally not a production truth source.
+    runtime_receipt = dict(runtime_result.receipt)
+    local_stage = runtime_receipt.get("local") if isinstance(runtime_receipt.get("local"), dict) else {}
+    local_response = local_stage.get("response") if isinstance(local_stage.get("response"), dict) else {}
+    online_stage = runtime_receipt.get("online") if isinstance(runtime_receipt.get("online"), dict) else {}
     report_payload["local_assist_mode"] = execution_context.get(
         "local_assist_mode",
-        runtime_meta.get("local_assist_mode", "disabled"),
+        "disabled",
     )
-    report_payload["local_assist_status"] = runtime_meta.get(
-        "local_assist_status",
+    report_payload["local_assist_status"] = str(local_stage.get(
+        "status",
         "NOT_REQUESTED" if execution_context.get("local_assist_mode") == "disabled" else "UNKNOWN",
+    ))
+    report_payload["local_context_forwarded"] = bool(
+        (runtime_receipt.get("online_safe_local_forward") or {}).get("forward_keys")
     )
-    report_payload["local_context_forwarded"] = bool(runtime_meta.get("local_context_forwarded", False))
-    report_payload["unified_runtime_receipt_path"] = str(runtime_meta.get("unified_runtime_receipt_path") or "")
+    report_payload["unified_runtime_receipt_path"] = runtime_result.receipt_path
     report_payload["unified_runtime_task_id"] = str(
-        runtime_meta.get("unified_runtime_task_id") or execution_context.get("task_id") or task_id
+        runtime_receipt.get("task_id") or execution_context.get("task_id") or task_id
     )
-    report_payload["online_provider"] = str(runtime_meta.get("online_provider") or "")
+    online_response = online_stage.get("response") if isinstance(online_stage.get("response"), dict) else {}
+    report_payload["online_provider"] = str(online_response.get("provider") or "")
     report_payload["workspace_revision"] = str(
-        runtime_meta.get("workspace_revision") or execution_context.get("workspace_revision") or revision
+        runtime_receipt.get("workspace_revision") or execution_context.get("workspace_revision") or revision
     )
     # Distinct stage booleans — never collapse into one status.
-    report_payload["local_assist_success"] = bool(runtime_meta.get("local_assist_success", False))
-    report_payload["online_success"] = bool(runtime_meta.get("online_success", False))
-    report_payload["runtime_receipt_complete"] = bool(runtime_meta.get("runtime_receipt_complete", False))
-    report_payload["task_pipeline_success"] = bool(
-        runtime_meta.get("task_pipeline_success", runtime_ok)
+    report_payload["local_assist_success"] = bool(local_stage.get("gate_passed", False))
+    report_payload["online_success"] = bool(online_stage.get("gate_passed", False))
+    report_payload["runtime_receipt_complete"] = bool(runtime_receipt.get("receipt_complete", False))
+    report_payload["task_pipeline_success"] = runtime_ok
+    report_payload["root_receipt_valid"] = runtime_result.root_receipt_valid
+    report_payload["root_receipt_blockers"] = list(runtime_result.root_receipt_blockers)
+    report_payload["root_receipt_hash"] = str(
+        runtime_result.root_receipt.get("root_receipt_hash") or ""
     )
-    claim = runtime_meta.get("claim_boundary")
+    report_payload["execution_decision_authority"] = runtime_result.execution_decision_authority
+    report_payload["production_ingress_count"] = runtime_result.production_ingress_count
+    report_payload["production_runtime_entry_count"] = runtime_result.production_runtime_entry_count
+    report_payload["local_action"] = str(local_response.get("action") or "")
+    claim = runtime_receipt.get("claim_boundary")
     report_payload["claim_boundary"] = (
         dict(claim)
         if isinstance(claim, dict)

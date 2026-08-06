@@ -19,7 +19,13 @@ import pytest
 
 from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
 from nexus.executors.worker_registry import WorkerRegistry
-from nexus.contracts.lifecycle_action import build_owner_inline_contract
+from nexus.contracts.lifecycle_action import (
+    ContractKind,
+    LifecycleActionType,
+    build_action_envelope,
+    build_owner_inline_contract,
+    canonical_request_hash,
+)
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
@@ -214,6 +220,109 @@ def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypa
     assert compact["task_action"]["next_action"] == "inspect_receipt_and_candidate"
     assert "attempts" not in compact
     assert detailed["attempts"] == [{"attempt_id": "a"}]
+
+
+@pytest.mark.parametrize(
+    ("payload", "blocker_code"),
+    [
+        ("null\n", "STATE_NOT_OBJECT"),
+        ("[]\n", "STATE_NOT_OBJECT"),
+        ("{not-json\n", "STATE_JSON_INVALID"),
+        (
+            json.dumps({
+                "task_id": "malformed-status",
+                "status": "FINAL_BLOCK",
+                "attempts": None,
+            }),
+            "STATE_FIELD_INVALID",
+        ),
+    ],
+)
+def test_status_surfaces_fail_closed_on_malformed_state_without_mutation(
+    tmp_path,
+    payload,
+    blocker_code,
+):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    service.state_dir.mkdir(parents=True)
+    state_path = service.state_dir / "malformed-status.json"
+    state_path.write_text(payload, encoding="utf-8")
+    before = state_path.read_bytes()
+
+    snapshot = service.get_task_snapshot("malformed-status", include_details=True)
+    fetched = service.get_task("malformed-status")
+    waited = service.wait_task("malformed-status", timeout_seconds=0)
+    actionable = service.list_actionable_tasks(include_details=True)
+    lifecycle = service.lifecycle_status()
+    retry = service.retry_task("malformed-status")
+
+    for status in (snapshot, fetched, waited):
+        assert status["status"] == "BLOCKED_INVALID_STATE"
+        assert status["state_valid"] is False
+        assert status["blocker"]["code"] == blocker_code
+        assert status["retry_authorized"] is False
+        assert status["task_action"]["next_action"] == "inspect_lifecycle_state"
+        assert status["task_action"]["recommended_tool"] is None
+    assert actionable["actionable_count"] == 1
+    assert actionable["tasks"][0]["status"] == "BLOCKED_INVALID_STATE"
+    assert lifecycle["invalid_states"] == 1
+    assert lifecycle["active_tasks"] == 0
+    assert lifecycle["blockers"][0]["code"] == blocker_code
+    assert retry["retry"]["decision"] == "BLOCKED_INVALID_STATE"
+    assert retry["retry"]["blocker"] == blocker_code
+    assert state_path.read_bytes() == before
+    assert not service._lock_path().exists()
+
+
+@pytest.mark.parametrize(
+    ("payload", "blocker_code"),
+    [
+        ("null\n", "STATE_NOT_OBJECT"),
+        ("{not-json\n", "STATE_JSON_INVALID"),
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["submit", "direct"])
+def test_submission_scan_blocks_invalid_durable_state_without_mutation(
+    tmp_path,
+    payload,
+    blocker_code,
+    entrypoint,
+):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    service.state_dir.mkdir(parents=True)
+    corrupt_path = service.state_dir / "corrupt-state.json"
+    corrupt_path.write_text(payload, encoding="utf-8")
+    before = corrupt_path.read_bytes()
+    request = _request(
+        tmp_path,
+        task_id="new-submission",
+        execution_lane="DIRECT_CANONICAL",
+        primary_agent=True,
+        worker="primary",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"INVALID_DURABLE_STATE_BLOCKS_SUBMISSION:corrupt-state:{blocker_code}",
+    ):
+        if entrypoint == "submit":
+            service.submit_task(request)
+        else:
+            service._submit_direct_canonical(request, "new-submission")
+
+    assert corrupt_path.read_bytes() == before
+    assert sorted(path.name for path in service.state_dir.glob("*.json")) == [
+        "corrupt-state.json"
+    ]
+    assert not service._lock_path().exists()
 
 
 def test_state_root_inventory_classifies_nested_receipts_and_conflicts(tmp_path, monkeypatch):
@@ -707,6 +816,141 @@ def test_retry_task_reuses_terminal_request_without_duplicate_task(tmp_path):
     while time.monotonic() < deadline and len(calls) < 2:
         time.sleep(0.01)
     assert calls == ["retry-surface-task", "retry-surface-task"]
+
+
+def test_retry_task_creates_attempt_scoped_identity_without_mutating_history(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(
+            {
+                "task_id": contract.task_id,
+                "attempt_id": request.get("attempt_id"),
+                "action_id": request.get("action_id"),
+                "idempotency_key": request.get("idempotency_key"),
+            }
+        )
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id="retry-scoped-identity",
+        idempotency_key="retry-scoped-identity:v1",
+        action_id="action-initial",
+        action_request_hash="1" * 64,
+        task_card_path="tasks/campaign/card.md",
+        task_card_hash="2" * 64,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        contract_hash="3" * 64,
+    )
+    service.submit_task(request)
+    assert _wait_for_status(service, request["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(request["task_id"]))
+
+    retried = service.retry_task(request["task_id"])
+    assert retried["retry"]["decision"] == "REUSED_TASK_ID"
+    assert _wait_for_status(service, request["task_id"], "FINAL_BLOCK")
+    after = service._read_state(request["task_id"])
+
+    assert after["task_id"] == before["task_id"]
+    assert after["task_card_hash"] == before["task_card_hash"]
+    assert after["contract_hash"] == before["contract_hash"]
+    assert after["attempt_id"] != before["attempt_id"]
+    assert after["action_id"] != before["action_id"]
+    assert after["idempotency_key"].startswith("retry-scoped-identity:v1:retry-")
+    assert after["request"]["idempotency_key"] == after["idempotency_key"]
+    assert after["request"]["action_id"] == after["action_id"]
+    assert after["request"]["attempt_id"] == after["attempt_id"]
+    assert after["attempts"][0] == before["attempts"][0]
+    assert len(after["attempts"]) == 2
+    assert calls[0]["task_id"] == calls[1]["task_id"] == request["task_id"]
+    assert calls[0]["idempotency_key"] != calls[1]["idempotency_key"]
+
+
+def test_idempotency_key_is_duplicate_only_for_same_exact_action_request(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(
+        tmp_path,
+        task_id="idempotency-exact-request",
+        idempotency_key="exact-key",
+    )
+    first = service.submit_task(request)
+    duplicate = service.submit_task(dict(request))
+
+    assert duplicate["duplicate"] is True
+    assert duplicate["attempt_id"] == first["attempt_id"]
+
+    conflicting = dict(request, what="different physical request")
+    with pytest.raises(ValueError, match="IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST"):
+        service.submit_task(conflicting)
+
+
+def test_action_bound_retry_rebinds_envelope_to_fresh_attempt_identity(tmp_path):
+    seen = []
+
+    def runner(contract, request, update):
+        seen.append(copy.deepcopy(dict(request)))
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    bound = _bound_action_request(
+        tmp_path,
+        execution_lane="ISOLATED_TARGET",
+        task_card_path="tasks/campaign/card.md",
+        task_card_hash="b" * 64,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        contract_hash="c" * 64,
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    first = service.submit_task(_action_transport(bound))
+    assert _wait_for_status(service, bound["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(bound["task_id"]))
+
+    retried = service.retry_task(bound["task_id"])
+    assert retried["retry"]["decision"] == "REUSED_TASK_ID"
+    assert _wait_for_status(service, bound["task_id"], "FINAL_BLOCK")
+    after = service._read_state(bound["task_id"])
+    retry_request = seen[1]
+
+    assert first["task_id"] == after["task_id"] == bound["task_id"]
+    assert retry_request["action"]["action_type"] == LifecycleActionType.TASK_RETRY.value
+    assert retry_request["attempt_id"] == retry_request["action"]["attempt_id"] == after["attempt_id"]
+    assert retry_request["action_id"] == retry_request["action"]["action_id"] == after["action_id"]
+    assert retry_request["idempotency_key"] == retry_request["action"]["idempotency_key"] == after["idempotency_key"]
+    assert retry_request["bound_action_request"]["attempt_id"] == after["attempt_id"]
+    assert retry_request["bound_action_request"]["action_id"] == after["action_id"]
+    assert retry_request["bound_action_request"]["idempotency_key"] == after["idempotency_key"]
+    assert retry_request["controller_revision"] == before["request"]["controller_revision"]
+    assert retry_request["allowed_files"] == before["request"]["allowed_files"]
+    assert retry_request["task_card_hash"] == before["request"]["task_card_hash"]
+    assert retry_request["contract_hash"] == before["request"]["contract_hash"]
+    assert after["attempts"][0] == before["attempts"][0]
+
+    duplicate = service.submit_task(copy.deepcopy(retry_request))
+    assert duplicate["duplicate"] is True
+    assert duplicate["attempt_id"] == after["attempt_id"]
+    assert len(duplicate["attempts"]) == 2
+
+    conflicting = copy.deepcopy(retry_request)
+    conflicting["bound_action_request"]["what"] = "different physical retry request"
+    conflicting["what"] = "different physical retry request"
+    conflicting_hash = canonical_request_hash(conflicting["bound_action_request"])
+    conflicting["action"]["request_hash"] = conflicting_hash
+    conflicting["action_request_hash"] = conflicting_hash
+    with pytest.raises(ValueError, match="IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST"):
+        service.submit_task(conflicting)
 
 
 def test_retry_task_blocks_retained_review_without_disposition(tmp_path):
@@ -4183,3 +4427,352 @@ def test_w1_service_path_canary(tmp_path):
     tampered_hash_result = service.verify_task("w1-svc-canary")
     assert tampered_hash_result["verified"] is False
     assert "verified_receipt_hash_mismatch" in tampered_hash_result["failure_reasons"]
+
+
+def _bound_action_request(tmp_path: Path, **overrides):
+    bound = _request(tmp_path, task_id="bound-action-task")
+    bound.update(overrides)
+    return bound
+
+
+def _action_transport(
+    bound: dict,
+    *,
+    action_type=LifecycleActionType.TASK_RUN,
+    attempt_id="attempt-bound-1",
+    action_id="action-bound-1",
+    idempotency_key="idempotency-bound-1",
+    **outer_overrides,
+):
+    contract_kind = ContractKind(str(bound.get("contract_kind") or ContractKind.NONE.value))
+    physical_bound = {
+        **bound,
+        "attempt_id": attempt_id,
+        "action_id": action_id,
+        "idempotency_key": idempotency_key,
+        "action_type": action_type.value,
+        "contract_kind": contract_kind.value,
+    }
+    action = build_action_envelope(
+        task_id=str(physical_bound["task_id"]),
+        action_type=action_type,
+        request=physical_bound,
+        tool_manifest_hash="a" * 64,
+        expected_head=physical_bound.get("controller_revision"),
+        allowed_paths=tuple(physical_bound.get("allowed_files") or ()),
+        mutation=False,
+        task_card_path=physical_bound.get("task_card_path"),
+        task_card_hash=physical_bound.get("task_card_hash"),
+        contract_kind=contract_kind,
+        contract_hash=physical_bound.get("contract_hash"),
+        attempt_id=attempt_id,
+        action_id=action_id,
+        idempotency_key=idempotency_key,
+    ).model_dump(mode="json")
+    transport = {
+        **physical_bound,
+        "action": action,
+        "bound_action_request": dict(physical_bound),
+        "action_id": action["action_id"],
+        "attempt_id": action["attempt_id"],
+        "idempotency_key": action["idempotency_key"],
+        "action_request_hash": action["request_hash"],
+    }
+    transport.update(outer_overrides)
+    return transport
+
+
+def test_action_transport_tampered_bound_payload_fails_before_task_resolution(tmp_path, monkeypatch):
+    bound = _bound_action_request(tmp_path)
+    transport = _action_transport(bound)
+    transport["bound_action_request"]["what"] = "tampered"
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
+    monkeypatch.setattr(service, "_resolve_current_execution_task_id", lambda *_: pytest.fail("task resolution ran"))
+
+    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        service.submit_task(transport)
+
+
+@pytest.mark.parametrize(
+    ("field", "tampered"),
+    [
+        ("task_id", "outer-task"),
+        ("attempt_id", "outer-attempt"),
+        ("action_id", "outer-action"),
+        ("idempotency_key", "outer-key"),
+        ("controller_revision", "f" * 40),
+        ("allowed_files", ["other.py"]),
+        ("task_card_path", "tasks/other.md"),
+        ("task_card_hash", "e" * 64),
+        ("contract_kind", ContractKind.OWNER_INLINE.value),
+        ("contract_hash", "d" * 64),
+    ],
+)
+def test_action_transport_outer_identity_overrides_fail_before_state_access(
+    tmp_path,
+    monkeypatch,
+    field,
+    tampered,
+):
+    bound = _bound_action_request(tmp_path)
+    transport = _action_transport(bound)
+    transport[field] = tampered
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH"):
+        service.submit_task(transport)
+
+
+@pytest.mark.parametrize(
+    ("field", "tampered"),
+    [
+        ("attempt_id", "attempt-envelope-tamper"),
+        ("action_id", "action-envelope-tamper"),
+        ("idempotency_key", "envelope-key-tamper"),
+        ("expected_head", None),
+        ("allowed_paths", []),
+        ("contract_hash", "d" * 64),
+    ],
+)
+def test_action_transport_envelope_identity_tamper_fails_before_state_access(
+    tmp_path,
+    monkeypatch,
+    field,
+    tampered,
+):
+    bound = _bound_action_request(
+        tmp_path,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        task_card_path="tasks/campaign/card.md",
+        task_card_hash="b" * 64,
+        contract_hash="c" * 64,
+    )
+    transport = _action_transport(bound)
+    transport["action"][field] = tampered
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH"):
+        service.submit_task(transport)
+
+
+def test_action_transport_requires_mapping_bound_payload_before_state_access(tmp_path, monkeypatch):
+    bound = _bound_action_request(tmp_path)
+    transport = _action_transport(bound, bound_action_request=[("task_id", bound["task_id"])])
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_REQUIRED"):
+        service.submit_task(transport)
+
+
+def test_task_retry_action_cannot_create_a_new_semantic_task(tmp_path, monkeypatch):
+    bound = _bound_action_request(tmp_path, task_id="unknown-retry-task")
+    transport = _action_transport(
+        bound,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-retry-1",
+        action_id="action-retry-1",
+        idempotency_key="unknown-retry-task:retry-1",
+    )
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("worker launch ran"))
+
+    with pytest.raises(ValueError, match="RETRY_REQUIRES_EXISTING_TASK"):
+        service.submit_task(transport)
+
+    assert service._read_state_snapshot(bound["task_id"]) is None
+
+
+def test_task_retry_action_type_cannot_be_tampered_to_task_run(tmp_path, monkeypatch):
+    bound = _bound_action_request(tmp_path, task_id="retry-action-type-tamper")
+    transport = _action_transport(
+        bound,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-retry-type",
+        action_id="action-retry-type",
+        idempotency_key="retry-action-type-tamper:retry-1",
+    )
+    transport["action"]["action_type"] = LifecycleActionType.TASK_RUN.value
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match="ACTION_IDENTITY_MISMATCH: action_type"):
+        service.submit_task(transport)
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["task_id", "attempt_id", "action_id", "idempotency_key", "action_type", "contract_kind"],
+)
+def test_action_transport_requires_identity_inside_bound_payload(tmp_path, monkeypatch, missing_field):
+    bound = _bound_action_request(tmp_path, task_id="missing-bound-action-type")
+    transport = _action_transport(bound)
+    transport["bound_action_request"].pop(missing_field)
+    transport["action"]["request_hash"] = canonical_request_hash(transport["bound_action_request"])
+    transport["action_request_hash"] = transport["action"]["request_hash"]
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match=f"ACTION_IDENTITY_MISSING: {missing_field}"):
+        service.submit_task(transport)
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "identity_name"),
+    [
+        ("controller_revision", "expected_head"),
+        ("allowed_files", "allowed_paths"),
+        ("task_card_path", "task_card_path"),
+        ("task_card_hash", "task_card_hash"),
+        ("contract_hash", "contract_hash"),
+    ],
+)
+def test_action_transport_requires_scope_and_contract_inside_bound_payload(
+    tmp_path,
+    monkeypatch,
+    missing_field,
+    identity_name,
+):
+    bound = _bound_action_request(
+        tmp_path,
+        task_id="missing-bound-scope",
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        task_card_path="tasks/campaign/card.md",
+        task_card_hash="b" * 64,
+        contract_hash="c" * 64,
+    )
+    transport = _action_transport(bound)
+    transport["bound_action_request"].pop(missing_field)
+    transport["action"]["request_hash"] = canonical_request_hash(transport["bound_action_request"])
+    transport["action_request_hash"] = transport["action"]["request_hash"]
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match=f"ACTION_IDENTITY_MISSING: {identity_name}"):
+        service.submit_task(transport)
+
+
+@pytest.mark.parametrize(
+    "retry_change",
+    [
+        {"what": "different semantic task"},
+        {"allowed_files": ["different.py"]},
+    ],
+)
+def test_task_retry_action_cannot_change_semantic_task_or_scope(tmp_path, retry_change):
+    def runner(contract, request, update):
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    bound = _bound_action_request(tmp_path, task_id="bound-retry-task")
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    service.submit_task(_action_transport(bound))
+    assert _wait_for_status(service, bound["task_id"], "FINAL_BLOCK")
+
+    changed = {**bound, **retry_change}
+    transport = _action_transport(
+        changed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-retry-2",
+        action_id="action-retry-2",
+        idempotency_key="bound-retry-task:retry-2",
+    )
+    with pytest.raises(ValueError, match="RETRY_SEMANTIC_TASK_MISMATCH"):
+        service.submit_task(transport)
+
+
+def test_task_retry_action_requires_fresh_attempt_scoped_identity(tmp_path):
+    def runner(contract, request, update):
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    bound = _bound_action_request(tmp_path, task_id="stale-retry-identity")
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    service.submit_task(_action_transport(bound))
+    assert _wait_for_status(service, bound["task_id"], "FINAL_BLOCK")
+
+    stale = _action_transport(
+        bound,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-bound-1",
+        action_id="action-stale-retry",
+        idempotency_key="stale-retry-identity:retry-stale",
+    )
+    with pytest.raises(ValueError, match="RETRY_ATTEMPT_ID_REUSED"):
+        service.submit_task(stale)
+
+
+@pytest.mark.parametrize(
+    "action_type",
+    [
+        LifecycleActionType.TASK_FINISH,
+        LifecycleActionType.CANDIDATE_APPROVE,
+        LifecycleActionType.CANDIDATE_INTEGRATE,
+        LifecycleActionType.CANDIDATE_DISPOSE,
+    ],
+)
+def test_task_submission_rejects_cross_domain_action_types_before_state_access(
+    tmp_path,
+    monkeypatch,
+    action_type,
+):
+    bound = _bound_action_request(tmp_path)
+    transport = _action_transport(bound)
+    transport["action"]["action_type"] = action_type.value
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
+    monkeypatch.setattr(service, "_workspace_task_states", lambda: pytest.fail("state access ran"))
+
+    with pytest.raises(ValueError, match="ACTION_TYPE_UNSUPPORTED_FOR_TASK_SUBMISSION"):
+        service.submit_task(transport)
+
+
+def test_action_transport_uses_bound_payload_and_preserves_card_contract_identity(tmp_path):
+    bound = _bound_action_request(
+        tmp_path,
+        execution_lane="ISOLATED_TARGET",
+        task_card_path="tasks/campaign/card.md",
+        task_card_hash="b" * 64,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        contract_hash="c" * 64,
+    )
+    transport = _action_transport(bound, what="untrusted outer copy")
+    seen = []
+
+    def fake_runner(contract, request, update):
+        seen.append(dict(request))
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": False}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=fake_runner,
+        ephemeral=True,
+        auto_reconcile=False,
+    )
+    result = service.submit_task(transport)
+    _wait_for_status(service, result["task_id"], "PENDING_HUMAN_APPROVAL")
+
+    executed = seen[0]
+    durable = service._read_state(result["task_id"])
+    assert executed["what"] == bound["what"]
+    assert executed["task_id"] == bound["task_id"]
+    assert executed["attempt_id"] == transport["action"]["attempt_id"]
+    assert executed["action_id"] == transport["action"]["action_id"]
+    assert executed["controller_revision"] == transport["action"]["expected_head"]
+    assert executed["allowed_files"] == transport["action"]["allowed_paths"]
+    assert executed["task_card_hash"] == bound["task_card_hash"]
+    assert executed["contract_hash"] == bound["contract_hash"]
+    assert durable["attempt_id"] == transport["action"]["attempt_id"]
+    assert durable["action_id"] == transport["action"]["action_id"]
+    assert durable["idempotency_key"] == transport["action"]["idempotency_key"]

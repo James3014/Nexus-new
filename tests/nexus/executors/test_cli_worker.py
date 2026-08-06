@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 import time
@@ -166,3 +167,19 @@ def test_worker_does_not_inherit_ambient_target_override(tmp_path, monkeypatch):
 
     assert result.status is CliWorkerStatus.COMPLETED
     assert result.stdout == b"MISSING\n"
+
+
+def test_worker_receipt_exposes_only_bounded_task_environment(tmp_path):
+    request = CliWorkerRequest(
+        executable=sys.executable,
+        argv=("-c", "print('ok')"),
+        cwd=str(tmp_path),
+        env={"TASK_SCOPED_MARKER": "kept", "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+
+    result = run_cli_worker(request)
+
+    assert result.env == (
+        ("PYTHONDONTWRITEBYTECODE", hashlib.sha256(b"1").hexdigest()),
+        ("TASK_SCOPED_MARKER", hashlib.sha256(b"kept").hexdigest()),
+    )

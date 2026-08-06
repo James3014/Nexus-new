@@ -44,7 +44,13 @@ from nexus.orchestrator.task_contract import (
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
 from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
-from nexus.contracts.lifecycle_action import ContractKind, validate_owner_inline_contract
+from nexus.contracts.lifecycle_action import (
+    ContractKind,
+    LifecycleActionEnvelope,
+    LifecycleActionType,
+    canonical_request_hash,
+    validate_owner_inline_contract,
+)
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
@@ -95,6 +101,252 @@ def _parse_time(value: Optional[str]) -> Optional[float]:
         return datetime.fromisoformat(value).timestamp()
     except ValueError:
         return None
+
+
+def _validated_action_request(
+    request: Mapping[str, Any],
+) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """Validate the physical action payload before resolving task state."""
+    if "action" not in request and "bound_action_request" not in request:
+        return dict(request), None
+
+    raw_action = request.get("action")
+    if not isinstance(raw_action, Mapping):
+        raise ValueError("ACTION_ENVELOPE_INVALID")
+    raw_bound = request.get("bound_action_request")
+    if not isinstance(raw_bound, Mapping):
+        raise ValueError("BOUND_ACTION_REQUEST_REQUIRED")
+    try:
+        envelope = LifecycleActionEnvelope.model_validate(raw_action)
+    except Exception as exc:
+        raise ValueError(f"ACTION_ENVELOPE_INVALID: {exc}") from exc
+    if envelope.action_type not in {
+        LifecycleActionType.TASK_RUN,
+        LifecycleActionType.TASK_RETRY,
+    }:
+        raise ValueError("ACTION_TYPE_UNSUPPORTED_FOR_TASK_SUBMISSION")
+
+    bound = dict(raw_bound)
+    if canonical_request_hash(bound) != envelope.request_hash:
+        raise ValueError("BOUND_ACTION_REQUEST_HASH_MISMATCH")
+    for field in (
+        "task_id",
+        "attempt_id",
+        "action_id",
+        "idempotency_key",
+        "action_type",
+        "contract_kind",
+    ):
+        if field not in bound:
+            raise ValueError(f"ACTION_IDENTITY_MISSING: {field}")
+    for field, expected in (
+        ("task_card_path", envelope.task_card_path),
+        ("task_card_hash", envelope.task_card_hash),
+        ("contract_hash", envelope.contract_hash),
+    ):
+        if expected is not None and field not in bound:
+            raise ValueError(f"ACTION_IDENTITY_MISSING: {field}")
+    if envelope.expected_head is not None and not {
+        "controller_revision",
+        "expected_head",
+    }.intersection(bound):
+        raise ValueError("ACTION_IDENTITY_MISSING: expected_head")
+    if not {"allowed_files", "allowed_paths"}.intersection(bound):
+        raise ValueError("ACTION_IDENTITY_MISSING: allowed_paths")
+
+    def require_match(source: Mapping[str, Any], field: str, expected: Any) -> None:
+        if field in source and source[field] != expected:
+            raise ValueError(f"ACTION_IDENTITY_MISMATCH: {field}")
+
+    identity_fields = (
+        ("task_id", envelope.task_id),
+        ("attempt_id", envelope.attempt_id),
+        ("action_id", envelope.action_id),
+        ("idempotency_key", envelope.idempotency_key),
+        ("action_type", envelope.action_type.value),
+        ("task_card_path", envelope.task_card_path),
+        ("task_card_hash", envelope.task_card_hash),
+        ("contract_kind", envelope.contract_kind.value),
+        ("contract_hash", envelope.contract_hash),
+    )
+    for field, expected in identity_fields:
+        require_match(bound, field, expected)
+        require_match(request, field, expected)
+    require_match(request, "action_request_hash", envelope.request_hash)
+    require_match(request, "request_hash", envelope.request_hash)
+
+    for source in (bound, request):
+        require_match(source, "controller_revision", envelope.expected_head)
+        require_match(source, "expected_head", envelope.expected_head)
+    expected_paths = tuple(envelope.allowed_paths)
+    for source in (bound, request):
+        if "allowed_files" in source and tuple(source["allowed_files"]) != expected_paths:
+            raise ValueError("ACTION_IDENTITY_MISMATCH: allowed_paths")
+        if "allowed_paths" in source and tuple(source["allowed_paths"]) != expected_paths:
+            raise ValueError("ACTION_IDENTITY_MISMATCH: allowed_paths")
+
+    effective = dict(bound)
+    effective["action"] = envelope.model_dump(mode="json")
+    effective["bound_action_request"] = dict(bound)
+    for field, expected in identity_fields:
+        if expected is not None:
+            effective[field] = expected
+    if envelope.expected_head is not None:
+        effective["controller_revision"] = envelope.expected_head
+    if envelope.allowed_paths and "allowed_files" not in effective:
+        effective["allowed_files"] = list(envelope.allowed_paths)
+    effective["action_request_hash"] = envelope.request_hash
+    return effective, envelope.model_dump(mode="json")
+
+
+def _retry_request(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Create fresh attempt-scoped transport identity for one semantic task."""
+    raw_request = state.get("request")
+    if not isinstance(raw_request, Mapping):
+        raise ValueError("RETRY_REQUEST_MISSING")
+    request = json.loads(json.dumps(dict(raw_request)))
+    task_id = str(state.get("task_id") or request.get("task_id") or "").strip()
+    if not task_id:
+        raise ValueError("RETRY_TASK_ID_MISSING")
+
+    token = uuid4().hex
+    attempt_id = f"attempt-{token}"
+    action_id = f"action-{token}"
+    previous_key = str(state.get("idempotency_key") or request.get("idempotency_key") or task_id)
+    base_key = previous_key.split(":retry-", 1)[0]
+    suffix = f":retry-{token}"
+    idempotency_key = f"{base_key[: max(1, 256 - len(suffix))]}{suffix}"
+
+    raw_action = request.get("action")
+    if isinstance(raw_action, Mapping):
+        raw_bound = request.get("bound_action_request")
+        if not isinstance(raw_bound, Mapping):
+            raise ValueError("RETRY_BOUND_ACTION_REQUEST_MISSING")
+        envelope = LifecycleActionEnvelope.model_validate(raw_action)
+        bound = json.loads(json.dumps(dict(raw_bound)))
+        bound.update(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            action_id=action_id,
+            idempotency_key=idempotency_key,
+            action_type=LifecycleActionType.TASK_RETRY.value,
+        )
+        action_payload = envelope.model_dump(mode="json")
+        action_payload.update(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            action_id=action_id,
+            idempotency_key=idempotency_key,
+            action_type=LifecycleActionType.TASK_RETRY.value,
+            request_hash=canonical_request_hash(bound),
+        )
+        retry_action = LifecycleActionEnvelope.model_validate(action_payload).model_dump(mode="json")
+        return {
+            **bound,
+            "action": retry_action,
+            "bound_action_request": bound,
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "action_id": action_id,
+            "idempotency_key": idempotency_key,
+            "action_request_hash": retry_action["request_hash"],
+        }
+
+    request.update(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        action_id=action_id,
+        idempotency_key=idempotency_key,
+    )
+    request.pop("action_request_hash", None)
+    request["action_request_hash"] = canonical_request_hash(request)
+    return request
+
+
+def _retry_semantic_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove only attempt-scoped transport identity from a durable request."""
+    raw_bound = request.get("bound_action_request")
+    source = raw_bound if isinstance(raw_bound, Mapping) else request
+    payload = json.loads(json.dumps(dict(source)))
+    for field in (
+        "attempt_id",
+        "action_id",
+        "idempotency_key",
+        "action_request_hash",
+        "action_type",
+    ):
+        payload.pop(field, None)
+    return payload
+
+
+def _validate_retry_predecessor(
+    request: Mapping[str, Any],
+    predecessor: Optional[Mapping[str, Any]],
+) -> None:
+    """Fail closed unless TASK_RETRY is a fresh attempt of one terminal task."""
+    if predecessor is None:
+        raise ValueError("RETRY_REQUIRES_EXISTING_TASK")
+
+    status = str(predecessor.get("status") or "")
+    cleanup_decision = str(predecessor.get("cleanup_decision") or "")
+    retained_retry = (
+        status == "RETAINED_FOR_REVIEW"
+        and predecessor.get("promotion_status") == "NOT_CREATED"
+        and cleanup_decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+        and not (
+            predecessor.get("promotion_packet")
+            or predecessor.get("candidate_commit_sha")
+            or predecessor.get("candidate_ref")
+        )
+    )
+    retryable_terminal = status in {
+        "FINAL_BLOCK",
+        "REJECTED",
+        "SUPERSEDED",
+        "CANCELLED",
+        "INTEGRATION_FAILED",
+        "INTEGRATED",
+    } or retained_retry
+    if not retryable_terminal:
+        raise ValueError("RETRY_REQUIRES_TERMINAL_TASK")
+    if cleanup_decision not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
+        raise ValueError("RETRY_TARGET_DISPOSITION_REQUIRED")
+
+    attempts = predecessor.get("attempts") or ()
+    used_attempt_ids = {
+        str(item.get("attempt_id") or "")
+        for item in attempts
+        if isinstance(item, Mapping)
+    }
+    used_action_ids = {
+        str(item.get("action_id") or "")
+        for item in attempts
+        if isinstance(item, Mapping)
+    }
+    used_idempotency_keys = {
+        str(item.get("idempotency_key") or "")
+        for item in attempts
+        if isinstance(item, Mapping)
+    }
+    used_attempt_ids.add(str(predecessor.get("attempt_id") or ""))
+    used_action_ids.add(str(predecessor.get("action_id") or ""))
+    used_idempotency_keys.add(str(predecessor.get("idempotency_key") or ""))
+    if str(request.get("attempt_id") or "") in used_attempt_ids:
+        raise ValueError("RETRY_ATTEMPT_ID_REUSED")
+    if str(request.get("action_id") or "") in used_action_ids:
+        raise ValueError("RETRY_ACTION_ID_REUSED")
+    if str(request.get("idempotency_key") or "") in used_idempotency_keys:
+        raise ValueError("RETRY_IDEMPOTENCY_KEY_REUSED")
+
+    previous_request = predecessor.get("request")
+    if not isinstance(previous_request, Mapping):
+        raise ValueError("RETRY_PREDECESSOR_REQUEST_MISSING")
+    if canonical_request_hash(_retry_semantic_payload(request)) != canonical_request_hash(
+        _retry_semantic_payload(previous_request)
+    ):
+        raise ValueError("RETRY_SEMANTIC_TASK_MISMATCH")
+
+
 def resolve_canonical_target_roots(
     task_id: str,
     campaign_id: Optional[str] = None,
@@ -457,7 +709,12 @@ class SelfHostedTaskService:
         promotion_status = str(state.get("promotion_status") or "")
         candidate_commit = cls._candidate_commit(state)
 
-        if status == "DIRECT_RECONCILE_REQUIRED" and state.get("reconciliation_decision") == "RETAINED_FOR_REVIEW":
+        if status == "BLOCKED_INVALID_STATE":
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "inspect_lifecycle_state"
+            recommended_tool = None
+        elif status == "DIRECT_RECONCILE_REQUIRED" and state.get("reconciliation_decision") == "RETAINED_FOR_REVIEW":
             action_state = "FINAL_BLOCK"
             attention_required = True
             next_action = "inspect_receipt_and_candidate"
@@ -580,15 +837,117 @@ class SelfHostedTaskService:
         state["task_action"] = cls._task_action_envelope(state)
         return state
 
+    @classmethod
+    def _invalid_state_status(
+        cls,
+        task_id: str,
+        *,
+        code: str,
+        detail: str,
+        source_path: Path,
+    ) -> dict[str, Any]:
+        return cls._with_task_action({
+            "schema": "nexus.self_hosted_task_status.v1",
+            "task_id": task_id,
+            "status": "BLOCKED_INVALID_STATE",
+            "found": True,
+            "state_valid": False,
+            "retry_authorized": False,
+            "blocker": {
+                "code": code,
+                "detail": detail,
+                "source_path": str(source_path),
+            },
+        })
+
+    @classmethod
+    def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
+        try:
+            payload = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_READ_FAILED",
+                detail=f"state file could not be read: {type(exc).__name__}",
+                source_path=path,
+            )
+        try:
+            decoded = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_JSON_INVALID",
+                detail=f"state JSON is invalid at line {exc.lineno} column {exc.colno}",
+                source_path=path,
+            )
+        if not isinstance(decoded, Mapping):
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_NOT_OBJECT",
+                detail="state JSON must decode to an object",
+                source_path=path,
+            )
+
+        state = dict(decoded)
+        state_task_id = state.get("task_id")
+        status = state.get("status")
+        if not isinstance(state_task_id, str) or state_task_id != task_id:
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_FIELD_INVALID",
+                detail="state task_id is missing or does not match its filename",
+                source_path=path,
+            )
+        if not isinstance(status, str) or not status.strip():
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_FIELD_INVALID",
+                detail="state status must be a non-empty string",
+                source_path=path,
+            )
+        for field in ("attempts", "executions"):
+            value = state.get(field)
+            if field in state and (
+                not isinstance(value, list)
+                or any(not isinstance(item, Mapping) for item in value)
+            ):
+                return cls._invalid_state_status(
+                    task_id,
+                    code="STATE_FIELD_INVALID",
+                    detail=f"state {field} must be a list of objects",
+                    source_path=path,
+                )
+        for field in (
+            "action",
+            "attempt_resolution",
+            "contract",
+            "lease",
+            "promotion_packet",
+            "request",
+            "verified_receipt",
+        ):
+            if field in state and state[field] is not None and not isinstance(state[field], Mapping):
+                return cls._invalid_state_status(
+                    task_id,
+                    code="STATE_FIELD_INVALID",
+                    detail=f"state {field} must be an object",
+                    source_path=path,
+                )
+        return cls._with_task_action(state)
+
     def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
         latest_path: Optional[Path] = None
         latest_state: Optional[dict[str, Any]] = None
         latest_key: tuple[str, int] = ("", -1)
         for path in self._archive_state_candidates(task_id):
-            state = json.loads(path.read_text(encoding="utf-8"))
+            state = self._load_state_path(path, task_id)
+            if state is None:
+                continue
             key = (str(state.get("updated_at") or ""), path.stat().st_mtime_ns)
             if latest_state is None or key > latest_key:
-                latest_path, latest_state, latest_key = path, self._with_task_action(state), key
+                latest_path, latest_state, latest_key = path, state, key
         return latest_path, latest_state
 
     def _lock_path(self) -> Path:
@@ -630,10 +989,12 @@ class SelfHostedTaskService:
         with self._state_lock():
             destination = self._state_path(task_id)
             if destination.exists():
-                return self._with_task_action(json.loads(destination.read_text(encoding="utf-8"))), False
+                existing = self._load_state_path(destination, task_id)
+                if existing is not None:
+                    return existing, False
             _, archived = self._latest_archived_state(task_id)
             if archived is not None:
-                return self._with_task_action(archived), False
+                return archived, False
             return self._write_state_locked(task_id, state), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -644,7 +1005,7 @@ class SelfHostedTaskService:
         with self._state_lock():
             if not path.exists():
                 return None
-            return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
+            return self._load_state_path(path, task_id)
 
     def _read_state_snapshot(self, task_id: str) -> Optional[dict[str, Any]]:
         """Read a durable snapshot without creating or acquiring the state lock.
@@ -654,13 +1015,11 @@ class SelfHostedTaskService:
         direct read observes either the previous complete JSON or the next
         complete JSON; a concurrent disappearance is treated as absent.
         """
-        path = self._state_path(task_id)
-        try:
-            payload = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            _, archived = self._latest_archived_state(task_id)
-            return archived
-        return self._with_task_action(json.loads(payload))
+        state = self._load_state_path(self._state_path(task_id), task_id)
+        if state is not None:
+            return state
+        _, archived = self._latest_archived_state(task_id)
+        return archived
 
     def _promotion_authority_error(
         self,
@@ -826,7 +1185,7 @@ class SelfHostedTaskService:
             if status in TERMINAL_STATUSES:
                 state["worker_finished_at"] = now
                 state["worker_child_pgid"] = None
-            for attempt in state.get("attempts", []):
+            for attempt in state.get("attempts") or []:
                 if attempt.get("attempt_id") == state.get("attempt_id"):
                     attempt["last_status"] = status
                     attempt["updated_at"] = now
@@ -1181,7 +1540,7 @@ class SelfHostedTaskService:
         policy = self._escalation_policy(contract)
         attempts = [
             receipt
-            for raw in state.get("executions", [])
+            for raw in state.get("executions") or []
             if (receipt := self._receipt_from_state(raw)) is not None
         ]
         is_fast_lane = check_fast_lane_eligible(contract, request)
@@ -1861,6 +2220,8 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             return state
+        if state.get("state_valid") is False:
+            return state
         if state.get("status") == "DIRECT_RECONCILE_REQUIRED":
             return self._reconcile_direct_failure(task_id)
         if state.get("status") in {"DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
@@ -2155,6 +2516,10 @@ class SelfHostedTaskService:
                         "status": state.get("status"),
                         "promotion_status": state.get("promotion_status"),
                         "verification_verdict": state.get("verification_verdict"),
+                        "found": state.get("found", True),
+                        "state_valid": state.get("state_valid", True),
+                        "blocker": state.get("blocker"),
+                        "retry_authorized": state.get("retry_authorized"),
                         "task_action": envelope,
                     }),
                     "wait": {
@@ -2173,6 +2538,10 @@ class SelfHostedTaskService:
                         "status": state.get("status"),
                         "promotion_status": state.get("promotion_status"),
                         "verification_verdict": state.get("verification_verdict"),
+                        "found": state.get("found", True),
+                        "state_valid": state.get("state_valid", True),
+                        "blocker": state.get("blocker"),
+                        "retry_authorized": state.get("retry_authorized"),
                         "task_action": envelope,
                     }),
                     "task_action": envelope,
@@ -2220,6 +2589,25 @@ class SelfHostedTaskService:
             state = self._read_state_snapshot(path.stem)
             if state is not None:
                 states[path.stem] = state
+        return states
+
+    def _submission_task_states(self) -> dict[str, dict[str, Any]]:
+        """Fail closed when submission authority cannot trust durable state."""
+        states = self._workspace_task_states()
+        invalid = [
+            state
+            for state in states.values()
+            if state.get("state_valid") is False
+        ]
+        if invalid:
+            blockers = ",".join(
+                f"{state.get('task_id') or 'unknown'}:"
+                f"{(state.get('blocker') or {}).get('code') or 'STATE_INVALID'}"
+                for state in invalid
+            )
+            raise RuntimeError(
+                f"INVALID_DURABLE_STATE_BLOCKS_SUBMISSION:{blockers}"
+            )
         return states
 
     def workspace_inventory(
@@ -2460,8 +2848,7 @@ class SelfHostedTaskService:
             else None
         )
         if idempotency_key and self.state_dir.exists():
-            for path in sorted(self.state_dir.glob("*.json")):
-                current = json.loads(path.read_text(encoding="utf-8"))
+            for current in self._submission_task_states().values():
                 if str(current.get("idempotency_key") or "") != idempotency_key:
                     continue
                 current_hash = str(current.get("action_request_hash") or current.get("request_hash") or "")
@@ -2547,7 +2934,13 @@ class SelfHostedTaskService:
             "action": _jsonable(dict(action)) if action else None,
             "action_id": action_id,
             "attempt_id": attempt_id,
-            "attempts": [{"attempt_id": attempt_id, "started_at": now}],
+            "attempts": [{
+                "attempt_id": attempt_id,
+                "action_id": action_id or None,
+                "idempotency_key": idempotency_key or None,
+                "action_request_hash": request_hash or None,
+                "started_at": now,
+            }],
             "idempotency_key": idempotency_key,
             "action_request_hash": request_hash,
             "request_hash": request_hash,
@@ -2847,6 +3240,7 @@ class SelfHostedTaskService:
         raise RuntimeError("CURRENT_EXECUTION_IDENTITY_REQUIRED")
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        request, _ = _validated_action_request(request)
         task_id = self._resolve_current_execution_task_id(request)
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
         if action and not self.ephemeral:
@@ -2865,8 +3259,27 @@ class SelfHostedTaskService:
         action_id = str(request.get("action_id") or action.get("action_id") or "")
         attempt_id_hint = str(request.get("attempt_id") or action.get("attempt_id") or "")
         idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or "")
-        action_request_hash = str(request.get("action_request_hash") or action.get("request_hash") or "")
-        states = self._workspace_task_states()
+        action_request_hash = str(
+            request.get("action_request_hash")
+            or action.get("request_hash")
+            or self._request_hash(request)
+        )
+        states = self._submission_task_states()
+        if action and idempotency_key:
+            for current in states.values():
+                if str(current.get("idempotency_key") or "") != idempotency_key:
+                    continue
+                current_hash = str(current.get("action_request_hash") or "")
+                if current_hash and action_request_hash and current_hash != action_request_hash:
+                    raise ValueError("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")
+                return {
+                    **self._with_task_action(current),
+                    "duplicate": True,
+                    "duplicate_action_id": current.get("action_id"),
+                    "idempotency_key": idempotency_key,
+                }
+        if action.get("action_type") == LifecycleActionType.TASK_RETRY.value:
+            _validate_retry_predecessor(request, self._read_state_snapshot(task_id))
         active_mutations = sum(
             1 for state in states.values()
             if state.get("task_id") != task_id
@@ -2884,10 +3297,7 @@ class SelfHostedTaskService:
         contract = self.build_contract(request)
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
-        existing_states = [
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in sorted(self.state_dir.glob("*.json"))
-        ] if self.state_dir.exists() else []
+        existing_states = list(self._submission_task_states().values())
         for current in existing_states:
             current_key = str(current.get("idempotency_key") or "")
             if idempotency_key and current_key == idempotency_key:
@@ -2927,7 +3337,7 @@ class SelfHostedTaskService:
                 and not request.get("competition_id")
             ):
                 raise RuntimeError("serial Target budget exceeded: another task owns the active Target")
-        attempt_id = uuid4().hex
+        attempt_id = attempt_id_hint if action else uuid4().hex
         now = _utc_now()
         state: dict[str, Any] = {
             "schema": "nexus.self_hosted_task_state.v1",
@@ -2969,7 +3379,13 @@ class SelfHostedTaskService:
                 )
             ),
             "attempt_id": attempt_id,
-            "attempts": [{"attempt_id": attempt_id, "started_at": now}],
+            "attempts": [{
+                "attempt_id": attempt_id,
+                "action_id": action_id or None,
+                "idempotency_key": idempotency_key or None,
+                "action_request_hash": action_request_hash or None,
+                "started_at": now,
+            }],
             "worker_pid": None,
             "worker_pgid": None,
             "worker_child_pgid": None,
@@ -3030,7 +3446,7 @@ class SelfHostedTaskService:
                 if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
                     raise RuntimeError("terminal retry blocked until previous Target disposition")
                 existing = self._reactivate_archived_state(contract.task_id, existing)
-                attempt_id = uuid4().hex
+                attempt_id = attempt_id_hint or uuid4().hex
                 def retry(current: dict[str, Any]) -> None:
                     packet = current.get("promotion_packet") or {}
                     if packet.get("candidate_commit_sha") or current.get("candidate_ref"):
@@ -3066,8 +3482,22 @@ class SelfHostedTaskService:
                             "target_created_at": None,
                             "worker_provider": contract.preferred_provider,
                         })
+                    current.update({
+                        "request": _jsonable(dict(request)),
+                        "action": _jsonable(dict(action)) if action else None,
+                        "action_id": action_id or None,
+                        "attempt_id_hint": attempt_id_hint or None,
+                        "idempotency_key": idempotency_key or None,
+                        "action_request_hash": action_request_hash or None,
+                    })
                     current["attempt_id"] = attempt_id
-                    current.setdefault("attempts", []).append({"attempt_id": attempt_id, "started_at": now})
+                    current.setdefault("attempts", []).append({
+                        "attempt_id": attempt_id,
+                        "action_id": action_id or None,
+                        "idempotency_key": idempotency_key or None,
+                        "action_request_hash": action_request_hash or None,
+                        "started_at": now,
+                    })
                     current["status"] = "SUBMITTED"
                     current.setdefault("status_history", []).append({"status": "ATTEMPT_INCREMENTED", "at": now})
                     current["lease"] = None
@@ -3131,6 +3561,17 @@ class SelfHostedTaskService:
         state = self._read_state_snapshot(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("state_valid") is False:
+            return {
+                **state,
+                "retry": {
+                    "task_id": task_id,
+                    "previous_status": state.get("status"),
+                    "previous_attempt_id": None,
+                    "decision": "BLOCKED_INVALID_STATE",
+                    "blocker": (state.get("blocker") or {}).get("code"),
+                },
+            }
 
         status = str(state.get("status") or "UNKNOWN")
         cleanup_decision = str(state.get("cleanup_decision") or "")
@@ -3174,10 +3615,13 @@ class SelfHostedTaskService:
             )
             return {**state, "retry": retry_meta}
 
-        result = dict(self.submit_task(request))
+        retry_request = _retry_request(state)
+        result = dict(self.submit_task(retry_request))
         retry_meta.update(
             decision="REUSED_TASK_ID",
             new_attempt_id=result.get("attempt_id"),
+            new_action_id=result.get("action_id"),
+            new_idempotency_key=result.get("idempotency_key"),
             attempts=len(result.get("attempts") or ()),
         )
         result["retry"] = retry_meta
@@ -3457,7 +3901,13 @@ class SelfHostedTaskService:
         return self._read_state(task_id) or {**cancelled, "cleanup": result}
 
     def lifecycle_status(self) -> dict[str, Any]:
-        states = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(self.state_dir.glob("*.json"))] if self.state_dir.exists() else []
+        states = [
+            state
+            for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists()
+            if (state := self._read_state_snapshot(path.stem)) is not None
+        ]
+        invalid_states = [state for state in states if state.get("state_valid") is False]
+        valid_states = [state for state in states if state.get("state_valid") is not False]
 
         def has_active_target(state: Mapping[str, Any]) -> bool:
             target_worktree = (state.get("lease") or {}).get("target_worktree")
@@ -3470,8 +3920,10 @@ class SelfHostedTaskService:
         return {
             "canonical_state_root": str(self.state_dir),
             "tasks": len(states),
-            "active_tasks": sum(state.get("status") not in TERMINAL_STATUSES for state in states),
-            "active_targets": sum(has_active_target(state) for state in states),
+            "active_tasks": sum(state.get("status") not in TERMINAL_STATUSES for state in valid_states),
+            "active_targets": sum(has_active_target(state) for state in valid_states),
+            "invalid_states": len(invalid_states),
+            "blockers": [state["blocker"] for state in invalid_states],
         }
 
     def _cleanup_authority_blocker(
@@ -3884,7 +4336,7 @@ class SelfHostedTaskService:
 
 
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
-        return self.reconcile_task(task_id)
+        return self.get_task_snapshot(task_id, include_details=True)
 
     def get_task_snapshot(self, task_id: str, *, include_details: bool = False) -> Optional[dict[str, Any]]:
         """Read status without reconciliation or state-lock acquisition."""
@@ -3900,6 +4352,10 @@ class SelfHostedTaskService:
             "status": state.get("status"),
             "promotion_status": state.get("promotion_status"),
             "verification_verdict": state.get("verification_verdict"),
+            "found": state.get("found", True),
+            "state_valid": state.get("state_valid", True),
+            "blocker": state.get("blocker"),
+            "retry_authorized": state.get("retry_authorized"),
             "task_action": action,
         }
 

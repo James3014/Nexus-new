@@ -229,9 +229,54 @@ def test_gateway_forwards_high_level_lifecycle_actions():
     status = gateway.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "nexus_task_status", "arguments": {"task_id": "t1"}}})
     finish = gateway.handle({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "nexus_task_finish", "arguments": {"execution_lane": "DIRECT_CANONICAL", "request": {"task_id": "t1"}, "expected_commit_sha": "a" * 40}}})
     cancel = gateway.handle({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "nexus_task_cancel", "arguments": {"task_id": "t1"}}})
-    assert status["result"]["structuredContent"]["status"] == "TERMINAL"
+    assert status["result"]["structuredContent"]["status"] == "PENDING_HUMAN_APPROVAL"
     assert finish["result"]["structuredContent"]["status"] == "DIRECT_CANONICAL_COMPLETED"
     assert cancel["result"]["structuredContent"]["status"] == "CANCELLED"
+
+
+def test_gateway_status_and_wait_return_read_only_not_found_envelopes():
+    class MissingTaskService(FakeService):
+        def __init__(self):
+            super().__init__()
+            self.reconcile_reads = 0
+            self.snapshot_reads = 0
+
+        def get_task(self, task_id):
+            self.reconcile_reads += 1
+            return None
+
+        def get_task_snapshot(self, task_id, *, include_details=False):
+            self.snapshot_reads += 1
+            return None
+
+        def wait_task(self, task_id, **kwargs):
+            return None
+
+    service = MissingTaskService()
+    gateway = UnifiedMCPGateway(service=service)
+
+    status = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 701,
+        "method": "tools/call",
+        "params": {"name": "nexus_task_status", "arguments": {"task_id": "missing-task"}},
+    })
+    waited = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 702,
+        "method": "tools/call",
+        "params": {"name": "nexus_task_wait", "arguments": {"task_id": "missing-task"}},
+    })
+
+    for response in (status, waited):
+        assert response["result"]["isError"] is False
+        payload = response["result"]["structuredContent"]
+        assert payload["status"] == "NOT_FOUND"
+        assert payload["found"] is False
+        assert payload["retry_authorized"] is False
+        assert payload["task_action"]["next_action"] == "none"
+    assert service.reconcile_reads == 0
+    assert service.snapshot_reads == 1
 
 
 def test_wait_forwards_bounded_timeout_and_returns_next_action():

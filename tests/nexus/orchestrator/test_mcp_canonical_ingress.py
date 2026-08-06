@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,7 +15,55 @@ class _NoDispatchService:
 
     def submit_task(self, request: dict[str, Any]) -> dict[str, Any]:
         self.submitted.append(request)
-        raise AssertionError("canonical MCP ingress must not dispatch before runtime convergence")
+        raise AssertionError("canonical MCP ingress must not enter lifecycle dispatch")
+
+
+class _RuntimeResult(SimpleNamespace):
+    def __bool__(self) -> bool:
+        return bool(self.ok)
+
+
+@pytest.fixture(autouse=True)
+def _canonical_runtime(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    def _execute(task_text, project_root, execution_context=None):
+        calls.append(
+            {
+                "task_text": task_text,
+                "project_root": project_root,
+                "execution_context": dict(execution_context or {}),
+            }
+        )
+        task_id = str((execution_context or {}).get("task_id") or "mcp-runtime")
+        return _RuntimeResult(
+            ok=True,
+            receipt={
+                "task_id": task_id,
+                "canonical_execution": {
+                    "execution_decision_authority": "CapabilityPlanner",
+                    "context_hash": "context-hash",
+                    "decision_hash": "decision-hash",
+                    "projection_hash": "projection-hash",
+                },
+            },
+            receipt_path="/tmp/mcp-canonical-runtime.json",
+            root_receipt={
+                "schema": "nexus.root_receipt.v1",
+                "root_receipt_hash": "sha256:" + "a" * 64,
+            },
+            root_receipt_valid=True,
+            root_receipt_blockers=(),
+            execution_decision_authority="CapabilityPlanner",
+            production_ingress_count=1,
+            production_runtime_entry_count=1,
+        )
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.execute_canonical_product_task",
+        _execute,
+    )
+    return calls
 
 
 def _call_task_run(gateway: UnifiedMCPGateway, **overrides: Any) -> dict[str, Any]:
@@ -42,11 +91,18 @@ def test_task_run_schema_excludes_caller_route_override_fields() -> None:
     schema = spec["inputSchema"]
     properties = schema["properties"]
 
-    assert "execution_preference" not in properties
-    assert "preferred_worker" not in properties
-    assert "preferred_model" not in properties
     assert set(properties) == {"task_id", "what", "why", "allowed_files", "verifier_commands"}
     assert schema["additionalProperties"] is False
+    assert properties["verifier_commands"]["maxItems"] == 1
+    for field in (
+        "execution_preference",
+        "preferred_worker",
+        "preferred_model",
+        "execution_lane",
+        "provider",
+        "model",
+    ):
+        assert field not in properties
 
 
 @pytest.mark.parametrize(
@@ -61,105 +117,79 @@ def test_task_run_schema_excludes_caller_route_override_fields() -> None:
         ("target_repo_root", "/tmp/forged-target"),
     ),
 )
-def test_task_run_rejects_caller_route_override_before_planning(
-    monkeypatch: pytest.MonkeyPatch,
+def test_task_run_rejects_caller_route_override_before_runtime(
+    _canonical_runtime: list[dict[str, Any]],
     field: str,
     value: str,
 ) -> None:
-    from nexus.engine import canonical_execution
-
-    planned = False
-
-    def _unexpected_plan(*_args: Any, **_kwargs: Any) -> Any:
-        nonlocal planned
-        planned = True
-        raise AssertionError("planner must not run for a forged route override")
-
-    monkeypatch.setattr(canonical_execution, "plan_canonical_task", _unexpected_plan)
     service = _NoDispatchService()
     result = _call_task_run(UnifiedMCPGateway(service=service), **{field: value})
 
     assert result["isError"] is True
     assert result["structuredContent"]["error"] == f"CALLER_ROUTE_OVERRIDE_FORBIDDEN:{field}"
-    assert planned is False
+    assert _canonical_runtime == []
     assert service.submitted == []
 
 
-def test_task_run_returns_canonical_decision_without_physical_dispatch() -> None:
+def test_task_run_enters_canonical_product_runtime_once(
+    _canonical_runtime: list[dict[str, Any]],
+) -> None:
     service = _NoDispatchService()
     result = _call_task_run(UnifiedMCPGateway(service=service))
 
     assert result["isError"] is False
     payload = result["structuredContent"]
-    assert payload["schema"] == "nexus.mcp_canonical_decision.v1"
-    assert payload["status"] == "CANONICAL_DECISION_READY"
+    assert payload["schema"] == "nexus.mcp_canonical_runtime.v1"
+    assert payload["status"] == "SUCCEEDED"
     assert payload["execution_decision_authority"] == "CapabilityPlanner"
-    assert payload["mutation_dispatched"] is False
-    assert payload["context_hash"] == payload["execution_decision"]["context_hash"]
-    assert payload["decision_hash"] == payload["canonical_execution_projection"]["decision_hash"]
-    assert payload["projection_hash"]
-    assert "execution_lane" not in payload
-    assert "provider" not in payload
-    assert "model" not in payload
+    assert payload["runtime_dispatched"] is True
+    assert payload["formal_workspace_mutated"] is False
+    assert payload["root_receipt_valid"] is True
+    assert payload["production_ingress_count"] == 1
+    assert payload["production_runtime_entry_count"] == 1
+    assert len(_canonical_runtime) == 1
+    call = _canonical_runtime[0]
+    assert call["execution_context"]["local_assist_mode"] == "advisor"
+    assert call["execution_context"]["target_files"] == ["README.md"]
+    assert "online_policy" not in call["execution_context"]
     assert service.submitted == []
 
 
-def test_task_run_carries_the_exact_plan_bundle_for_runtime_continuation() -> None:
-    payload = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))[
-        "structuredContent"
-    ]
-
-    bundle = payload["canonical_planning_bundle"]
-    assert bundle["schema"] == "nexus.canonical_planning_bundle.v1"
-    assert bundle["context_hash"] == payload["context_hash"]
-    assert bundle["plan_hash"] == payload["execution_decision"]["plan_hash"]
-    assert bundle["decision_hash"] == payload["decision_hash"]
-    assert bundle["projection_hash"] == payload["projection_hash"]
-    assert bundle["plan_payload"]["signal_snapshot"]["workforce_demands"]
-
-
-def test_mcp_and_direct_seam_produce_the_same_decision_hash(
-    monkeypatch: pytest.MonkeyPatch,
+def test_task_run_threads_one_verifier_to_world_c(
+    _canonical_runtime: list[dict[str, Any]],
 ) -> None:
-    from nexus.engine.canonical_execution import plan_canonical_task_bundle
-    from nexus.orchestrator import canonical_mcp_ingress
-
-    context = canonical_mcp_ingress.build_mcp_task_context(
-        task_id="mcp-canonical-ingress",
-        what="Inspect one bounded file",
-        why="Verify canonical ingress identity",
-        allowed_files=["README.md"],
+    result = _call_task_run(
+        UnifiedMCPGateway(service=_NoDispatchService()),
+        verifier_commands=["python -m py_compile README.md"],
     )
-    direct_bundle = plan_canonical_task_bundle(context)
-    planner_calls = 0
-
-    def _counted_plan(canonical_context):
-        nonlocal planner_calls
-        planner_calls += 1
-        return plan_canonical_task_bundle(canonical_context)
-
-    monkeypatch.setattr(canonical_mcp_ingress, "plan_canonical_task_bundle", _counted_plan)
-    result = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))
-    payload = result["structuredContent"]
 
     assert result["isError"] is False
-    assert planner_calls == 1
-    assert payload["decision_hash"] == direct_bundle.decision.decision_hash
-    assert payload["projection_hash"] == direct_bundle.projection.projection_hash
+    assert _canonical_runtime[0]["execution_context"]["verifier_command"] == (
+        "python -m py_compile README.md"
+    )
 
 
-def test_gateway_task_run_contains_no_route_authority_writer() -> None:
+def test_task_run_rejects_parallel_verifier_authority(
+    _canonical_runtime: list[dict[str, Any]],
+) -> None:
+    result = _call_task_run(
+        UnifiedMCPGateway(service=_NoDispatchService()),
+        verifier_commands=["pytest -q", "git diff --check"],
+    )
+
+    assert result["isError"] is True
+    assert "supports exactly one isolated command" in result["structuredContent"]["error"]
+    assert _canonical_runtime == []
+
+
+def test_gateway_task_run_contains_no_second_planner_or_lifecycle_writer() -> None:
     source = inspect.getsource(UnifiedMCPGateway._task_run)
 
-    assert not hasattr(UnifiedMCPGateway, "_plan_route")
-    for forbidden in (
-        "execution_lane",
-        "execution_preference",
-        "preferred_worker",
-        "preferred_model",
-        "resolve_execution_lane",
-    ):
-        assert forbidden not in source
+    assert source.count("execute_canonical_product_task(") == 1
+    assert "plan_mcp_task" not in source
+    assert "plan_canonical_task" not in source
+    assert "submit_task" not in source
+    assert "execution_lane" not in source
 
 
 @pytest.mark.parametrize(
@@ -168,11 +198,9 @@ def test_gateway_task_run_contains_no_route_authority_writer() -> None:
         "task_card_path",
         "task_card_hash",
         "owner_confirmation",
-        "owner_inline_expires_at",
         "worker_may_commit",
         "idempotency_key",
         "apply",
-        "controller_dirty_baseline_authorization",
         "dirty_overlap",
     ),
 )
@@ -183,41 +211,17 @@ def test_task_run_rejects_noncanonical_execution_control_fields(field: str) -> N
     assert result["structuredContent"]["error"] == f"MCP_CANONICAL_INGRESS_FIELD_FORBIDDEN:{field}"
 
 
-def test_task_run_decision_does_not_probe_dirty_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
-    from nexus.orchestrator import worktree_manager
-
-    def _unexpected_snapshot(*_args: Any, **_kwargs: Any) -> bytes:
-        raise AssertionError("dirty worktree is a post-decision containment fact")
-
-    monkeypatch.setattr(
-        worktree_manager.WorktreeManager,
-        "_status_bytes",
-        _unexpected_snapshot,
-    )
-    result = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))
-
-    assert result["isError"] is False
-    assert result["structuredContent"]["status"] == "CANONICAL_DECISION_READY"
-
-
-def test_mcp_reconnect_preserves_task_and_decision_identity() -> None:
-    first = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))["structuredContent"]
-    second = _call_task_run(UnifiedMCPGateway(service=_NoDispatchService()))["structuredContent"]
-
-    assert first["task_id"] == second["task_id"]
-    assert first["context_hash"] == second["context_hash"]
-    assert first["decision_hash"] == second["decision_hash"]
-    assert first["projection_hash"] == second["projection_hash"]
-
-
-def test_mcp_canonical_ingress_soak_never_dispatches_mutation() -> None:
+def test_mcp_canonical_ingress_soak_uses_one_runtime_per_request(
+    _canonical_runtime: list[dict[str, Any]],
+) -> None:
     service = _NoDispatchService()
     gateway = UnifiedMCPGateway(service=service)
 
     for index in range(20):
         result = _call_task_run(gateway, task_id=f"mcp-canonical-soak-{index}")
         assert result["isError"] is False
-        assert result["structuredContent"]["status"] == "CANONICAL_DECISION_READY"
-        assert result["structuredContent"]["mutation_dispatched"] is False
+        assert result["structuredContent"]["runtime_dispatched"] is True
+        assert result["structuredContent"]["formal_workspace_mutated"] is False
 
+    assert len(_canonical_runtime) == 20
     assert service.submitted == []

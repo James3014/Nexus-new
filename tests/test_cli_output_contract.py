@@ -1,9 +1,43 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_mod
+
+
+class _RuntimeResult(SimpleNamespace):
+    def __bool__(self):
+        return bool(self.ok)
+
+
+def _runtime_result(*, ok: bool = True):
+    root_hash = "sha256:" + "a" * 64
+    receipt = {
+        "task_id": "cli-test",
+        "workspace_revision": "test-revision",
+        "terminal_status": "SUCCEEDED" if ok else "INCOMPLETE",
+        "receipt_complete": ok,
+        "local": {"status": "NOT_REQUESTED", "gate_passed": False},
+        "online": {
+            "status": "SUCCEEDED" if ok else "FAILED",
+            "gate_passed": ok,
+            "response": {"provider": "fixture"},
+        },
+        "claim_boundary": {"public_claim_allowed": False},
+    }
+    return _RuntimeResult(
+        ok=ok,
+        receipt=receipt,
+        receipt_path="/tmp/canonical-runtime.json",
+        root_receipt={"root_receipt_hash": root_hash},
+        root_receipt_valid=ok,
+        root_receipt_blockers=() if ok else ("receipt_not_complete",),
+        execution_decision_authority="CapabilityPlanner",
+        production_ingress_count=1,
+        production_runtime_entry_count=1,
+    )
 
 
 def test_nexus_cli_compat_shim_uses_canonical_service_factory(monkeypatch, tmp_path):
@@ -39,7 +73,7 @@ def test_run_fails_fast_when_task_requests_file_output_without_output_file():
 
 def test_run_writes_output_file_when_explicit_path_provided(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(cli_mod, "execute_single_task_via_service", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(cli_mod, "execute_canonical_product_task", lambda *_args, **_kwargs: _runtime_result())
 
     out_path = tmp_path / "out" / "task_result.json"
     report_path = tmp_path / "reports" / "run_report.json"
@@ -62,7 +96,10 @@ def test_run_writes_output_file_when_explicit_path_provided(monkeypatch, tmp_pat
     assert report["runtime_classification"] == "verified_pass"
     assert report["retryable"] is False
     assert report["blocker_type"] == "none"
-    assert report["execution_path"] == "cli->command_service->engine"
+    assert report["execution_path"] == "cli->canonical_task_seam->mainchain"
+    assert report["root_receipt_valid"] is True
+    assert report["production_ingress_count"] == 1
+    assert report["production_runtime_entry_count"] == 1
     assert str(out_path) in report["artifact_paths"]
 
 
@@ -74,9 +111,9 @@ def test_run_uses_canonical_single_task_executor(monkeypatch, tmp_path):
         called["task_text"] = task_text
         called["project_root"] = project_root
         called["execution_context"] = execution_context or {}
-        return True
+        return _runtime_result()
 
-    monkeypatch.setattr(cli_mod, "execute_single_task_via_service", _fake_execute)
+    monkeypatch.setattr(cli_mod, "execute_canonical_product_task", _fake_execute)
     runner = CliRunner()
     res = runner.invoke(cli_mod.nexus, ["nexus", "run", "fix canonical seam"])
     assert res.exit_code == 0, res.output
@@ -89,7 +126,11 @@ def test_run_uses_canonical_single_task_executor(monkeypatch, tmp_path):
 
 def test_run_fails_closed_when_canonical_executor_returns_false(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(cli_mod, "execute_single_task_via_service", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        cli_mod,
+        "execute_canonical_product_task",
+        lambda *_args, **_kwargs: _runtime_result(ok=False),
+    )
     report_path = tmp_path / "reports" / "failed_run.json"
     runner = CliRunner()
     res = runner.invoke(cli_mod.nexus, ["nexus", "run", "broken-task", "--report-file", str(report_path)])
@@ -104,7 +145,7 @@ def test_run_fails_closed_when_canonical_executor_returns_false(monkeypatch, tmp
 
 def test_run_direct_mode_fails_closed_when_semantic_audit_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(cli_mod, "execute_single_task_via_service", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(cli_mod, "execute_canonical_product_task", lambda *_args, **_kwargs: _runtime_result())
     monkeypatch.setattr(
         cli_mod,
         "evaluate_direct_mode_completion",

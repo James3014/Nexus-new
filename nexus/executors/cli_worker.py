@@ -38,6 +38,19 @@ _INHERITED_ENV_ALLOWLIST = frozenset({
 })
 
 
+def bounded_environment_receipt(
+    environment: Optional[Mapping[str, str]],
+) -> Tuple[Tuple[str, str], ...]:
+    """Bind task-scoped environment values without persisting secrets."""
+    return tuple(sorted(
+        (
+            str(key),
+            hashlib.sha256(str(value).encode("utf-8")).hexdigest(),
+        )
+        for key, value in (environment or {}).items()
+    ))
+
+
 def _resolve_executable(executable: str) -> str:
     if not isinstance(executable, str) or not executable.strip():
         raise ValueError("executable must be non-empty")
@@ -107,6 +120,7 @@ class CliWorkerResult:
     process_group_killed: bool = False
     timed_out: bool = False
     executable_sha256: str = ""
+    env: Tuple[Tuple[str, str], ...] = ()
     telemetry: dict[str, int] = field(default_factory=dict)
 
     @staticmethod
@@ -204,6 +218,9 @@ def run_cli_worker(
         process_group_id=process_group_id,
         process_group_killed=group_killed,
         timed_out=timed_out,
+        # Receipt only exposes the bounded task-scoped overlay, never the
+        # inherited allowlist (which may contain machine-specific paths).
+        env=bounded_environment_receipt(request.env),
         telemetry={
             "wall_time_ms": wall_time_ms,
             "process_group_id": process_group_id or 0,

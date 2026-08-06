@@ -62,6 +62,16 @@ def _forbidden_context_key(key: str) -> bool:
     )
 
 
+def _allowed_route_evidence_key(*, path: str, key: str) -> bool:
+    """Allow observed route receipts without admitting route selection inputs."""
+    if path == "codeintel" and key == "formal_route_receipts":
+        return True
+    return (
+        path.startswith("codeintel.formal_route_receipts[]")
+        and key == "route"
+    )
+
+
 def _freeze_json(value: Any, *, path: str) -> Any:
     if isinstance(value, Mapping):
         frozen: dict[str, Any] = {}
@@ -69,7 +79,10 @@ def _freeze_json(value: Any, *, path: str) -> Any:
         if any(not isinstance(raw_key, str) for raw_key in raw_keys):
             raise ValueError(f"canonical_context_key_must_be_string:{path}")
         for raw_key in sorted(raw_keys):
-            if _forbidden_context_key(raw_key):
+            if _forbidden_context_key(raw_key) and not _allowed_route_evidence_key(
+                path=path,
+                key=raw_key,
+            ):
                 raise ValueError(f"canonical_context_route_override_forbidden:{path}.{raw_key}")
             frozen[raw_key] = _freeze_json(value[raw_key], path=f"{path}.{raw_key}")
         return MappingProxyType(frozen)

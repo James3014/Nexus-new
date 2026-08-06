@@ -5886,7 +5886,7 @@ def test_c15_3t_delegated_retry_stage_first_patch_empty(tmp_path) -> None:
     # C15-3U observability assertions
     assert meta.get("delegated_retry_provider_prompt_len", 0) > 0
     assert meta.get("delegated_retry_provider_prompt_hash", "") != ""
-    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b-instruct"
+    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b"
     assert meta.get("delegated_retry_provider_response_is_none") is False
     assert meta.get("delegated_retry_provider_response_empty") is True
     assert meta.get("delegated_retry_provider_response_len") == 0
@@ -6404,7 +6404,7 @@ def test_delegated_retry_falls_back_to_pipeline_model_without_override(tmp_path)
     meta = resp.raw_model_metadata
     assert meta.get("pipeline_retry_delegated") is True
     assert meta.get("delegated_retry_provider_called") is True
-    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b-instruct", \
+    assert meta.get("delegated_retry_provider_model_name") == "qwen2.5-coder:7b", \
         f"Expected fallback to 7B, got {meta.get('delegated_retry_provider_model_name')}"
 
 

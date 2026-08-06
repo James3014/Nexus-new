@@ -36,7 +36,11 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     build_action_envelope,
 )
-from nexus.orchestrator.canonical_mcp_ingress import plan_mcp_task, reject_caller_route_overrides
+from nexus.engine.canonical_task_seam import execute_canonical_product_task
+from nexus.orchestrator.canonical_mcp_ingress import (
+    build_mcp_execution_context,
+    reject_caller_route_overrides,
+)
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
     configure_runtime_manifest_hash,
@@ -1803,7 +1807,7 @@ class UnifiedMCPGateway:
             },
             {
                 "name": "nexus_task_run",
-                "description": "Normalize one bounded MCP task and return its canonical planner decision without dispatching mutation.",
+                "description": "Run one bounded task through the canonical Planner, Online/Local runtime, verifier, and RootReceipt path.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["what", "why", "allowed_files"],
@@ -1812,7 +1816,7 @@ class UnifiedMCPGateway:
                         "what": {"type": "string"},
                         "why": {"type": "string"},
                         "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
-                        "verifier_commands": {"type": "array", "items": {"type": "string"}},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}, "maxItems": 1},
                     },
                     "additionalProperties": False,
                 },
@@ -2025,6 +2029,42 @@ class UnifiedMCPGateway:
     def _success(request_id: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
         text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": text}], "structuredContent": dict(payload), "isError": False}}
+
+    @staticmethod
+    def _task_not_found(
+        task_id: str,
+        *,
+        operation: str,
+        timeout_seconds: Optional[float] = None,
+        poll_interval_seconds: Optional[float] = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "schema": "nexus.self_hosted_task_status.v1",
+            "task_id": task_id,
+            "status": "NOT_FOUND",
+            "found": False,
+            "state_valid": False,
+            "retry_authorized": False,
+            "blocker": {"code": "TASK_NOT_FOUND", "detail": "no lifecycle state exists for task_id"},
+            "task_action": {
+                "schema": "nexus.self_hosted_task_action.v1",
+                "task_id": task_id,
+                "task_status": "NOT_FOUND",
+                "action_state": "NOT_FOUND",
+                "attention_required": False,
+                "next_action": "none",
+                "recommended_tool": None,
+            },
+            "operation": operation,
+        }
+        if operation == "wait":
+            payload["wait"] = {
+                "timed_out": False,
+                "not_found": True,
+                "timeout_seconds": timeout_seconds,
+                "poll_interval_seconds": poll_interval_seconds,
+            }
+        return payload
 
     @staticmethod
     def _error(request_id: Any, error: Exception | str) -> dict[str, Any]:
@@ -2490,13 +2530,45 @@ class UnifiedMCPGateway:
             _safe_relative_path(path, "allowed_files")
         verifiers = [str(command).strip() for command in (arguments.get("verifier_commands") or []) if str(command).strip()]
         task_id = self._task_id(arguments, what, why, allowed)
-        return plan_mcp_task(
-            task_id=task_id,
-            what=what,
-            why=why,
-            allowed_files=allowed,
-            verifier_commands=verifiers,
+        if len(verifiers) > 1:
+            raise GatewayInputError("verifier_commands supports exactly one isolated command")
+        revision = _git("rev-parse", "HEAD").strip()
+        try:
+            execution_context = build_mcp_execution_context(
+                task_id=task_id,
+                workspace_revision=revision,
+                allowed_files=allowed,
+                verifier_commands=verifiers,
+            )
+            result = execute_canonical_product_task(
+                f"{what}\n\nAcceptance context: {why}",
+                CANONICAL_SOURCE_ROOT,
+                execution_context=execution_context,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"canonical_product_runtime_failed_closed:{exc}") from exc
+        receipt = dict(result.receipt)
+        canonical_execution = (
+            dict(receipt.get("canonical_execution"))
+            if isinstance(receipt.get("canonical_execution"), Mapping)
+            else {}
         )
+        return {
+            "schema": "nexus.mcp_canonical_runtime.v1",
+            "status": "SUCCEEDED" if bool(result) else "BLOCKED",
+            "task_id": str(receipt.get("task_id") or task_id),
+            "execution_decision_authority": result.execution_decision_authority,
+            "canonical_execution": canonical_execution,
+            "root_receipt": dict(result.root_receipt),
+            "root_receipt_valid": result.root_receipt_valid,
+            "root_receipt_blockers": list(result.root_receipt_blockers),
+            "runtime_receipt_path": result.receipt_path,
+            "runtime_dispatched": True,
+            "formal_workspace_mutated": False,
+            "production_ingress_count": result.production_ingress_count,
+            "production_runtime_entry_count": result.production_runtime_entry_count,
+            "public_claim_allowed": False,
+        }
 
     @staticmethod
     def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None, contract_binding: Optional[Mapping[str, Any]] = None, controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, bound_action_request: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
@@ -2781,14 +2853,21 @@ class UnifiedMCPGateway:
             assisted = self._assist_read(task_id)
             if assisted is not None:
                 return self._assist_response(self._assist_refresh(task_id) or assisted, operation="status")
-            return self.service.get_task(task_id)
+            status = self.service.get_task_snapshot(task_id)
+            return status or self._task_not_found(task_id, operation="status")
         if name == "nexus_task_wait":
             task_id = _text(arguments.get("task_id"), "task_id")
             timeout = min(60.0, max(0.0, float(arguments.get("timeout_seconds", 10.0))))
             poll = min(5.0, max(0.01, float(arguments.get("poll_interval_seconds", 0.25))))
             if self._assist_read(task_id) is not None:
                 return self._assist_wait(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
-            return self.service.wait_task(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
+            waited = self.service.wait_task(task_id, timeout_seconds=timeout, poll_interval_seconds=poll)
+            return waited or self._task_not_found(
+                task_id,
+                operation="wait",
+                timeout_seconds=timeout,
+                poll_interval_seconds=poll,
+            )
         if name == "nexus_task_finish":
             return self._finish(arguments)
         if name == "nexus_task_cancel":

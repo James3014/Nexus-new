@@ -42,14 +42,25 @@ def build_world_c_verifier_projection(context: Mapping[str, Any]) -> dict[str, A
     world_c = _world_c_from_runtime({"local": _mapping(context.get("local"))})
     valid, reasons = validate_world_c_receipt(world_c)
     verifier = _mapping(world_c.get("authoritative_verifier"))
+    evidence_bundle = _mapping(context.get("capability_evidence_bundle"))
+    source_hash = str(
+        context.get("source_hash")
+        or evidence_bundle.get("source_hash")
+        or ""
+    )
+    world_c_hash = str(world_c.get("receipt_hash") or "")
+    verifier_status = "pass" if valid else "failed"
     return {
         "task_id": str(context.get("task_id") or world_c.get("task_id") or ""),
-        "status": "pass" if valid else "failed",
+        "status": verifier_status,
+        "verifier_status": verifier_status,
         "invoked": bool(verifier.get("invoked")),
         "gate_passed": valid,
         "evidence_refs": list(verifier.get("evidence_refs") or []),
         "source": "HealOrchestrator.VerificationPhase",
-        "world_c_receipt_hash": str(world_c.get("receipt_hash") or ""),
+        "source_hash": source_hash,
+        "verifier_artifact": world_c_hash,
+        "world_c_receipt_hash": world_c_hash,
         "failure_reasons": reasons,
     }
 

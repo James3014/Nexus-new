@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+from unittest import mock
 
 import pytest
 
@@ -166,6 +167,80 @@ def test_canonical_local_receipt_preserves_projection_and_admission_identity(tmp
         == canonical_snapshot["local_model_invocation_authority"]
     )
     assert response.planner_decision["canonical_execution"] == canonical_snapshot["canonical_execution"]
+
+
+def test_canonical_local_admission_authorizes_physical_ollama_without_legacy_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    canonical_snapshot = _canonical_snapshot(
+        authority_model="qwen2.5-coder:7b-instruct"
+    )
+    request = request.__class__(
+        **{
+            **request.__dict__,
+            "planner_snapshot": {
+                **canonical_snapshot,
+                "executor_model": "qwen2.5-coder:7b-instruct",
+            },
+        }
+    )
+    monkeypatch.delenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", raising=False)
+    monkeypatch.delenv("NEXUS_LOCAL_MODEL_PROVIDER", raising=False)
+    fake_response = mock.MagicMock()
+    fake_response.read.return_value = b'{"response": "bounded local diagnosis"}'
+    fake_response.__enter__.return_value = fake_response
+
+    with mock.patch("urllib.request.urlopen", return_value=fake_response) as call:
+        response = LocalAssistService().handle(request)
+
+    assert call.call_count == 1
+    assert response.status == "SUCCEEDED"
+    assert response.local_model_invoked is True
+    assert response.model_call_count == 1
+    assert response.resolved_models == ("qwen2.5-coder:7b-instruct",)
+
+
+def test_verified_subtask_projects_absolute_verifier_interpreter_to_world_c(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path, "verified-subtask")
+    request = request.__class__(
+        **{
+            **request.__dict__,
+            "planner_snapshot": {
+                **request.planner_snapshot,
+                "execution_topology": "localheal_pipeline",
+            },
+        }
+    )
+    captured_route_context: dict[str, object] = {}
+
+    def fake_executor(executor_request, *, provider):
+        del provider
+        captured_route_context.update(executor_request.route_context)
+        return LocalModelExecutorResponse(
+            invoked=True,
+            local_model_called=False,
+            candidate_patch="",
+            candidate_hash="",
+            reasoning_summary="bounded failure",
+            raw_model_metadata={},
+            provider="injected",
+            model_name="qwen2.5-coder:7b",
+            error="model_not_called",
+            timeout=False,
+            evidence_refs=request.evidence_refs,
+        )
+
+    LocalAssistService(
+        provider=InjectedLocalModelProvider(lambda _: "unused"),
+        executor_runner=fake_executor,
+    ).handle(request)
+
+    assert captured_route_context["verifier_command"] == list(request.verifier_command)
+    assert captured_route_context["python_executable"] == sys.executable
 
 
 def test_advisor_records_invocation_and_delivery(tmp_path: Path) -> None:

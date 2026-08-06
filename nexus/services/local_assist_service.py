@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -282,6 +283,33 @@ def _safe_task_id(value: str, *, field_name: str) -> str:
     return raw
 
 
+def _task_scoped_python_from_verifier_command(command: tuple[str, ...]) -> str:
+    """Project only a validated Python executable, never the verifier command.
+
+    World C's micro verifier needs the task interpreter, while the complete
+    verifier remains quarantined until VerificationPhase.  Relative executables
+    and non-Python launchers stay unprojected and therefore fail closed.
+    """
+    if not command:
+        return ""
+    raw = str(command[0] or "").strip()
+    candidate = Path(raw)
+    executable_name = candidate.name.lower()
+    if (
+        not raw
+        or not candidate.is_absolute()
+        or not candidate.is_file()
+        or not os.access(candidate, os.X_OK)
+        or not (
+            executable_name == "python"
+            or executable_name.startswith("python")
+            or executable_name.startswith("pypy")
+        )
+    ):
+        return ""
+    return raw
+
+
 @dataclass(frozen=True)
 class LocalAssistRequest:
     schema: str
@@ -477,7 +505,22 @@ class LocalAssistService:
             local_enabled=True,
             local_mode=str(planner_snapshot.get("local_mode") or request.action or "advisor"),
         )
-        provider = self._provider or OllamaLocalModelProvider()
+        if self._provider is not None:
+            provider = self._provider
+        elif canonical_execution_payload:
+            # Canonical Workforce Admission is the product call authority.  Do
+            # not mirror it into process-global legacy environment flags.
+            provider = OllamaLocalModelProvider(
+                call_authorized=bool(
+                    local_authority_payload.get("schema")
+                    == "nexus.local_model_invocation_authority.v1"
+                    and local_authority_payload.get("status") == "ALLOW"
+                    and local_authority_payload.get("gate_passed") is True
+                    and local_authority_payload.get("resolved_provider") == "ollama"
+                )
+            )
+        else:
+            provider = OllamaLocalModelProvider()
         raw_provider = provider
         if canonical_execution_payload:
             provider_identity = str(getattr(raw_provider, "provider_identity", "") or "")
@@ -683,6 +726,9 @@ class LocalAssistService:
                 _problem = request.task_statement
                 if _prompt_evidence_section:
                     _problem = f"{request.task_statement}\n\n{_prompt_evidence_section}"
+                task_scoped_python = _task_scoped_python_from_verifier_command(
+                    request.verifier_command
+                )
                 executor_request = LocalModelExecutorRequest(
                     task_id=request.task_id,
                     problem_statement=_problem,
@@ -702,6 +748,11 @@ class LocalAssistService:
                         "target_symbol": request.target_symbol,
                         "locked_search": request.locked_search,
                         "verifier_command": list(request.verifier_command),
+                        **(
+                            {"python_executable": task_scoped_python}
+                            if task_scoped_python
+                            else {}
+                        ),
                         "capability_evidence_bundle": _bundle,
                         "bundle_hash": _bundle_hash,
                         "capability_evidence_context": dict(_local_evidence.get("compact") or {}),

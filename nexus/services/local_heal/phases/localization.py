@@ -1,8 +1,11 @@
+from pathlib import Path, PurePosixPath
 from typing import Any, List, Tuple
-from nexus.services.local_heal.interface import IPhase, PhaseResult, LocalizationInput, LocalizationOutput
-from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer, LocalizationBundle
+
 from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.context_budget import ContextBudgetManager
+from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer, LocalizationBundle
+from nexus.services.local_heal.interface import IPhase, LocalizationInput, LocalizationOutput, PhaseResult
+
 
 class LocalizationPhase(IPhase):
     """Phase 3: Localization (深度定位 - 函式級精煉)"""
@@ -106,6 +109,141 @@ class LocalizationPhase(IPhase):
             model_decisions=model_decisions
         )
 
+    def _run_canonical_target(
+        self,
+        *,
+        target_file: str,
+        input_data: LocalizationInput,
+    ) -> LocalizationOutput:
+        """Localize only the Planner-authorized target file, fail closed otherwise."""
+        from nexus.services.local_heal.interface import LocalizedFile
+
+        try:
+            relative_path = PurePosixPath(target_file)
+        except (TypeError, ValueError):
+            relative_path = PurePosixPath("/")
+        if (
+            relative_path.is_absolute()
+            or not relative_path.parts
+            or ".." in relative_path.parts
+            or "\\" in target_file
+            or "\x00" in target_file
+        ):
+            return LocalizationOutput(
+                success=False,
+                localized_files=[],
+                model_decisions=[],
+                error_reason="LOCALIZATION_TARGET_INVALID",
+            )
+
+        canonical_path = relative_path.as_posix()
+        repo_root = Path(input_data.repo_dir).resolve()
+        target_path = (repo_root / canonical_path).resolve()
+        try:
+            target_path.relative_to(repo_root)
+        except ValueError:
+            return LocalizationOutput(
+                success=False,
+                localized_files=[],
+                model_decisions=[],
+                error_reason="LOCALIZATION_TARGET_INVALID",
+            )
+        if not target_path.is_file():
+            return LocalizationOutput(
+                success=False,
+                localized_files=[],
+                model_decisions=[],
+                error_reason="LOCALIZATION_TARGET_NOT_FOUND",
+            )
+
+        try:
+            content = target_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return LocalizationOutput(
+                success=False,
+                localized_files=[],
+                model_decisions=[],
+                error_reason="LOCALIZATION_TARGET_READ_FAILED",
+            )
+
+        search_symbols = input_data.plan.search_symbols if input_data.plan else []
+        if hasattr(self.localizer, "build_query"):
+            refine_query = self.localizer.build_query(
+                input_data.problem_statement,
+                search_symbols=search_symbols,
+                evidence=input_data.repro_evidence,
+            )
+        else:
+            refine_query = input_data.problem_statement
+
+        model_decisions = []
+        if hasattr(self.localizer, "localize"):
+            bundle = self.localizer.localize(canonical_path, content, refine_query)
+            localized_content = bundle.build_context()
+            relevance_score = bundle.confidence
+            model_decisions.append({
+                "phase": "localization",
+                "file": canonical_path,
+                "source": "canonical_target_file",
+                "slice_mode": bundle.fallback_mode or "granular",
+                "slice_reason": bundle.slice_reason,
+                "confidence": bundle.confidence,
+            })
+        elif hasattr(self.localizer, "extract_relevant_code"):
+            results = self.localizer.extract_relevant_code(
+                [(1.0, {"path": canonical_path, "content": content})],
+                refine_query,
+            )
+            localized_content = results[0][1] if results else ""
+            relevance_score = 1.0
+            model_decisions.append({
+                "phase": "localization",
+                "file": canonical_path,
+                "source": "canonical_target_file",
+                "slice_mode": "legacy_extract",
+                "slice_reason": "canonical target compatibility path",
+                "confidence": 1.0,
+            })
+        else:
+            localized_content = content
+            relevance_score = 1.0
+            model_decisions.append({
+                "phase": "localization",
+                "file": canonical_path,
+                "source": "canonical_target_file",
+                "slice_mode": "full_file",
+                "slice_reason": "canonical target without granular localizer",
+                "confidence": 1.0,
+            })
+
+        fitted_tuples = self.budget_manager.enforce_hard_limit(
+            [(canonical_path, localized_content)]
+        )
+        if not fitted_tuples:
+            return LocalizationOutput(
+                success=False,
+                localized_files=[],
+                model_decisions=model_decisions,
+                error_reason="LOCALIZATION_EMPTY",
+            )
+        fitted_path, fitted_content = fitted_tuples[0]
+        if fitted_path != canonical_path:
+            return LocalizationOutput(
+                success=False,
+                localized_files=[],
+                model_decisions=model_decisions,
+                error_reason="LOCALIZATION_TARGET_MISMATCH",
+            )
+        return LocalizationOutput(
+            success=True,
+            localized_files=[LocalizedFile(
+                path=canonical_path,
+                content=fitted_content,
+                relevance_score=relevance_score,
+            )],
+            model_decisions=model_decisions,
+        )
+
     def execute(self, ctx: HealContext) -> PhaseResult:
         if ctx.op.localized_files:
             return PhaseResult(success=True)
@@ -126,7 +264,13 @@ class LocalizationPhase(IPhase):
             plan=ctx.op.plan
         )
 
-        output = self.run(input_data)
+        if target_file_hint:
+            output = self._run_canonical_target(
+                target_file=target_file_hint,
+                input_data=input_data,
+            )
+        else:
+            output = self.run(input_data)
         
         ctx.op.localized_files = output.localized_files
         ctx.op.model_decisions.extend(output.model_decisions)

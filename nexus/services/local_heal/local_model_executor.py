@@ -2509,6 +2509,11 @@ class LocalModelExecutor:
                 and retry_cap > 0
             ):
                 retry_available = True
+                # The delegated retry is an attempted execution as soon as the
+                # retry branch is entered.  Keep this truth visible even when
+                # downstream receipt persistence aborts the pipeline (for
+                # example, an ephemeral test workspace).
+                pipeline_retry_delegated = True
                 try:
                     from nexus.services.local_heal.pipeline import HealPipeline, HealContext as LegacyHealContext
                     from nexus.services.local_heal.corrector import SelfCorrector
@@ -2657,6 +2662,8 @@ class LocalModelExecutor:
                     print(f"[C15-5C] candidate_models={_dr_candidate_models} len={len(_dr_candidate_models)}", file=_dbg.stderr)
                     if len(_dr_candidate_models) > 1:
                         _dr_committee_candidate_count = len(_dr_candidate_models)
+                        raw_meta["delegated_retry_committee_path_used"] = True
+                        raw_meta["delegated_retry_heterogeneous_candidate_count"] = _dr_committee_candidate_count
                         for idx, _dr_cand_model in enumerate(_dr_candidate_models, start=1):
                             _dr_cand_resolved = _dr_cand_model
                             import re as _re
@@ -3064,7 +3071,32 @@ class LocalModelExecutor:
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
-                    pipeline_retry_delegated = False
+                    # Preserve attempted-retry telemetry on infrastructure
+                    # failures; this does not imply a successful patch.
+                    pipeline_retry_delegated = True
+                    if delegated_retry_provider_called:
+                        delegated_retry_stage = "first_patch_empty_response" if delegated_retry_provider_response_empty else "first_patch_failed"
+                    if _dr_candidate_models and len(_dr_candidate_models) > 1:
+                        raw_meta["delegated_retry_committee_path_used"] = True
+                        raw_meta["delegated_retry_heterogeneous_candidate_count"] = len(_dr_candidate_models)
+                        if not _dr_committee_candidates_list:
+                            # Keep the committee receipt structurally complete
+                            # when a candidate pipeline aborts before its
+                            # per-candidate projection (e.g. receipt storage
+                            # rejects an ephemeral workspace).
+                            import json as _fallback_json
+                            import re as _fallback_re
+                            _fallback_candidates = []
+                            for _idx, _model in enumerate(_dr_candidate_models, start=1):
+                                _slug = _fallback_re.sub(r"[^a-zA-Z0-9]", "-", str(_model).lower()).strip("-")
+                                _fallback_candidates.append({
+                                    "candidate_id": f"{request.task_id}#delegated-retry-{_idx:02d}-{_slug}",
+                                    "model": str(_model),
+                                    "candidate_model": str(_model),
+                                    "selected": False,
+                                    "rejection_reason": "retry_pipeline_error",
+                                })
+                            raw_meta["delegated_retry_committee_candidates_json"] = _fallback_json.dumps(_fallback_candidates)
 
             raw_meta["retry_available"] = retry_available
             raw_meta["retry_not_invoked_reason"] = retry_not_invoked_reason
@@ -3093,10 +3125,14 @@ class LocalModelExecutor:
             # P2-F: Store hash_match on route_context for orchestrator fallback
             if isinstance(request.route_context, dict):
                 request.route_context["candidate_hash_matches_applied"] = hash_match
+            pipeline_model_called = bool(
+                repair_exec.telemetries.get("model_called", False)
+                or repair_exec.telemetries.get("patch_synthesis_model_called", False)
+            )
             raw_meta = _attach_local_armor_attempt_receipt(
                 request,
                 raw_meta,
-                local_model_called=True,
+                local_model_called=pipeline_model_called,
                 provider=provider_name,
                 model_name=repair_exec.telemetries.get("patch_synthesis_model_name", ""),
                 evidence_refs=request.evidence_refs,
@@ -3105,7 +3141,7 @@ class LocalModelExecutor:
             _inject_ledger_state(raw_meta, provider)
             return LocalModelExecutorResponse(
                 invoked=True,
-                local_model_called=True,
+                local_model_called=pipeline_model_called,
                 candidate_patch=candidate_patch,
                 candidate_hash=candidate_hash,
                 reasoning_summary="pipeline_result" if pipeline_result_projected else "pipeline_failed_empty",

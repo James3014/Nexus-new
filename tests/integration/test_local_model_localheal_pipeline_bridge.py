@@ -31,13 +31,17 @@ def test_localheal_pipeline_availability_reported():
     assert r.telemetries.get("semantic_retry_available") is True
 
 
-def test_localheal_pipeline_topology_invokes_modules():
-    """When in pipeline topology, executor invokes path A modules."""
+def test_localheal_pipeline_topology_invokes_modules(tmp_path):
+    """Pipeline topology enters World C but cannot claim completion without evidence."""
+    (tmp_path / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
     ctx = _make_ctx(topology="localheal_pipeline")
+    ctx.source_root = str(tmp_path)
     ctx.failure_feedback = "VERIFIER_FAIL: previous attempt"
     r = LocalHealPipelineCapabilityExecutor().execute(ctx)
     assert r.invoked is True
-    assert r.telemetries.get("localheal_pipeline_actual_execution") is True
+    assert r.telemetries.get("localheal_pipeline_run_called") is True
+    assert r.telemetries.get("localheal_pipeline_actual_execution") is False
+    assert r.gate_passed is False
     assert r.telemetries.get("committee_orchestrator_invoked") is True
     assert r.telemetries.get("solid_search_replace_protocol_invoked") is True
     assert r.telemetries.get("granular_localizer_invoked") is True

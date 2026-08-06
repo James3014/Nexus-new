@@ -366,6 +366,42 @@ class PatchSynthesisPhase(IPhase):
                 refusal_detected=(intents_or_error.kind == PatchErrorKind.REFUSAL_DETECTED)
             )
 
+        # A headerless SEARCH/REPLACE block has no physical file identity.  Bind
+        # it only when localization leaves exactly one bounded source target (or
+        # the canonical target hint selects one of those localized files).
+        localized_paths = list(
+            dict.fromkeys(
+                loc_file.path
+                for loc_file in input_data.localized_files
+                if Path(loc_file.path).name not in _PATCH_BLACKLIST
+            )
+        )
+        route_context = getattr(input_data, "route_context", {})
+        target_hint = (
+            str(route_context.get("target_file") or "")
+            if isinstance(route_context, dict)
+            else ""
+        )
+        bound_target = (
+            target_hint
+            if target_hint in localized_paths
+            else localized_paths[0]
+            if len(localized_paths) == 1
+            else ""
+        )
+        if bound_target:
+            intents_or_error = [
+                type(intent)(
+                    file_path=bound_target
+                    if intent.file_path == "UNKNOWN_PENDING"
+                    else intent.file_path,
+                    search=intent.search,
+                    replace=intent.replace,
+                    operation=intent.operation,
+                )
+                for intent in intents_or_error
+            ]
+
         # S4 Patch Protocol Guard
         protocol_mode = os.getenv("NEXUS_PROTOCOL_MODE", "standard")
         if (
