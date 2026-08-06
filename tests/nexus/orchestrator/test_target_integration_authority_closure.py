@@ -18,6 +18,7 @@ from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLif
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.worktree_manager import WorktreeManager
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
+from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 
 
 def _git(root: Path, *args: str) -> str:
@@ -50,6 +51,22 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str]:
 def _status_hash(root: Path) -> str:
     status = _git(root, "status", "--porcelain=v1", "--untracked-files=all")
     return hashlib.sha256(status.encode()).hexdigest()
+
+
+def _verified_gate_proof(root: Path, contract) -> dict[str, object]:
+    """Build the exact policy proof consumed by integration recheck."""
+    gate = RepositoryContractGate(
+        WorktreeManager(root_dir=str(root), create_root=False)
+    )
+    policy_inputs = gate._policy_input_hashes(
+        root.resolve(), contract.target_base_revision
+    )
+    return {
+        "repository_contract_gate_passed": True,
+        "repository_contract_policy_revision_hash": gate._policy_revision_hash(
+            contract.target_base_revision, policy_inputs
+        ),
+    }
 
 
 def _acceptance(candidate: str) -> ExternalAcceptanceReceipt:
@@ -357,6 +374,7 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
         "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request,
         "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
         "task_card_hash": "c" * 64,
+        "verified_receipt": _verified_gate_proof(root, contract),
         "promotion_packet": {
             "candidate_commit_sha": candidate,
             "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"),
@@ -526,6 +544,7 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
         "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL",
         "request": request, "contract": contract.model_dump(mode="json"),
         "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64,
+        "verified_receipt": _verified_gate_proof(root, contract),
         "promotion_packet": packet, "candidate_ref": durable_ref,
         "post_apply_commands": [["/bin/sh", "-c", "exit 1"]],
         "lease": {
@@ -677,7 +696,7 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(contract, target, "nexus/task/dirty-owner-finish")
     packet = {"candidate_commit_sha": candidate, "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"), "candidate_state_hash": "d" * 64, "verified_receipt_hash": "e" * 64}
     service._write_state("dirty-owner-finish", {
-        "task_id": "dirty-owner-finish", "attempt_id": "attempt-1", "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64, "promotion_packet": packet, "candidate_ref": durable_ref,
+        "task_id": "dirty-owner-finish", "attempt_id": "attempt-1", "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64, "verified_receipt": _verified_gate_proof(root, contract), "promotion_packet": packet, "candidate_ref": durable_ref,
         "lease": {"schema": "nexus.target_worktree_lease.v1", "lease_id": lease_id, "task_id": "dirty-owner-finish", "controller_revision": base, "target_base_revision": base, "target_worktree": str(target), "target_branch": "nexus/task/dirty-owner-finish", "initial_head": base, "initial_status_sha256": "0" * 64, "controller_status_sha256": "0" * 64, "created_from_exact_revision": True, "commit_created": True, "merge_performed": False},
     })
     context = {"schema": "nexus.approval.v2", "approval_id": "approval-dirty-owner-finish", "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD", "contract_hash": "c" * 64, "task_card_hash": "c" * 64}
