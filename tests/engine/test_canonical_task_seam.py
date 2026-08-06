@@ -291,6 +291,59 @@ def test_canonical_product_verified_repair_topology_is_planner_owned(
     assert request.route["workforce_bindings"]["online"]["worker_id"] == "grok_review"
 
 
+def test_canonical_product_online_deny_removes_online_runtime_demand(
+    monkeypatch,
+    tmp_path,
+):
+    from nexus.engine.canonical_task_seam import execute_canonical_product_task
+
+    (tmp_path / "target.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    captured = {}
+
+    class _Gateway:
+        def __init__(self, project_root):
+            pass
+
+        def ask_unified(self, request, **kwargs):
+            captured["request"] = request
+            receipt = {
+                "terminal_status": "SUCCEEDED",
+                "receipt_complete": True,
+                "canonical_execution": {
+                    "execution_decision_authority": "CapabilityPlanner",
+                },
+                "root_receipt": {"schema": "nexus.root_receipt.v1"},
+            }
+            _write_runtime_receipt(kwargs["receipt_path"], receipt)
+            return receipt
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", _Gateway)
+    monkeypatch.setattr(
+        "nexus.contracts.root_receipt.validate_root_receipt",
+        lambda _root: (True, []),
+    )
+
+    execute_canonical_product_task(
+        "repair target.py with the local verified pipeline",
+        tmp_path,
+        execution_context={
+            "task_id": "canonical-world-c-local-only",
+            "workspace_revision": "rev-world-c-local-only",
+            "local_assist_mode": "advisor",
+            "online_policy": "deny",
+            "target_files": ["target.py"],
+            "target_file": "target.py",
+            "verifier_command": ["python", "-m", "py_compile", "target.py"],
+        },
+    )
+
+    request = captured["request"]
+    assert request.online_enabled is False
+    assert request.local_enabled is True
+    assert request.canonical_planning_bundle.context.execution_channels == ("local",)
+    assert set(request.route["workforce_bindings"]) == {"local"}
+
+
 def test_canonical_product_rejects_caller_route_override(tmp_path):
     import pytest
 

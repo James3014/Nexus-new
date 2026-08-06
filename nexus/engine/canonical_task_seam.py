@@ -449,13 +449,18 @@ def execute_canonical_product_task(
         "bounded_allowed_file_count": len(allowed_files),
         "deterministic_verifier_available": bool(verifier_command),
     }
+    execution_channels = ("online",)
+    if local_enabled:
+        execution_channels = (
+            ("local",) if online_policy == "deny" else ("online", "local")
+        )
     canonical_context = CanonicalTaskContext(
         task_id=task_id,
         task_type=task_type,
         task_desc=str(task_text),
         execution_world=str(context.get("execution_world") or "product_runtime"),
         transport_ingress=str(context.get("transport_ingress") or "direct"),
-        execution_channels=("online", "local") if local_enabled else ("online",),
+        execution_channels=execution_channels,
         task_facts={
             "mutation_requested": bool(allowed_files),
             "candidate_required": verified_world_c,
@@ -481,7 +486,7 @@ def execute_canonical_product_task(
     online_decision = resolve_online_execution_decision(
         task_online_policy=online_policy,
         project_root=root,
-        planner_online_needed=True,
+        planner_online_needed=online_policy != "deny",
         requested_provider=selected_online_provider,
     )
     route = {
@@ -532,7 +537,7 @@ def execute_canonical_product_task(
         task_statement=str(task_text),
         task_type=task_type,
         route=route,
-        online_enabled=True,
+        online_enabled=online_decision.online_execution_requested,
         local_enabled=local_enabled,
         online_prompt=str(task_text),
         online_payload=json.dumps(
