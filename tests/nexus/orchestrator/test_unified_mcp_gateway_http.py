@@ -86,6 +86,28 @@ def test_mcp_requires_bearer_and_forwards_jsonrpc():
         server.shutdown(); server.server_close(); thread.join(timeout=3)
 
 
+def test_tools_list_exposes_exact_canonical_task_schema_and_rejects_route_override():
+    server, thread = _server()
+    try:
+        listed = json.loads(_request(server, {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}}, token="secret").read())
+        spec = next(tool for tool in listed["result"]["tools"] if tool["name"] == "nexus_task_run")
+        schema = spec["inputSchema"]
+        assert set(schema["properties"]) == {"task_id", "what", "why", "allowed_files", "verifier_commands"}
+        assert set(schema["required"]) == {"what", "why", "allowed_files"}
+        assert schema["additionalProperties"] is False
+
+        response = _request(
+            server,
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "nexus_task_run", "arguments": {"what": "bad", "why": "route override", "allowed_files": ["README.md"], "execution_lane": "DIRECT_CANONICAL"}}},
+            token="secret",
+        )
+        payload = json.loads(response.read())
+        assert payload["result"]["isError"] is True
+        assert payload["result"]["structuredContent"]["error"] == "CALLER_ROUTE_OVERRIDE_FORBIDDEN:execution_lane"
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=3)
+
+
 def test_non_post_mcp_is_rejected():
     server, thread = _server()
     try:
