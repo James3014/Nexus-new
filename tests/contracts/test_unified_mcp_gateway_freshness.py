@@ -5,6 +5,9 @@
 contract evaluation triggers ``action_review_required``.
 """
 
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +42,66 @@ class _StubService:
 
     def list_actionable_tasks(self, *, include_details=False):
         return {"actionable_count": 0, "details_included": include_details, "tasks": []}
+
+
+def test_gateway_process_binds_explicit_canonical_source_root():
+    root = Path(repo_root).resolve()
+    command = (
+        "import json; "
+        "from nexus.orchestrator import lifecycle_guards, self_hosted_task_service, unified_mcp_gateway; "
+        "print(json.dumps({"
+        "'guard': str(lifecycle_guards.CANONICAL_SOURCE_ROOT), "
+        "'service': str(self_hosted_task_service.CANONICAL_SOURCE_ROOT), "
+        "'gateway': str(unified_mcp_gateway.CANONICAL_SOURCE_ROOT), "
+        "'head': unified_mcp_gateway.SERVER_REPO_HEAD_AT_START, "
+        "'runtime_paths': len(unified_mcp_gateway.RUNTIME_SOURCE_PATHS)"
+        "}, sort_keys=True))"
+    )
+    env = dict(os.environ)
+    env["NEXUS_CANONICAL_SOURCE_ROOT"] = str(root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["guard"] == str(root)
+    assert payload["service"] == str(root)
+    assert payload["gateway"] == str(root)
+    assert payload["head"] == subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert payload["runtime_paths"] > 0
+
+
+def test_gateway_process_rejects_activation_root_for_different_loaded_source(tmp_path):
+    other_root = tmp_path / "other-checkout"
+    other_root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=other_root, check=True)
+    env = dict(os.environ)
+    env["NEXUS_CANONICAL_SOURCE_ROOT"] = str(other_root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from nexus.orchestrator import unified_mcp_gateway"],
+        cwd=Path(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH" in result.stderr
 
 
 def test_head_drift_only_is_informational():

@@ -22,8 +22,8 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     validate_owner_inline_contract,
 )
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
 
-CANONICAL_SOURCE_ROOT = Path("/Users/jameschen/Workspace/nexus")
 _TRUSTED_TOOL_MANIFEST_HASH: Optional[str] = None
 
 

@@ -29,6 +29,7 @@ from nexus.executors.worker_contract import (
     resolve_attempt,
 )
 from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
 from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationExecutionError
@@ -361,7 +362,7 @@ def resolve_canonical_target_roots(
     else:
         workspace_root = Path.cwd().resolve()
         if workspace_root == CANONICAL_SOURCE_ROOT:
-            base_worktree_root = Path("/Users/jameschen/Workspace/nexus-runtime-targets")
+            base_worktree_root = CANONICAL_SOURCE_ROOT.parent / "nexus-runtime-targets"
         elif "nexus-runtime-targets" in workspace_root.parts:
             idx = workspace_root.parts.index("nexus-runtime-targets")
             base_worktree_root = Path(*workspace_root.parts[:idx + 1])
@@ -550,7 +551,6 @@ def check_fast_lane_eligible(contract: ArchitectTaskContract, request: Optional[
     return True
 
 
-CANONICAL_SOURCE_ROOT = Path("/Users/jameschen/Workspace/nexus")
 CANONICAL_SOURCE_BRANCH = "nexus/integration/main"
 
 

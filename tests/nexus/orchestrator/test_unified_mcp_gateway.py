@@ -96,6 +96,26 @@ class FakeService:
         return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"], "target_created": False, "state_created": False}
 
 
+def test_canonical_request_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    activation_root = tmp_path / "clean-activation"
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", activation_root)
+
+    request = UnifiedMCPGateway._canonical_request(
+        "activation-request",
+        "exercise product bridge",
+        "prove clean activation binding",
+        ["README.md"],
+        ["/usr/bin/true"],
+        "a" * 40,
+    )
+
+    assert request["controller_repo_root"] == str(activation_root)
+    assert request["target_worktree_root"] == str(tmp_path / "nexus-runtime-targets")
+    assert request["target_repo_root"] == str(tmp_path / "nexus-runtime-targets" / "activation-request")
+
+
 def test_gateway_has_one_identity_and_bounded_public_surface():
     gateway = UnifiedMCPGateway(service=FakeService())
     initialized = gateway.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
@@ -208,10 +228,12 @@ def test_cline_parser_does_not_join_unrelated_json_objects():
 
 
 def test_gateway_read_and_snapshot_are_bounded():
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
     gateway = UnifiedMCPGateway(service=FakeService())
     snapshot = gateway.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nexus_workspace_snapshot", "arguments": {}}})
     read = gateway.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "nexus_read", "arguments": {"path": "AGENTS.md", "max_lines": 2}}})
-    assert snapshot["result"]["structuredContent"]["root"] == "/Users/jameschen/Workspace/nexus"
+    assert snapshot["result"]["structuredContent"]["root"] == str(gateway_module.CANONICAL_SOURCE_ROOT)
     assert snapshot["result"]["structuredContent"]["registered_worktree_count"] >= 1
     assert len(read["result"]["structuredContent"]["lines"]) == 2
 

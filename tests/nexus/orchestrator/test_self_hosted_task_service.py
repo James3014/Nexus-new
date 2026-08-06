@@ -2139,6 +2139,20 @@ def test_default_production_target_root_is_outside_disabled_worktree_namespace(m
     assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
 
 
+def test_activation_root_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    activation_root = tmp_path / "clean-activation"
+    activation_root.mkdir()
+    monkeypatch.setattr(service_module, "CANONICAL_SOURCE_ROOT", activation_root)
+    monkeypatch.chdir(activation_root)
+
+    root, target = resolve_canonical_target_roots("activation-root-test")
+
+    assert root == tmp_path / "nexus-runtime-targets"
+    assert target == root / "activation-root-test"
+
+
 def test_disabled_target_root_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="DISABLED_TARGET_ROOT"):
         resolve_canonical_target_roots(

@@ -2459,7 +2459,7 @@ class UnifiedMCPGateway:
             "registered_worktrees": worktrees,
             "registered_worktree_count": len(worktrees),
             "actionable_count": int(actionable.get("actionable_count", 0)),
-            "target_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
+            "target_root": str(CANONICAL_SOURCE_ROOT.parent / "nexus-runtime-targets"),
         }
 
     def _read(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -2572,12 +2572,13 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def _canonical_request(task_id: str, what: str, why: str, allowed: list[str], verifiers: list[str], base: str, *, action: Optional[Mapping[str, Any]] = None, contract_binding: Optional[Mapping[str, Any]] = None, controller_dirty_baseline_authorization: Optional[Mapping[str, Any]] = None, bound_action_request: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+        target_worktree_root = CANONICAL_SOURCE_ROOT.parent / "nexus-runtime-targets"
         request = {
             "task_id": task_id, "what": what, "why": why,
             "controller_revision": base, "target_base_revision": base,
             "controller_repo_root": str(CANONICAL_SOURCE_ROOT),
-            "target_repo_root": f"/Users/jameschen/Workspace/nexus-runtime-targets/{task_id}",
-            "target_worktree_root": "/Users/jameschen/Workspace/nexus-runtime-targets",
+            "target_repo_root": str(target_worktree_root / task_id),
+            "target_worktree_root": str(target_worktree_root),
             "allowed_files": allowed, "verifier_commands": verifiers,
         }
         if contract_binding:
