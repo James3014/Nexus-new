@@ -1,13 +1,75 @@
 import hashlib
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from nexus.contracts.lifecycle_action import LifecycleActionType, PermissionProfile, build_action_envelope
-from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, post_action_receipt_formatter, pre_action_guard
+from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, post_action_receipt_formatter, pre_action_guard, validate_architecture_approval, validate_consumed_architecture_approval
 
 
 HEAD = "a" * 40
 MANIFEST = "b" * 64
+
+
+def test_architecture_approval_requires_exact_binding_and_accepts_valid_ack():
+    now = datetime.now(timezone.utc)
+    approval = {
+        "schema": "nexus.architecture_approval.v1",
+        "approval_id": "arch-1",
+        "approved_by": "owner",
+        "issued_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "bound_task_id": "task",
+        "bound_attempt_id": "attempt",
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "authority_findings_sha256": "e" * 64,
+        "approval_scope": "ALLOW_ACTION_ONCE",
+    }
+    assert validate_architecture_approval(approval, required=True, task_id="task", attempt_id="attempt", candidate_commit_sha="c" * 40, candidate_tree_sha="d" * 40, authority_findings_sha256="e" * 64)
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_BINDING_MISMATCH"):
+            validate_architecture_approval({**approval, "candidate_tree_sha": "f" * 40}, required=True, task_id="task", attempt_id="attempt", candidate_commit_sha="c" * 40, candidate_tree_sha="d" * 40, authority_findings_sha256="e" * 64)
+
+
+@pytest.mark.parametrize("mutate,code", [
+    (lambda a: a.pop("bound_task_id"), "ARCHITECTURE_APPROVAL_BINDING_INCOMPLETE"),
+    (lambda a: a.update({"unknown": 1}), "ARCHITECTURE_APPROVAL_UNKNOWN_FIELDS"),
+    (lambda a: a.update({"candidate_commit_sha": "x"}), "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+    (lambda a: a.update({"bound_attempt_id": "other"}), "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+])
+def test_architecture_approval_negative_controls(mutate, code):
+    now = datetime.now(timezone.utc)
+    approval = {"schema":"nexus.architecture_approval.v1","approval_id":"a","approved_by":"o","issued_at":now.isoformat(),"expires_at":(now+timedelta(minutes=5)).isoformat(),"approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":"task","bound_attempt_id":"attempt","candidate_commit_sha":"c"*40,"candidate_tree_sha":"d"*40,"authority_findings_sha256":"e"*64}
+    mutate(approval)
+    with pytest.raises(LifecycleGuardError, match=code):
+        validate_architecture_approval(approval, required=True, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+
+
+def test_architecture_approval_unexpected_when_not_required():
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_UNEXPECTED"):
+        validate_architecture_approval({"schema":"nexus.architecture_approval.v1"}, required=False, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+
+
+def test_consumed_architecture_approval_requires_valid_consume_window():
+    now = datetime.now(timezone.utc)
+    base = {"schema":"nexus.architecture_approval.v1","approval_id":"a","approved_by":"o","issued_at":(now-timedelta(minutes=2)).isoformat(),"expires_at":(now+timedelta(minutes=5)).isoformat(),"approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":"task","bound_attempt_id":"attempt","candidate_commit_sha":"c"*40,"candidate_tree_sha":"d"*40,"authority_findings_sha256":"e"*64}
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_NOT_CONSUMED"):
+        validate_consumed_architecture_approval(base, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+    valid = {**base, "consumed_at": now.isoformat()}
+    assert validate_consumed_architecture_approval(valid, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)["consumed_at"]
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID"):
+        validate_consumed_architecture_approval({**base, "consumed_at": (now-timedelta(minutes=3)).isoformat()}, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+
+
+def test_architecture_approval_expired_and_future_issued_fail_closed():
+    now = datetime.now(timezone.utc)
+    base = {"schema":"nexus.architecture_approval.v1","approval_id":"a","approved_by":"o","approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":"task","bound_attempt_id":"attempt","candidate_commit_sha":"c"*40,"candidate_tree_sha":"d"*40,"authority_findings_sha256":"e"*64}
+    expired = {**base, "issued_at": (now - timedelta(minutes=10)).isoformat(), "expires_at": (now - timedelta(minutes=1)).isoformat()}
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_EXPIRED"):
+        validate_architecture_approval(expired, required=True, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+    future = {**base, "issued_at": (now + timedelta(minutes=1)).isoformat(), "expires_at": (now + timedelta(minutes=5)).isoformat()}
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_EXPIRY_INVALID"):
+        validate_architecture_approval(future, required=True, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
 
 
 def _action(**kwargs):

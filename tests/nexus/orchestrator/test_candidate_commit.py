@@ -1,4 +1,4 @@
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import os
 import subprocess
@@ -64,6 +64,7 @@ def _scenario(tmp_path: Path):
 
 def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     contract, lease, verified, manager = _scenario(tmp_path)
+    verified = replace(verified, authority_change_required=True, authority_findings_sha256="a" * 64)
 
     packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
 
@@ -76,6 +77,8 @@ def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     assert len(packet.candidate_commit_sha) == 40
     assert len(packet.candidate_tree_sha) == 40
     assert packet.verified_receipt_hash
+    assert packet.authority_change_required == verified.authority_change_required
+    assert packet.authority_findings_sha256 == verified.authority_findings_sha256
     assert _git(Path(lease.target_worktree), "status", "--short") == ""
     assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == packet.candidate_commit_sha
     changed = _git(Path(lease.target_worktree), "diff-tree", "--no-commit-id", "--name-only", "-r", packet.candidate_commit_sha)

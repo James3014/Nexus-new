@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
+from nexus.orchestrator.lifecycle_guards import LifecycleGuardError, validate_consumed_architecture_approval
 from nexus.orchestrator.worktree_manager import (
     CandidateDiffReceipt,
     TargetWorktreeLease,
@@ -33,12 +34,14 @@ class RepositoryContractGateReceipt:
     policy_revision_hash: str
     findings: tuple[RepositoryContractFinding, ...]
     blocking_reasons: tuple[str, ...] = ()
+    authority_change_required: bool = False
+    authority_findings_sha256: str = ""
 
 
 class RepositoryContractGate:
-    """Shadow repository contract gate with fail-closed policy self-modification."""
+    """Enforced repository contract gate with explicit authority acknowledgement."""
 
-    MODE = "shadow"
+    MODE = "enforced"
     POLICY_SCHEMA = "nexus.repository_contract_policy.v1"
     AGENT_AUTHORITY_PATHS = ("AGENTS.md", "MUSE_PROTO.md")
     GENERATED_FACTS_PATH = "docs/arch/module-inventory.generated.json"
@@ -175,12 +178,19 @@ class RepositoryContractGate:
                     )
                 )
 
+        authority_findings = tuple(
+            finding for finding in findings
+            if finding.kind == "authority_change_pending_human_verification"
+        )
+        authority_required = bool(authority_findings)
         return RepositoryContractGateReceipt(
             passed=not blocking_reasons,
             mode=self.MODE,
             policy_revision_hash=policy_revision_hash,
             findings=tuple(sorted(findings, key=self._finding_sort_key)),
             blocking_reasons=tuple(sorted(blocking_reasons)),
+            authority_change_required=authority_required,
+            authority_findings_sha256=self.authority_findings_sha256(authority_findings),
         )
 
     def evaluate_committed_candidate(
@@ -190,6 +200,9 @@ class RepositoryContractGate:
         candidate_commit: str,
         candidate_tree_sha: str,
         expected_policy_revision_hash: str,
+        architecture_approval: Mapping[str, object] | None = None,
+        task_id: str = "",
+        attempt_id: str = "",
     ) -> RepositoryContractGateReceipt:
         """Re-evaluate the exact committed tree immediately before integration."""
         target = Path(contract.controller_repo_root).resolve()
@@ -341,13 +354,58 @@ class RepositoryContractGate:
             if path in base_inputs and self._is_policy_path(path):
                 blocking_reasons.append(f"repository_contract_self_modification:{path}")
 
+        authority_findings = tuple(
+            finding for finding in findings
+            if finding.kind == "authority_change_pending_human_verification"
+        )
+        authority_hash = self.authority_findings_sha256(authority_findings)
+        authority_required = bool(authority_findings)
+        if authority_required:
+            approval = architecture_approval if isinstance(architecture_approval, Mapping) else None
+            try:
+                validate_consumed_architecture_approval(
+                    approval,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    candidate_commit_sha=candidate_commit,
+                    candidate_tree_sha=candidate_tree_sha,
+                    authority_findings_sha256=authority_hash,
+                )
+            except LifecycleGuardError as exc:
+                blocking_reasons.append("architecture_approval_binding_mismatch")
+                findings.append(RepositoryContractFinding(
+                    kind="architecture_approval_binding_mismatch",
+                    severity="blocking",
+                    message="authority change requires an exact Owner Architecture Approval",
+                    evidence={"code": exc.code, "message": exc.message},
+                ))
+        elif architecture_approval:
+            blocking_reasons.append("architecture_approval_unexpected")
+
         return RepositoryContractGateReceipt(
             passed=not blocking_reasons,
             mode=self.MODE,
             policy_revision_hash=policy_revision_hash,
             findings=tuple(sorted(findings, key=self._finding_sort_key)),
             blocking_reasons=tuple(sorted(set(blocking_reasons))),
+            authority_change_required=authority_required,
+            authority_findings_sha256=authority_hash,
         )
+
+    @staticmethod
+    def authority_findings_sha256(
+        findings: tuple[RepositoryContractFinding, ...] | list[RepositoryContractFinding],
+    ) -> str:
+        canonical = [
+            {
+                "kind": finding.kind,
+                "path": finding.path,
+                "message": finding.message,
+                "evidence": dict(sorted(finding.evidence.items())),
+            }
+            for finding in sorted(findings, key=lambda item: (item.kind, item.path, item.message, json.dumps(dict(sorted(item.evidence.items())), sort_keys=True)))
+        ]
+        return hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     def _freeze_findings(
         self,
@@ -491,11 +549,12 @@ class RepositoryContractGate:
         def add(path: str, message: str, evidence: Mapping[str, str]) -> None:
             kind = "authority_change_pending_human_verification" if marked else "effective_route_authority_change"
             reason = f"{kind}:{path}"
-            blocking_reasons.append(reason)
+            if not marked:
+                blocking_reasons.append(reason)
             findings.append(
                 RepositoryContractFinding(
                     kind=kind,
-                    severity="blocking",
+                    severity="approval_required" if marked else "blocking",
                     path=path,
                     message=message,
                     evidence={**evidence, "authority_change_marker": str(marked).lower()},

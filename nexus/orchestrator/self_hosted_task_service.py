@@ -46,7 +46,11 @@ from nexus.orchestrator.task_contract import (
 )
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
-from nexus.orchestrator.lifecycle_guards import pre_action_guard, trusted_runtime_manifest_hash
+from nexus.orchestrator.lifecycle_guards import (
+    pre_action_guard,
+    trusted_runtime_manifest_hash,
+    validate_architecture_approval,
+)
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionEnvelope,
@@ -4880,6 +4884,19 @@ class SelfHostedTaskService:
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
         grant = dict(approval_context or {}) if approval_context is not None else None
+        architecture_approval = grant.get("architecture_approval") if isinstance(grant, Mapping) else None
+        receipt = state.get("verified_receipt") if isinstance(state.get("verified_receipt"), Mapping) else {}
+        authority_required = bool(packet.get("authority_change_required") or receipt.get("authority_change_required"))
+        authority_hash = str(packet.get("authority_findings_sha256") or receipt.get("authority_findings_sha256") or "")
+        validate_architecture_approval(
+            architecture_approval,
+            required=authority_required,
+            task_id=task_id,
+            attempt_id=str(state.get("attempt_id") or ""),
+            candidate_commit_sha=candidate_commit_sha,
+            candidate_tree_sha=candidate_tree_sha,
+            authority_findings_sha256=authority_hash,
+        )
         external_acceptance: dict[str, Any] | None = None
         integration_authorization: dict[str, Any] | None = None
         if grant is not None:
@@ -4951,6 +4968,10 @@ class SelfHostedTaskService:
             if consumed is not None:
                 consumed["approval_scope"] = "ALLOW_ACTION_ONCE"
                 consumed["consumed_at"] = now
+                if isinstance(consumed.get("architecture_approval"), Mapping):
+                    nested = dict(consumed["architecture_approval"])
+                    nested["consumed_at"] = now
+                    consumed["architecture_approval"] = nested
             current.update({
                 "status": status,
                 "promotion_status": status,
@@ -4960,6 +4981,7 @@ class SelfHostedTaskService:
                     "approval_grant": consumed,
                     "external_acceptance": external_acceptance,
                     "integration_authorization": integration_authorization,
+                    "architecture_approval": (consumed or {}).get("architecture_approval") if consumed is not None else architecture_approval,
                 } if valid else None),
                 "external_acceptance": external_acceptance,
                 "integration_authorization": integration_authorization,
@@ -5351,6 +5373,9 @@ class SelfHostedTaskService:
                 candidate_commit=str(packet.get("candidate_commit_sha") or ""),
                 candidate_tree_sha=str(packet.get("candidate_tree_sha") or ""),
                 expected_policy_revision_hash=expected_policy_revision_hash,
+                architecture_approval=(bound_state.get("approved_binding") or {}).get("architecture_approval") if isinstance(bound_state.get("approved_binding"), Mapping) else None,
+                task_id=str(bound_state.get("task_id") or task_id),
+                attempt_id=str(bound_state.get("attempt_id") or ""),
             )
             if not result.passed:
                 raise RuntimeError(

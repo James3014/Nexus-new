@@ -70,11 +70,13 @@ class VerifiedCandidateReceipt:
     authorized_deletions: tuple[str, ...] = ()
     authorized_deletions_hash: str = ""
     repository_contract_gate_passed: bool = True
-    repository_contract_mode: str = "shadow"
+    repository_contract_mode: str = "enforced"
     repository_contract_policy_revision_hash: str = ""
     repository_contract_findings: tuple[RepositoryContractFinding, ...] = ()
     verifier_manifest_sha256: str = ""
     verification_wall_time_ms: int = 0
+    authority_change_required: bool = False
+    authority_findings_sha256: str = ""
 
 
 class CandidateVerifier:
@@ -361,6 +363,8 @@ class CandidateVerifier:
             repository_contract_mode=repository_contract.mode,
             repository_contract_policy_revision_hash=repository_contract.policy_revision_hash,
             repository_contract_findings=repository_contract.findings,
+            authority_change_required=repository_contract.authority_change_required,
+            authority_findings_sha256=repository_contract.authority_findings_sha256,
             verifier_manifest_sha256=hashlib.sha256(
                 json.dumps(verifier_manifest, separators=(",", ":")).encode("utf-8")
             ).hexdigest(),

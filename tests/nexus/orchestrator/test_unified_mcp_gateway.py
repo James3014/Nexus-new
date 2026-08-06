@@ -146,6 +146,29 @@ def test_public_candidate_approve_schema_requires_versioned_approval():
     assert {"contract_kind", "contract_hash", "task_card_hash"}.issubset(set(approval["required"]))
     assert approval["properties"]["task_card_hash"]["type"] == ["string", "null"]
     assert approval["additionalProperties"] is False
+    architecture = approval["properties"]["architecture_approval"]
+    assert set(architecture["required"]) == {"schema", "approval_id", "approved_by", "issued_at", "expires_at", "approval_scope", "bound_task_id", "bound_attempt_id", "candidate_commit_sha", "candidate_tree_sha", "authority_findings_sha256"}
+    assert architecture["additionalProperties"] is False
+
+
+def test_candidate_approve_forwards_nested_architecture_ack_unchanged():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    now = datetime.now(timezone.utc)
+    architecture = {
+        "schema": "nexus.architecture_approval.v1", "approval_id": "arch", "approved_by": "owner",
+        "issued_at": now.isoformat(), "expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "approval_scope": "ALLOW_ACTION_ONCE", "bound_task_id": "recover-1", "bound_attempt_id": "attempt-recovery",
+        "candidate_commit_sha": "a" * 40, "candidate_tree_sha": "a" * 40, "authority_findings_sha256": "e" * 64,
+    }
+    approval = _approval()
+    approval["architecture_approval"] = architecture
+    response = gateway.handle({"jsonrpc": "2.0", "id": 415, "method": "tools/call", "params": {"name": "nexus_candidate_approve", "arguments": {
+        "task_id": "recover-1", "candidate_commit_sha": "a" * 40, "candidate_tree_sha": "a" * 40,
+        "candidate_state_hash": "b" * 64, "verified_receipt_hash": "b" * 64, "approval": approval,
+    }}})
+    assert response["result"]["structuredContent"]["status"] == "APPROVED"
+    assert service.approved_binding["approval_grant"]["architecture_approval"] == architecture
 
 
 def _approval(task_id="recover-1", attempt_id="attempt-recovery", *, contract_kind="TRACKED_TASK_CARD", contract_hash="c" * 64, task_card_hash="c" * 64, owner_inline_contract=None):

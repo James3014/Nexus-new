@@ -553,6 +553,46 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["push_performed"] is False
 
 
+def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "authority-ack"
+    packet = {"candidate_commit_sha": "c"*40, "candidate_tree_sha": "d"*40, "candidate_state_hash": "e"*64, "verified_receipt_hash": "f"*64, "authority_change_required": True, "authority_findings_sha256": "a"*64}
+    service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": {"authority_change_required": True, "authority_findings_sha256": "a"*64}})
+    with pytest.raises(RuntimeError, match="OWNER_ARCHITECTURE_APPROVAL_REQUIRED"):
+        service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema":"nexus.approval.v2", "approval_id":"p", "approved_by":"owner", "approval_scope":"ALLOW_ACTION_ONCE"})
+    now = datetime.now(timezone.utc)
+    arch = {"schema":"nexus.architecture_approval.v1", "approval_id":"arch", "approved_by":"owner", "issued_at":now.isoformat(), "expires_at":(now+timedelta(minutes=5)).isoformat(), "approval_scope":"ALLOW_ACTION_ONCE", "bound_task_id":task_id, "bound_attempt_id":"attempt-1", "candidate_commit_sha":"c"*40, "candidate_tree_sha":"d"*40, "authority_findings_sha256":"a"*64}
+    approved = service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema":"nexus.approval.v2", "approval_id":"p", "approved_by":"owner", "approval_scope":"ALLOW_ACTION_ONCE", "architecture_approval":arch})
+    assert approved["promotion_status"] == "APPROVED"
+    assert approved["approved_binding"]["architecture_approval"]["authority_findings_sha256"] == "a"*64
+    assert approved["approved_binding"]["architecture_approval"].get("consumed_at")
+    assert "consumed_at" not in arch
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("bound_task_id", "other", "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+        ("bound_attempt_id", "other", "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+        ("candidate_commit_sha", "f" * 40, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+        ("candidate_tree_sha", "f" * 40, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+        ("authority_findings_sha256", "b" * 64, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
+        ("expires_at", (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(), "ARCHITECTURE_APPROVAL_EXPIRY_INVALID"),
+        ("unknown", "reject", "ARCHITECTURE_APPROVAL_UNKNOWN_FIELDS"),
+    ],
+)
+def test_marked_authority_approval_service_rejects_tamper_and_expiry(tmp_path, field, value, code):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    task_id = "authority-service-negative"
+    packet = {"candidate_commit_sha": "c" * 40, "candidate_tree_sha": "d" * 40, "candidate_state_hash": "e" * 64, "verified_receipt_hash": "f" * 64, "authority_change_required": True, "authority_findings_sha256": "a" * 64}
+    service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": packet})
+    now = datetime.now(timezone.utc)
+    architecture = {"schema": "nexus.architecture_approval.v1", "approval_id": "arch", "approved_by": "owner", "issued_at": now.isoformat(), "expires_at": (now + timedelta(minutes=5)).isoformat(), "approval_scope": "ALLOW_ACTION_ONCE", "bound_task_id": task_id, "bound_attempt_id": "attempt-1", "candidate_commit_sha": "c" * 40, "candidate_tree_sha": "d" * 40, "authority_findings_sha256": "a" * 64}
+    architecture[field] = value
+    with pytest.raises(RuntimeError, match=code):
+        service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE", "architecture_approval": architecture})
+
+
 def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempotent(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     task_id = "approval-once"
@@ -1306,6 +1346,8 @@ def test_integrate_approved_rechecks_exact_candidate_before_integration(tmp_path
         "candidate_tree_sha": candidate_tree,
         "candidate_state_hash": "e" * 64,
         "verified_receipt_hash": "f" * 64,
+        "authority_change_required": True,
+        "authority_findings_sha256": "a" * 64,
     }
     closure = _closure_context(
         task_id,
@@ -1315,6 +1357,19 @@ def test_integrate_approved_rechecks_exact_candidate_before_integration(tmp_path
     grant = {
         **closure["approval_context"],
         "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    architecture_approval = {
+        "schema": "nexus.architecture_approval.v1",
+        "approval_id": "arch-integration",
+        "approved_by": "owner",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "bound_task_id": task_id,
+        "bound_attempt_id": "attempt-1",
+        "candidate_commit_sha": candidate_commit,
+        "candidate_tree_sha": candidate_tree,
+        "authority_findings_sha256": "a" * 64,
     }
     service._write_state(
         task_id,
@@ -1329,8 +1384,10 @@ def test_integrate_approved_rechecks_exact_candidate_before_integration(tmp_path
             "verified_receipt": {
                 "repository_contract_gate_passed": True,
                 "repository_contract_policy_revision_hash": "a" * 64,
+                "authority_change_required": True,
+                "authority_findings_sha256": "a" * 64,
             },
-            "approved_binding": {**packet, "approval_grant": grant},
+            "approved_binding": {**packet, "approval_grant": grant, "architecture_approval": architecture_approval},
             "external_acceptance": closure["external_acceptance"],
             "integration_authorization": closure["integration_authorization"],
         },
@@ -1361,6 +1418,8 @@ def test_integrate_approved_rechecks_exact_candidate_before_integration(tmp_path
     assert seen["candidate_commit"] == candidate_commit
     assert seen["candidate_tree_sha"] == candidate_tree
     assert seen["expected_policy_revision_hash"] == "a" * 64
+    assert seen["architecture_approval"] == architecture_approval
+    assert seen["attempt_id"] == "attempt-1"
     assert service._read_state(task_id)["status"] == "APPROVED"
 
 
@@ -1383,11 +1442,26 @@ def test_integrate_approved_rechecks_again_at_locked_apply_boundary(tmp_path, mo
         "candidate_tree_sha": candidate_tree,
         "candidate_state_hash": "e" * 64,
         "verified_receipt_hash": "f" * 64,
+        "authority_change_required": True,
+        "authority_findings_sha256": "a" * 64,
     }
     closure = _closure_context(task_id, candidate_commit, candidate_tree_sha=candidate_tree)
     grant = {
         **closure["approval_context"],
         "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    architecture_approval = {
+        "schema": "nexus.architecture_approval.v1",
+        "approval_id": "arch-integration",
+        "approved_by": "owner",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "bound_task_id": task_id,
+        "bound_attempt_id": "attempt-1",
+        "candidate_commit_sha": candidate_commit,
+        "candidate_tree_sha": candidate_tree,
+        "authority_findings_sha256": "a" * 64,
     }
     service._write_state(
         task_id,
@@ -1402,8 +1476,10 @@ def test_integrate_approved_rechecks_again_at_locked_apply_boundary(tmp_path, mo
             "verified_receipt": {
                 "repository_contract_gate_passed": True,
                 "repository_contract_policy_revision_hash": "a" * 64,
+                "authority_change_required": True,
+                "authority_findings_sha256": "a" * 64,
             },
-            "approved_binding": {**packet, "approval_grant": grant},
+            "approved_binding": {**packet, "approval_grant": grant, "architecture_approval": architecture_approval},
             "external_acceptance": closure["external_acceptance"],
             "integration_authorization": closure["integration_authorization"],
         },
@@ -1435,6 +1511,7 @@ def test_integrate_approved_rechecks_again_at_locked_apply_boundary(tmp_path, mo
 
     assert len(calls) == 2
     assert calls[0] == calls[1]
+    assert calls[0]["architecture_approval"] == architecture_approval
     assert service._read_state(task_id)["merge_performed"] is False
 
 

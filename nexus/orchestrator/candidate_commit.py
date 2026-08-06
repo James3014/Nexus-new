@@ -30,6 +30,8 @@ class PromotionApprovalPacket:
     production_ready: bool
     merge_performed: bool
     push_performed: bool
+    authority_change_required: bool = False
+    authority_findings_sha256: str = ""
 
 
 class CandidateCommitter:
@@ -197,4 +199,6 @@ class CandidateCommitter:
             production_ready=False,
             merge_performed=False,
             push_performed=False,
+            authority_change_required=receipt.authority_change_required,
+            authority_findings_sha256=receipt.authority_findings_sha256,
         )

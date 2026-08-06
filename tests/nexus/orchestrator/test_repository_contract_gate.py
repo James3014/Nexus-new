@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import re
 import subprocess
 from pathlib import Path
@@ -545,8 +546,51 @@ def test_authority_change_marker_remains_pending_human_verification(tmp_path):
     path.write_text("x = 1\n", encoding="utf-8")
     current = controller.collect_candidate(contract, lease)
     receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
-    assert receipt.passed is False
+    assert receipt.passed is True
+    assert receipt.mode == "enforced"
+    assert receipt.authority_change_required is True
+    assert receipt.authority_findings_sha256
+    assert any(f.severity == "approval_required" for f in receipt.findings)
     assert any(f.kind == "authority_change_pending_human_verification" for f in receipt.findings)
+
+
+def test_committed_authority_change_requires_exact_approval_and_replay_is_blocked(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
+    contract = _contract(
+        controller_root, target_root, task_id="committed-authority", target_sha=target_sha,
+        controller_sha=controller_sha, allowed_files=["bounded.txt", "nexus/core/planner.py"], verifier_commands=[]
+    ).model_copy(update={"protected_contracts": ["repository-authority-change.v1"]})
+    controller, lease = _prepare(contract, target_root)
+    target = Path(lease.target_worktree)
+    planner = target / "nexus/core/planner.py"
+    planner.parent.mkdir(parents=True)
+    planner.write_text("x = 1\n", encoding="utf-8")
+    _git(target, "add", "nexus/core/planner.py")
+    _git(target, "commit", "-m", "authority change")
+    candidate_commit = _git(target, "rev-parse", "HEAD")
+    candidate_tree = _git(target, "rev-parse", "HEAD^{tree}")
+    gate = RepositoryContractGate(controller.worktree_manager)
+    policy_inputs = gate._policy_input_hashes(controller_root, contract.target_base_revision)
+    policy_hash = gate._policy_revision_hash(contract.target_base_revision, policy_inputs)
+    initial = gate.evaluate_committed_candidate(contract=contract, candidate_commit=candidate_commit, candidate_tree_sha=candidate_tree, expected_policy_revision_hash=policy_hash, task_id=contract.task_id, attempt_id="attempt-1")
+    assert not initial.passed
+    assert "architecture_approval_binding_mismatch" in initial.blocking_reasons
+    now = datetime.now(timezone.utc)
+    approval = {"schema":"nexus.architecture_approval.v1","approval_id":"arch","approved_by":"owner","issued_at":(now - timedelta(minutes=1)).isoformat(),"expires_at":(now + timedelta(minutes=5)).isoformat(),"approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":contract.task_id,"bound_attempt_id":"attempt-1","candidate_commit_sha":candidate_commit,"candidate_tree_sha":candidate_tree,"authority_findings_sha256":initial.authority_findings_sha256,"consumed_at":now.isoformat()}
+    accepted = gate.evaluate_committed_candidate(contract=contract, candidate_commit=candidate_commit, candidate_tree_sha=candidate_tree, expected_policy_revision_hash=policy_hash, architecture_approval=approval, task_id=contract.task_id, attempt_id="attempt-1")
+    assert accepted.passed is True
+    replay = gate.evaluate_committed_candidate(contract=contract, candidate_commit=candidate_commit, candidate_tree_sha=candidate_tree, expected_policy_revision_hash=policy_hash, architecture_approval=approval, task_id=contract.task_id, attempt_id="attempt-2")
+    assert replay.passed is False
+    assert "architecture_approval_binding_mismatch" in replay.blocking_reasons
+    tree_replay = gate.evaluate_committed_candidate(contract=contract, candidate_commit=candidate_commit, candidate_tree_sha="f" * 40, expected_policy_revision_hash=policy_hash, architecture_approval=approval, task_id=contract.task_id, attempt_id="attempt-1")
+    assert tree_replay.passed is False
+    assert "integration_candidate_identity_mismatch" in tree_replay.blocking_reasons
+    out_of_scope_contract = contract.model_copy(update={"allowed_files": ["bounded.txt"]})
+    out_of_scope = gate.evaluate_committed_candidate(contract=out_of_scope_contract, candidate_commit=candidate_commit, candidate_tree_sha=candidate_tree, expected_policy_revision_hash=policy_hash, architecture_approval=approval, task_id=contract.task_id, attempt_id="attempt-1")
+    assert out_of_scope.passed is False
+    assert any(reason.startswith("integration_candidate_out_of_scope:") for reason in out_of_scope.blocking_reasons)
 
 
 def test_identity_recheck_blocks_candidate_head_drift(tmp_path):

@@ -171,7 +171,7 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert receipt.public_claim_allowed is False
     assert receipt.production_ready is False
     assert receipt.repository_contract_gate_passed is True
-    assert receipt.repository_contract_mode == "shadow"
+    assert receipt.repository_contract_mode == "enforced"
     assert len(receipt.repository_contract_policy_revision_hash) == 64
     assert receipt.repository_contract_findings == ()
     assert verifier_evidence.argv == ("-c", 'print("verifier pass")')
@@ -185,6 +185,36 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert verifier_evidence.process_group_id is not None
     assert verifier_evidence.process_group_killed is False
     assert verifier_evidence.timed_out is False
+
+
+def test_candidate_verifier_authority_marker_is_verified_but_requires_architecture_ack(scenario):
+    contract, lease, _, controller = scenario
+    authority_contract = contract.model_copy(update={
+        "allowed_files": ["bounded.txt", "nexus/core/planner.py"],
+        "protected_contracts": ["repository-authority-change.v1"],
+    })
+    planner = Path(lease.target_worktree, "nexus/core/planner.py")
+    planner.parent.mkdir(parents=True)
+    planner.write_text("x = 1\n", encoding="utf-8")
+    candidate = controller.collect_candidate(authority_contract, lease)
+    receipt = CandidateVerifier(controller.worktree_manager).verify(authority_contract, lease, candidate)
+    assert receipt.verified is True
+    assert receipt.candidate_commit_allowed is True
+    assert receipt.authority_change_required is True
+    assert len(receipt.authority_findings_sha256) == 64
+
+
+def test_candidate_verifier_unmarked_authority_change_remains_blocked(scenario):
+    contract, lease, _, controller = scenario
+    unmarked = contract.model_copy(update={"allowed_files": ["bounded.txt", "nexus/core/planner.py"]})
+    planner = Path(lease.target_worktree, "nexus/core/planner.py")
+    planner.parent.mkdir(parents=True)
+    planner.write_text("x = 1\n", encoding="utf-8")
+    candidate = controller.collect_candidate(unmarked, lease)
+    receipt = CandidateVerifier(controller.worktree_manager).verify(unmarked, lease, candidate)
+    assert receipt.verified is False
+    assert receipt.candidate_commit_allowed is False
+    assert any(reason.startswith("effective_route_authority_change:") for reason in receipt.failure_reasons)
 
 
 def test_candidate_verifier_fails_closed_for_nonzero_verifier_exit(scenario):

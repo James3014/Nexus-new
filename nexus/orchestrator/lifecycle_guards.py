@@ -58,6 +58,108 @@ class LifecycleGuardError(RuntimeError):
         }
 
 
+def validate_architecture_approval(
+    approval: Any,
+    *,
+    required: bool,
+    task_id: str,
+    attempt_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+    authority_findings_sha256: str,
+) -> dict[str, Any] | None:
+    """Validate the narrow acknowledgement for a repository authority change."""
+    if not required:
+        if approval is not None:
+            raise LifecycleGuardError("ARCHITECTURE_APPROVAL_UNEXPECTED", "architecture approval is not required")
+        return None
+    if not isinstance(approval, Mapping):
+        raise LifecycleGuardError("OWNER_ARCHITECTURE_APPROVAL_REQUIRED", "exact Owner Architecture Approval is required")
+    allowed_keys = {
+        "schema", "approval_id", "approved_by", "issued_at", "expires_at", "approval_scope",
+        "bound_task_id", "bound_attempt_id", "candidate_commit_sha", "candidate_tree_sha",
+        "authority_findings_sha256", "consumed_at",
+    }
+    unknown = sorted(set(approval) - allowed_keys)
+    if unknown:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_UNKNOWN_FIELDS", "architecture approval contains unknown fields", details={"unknown": unknown})
+    expected = {
+        "schema": "nexus.architecture_approval.v1",
+        "bound_task_id": task_id,
+        "bound_attempt_id": attempt_id,
+        "candidate_commit_sha": candidate_commit_sha,
+        "candidate_tree_sha": candidate_tree_sha,
+        "authority_findings_sha256": authority_findings_sha256,
+    }
+    if "task_id" in approval or "attempt_id" in approval:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_BINDING_AMBIGUOUS", "architecture approval must use bound_task_id/bound_attempt_id")
+    missing = [key for key, value in expected.items() if not str(approval.get(key) or "").strip()]
+    if missing:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_BINDING_INCOMPLETE", "architecture approval binding is incomplete", details={"missing": missing})
+    mismatches = {key: {"expected": value, "received": approval.get(key)} for key, value in expected.items() if str(approval.get(key)) != str(value)}
+    if mismatches:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_BINDING_MISMATCH", "architecture approval is bound to a different candidate", details={"mismatches": mismatches})
+    if not re.fullmatch(r"[0-9a-f]{40}", str(approval.get("candidate_commit_sha"))):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_COMMIT_INVALID", "candidate commit must be a SHA-1")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(approval.get("candidate_tree_sha"))):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_TREE_INVALID", "candidate tree must be a SHA-1")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(approval.get("authority_findings_sha256"))):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_FINDINGS_HASH_INVALID", "authority findings hash must be SHA-256")
+    try:
+        issued = datetime.fromisoformat(str(approval.get("issued_at")).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(approval.get("expires_at")).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRY_INVALID", "architecture approval timestamps are invalid") from exc
+    if issued.tzinfo is None or expires.tzinfo is None or expires <= issued or issued > datetime.now(timezone.utc):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRY_INVALID", "architecture approval expiry must follow issuance")
+    if expires <= datetime.now(timezone.utc):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRED", "architecture approval has expired")
+    if approval.get("consumed_at"):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_ALREADY_CONSUMED", "architecture approval is one-shot and already consumed")
+    if not str(approval.get("approved_by") or "").strip():
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_APPROVER_REQUIRED", "architecture approval requires an Owner identity")
+    if not str(approval.get("approval_id") or "").strip():
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_ID_REQUIRED", "architecture approval requires an approval id")
+    if str(approval.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_SCOPE_UNSUPPORTED", "architecture approval must be one-shot")
+    return dict(approval)
+
+
+def validate_consumed_architecture_approval(
+    approval: Any,
+    *,
+    task_id: str,
+    attempt_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+    authority_findings_sha256: str,
+) -> dict[str, Any]:
+    """Validate the durable, already-consumed architecture acknowledgement."""
+    if not isinstance(approval, Mapping) or not approval.get("consumed_at"):
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_NOT_CONSUMED", "persisted architecture approval has no consume marker")
+    consumed_at = approval.get("consumed_at")
+    incoming = dict(approval)
+    incoming.pop("consumed_at", None)
+    validated = validate_architecture_approval(
+        incoming,
+        required=True,
+        task_id=task_id,
+        attempt_id=attempt_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        authority_findings_sha256=authority_findings_sha256,
+    )
+    try:
+        issued = datetime.fromisoformat(str(approval.get("issued_at")).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(approval.get("expires_at")).replace("Z", "+00:00"))
+        consumed = datetime.fromisoformat(str(consumed_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is invalid") from exc
+    if consumed.tzinfo is None or consumed < issued or consumed >= expires:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is outside approval lifetime")
+    return {**validated, "consumed_at": str(consumed_at)}
+
+
 def validate_approval_grant(
     approval: Any,
     *,
