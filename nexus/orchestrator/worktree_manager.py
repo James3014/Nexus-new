@@ -1403,6 +1403,7 @@ class WorktreeManager:
                 continue
             path = Path(entry.path)
             changed: list[str] = []
+            status_read_error = False
             if path.exists():
                 try:
                     changed, untracked, deleted = self._parse_status(
@@ -1410,7 +1411,7 @@ class WorktreeManager:
                     )
                     changed = sorted(set(changed) | set(untracked) | set(deleted))
                 except Exception:
-                    changed = []
+                    status_read_error = True
             task_id = entry.task_id
             state = states.get(task_id or "") if task_id else None
             status = state.get("status") if state else None
@@ -1434,6 +1435,9 @@ class WorktreeManager:
             if entry.is_dirty and task_id and overlap:
                 record_blockers.append("dirty_allowed_overlap")
                 blockers.append(f"dirty_allowed_overlap:{entry.path}")
+            if entry.is_dirty and task_id and status_read_error:
+                record_blockers.append("worktree_status_unreadable")
+                blockers.append(f"worktree_status_unreadable:{entry.path}")
             aux_records.append({
                 "path": entry.path,
                 "head": entry.head,
@@ -1444,6 +1448,7 @@ class WorktreeManager:
                 "task_status": status,
                 "changed_files": changed,
                 "allowed_overlap": overlap,
+                "status_read_error": status_read_error,
                 "blockers": record_blockers,
             })
 
