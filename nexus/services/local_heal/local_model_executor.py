@@ -207,10 +207,11 @@ def _attach_local_armor_attempt_receipt(
 
 
 def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
-    """Resolve execution topology strictly from planner-owned signal_snapshot.
+    """Resolve executor topology strictly from planner-owned signal_snapshot.
 
     Resolution order:
-    1. request.route_context["signal_snapshot"]["execution_topology"] (planner-owned)
+    1. request.route_context["signal_snapshot"]["executor_topology"] (planner-owned)
+    2. legacy physical ``execution_topology`` only when no canonical value exists
     No fallbacks allowed. Missing or empty => raises ValueError.
     """
     route_ctx = request.route_context if isinstance(request.route_context, dict) else {}
@@ -218,9 +219,13 @@ def _resolve_execution_topology(request: LocalModelExecutorRequest) -> str:
     if not isinstance(signal_snapshot, dict):
         raise ValueError("Missing signal_snapshot in route_context")
 
-    topology = signal_snapshot.get("execution_topology")
+    topology = signal_snapshot.get("executor_topology")
     if not topology:
-        raise ValueError("Missing execution_topology in signal_snapshot")
+        legacy = signal_snapshot.get("execution_topology")
+        if legacy not in {"DIRECT_CANONICAL", "ISOLATED_TARGET", "ASSISTED_CANONICAL"}:
+            topology = legacy
+    if not topology:
+        raise ValueError("Missing executor_topology in signal_snapshot")
 
     if "protocol_mode" not in signal_snapshot:
         raise ValueError("Missing protocol_mode in signal_snapshot")
@@ -940,7 +945,11 @@ def _validate_local_model_authority(
     ):
         return "local_model_signal_identity_mismatch", resolved_provider, resolved_model
 
-    execution_topology = signal_snapshot.get("execution_topology")
+    execution_topology = signal_snapshot.get("executor_topology")
+    if not execution_topology:
+        legacy = signal_snapshot.get("execution_topology")
+        if legacy not in {"DIRECT_CANONICAL", "ISOLATED_TARGET", "ASSISTED_CANONICAL"}:
+            execution_topology = legacy
     committee_enabled = (
         signal_snapshot.get("local_committee_enabled") is True
         or signal_snapshot.get("use_committee") is True
@@ -4071,7 +4080,8 @@ def _try_invoke_p4_committee(
         target_file=request.target_file,
         target_symbol=signal_snapshot.get("target_symbol", ""),
         difficulty=signal_snapshot.get("difficulty", "") or raw_meta.get("task_difficulty", ""),
-        execution_topology=signal_snapshot.get("execution_topology", ""),
+        execution_topology=signal_snapshot.get("executor_topology")
+        or signal_snapshot.get("execution_topology", ""),
         p3_route_status=raw_meta.get("p3_route_status", ""),
         hard_case_escalation_reason=raw_meta.get("stage5_escalation_reason", ""),
         evidence_refs=request.evidence_refs,

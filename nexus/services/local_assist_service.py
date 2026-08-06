@@ -420,7 +420,12 @@ class LocalAssistRequest:
                 raise ValueError("canonical_local_model_identity_mismatch")
         elif self.planner_snapshot.get("executor_provider") != "ollama":
             raise ValueError("unknown_provider")
-        if self.planner_snapshot.get("execution_topology") not in ALLOWED_TOPOLOGIES:
+        executor_topology = self.planner_snapshot.get("executor_topology")
+        if not executor_topology:
+            legacy = self.planner_snapshot.get("execution_topology")
+            if legacy not in {"DIRECT_CANONICAL", "ISOLATED_TARGET", "ASSISTED_CANONICAL"}:
+                executor_topology = legacy
+        if executor_topology not in ALLOWED_TOPOLOGIES:
             raise ValueError("unsupported_execution_topology")
         if not self.planner_snapshot.get("model_call_allowed"):
             raise ValueError("provider_call_not_allowed")
@@ -818,7 +823,10 @@ class LocalAssistService:
                         output_delivered = False
                         fallback_reason = "candidate_hash_not_proven"
                     if request.action == "verified-subtask" and output_delivered:
-                        if str(planner_snapshot.get("execution_topology")) == "localheal_pipeline":
+                        if str(
+                            planner_snapshot.get("executor_topology")
+                            or planner_snapshot.get("execution_topology")
+                        ) == "localheal_pipeline":
                             from nexus.services.local_heal.world_c_receipt import (
                                 validate_world_c_receipt,
                             )

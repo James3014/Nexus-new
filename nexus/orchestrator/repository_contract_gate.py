@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
 import hashlib
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -183,12 +183,179 @@ class RepositoryContractGate:
             blocking_reasons=tuple(sorted(blocking_reasons)),
         )
 
+    def evaluate_committed_candidate(
+        self,
+        *,
+        contract: SelfHostedTaskContract,
+        candidate_commit: str,
+        candidate_tree_sha: str,
+        expected_policy_revision_hash: str,
+    ) -> RepositoryContractGateReceipt:
+        """Re-evaluate the exact committed tree immediately before integration."""
+        target = Path(contract.controller_repo_root).resolve()
+        findings: list[RepositoryContractFinding] = []
+        blocking_reasons: list[str] = []
+        try:
+            actual_commit = self.worktree_manager._run_git(
+                ["rev-parse", f"{candidate_commit}^{{commit}}"], cwd=target
+            )
+            actual_tree = self.worktree_manager._run_git(
+                ["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=target
+            )
+        except RuntimeError:
+            actual_commit = ""
+            actual_tree = ""
+        if actual_commit != candidate_commit or actual_tree != candidate_tree_sha:
+            blocking_reasons.append("integration_candidate_identity_mismatch")
+            findings.append(
+                RepositoryContractFinding(
+                    kind="integration_candidate_identity_mismatch",
+                    severity="blocking",
+                    message="integration candidate commit/tree no longer matches the verified packet",
+                    evidence={
+                        "expected_commit": candidate_commit,
+                        "actual_commit": actual_commit,
+                        "expected_tree": candidate_tree_sha,
+                        "actual_tree": actual_tree,
+                    },
+                )
+            )
+
+        base_inputs = self._policy_input_hashes(target, contract.target_base_revision)
+        policy_revision_hash = self._policy_revision_hash(
+            contract.target_base_revision, base_inputs
+        )
+        if not expected_policy_revision_hash or policy_revision_hash != expected_policy_revision_hash:
+            blocking_reasons.append("integration_repository_policy_revision_drift")
+            findings.append(
+                RepositoryContractFinding(
+                    kind="integration_repository_policy_revision_drift",
+                    severity="blocking",
+                    message="repository contract policy revision differs from verification",
+                    evidence={
+                        "expected": expected_policy_revision_hash,
+                        "actual": policy_revision_hash,
+                    },
+                )
+            )
+
+        try:
+            name_status = self.worktree_manager._run_git(
+                [
+                    "diff",
+                    "--find-renames",
+                    "--find-copies",
+                    "--name-status",
+                    contract.target_base_revision,
+                    candidate_commit,
+                    "--",
+                ],
+                cwd=target,
+            )
+        except RuntimeError:
+            name_status = ""
+            blocking_reasons.append("integration_candidate_diff_unreadable")
+        candidate_paths: list[str] = []
+        deleted_files: list[str] = []
+        for line in name_status.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2 or not parts[0]:
+                blocking_reasons.append("integration_candidate_diff_malformed")
+                continue
+            status = parts[0]
+            status_code = status[0]
+            if status_code in {"R", "C"}:
+                if len(parts) != 3:
+                    blocking_reasons.append("integration_candidate_diff_malformed")
+                    continue
+                source_path, destination_path = parts[1], parts[2]
+                candidate_paths.extend((source_path, destination_path))
+                blocking_reasons.append(
+                    "integration_candidate_rename_copy_forbidden:"
+                    f"{source_path}->{destination_path}"
+                )
+                continue
+            if len(parts) != 2 or status_code not in {"A", "D", "M", "T", "U", "X", "B"}:
+                blocking_reasons.append("integration_candidate_diff_malformed")
+                continue
+            path = parts[1]
+            candidate_paths.append(path)
+            if status_code == "D":
+                deleted_files.append(path)
+        candidate_paths = sorted(set(candidate_paths))
+        deleted_files = sorted(set(deleted_files))
+
+        deleted_set = set(deleted_files)
+        for path in candidate_paths:
+            if path in deleted_set:
+                continue
+            try:
+                self.worktree_manager._run_git(
+                    ["cat-file", "-e", f"{candidate_commit}:{path}"], cwd=target
+                )
+            except RuntimeError:
+                blocking_reasons.append(
+                    f"integration_candidate_content_unreadable:{path}"
+                )
+                continue
+            if path.endswith((".py", ".json", ".toml", ".yaml", ".yml")) and self._candidate_text(
+                target=target,
+                path=path,
+                candidate_revision=candidate_commit,
+            ) is None:
+                blocking_reasons.append(
+                    f"integration_candidate_content_unreadable:{path}"
+                )
+
+        out_of_scope = [
+            path
+            for path in candidate_paths
+            if not self.worktree_manager._matches_any(path, contract.allowed_files)
+            or self.worktree_manager._matches_any(path, contract.forbidden_files)
+        ]
+        for path in out_of_scope:
+            blocking_reasons.append(f"integration_candidate_out_of_scope:{path}")
+        for path in sorted(set(deleted_files) - set(contract.authorized_deletions)):
+            blocking_reasons.append(f"integration_undeclared_deletion:{path}")
+
+        findings.extend(self._authority_drift_findings(candidate_paths, base_inputs))
+        route_findings, route_blocking = self._effective_route_findings(
+            target=target,
+            contract=contract,
+            candidate_paths=candidate_paths,
+            current=None,
+            candidate_revision=candidate_commit,
+        )
+        findings.extend(route_findings)
+        blocking_reasons.extend(route_blocking)
+        freeze_findings, freeze_blocking = self._freeze_findings(
+            target=target,
+            contract=contract,
+            candidate_paths=candidate_paths,
+            deleted_files=deleted_files,
+            candidate_revision=candidate_commit,
+        )
+        findings.extend(freeze_findings)
+        blocking_reasons.extend(freeze_blocking)
+        for path in candidate_paths:
+            if path in base_inputs and self._is_policy_path(path):
+                blocking_reasons.append(f"repository_contract_self_modification:{path}")
+
+        return RepositoryContractGateReceipt(
+            passed=not blocking_reasons,
+            mode=self.MODE,
+            policy_revision_hash=policy_revision_hash,
+            findings=tuple(sorted(findings, key=self._finding_sort_key)),
+            blocking_reasons=tuple(sorted(set(blocking_reasons))),
+        )
+
     def _freeze_findings(
         self,
         target: Path,
         contract: SelfHostedTaskContract,
         candidate_paths: list[str],
         deleted_files: list[str],
+        candidate_revision: str | None = None,
     ) -> tuple[list[RepositoryContractFinding], list[str]]:
         findings: list[RepositoryContractFinding] = []
         blocking_reasons: list[str] = []
@@ -198,7 +365,6 @@ class RepositoryContractGate:
             if path in deleted_set:
                 continue
 
-            file_path = target / path
             is_new = not self._base_path_exists(target, contract.target_base_revision, path)
 
             # (1), (2), (3) Markdown Freeze Checks
@@ -255,9 +421,13 @@ class RepositoryContractGate:
                     )
 
                 # (5) & (6) AST class checks for class names ending with Agent, Router, or Wrapper
-                if file_path.exists():
+                cand_code = self._candidate_text(
+                    target=target,
+                    path=path,
+                    candidate_revision=candidate_revision,
+                )
+                if cand_code is not None:
                     try:
-                        cand_code = file_path.read_text(encoding="utf-8")
                         tree_cand = ast.parse(cand_code, filename=path)
                         cand_classes = {
                             node.name
@@ -311,7 +481,8 @@ class RepositoryContractGate:
         target: Path,
         contract: SelfHostedTaskContract,
         candidate_paths: list[str],
-        current: CandidateDiffReceipt,
+        current: CandidateDiffReceipt | None,
+        candidate_revision: str | None = None,
     ) -> tuple[list[RepositoryContractFinding], list[str]]:
         findings: list[RepositoryContractFinding] = []
         blocking_reasons: list[str] = []
@@ -340,10 +511,15 @@ class RepositoryContractGate:
                 # Preserve the legacy reason for the original three checks.
                 if not any(token in stem for token in ("agent", "router", "wrapper")):
                     add(path, "new production module name can become a second control-plane authority", {"stem": stem})
-            if path.endswith(".py") and is_new and (target / path).exists():
+            candidate_text = self._candidate_text(
+                target=target,
+                path=path,
+                candidate_revision=candidate_revision,
+            )
+            if path.endswith(".py") and is_new and candidate_text is not None:
                 try:
-                    tree = ast.parse((target / path).read_text(encoding="utf-8"), filename=path)
-                except (OSError, SyntaxError, UnicodeDecodeError):
+                    tree = ast.parse(candidate_text, filename=path)
+                except SyntaxError:
                     tree = None
                 if tree is not None:
                     for node in ast.walk(tree):
@@ -354,16 +530,26 @@ class RepositoryContractGate:
                             if not class_name.endswith(("agent", "router", "wrapper")):
                                 add(f"{path}:{node.name}", "new production class name can become a second control-plane authority", {"class_name": node.name})
             if is_new:
-                try:
-                    added = (target / path).read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    added = ""
+                added = candidate_text or ""
             else:
                 try:
-                    diff = self.worktree_manager._run_git(
-                        ["diff", "--unified=0", contract.target_base_revision, "--", path], cwd=target
-                    )
+                    args = ["diff", "--unified=0", contract.target_base_revision]
+                    if candidate_revision:
+                        args.append(candidate_revision)
+                    args.extend(["--", path])
+                    diff = self.worktree_manager._run_git(args, cwd=target)
                 except RuntimeError:
+                    if candidate_revision:
+                        reason = f"integration_candidate_diff_unreadable:{path}"
+                        blocking_reasons.append(reason)
+                        findings.append(
+                            RepositoryContractFinding(
+                                kind="integration_candidate_diff_unreadable",
+                                severity="blocking",
+                                path=path,
+                                message="candidate route-sensitive diff could not be read",
+                            )
+                        )
                     continue
                 added = "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
             if not any(token in path.lower() for token in self.AUTHORITY_PATH_TOKENS) and not (
@@ -376,6 +562,28 @@ class RepositoryContractGate:
                 add(path, "existing authority-sensitive file adds an effective route/fallback branch", {"matched_tokens": ",".join(matched)})
 
         return findings, blocking_reasons
+
+    def _candidate_text(
+        self,
+        *,
+        target: Path,
+        path: str,
+        candidate_revision: str | None,
+    ) -> str | None:
+        if candidate_revision:
+            try:
+                return self.worktree_manager._run_git(
+                    ["show", f"{candidate_revision}:{path}"], cwd=target
+                )
+            except RuntimeError:
+                return None
+        file_path = target / path
+        if not file_path.exists():
+            return None
+        try:
+            return file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
 
 
     def _policy_input_hashes(self, target: Path, base_revision: str) -> dict[str, str]:

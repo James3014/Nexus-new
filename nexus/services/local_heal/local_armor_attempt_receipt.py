@@ -161,7 +161,11 @@ def _build_attempt_xray(
 ) -> dict[str, Any]:
     return {
         "planner_snapshot": {
-            "execution_topology": str(planner_snapshot.get("execution_topology", "") or ""),
+            "execution_topology": str(
+                planner_snapshot.get("executor_topology")
+                or planner_snapshot.get("execution_topology", "")
+                or ""
+            ),
             "selected_executor": str(planner_snapshot.get("selected_executor", "") or ""),
             "executor_model": str(planner_snapshot.get("executor_model", "") or ""),
             "protocol_mode": str(planner_snapshot.get("protocol_mode", "") or ""),

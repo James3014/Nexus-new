@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -33,6 +34,7 @@ from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
 from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationExecutionError
+from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,
@@ -5289,16 +5291,6 @@ class SelfHostedTaskService:
         if grant.get("consumed_at") and grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
             raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
 
-        self._checkpoint(
-            task_id,
-            "INTEGRATING",
-            {
-                "integration_branch": integration_branch,
-                "push_performed": False,
-            },
-            attempt_id=state.get("attempt_id"),
-        )
-        integrating = self._read_state(task_id) or state
         c_dict = state.get("contract") or {}
         request_dict = state.get("request") or {
             "what": c_dict.get("objective", "integration task"),
@@ -5311,16 +5303,115 @@ class SelfHostedTaskService:
             "target_base_revision": c_dict.get("target_base_revision", "a" * 40),
         }
         contract = self.build_contract(request_dict)
-        try:
-            receipt = ControlledIntegrationManager(
-                integration_root=contract.controller_repo_root
-            ).integrate_authorized_task_state(
-                integrating,
-                integration_branch=integration_branch,
-                staging_root=str(state.get("integration_staging_root") or (Path(contract.target_worktree_root).parent / ".nexus-integration-staging")),
-                apply=True,
-                post_apply_commands=tuple(tuple(command) for command in state.get("post_apply_commands") or ()),
+        protected_binding_fields = (
+            "task_id",
+            "attempt_id",
+            "request",
+            "contract",
+            "promotion_packet",
+            "verified_receipt",
+            "approved_binding",
+            "external_acceptance",
+            "integration_authorization",
+        )
+
+        def binding_hash(bound_state: Mapping[str, Any]) -> str:
+            payload = {
+                key: _jsonable(bound_state.get(key)) for key in protected_binding_fields
+            }
+            return hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+
+        def repository_recheck(
+            bound_state: Mapping[str, Any],
+            bound_contract: ArchitectTaskContract,
+        ) -> Any:
+            packet = bound_state.get("promotion_packet") if isinstance(
+                bound_state.get("promotion_packet"), Mapping
+            ) else {}
+            verified_receipt = bound_state.get("verified_receipt") if isinstance(
+                bound_state.get("verified_receipt"), Mapping
+            ) else {}
+            expected_policy_revision_hash = str(
+                verified_receipt.get("repository_contract_policy_revision_hash") or ""
             )
+            if verified_receipt.get("repository_contract_gate_passed") is not True:
+                raise RuntimeError(
+                    "REPOSITORY_CONTRACT_RECHECK_REQUIRED: verified gate proof is missing"
+                )
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_policy_revision_hash):
+                raise RuntimeError(
+                    "REPOSITORY_CONTRACT_RECHECK_REQUIRED: policy revision hash is missing"
+                )
+            result = RepositoryContractGate(
+                WorktreeManager(bound_contract.target_worktree_root)
+            ).evaluate_committed_candidate(
+                contract=bound_contract,
+                candidate_commit=str(packet.get("candidate_commit_sha") or ""),
+                candidate_tree_sha=str(packet.get("candidate_tree_sha") or ""),
+                expected_policy_revision_hash=expected_policy_revision_hash,
+            )
+            if not result.passed:
+                raise RuntimeError(
+                    "REPOSITORY_CONTRACT_RECHECK_FAILED: "
+                    + json.dumps(
+                        list(result.blocking_reasons),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            return result
+
+        approved_binding_hash = binding_hash(state)
+        integration_recheck = repository_recheck(state, contract)
+
+        self._checkpoint(
+            task_id,
+            "INTEGRATING",
+            {
+                "integration_branch": integration_branch,
+                "push_performed": False,
+                "repository_contract_integration_recheck": _jsonable(
+                    integration_recheck
+                ),
+            },
+            attempt_id=state.get("attempt_id"),
+        )
+        try:
+            # Hold the lifecycle state lock across the final exact-tree recheck
+            # and apply call so no formal state writer can change the approved
+            # packet between proof and mutation.
+            with self._state_lock():
+                integrating = self._load_state_path(self._state_path(task_id), task_id)
+                if integrating is None:
+                    raise RuntimeError("INTEGRATION_STATE_MISSING_AT_APPLY_BOUNDARY")
+                if binding_hash(integrating) != approved_binding_hash:
+                    raise RuntimeError("INTEGRATION_BINDING_DRIFT_AT_APPLY_BOUNDARY")
+                final_request = integrating.get("request") or request_dict
+                final_contract = self.build_contract(final_request)
+                final_recheck = repository_recheck(integrating, final_contract)
+                integrating["repository_contract_integration_recheck"] = _jsonable(
+                    final_recheck
+                )
+                receipt = ControlledIntegrationManager(
+                    integration_root=final_contract.controller_repo_root
+                ).integrate_authorized_task_state(
+                    integrating,
+                    integration_branch=integration_branch,
+                    staging_root=str(
+                        integrating.get("integration_staging_root")
+                        or (
+                            Path(final_contract.target_worktree_root).parent
+                            / ".nexus-integration-staging"
+                        )
+                    ),
+                    apply=True,
+                    post_apply_commands=tuple(
+                        tuple(command)
+                        for command in integrating.get("post_apply_commands") or ()
+                    ),
+                )
         except IntegrationExecutionError as exc:
             failed_status = (
                 "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"

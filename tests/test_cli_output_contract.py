@@ -122,6 +122,9 @@ def test_run_uses_canonical_single_task_executor(monkeypatch, tmp_path):
     # Gate 2: task-level Local Assist policy is always threaded (default disabled).
     assert called["execution_context"].get("local_assist_mode") == "disabled"
     assert "workspace_revision" in called["execution_context"]
+    assert called["execution_context"]["execution_world"] == "development_task"
+    assert called["execution_context"]["transport_ingress"] == "cli"
+    assert called["execution_context"]["canonical_semantic_hash"].startswith("sha256:")
 
 
 def test_run_fails_closed_when_canonical_executor_returns_false(monkeypatch, tmp_path):

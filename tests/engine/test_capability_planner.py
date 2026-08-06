@@ -2792,7 +2792,8 @@ def test_capability_planner_local_committee_topology_metadata(monkeypatch):
     
     snapshot = plan.signal_snapshot
     assert "local_model_executor" in plan.selected_capabilities
-    assert snapshot.get("execution_topology") == "local_committee_only"
+    assert snapshot.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert snapshot.get("executor_topology") == "local_committee_only"
     assert snapshot.get("committee_profile") == "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
     assert snapshot.get("local_committee_enabled") is True
 

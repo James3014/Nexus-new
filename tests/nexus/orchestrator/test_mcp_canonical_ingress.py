@@ -42,6 +42,8 @@ def _canonical_runtime(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
                 "task_id": task_id,
                 "canonical_execution": {
                     "execution_decision_authority": "CapabilityPlanner",
+                    "execution_world": "development_task",
+                    "canonical_execution_topology": "ASSISTED_CANONICAL",
                     "context_hash": "context-hash",
                     "decision_hash": "decision-hash",
                     "projection_hash": "projection-hash",
@@ -142,6 +144,8 @@ def test_task_run_enters_canonical_product_runtime_once(
     assert payload["schema"] == "nexus.mcp_canonical_runtime.v1"
     assert payload["status"] == "SUCCEEDED"
     assert payload["execution_decision_authority"] == "CapabilityPlanner"
+    assert payload["execution_world"] == "development_task"
+    assert payload["canonical_execution_topology"] == "ASSISTED_CANONICAL"
     assert payload["runtime_dispatched"] is True
     assert payload["formal_workspace_mutated"] is False
     assert payload["root_receipt_valid"] is True
@@ -150,6 +154,9 @@ def test_task_run_enters_canonical_product_runtime_once(
     assert len(_canonical_runtime) == 1
     call = _canonical_runtime[0]
     assert call["execution_context"]["local_assist_mode"] == "advisor"
+    assert call["execution_context"]["execution_world"] == "development_task"
+    assert call["execution_context"]["transport_ingress"] == "mcp"
+    assert call["execution_context"]["canonical_semantic_hash"].startswith("sha256:")
     assert call["execution_context"]["target_files"] == ["README.md"]
     assert "online_policy" not in call["execution_context"]
     assert service.submitted == []

@@ -8,6 +8,7 @@ state, or a durable workspace.
 from __future__ import annotations
 
 from dataclasses import fields
+import os
 
 import pytest
 
@@ -128,3 +129,76 @@ def test_world_identity_survives_context_roundtrip_and_identity_projection() -> 
     assert restored.execution_world == "local_armor"
     assert restored.transport_ingress == "direct"
     assert identity["execution_world"] == "local_armor"
+
+
+def test_transport_ingress_does_not_change_planner_world_topology_or_depth() -> None:
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
+
+    decisions = []
+    for ingress in ("mcp", "cli", "direct"):
+        bundle = plan_canonical_task_bundle(_context(transport_ingress=ingress))
+        decisions.append(bundle.decision)
+    assert {item.execution_world for item in decisions} == {"development_task"}
+    assert {item.execution_topology for item in decisions} == {"ISOLATED_TARGET"}
+    assert len({item.execution_depth for item in decisions}) == 1
+    assert len({item.selected_capabilities for item in decisions}) == 1
+
+
+def test_legacy_difficulty_advisor_cannot_replace_canonical_topology() -> None:
+    from nexus.engine.capability_planner import CapabilityPlanner
+
+    previous = {
+        name: os.environ.get(name)
+        for name in (
+            "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR",
+            "NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW",
+        )
+    }
+    os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
+    os.environ["NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW"] = "1"
+    try:
+        plan = CapabilityPlanner().plan(
+            execution_world="development_task",
+            task_desc="hard cross-module repair",
+            task_type="bugfix",
+            route={
+                "difficulty": "hard",
+                "pillar_signals": {},
+                "topology_facts": {"isolation_required": True},
+            },
+        )
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    assert plan.execution_topology == "ISOLATED_TARGET"
+    assert plan.signal_snapshot["canonical_execution_topology"] == "ISOLATED_TARGET"
+    assert plan.signal_snapshot["suggested_executor_topology"] == "cloud_with_local_assist"
+    assert plan.signal_snapshot.get("route_selected_by") != "p3_difficulty_router"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("execution_world", "product_runtime", "canonical_execution_identity_world_mismatch"),
+        (
+            "canonical_execution_topology",
+            "DIRECT_CANONICAL",
+            "canonical_execution_identity_topology_mismatch",
+        ),
+    ),
+)
+def test_canonical_identity_rejects_world_or_topology_tamper(
+    field: str, value: str, message: str
+) -> None:
+    from nexus.contracts.canonical_execution import validate_canonical_execution_identity
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
+    from nexus.services.unified_runtime import canonical_execution_identity
+
+    identity = canonical_execution_identity(plan_canonical_task_bundle(_context()))
+    identity[field] = value
+    with pytest.raises(ValueError, match=message):
+        validate_canonical_execution_identity(identity)

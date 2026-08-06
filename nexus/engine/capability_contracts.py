@@ -4,6 +4,10 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
+from nexus.contracts.execution_identity import (
+    require_execution_topology,
+    require_execution_world,
+)
 
 PHASES = ("S", "P", "X", "D", "R", "A", "C")
 
@@ -400,10 +404,22 @@ class CapabilityPlan:
     planner_mode: str = "dry_run"
     signal_snapshot: dict[str, Any] = field(default_factory=dict)
     execution_depth: str = EXECUTION_DEPTH_STANDARD
+    execution_world: str = "product_runtime"
+    execution_topology: str = "ASSISTED_CANONICAL"
 
     def __post_init__(self) -> None:
         if self.execution_depth not in VALID_EXECUTION_DEPTHS:
             raise ValueError(f"invalid_execution_depth:{self.execution_depth}")
+        object.__setattr__(
+            self,
+            "execution_world",
+            require_execution_world(self.execution_world),
+        )
+        object.__setattr__(
+            self,
+            "execution_topology",
+            require_execution_topology(self.execution_topology),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

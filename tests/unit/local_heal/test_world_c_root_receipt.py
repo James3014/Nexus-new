@@ -31,7 +31,12 @@ def _context(tmp_path: Path, task_id: str = "world-c-1") -> HealContext:
             "world_c_source_root": str(tmp_path),
             "world_c_workspace_path": str(isolated),
             "signal_snapshot": {
-                "execution_topology": "localheal_pipeline",
+                "execution_topology": "ISOLATED_TARGET",
+                "executor_topology": "localheal_pipeline",
+                "execution_world": "local_armor",
+                "canonical_execution_topology": "ISOLATED_TARGET",
+                "canonical_execution": {"context_hash": "a" * 64},
+                "capability_evidence_bundle": {"source_hash": "sha256:source"},
                 "planner_decision_id": "plan-1",
             },
         },
@@ -40,8 +45,18 @@ def _context(tmp_path: Path, task_id: str = "world-c-1") -> HealContext:
     return HealContext(op=op, gov=GovernanceContext())
 
 
-def _complete_world_c(tmp_path: Path) -> dict:
+def _complete_world_c(
+    tmp_path: Path,
+    *,
+    execution_world: str = "local_armor",
+    canonical_execution_topology: str = "ISOLATED_TARGET",
+    canonical_execution_hash: str = "a" * 64,
+) -> dict:
     ctx = _context(tmp_path)
+    snapshot = ctx.op.route_context["signal_snapshot"]
+    snapshot["execution_world"] = execution_world
+    snapshot["canonical_execution_topology"] = canonical_execution_topology
+    snapshot["canonical_execution"]["context_hash"] = canonical_execution_hash
     for stage in WORLD_C_STAGES:
         _set_stage_evidence(ctx, stage)
         record_world_c_phase_result(ctx, stage, PhaseResult(success=True))
@@ -135,6 +150,10 @@ def test_world_c_receipt_binds_final_verifier_attempt(tmp_path: Path) -> None:
     verifier = receipt["stages"][-1]
     assert verifier["attempt_count"] == 2
     assert verifier["final_success"] is True
+    assert receipt["execution_world"] == "local_armor"
+    assert receipt["canonical_execution_topology"] == "ISOLATED_TARGET"
+    assert receipt["canonical_execution_hash"] == "a" * 64
+    assert receipt["source_hash"] == "sha256:source"
 
 
 def test_root_receipt_references_world_c_as_the_single_verifier_source(tmp_path: Path) -> None:
@@ -150,7 +169,13 @@ def test_root_receipt_references_world_c_as_the_single_verifier_source(tmp_path:
         "task_id": "world-c-1",
         "workspace_revision": "rev-1",
         "planner_decision_id": "plan-1",
-        "canonical_execution": {"task_id": "world-c-1", "execution_id": "exec-1"},
+        "canonical_execution": {
+            "task_id": "world-c-1",
+            "execution_id": "exec-1",
+            "execution_world": "local_armor",
+            "canonical_execution_topology": "ISOLATED_TARGET",
+            "context_hash": "a" * 64,
+        },
         "planner": {"planner_decision_id": "plan-1"},
         "workforce_admission": {"aggregate_binding_hash": "sha256:workforce"},
         "capability_evidence_bundle": {"source_hash": "sha256:source"},
@@ -179,6 +204,45 @@ def test_root_receipt_references_world_c_as_the_single_verifier_source(tmp_path:
     assert root["receipt_complete"] is True
     assert root["verifier_bound_to_world_c"] is True
     assert root["public_claim_allowed"] is False
+
+
+def test_root_receipt_rejects_world_c_canonical_identity_tamper(tmp_path: Path) -> None:
+    world_c = _complete_world_c(
+        tmp_path,
+        canonical_execution_topology="ASSISTED_CANONICAL",
+        canonical_execution_hash="b" * 64,
+    )
+    runtime = {
+        "task_id": "world-c-1",
+        "workspace_revision": "rev-1",
+        "planner_decision_id": "plan-1",
+        "canonical_execution": {
+            "task_id": "world-c-1",
+            "execution_id": "exec-1",
+            "execution_world": "local_armor",
+            "canonical_execution_topology": "ISOLATED_TARGET",
+            "context_hash": "a" * 64,
+        },
+        "planner": {"planner_decision_id": "plan-1"},
+        "workforce_admission": {"aggregate_binding_hash": "sha256:workforce"},
+        "capability_evidence_bundle": {"source_hash": "sha256:source"},
+        "local": _stage("local", response={"local_outputs": {"world_c_receipt": world_c}}),
+        "verifier": _stage(
+            "verifier",
+            response={
+                "source": "HealOrchestrator.VerificationPhase",
+                "world_c_receipt_hash": world_c["receipt_hash"],
+            },
+        ),
+        "learning": _stage("learning"),
+        "capability_results": {},
+    }
+
+    root = build_root_receipt(runtime)
+
+    assert root["receipt_complete"] is False
+    assert "world_c_canonical_execution_topology_mismatch" in root["missing_evidence"]
+    assert "world_c_canonical_execution_hash_mismatch" in root["missing_evidence"]
 
 
 def test_root_receipt_fails_closed_when_runtime_verifier_is_not_world_c_projection(

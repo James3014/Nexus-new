@@ -12,9 +12,15 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from nexus.contracts.execution_identity import (
+    require_execution_topology,
+    require_execution_world,
+    require_transport_ingress,
+)
 from nexus.engine.capability_contracts import CapabilityPlan
 
-_CONTEXT_SCHEMA = "nexus.canonical_task_context.v1"
+_CONTEXT_SCHEMA = "nexus.canonical_task_context.v2"
+_LEGACY_CONTEXT_SCHEMA = "nexus.canonical_task_context.v1"
 _DECISION_SCHEMA = "nexus.execution_decision.v1"
 _PROJECTION_SCHEMA = "nexus.canonical_execution_projection.v1"
 _BUNDLE_SCHEMA = "nexus.canonical_planning_bundle.v1"
@@ -23,6 +29,25 @@ _VALID_EXECUTION_DEPTHS = frozenset({"LIGHT", "STANDARD", "FULL"})
 _VALID_EXECUTION_CHANNELS = frozenset({"online", "local"})
 _ALLOWED_BUDGET_KEYS = frozenset({"max_cost", "scoring"})
 _ALLOWED_SCORING_KEYS = frozenset({"benefit_weight", "risk_weight", "cost_weight"})
+_ALLOWED_TASK_FACT_KEYS = frozenset(
+    {
+        "mutation_requested",
+        "cross_module",
+        "dirty_path_overlap",
+        "authority_changing_scope",
+        "security_sensitive_scope",
+        "candidate_required",
+    }
+)
+_ALLOWED_AUTHORITY_INPUT_KEYS = frozenset(
+    {
+        "direct_canonical_eligible",
+        "delegation_required",
+        "isolation_required",
+        "owner_authorized",
+        "assisted_execution_required",
+    }
+)
 
 
 def _canonical_hash(payload: Mapping[str, Any]) -> str:
@@ -137,7 +162,11 @@ class CanonicalTaskContext:
     task_id: str = ""
     task_type: str = ""
     task_desc: str = ""
+    execution_world: str = "product_runtime"
+    transport_ingress: str = "direct"
     execution_channels: tuple[str, ...] = ("online",)
+    task_facts: Mapping[str, Any] = field(default_factory=dict)
+    authority_inputs: Mapping[str, Any] = field(default_factory=dict)
     route_features: Mapping[str, Any] = field(default_factory=dict)
     pillars: Mapping[str, Any] = field(default_factory=dict)
     codeintel: Mapping[str, Any] = field(default_factory=dict)
@@ -145,11 +174,19 @@ class CanonicalTaskContext:
     budget: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.schema != _CONTEXT_SCHEMA:
+        if self.schema not in {_CONTEXT_SCHEMA, _LEGACY_CONTEXT_SCHEMA}:
             raise ValueError(f"invalid_canonical_task_context_schema:{self.schema}")
         _require_text(self.task_id, "task_id")
         _require_text(self.task_type, "task_type")
         _require_text(self.task_desc, "task_desc")
+        if self.schema == _CONTEXT_SCHEMA:
+            object.__setattr__(self, "execution_world", require_execution_world(self.execution_world))
+            object.__setattr__(self, "transport_ingress", require_transport_ingress(self.transport_ingress))
+        else:
+            if self.execution_world:
+                object.__setattr__(self, "execution_world", require_execution_world(self.execution_world))
+            if self.transport_ingress:
+                object.__setattr__(self, "transport_ingress", require_transport_ingress(self.transport_ingress))
         if isinstance(self.execution_channels, str) or not isinstance(
             self.execution_channels, (list, tuple)
         ):
@@ -161,11 +198,29 @@ class CanonicalTaskContext:
         if unsupported:
             raise ValueError(f"unsupported_execution_channel:{unsupported[0]}")
         object.__setattr__(self, "execution_channels", channels)
-        for name in ("route_features", "pillars", "codeintel", "phase_trace", "budget"):
+        for name in (
+            "task_facts",
+            "authority_inputs",
+            "route_features",
+            "pillars",
+            "codeintel",
+            "phase_trace",
+            "budget",
+        ):
             value = getattr(self, name)
             if not isinstance(value, Mapping):
                 raise ValueError(f"{name}_must_be_mapping")
             object.__setattr__(self, name, _freeze_json(value, path=name))
+        for key, value in self.task_facts.items():
+            if key not in _ALLOWED_TASK_FACT_KEYS:
+                raise ValueError(f"canonical_context_task_fact_forbidden:{key}")
+            if not isinstance(value, bool):
+                raise ValueError(f"canonical_context_task_fact_must_be_bool:{key}")
+        for key, value in self.authority_inputs.items():
+            if key not in _ALLOWED_AUTHORITY_INPUT_KEYS:
+                raise ValueError(f"canonical_context_authority_input_forbidden:{key}")
+            if not isinstance(value, bool):
+                raise ValueError(f"canonical_context_authority_input_must_be_bool:{key}")
         for key in self.budget:
             if key not in _ALLOWED_BUDGET_KEYS:
                 raise ValueError(f"canonical_context_budget_key_forbidden:{key}")
@@ -182,7 +237,11 @@ class CanonicalTaskContext:
             "task_id": self.task_id,
             "task_type": self.task_type,
             "task_desc": self.task_desc,
+            "execution_world": self.execution_world,
+            "transport_ingress": self.transport_ingress,
             "execution_channels": list(self.execution_channels),
+            "task_facts": _thaw_json(self.task_facts),
+            "authority_inputs": _thaw_json(self.authority_inputs),
             "route_features": _thaw_json(self.route_features),
             "pillars": _thaw_json(self.pillars),
             "codeintel": _thaw_json(self.codeintel),
@@ -195,15 +254,23 @@ class CanonicalTaskContext:
         return _canonical_hash(self.to_dict())
 
     def planner_inputs(self) -> dict[str, Any]:
+        topology_facts = {
+            **_thaw_json(self.task_facts),
+            **_thaw_json(self.authority_inputs),
+        }
+        route = {
+            "route_features": _thaw_json(self.route_features),
+            "workforce_admission_enabled": True,
+            "online_enabled": "online" in self.execution_channels,
+            "local_enabled": "local" in self.execution_channels,
+        }
+        if topology_facts:
+            route["topology_facts"] = topology_facts
         return {
+            "execution_world": self.execution_world,
             "task_desc": self.task_desc,
             "task_type": self.task_type,
-            "route": {
-                "route_features": _thaw_json(self.route_features),
-                "workforce_admission_enabled": True,
-                "online_enabled": "online" in self.execution_channels,
-                "local_enabled": "local" in self.execution_channels,
-            },
+            "route": route,
             "pillars": _thaw_json(self.pillars),
             "codeintel": _thaw_json(self.codeintel),
             "phase_trace": _thaw_json(self.phase_trace),
@@ -219,7 +286,11 @@ class CanonicalTaskContext:
             "task_id",
             "task_type",
             "task_desc",
+            "execution_world",
+            "transport_ingress",
             "execution_channels",
+            "task_facts",
+            "authority_inputs",
             "route_features",
             "pillars",
             "codeintel",
@@ -234,7 +305,11 @@ class CanonicalTaskContext:
             task_id=str(value.get("task_id") or ""),
             task_type=str(value.get("task_type") or ""),
             task_desc=str(value.get("task_desc") or ""),
+            execution_world=str(value.get("execution_world") or ""),
+            transport_ingress=str(value.get("transport_ingress") or ""),
             execution_channels=tuple(value.get("execution_channels") or ()),
+            task_facts=value.get("task_facts") or {},
+            authority_inputs=value.get("authority_inputs") or {},
             route_features=value.get("route_features") or {},
             pillars=value.get("pillars") or {},
             codeintel=value.get("codeintel") or {},
@@ -260,6 +335,8 @@ class ExecutionDecision:
     forbidden_capabilities: tuple[str, ...]
     constraints: tuple[str, ...]
     execution_depth: str
+    execution_world: str
+    execution_topology: str
     fallback_policy: str = "fail_closed"
 
     def __post_init__(self) -> None:
@@ -274,6 +351,12 @@ class ExecutionDecision:
         _require_text(self.planner_mode, "planner_mode")
         if self.execution_depth not in _VALID_EXECUTION_DEPTHS:
             raise ValueError(f"invalid_execution_depth:{self.execution_depth}")
+        object.__setattr__(self, "execution_world", require_execution_world(self.execution_world))
+        object.__setattr__(
+            self,
+            "execution_topology",
+            require_execution_topology(self.execution_topology),
+        )
         if self.fallback_policy != "fail_closed":
             raise ValueError("execution_decision_fallback_must_fail_closed")
         for name in (
@@ -288,6 +371,8 @@ class ExecutionDecision:
 
     @classmethod
     def from_plan(cls, context: CanonicalTaskContext, plan: CapabilityPlan) -> "ExecutionDecision":
+        if plan.execution_world != context.execution_world:
+            raise ValueError("plan_execution_world_context_binding_mismatch")
         return cls(
             schema=_DECISION_SCHEMA,
             task_id=context.task_id,
@@ -304,6 +389,8 @@ class ExecutionDecision:
             forbidden_capabilities=tuple(plan.forbidden_capabilities),
             constraints=tuple(plan.constraints),
             execution_depth=plan.execution_depth,
+            execution_world=plan.execution_world,
+            execution_topology=plan.execution_topology,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -323,6 +410,8 @@ class ExecutionDecision:
             "forbidden_capabilities": list(self.forbidden_capabilities),
             "constraints": list(self.constraints),
             "execution_depth": self.execution_depth,
+            "execution_world": self.execution_world,
+            "execution_topology": self.execution_topology,
             "fallback_policy": self.fallback_policy,
         }
 
@@ -350,6 +439,8 @@ class ExecutionDecision:
             forbidden_capabilities=tuple(value.get("forbidden_capabilities") or ()),
             constraints=tuple(value.get("constraints") or ()),
             execution_depth=str(value.get("execution_depth") or ""),
+            execution_world=str(value.get("execution_world") or ""),
+            execution_topology=str(value.get("execution_topology") or ""),
             fallback_policy=str(value.get("fallback_policy") or ""),
         )
 
@@ -365,6 +456,8 @@ class CanonicalExecutionProjection:
     selected_capabilities: tuple[str, ...]
     constraints: tuple[str, ...]
     execution_depth: str
+    execution_world: str
+    execution_topology: str
     fallback_policy: str = "fail_closed"
 
     def __post_init__(self) -> None:
@@ -378,6 +471,12 @@ class CanonicalExecutionProjection:
             raise ValueError("projection_authority_must_be_CapabilityPlanner")
         if self.execution_depth not in _VALID_EXECUTION_DEPTHS:
             raise ValueError(f"invalid_execution_depth:{self.execution_depth}")
+        object.__setattr__(self, "execution_world", require_execution_world(self.execution_world))
+        object.__setattr__(
+            self,
+            "execution_topology",
+            require_execution_topology(self.execution_topology),
+        )
         if self.fallback_policy != "fail_closed":
             raise ValueError("projection_fallback_must_fail_closed")
         object.__setattr__(self, "selected_capabilities", tuple(str(item) for item in self.selected_capabilities))
@@ -395,6 +494,8 @@ class CanonicalExecutionProjection:
             selected_capabilities=decision.selected_capabilities,
             constraints=decision.constraints,
             execution_depth=decision.execution_depth,
+            execution_world=decision.execution_world,
+            execution_topology=decision.execution_topology,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -408,6 +509,8 @@ class CanonicalExecutionProjection:
             "selected_capabilities": list(self.selected_capabilities),
             "constraints": list(self.constraints),
             "execution_depth": self.execution_depth,
+            "execution_world": self.execution_world,
+            "execution_topology": self.execution_topology,
             "fallback_policy": self.fallback_policy,
         }
 
@@ -431,6 +534,8 @@ class CanonicalExecutionProjection:
             selected_capabilities=tuple(value.get("selected_capabilities") or ()),
             constraints=tuple(value.get("constraints") or ()),
             execution_depth=str(value.get("execution_depth") or ""),
+            execution_world=str(value.get("execution_world") or ""),
+            execution_topology=str(value.get("execution_topology") or ""),
             fallback_policy=str(value.get("fallback_policy") or ""),
         )
 
@@ -544,6 +649,12 @@ def validate_canonical_execution_binding(
         raise ValueError("projection_constraints_binding_mismatch")
     if projection.execution_depth != decision.execution_depth:
         raise ValueError("projection_execution_depth_binding_mismatch")
+    if decision.execution_world != context.execution_world:
+        raise ValueError("execution_decision_world_binding_mismatch")
+    if projection.execution_world != decision.execution_world:
+        raise ValueError("projection_execution_world_binding_mismatch")
+    if projection.execution_topology != decision.execution_topology:
+        raise ValueError("projection_execution_topology_binding_mismatch")
 
 
 def validate_canonical_execution_identity(value: Mapping[str, Any]) -> None:
@@ -582,6 +693,16 @@ def validate_canonical_execution_identity(value: Mapping[str, Any]) -> None:
         raise ValueError("canonical_execution_identity_projection_decision_mismatch")
     if projection.get("execution_decision_authority") != _ROUTE_AUTHORITY:
         raise ValueError("canonical_execution_identity_projection_authority_mismatch")
+    if value.get("execution_world") != decision.get("execution_world") or value.get(
+        "execution_world"
+    ) != projection.get("execution_world"):
+        raise ValueError("canonical_execution_identity_world_mismatch")
+    if value.get("canonical_execution_topology") != decision.get(
+        "execution_topology"
+    ) or value.get("canonical_execution_topology") != projection.get(
+        "execution_topology"
+    ):
+        raise ValueError("canonical_execution_identity_topology_mismatch")
     if decision.get("fallback_policy") != "fail_closed" or projection.get(
         "fallback_policy"
     ) != "fail_closed":

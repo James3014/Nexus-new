@@ -2559,6 +2559,10 @@ class UnifiedMCPGateway:
             "task_id": str(receipt.get("task_id") or task_id),
             "execution_decision_authority": result.execution_decision_authority,
             "canonical_execution": canonical_execution,
+            "execution_world": str(canonical_execution.get("execution_world") or ""),
+            "canonical_execution_topology": str(
+                canonical_execution.get("canonical_execution_topology") or ""
+            ),
             "root_receipt": dict(result.root_receipt),
             "root_receipt_valid": result.root_receipt_valid,
             "root_receipt_blockers": list(result.root_receipt_blockers),

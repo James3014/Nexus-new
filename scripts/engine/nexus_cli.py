@@ -1149,6 +1149,7 @@ def run(
         write_canonical_policy_receipt,
     )
     from nexus.services.online_execution_policy import normalize_online_policy
+    from nexus.orchestrator.canonical_mcp_ingress import build_cli_execution_context
 
     try:
         policy_norm = normalize_local_assist_policy(local_assist_policy)
@@ -1169,17 +1170,26 @@ def run(
         revision = f"fixture-{hashlib.sha256(str(REPO_ROOT).encode()).hexdigest()[:12]}"
 
     safe_task_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(task_id))[:120] or "task"
-    execution_context = build_execution_context_fields(
+    normalized_targets = [Path(path).as_posix() for path in target_files]
+    canonical_ingress = build_cli_execution_context(
+        task_id=str(task_id),
+        what=str(task_id),
+        why="canonical CLI execution",
+        allowed_files=normalized_targets,
+        verifier_commands=(verify_command,) if verify_command else (),
+        workspace_revision=revision,
+    )
+    policy_context = build_execution_context_fields(
         policy=local_assist_policy,
         task_id=str(task_id),
         workspace_revision=revision,
         policy_source="cli",
     )
+    execution_context = {**canonical_ingress, **policy_context}
     execution_context["online_policy"] = online_norm
     execution_context["online_policy_source"] = "cli"
     execution_context["product_entry"] = "nexus run"
     if target_files:
-        normalized_targets = [Path(path).as_posix() for path in target_files]
         execution_context["target_files"] = normalized_targets
         execution_context["target_file"] = normalized_targets[0]
     if verify_command:

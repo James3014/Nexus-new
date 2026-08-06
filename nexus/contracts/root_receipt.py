@@ -8,7 +8,6 @@ from typing import Any, Mapping
 
 from nexus.services.local_heal.world_c_receipt import validate_world_c_receipt
 
-
 ROOT_RECEIPT_SCHEMA = "nexus.root_receipt.v1"
 
 
@@ -110,6 +109,10 @@ def build_root_receipt(runtime_receipt: Mapping[str, Any]) -> dict[str, Any]:
     )
 
     identity_hash = _hash(canonical_execution) if canonical_execution else ""
+    execution_world = str(canonical_execution.get("execution_world") or "")
+    canonical_execution_topology = str(
+        canonical_execution.get("canonical_execution_topology") or ""
+    )
     planner_hash = str(
         receipt.get("planner_decision_id")
         or planner.get("planner_decision_id")
@@ -144,6 +147,21 @@ def build_root_receipt(runtime_receipt: Mapping[str, Any]) -> dict[str, Any]:
         missing.extend(f"world_c:{reason}" for reason in world_c_errors)
     if world_c and str(world_c.get("task_id") or "") != task_id:
         missing.append("world_c_task_id_mismatch")
+    if world_c and execution_world:
+        if str(world_c.get("execution_world") or "") != execution_world:
+            missing.append("world_c_execution_world_mismatch")
+        if (
+            str(world_c.get("canonical_execution_topology") or "")
+            != canonical_execution_topology
+        ):
+            missing.append("world_c_canonical_execution_topology_mismatch")
+        if (
+            str(world_c.get("canonical_execution_hash") or "")
+            != str(canonical_execution.get("context_hash") or "")
+        ):
+            missing.append("world_c_canonical_execution_hash_mismatch")
+        if str(world_c.get("source_hash") or "") != source_hash:
+            missing.append("world_c_source_hash_mismatch")
     if not _stage_passed(verifier):
         missing.append("verifier_not_passed")
     if not verifier_bound_to_world_c:
@@ -160,6 +178,8 @@ def build_root_receipt(runtime_receipt: Mapping[str, Any]) -> dict[str, Any]:
         "schema": ROOT_RECEIPT_SCHEMA,
         "task_id": task_id,
         "canonical_execution_hash": identity_hash,
+        "execution_world": execution_world,
+        "canonical_execution_topology": canonical_execution_topology,
         "planner_decision_id": planner_hash,
         "workforce_admission_hash": workforce_hash,
         "source_hash": source_hash,

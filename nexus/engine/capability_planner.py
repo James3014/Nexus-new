@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.contracts.execution_identity import (
+    CanonicalExecutionTopology,
+    require_execution_world,
+)
+from nexus.contracts.workforce_admission import WorkforceDemand, WorkforceDemands
+from nexus.core.lite_route_oracle import lite_route_safety_blockers
 from nexus.engine.capability_contracts import (
     CapabilityNode,
     CapabilityPlan,
@@ -10,6 +16,7 @@ from nexus.engine.capability_contracts import (
     apply_execution_depth_floor,
     execution_depth_for_routing_tier,
 )
+from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 from nexus.engine.harness_route_policy import (
     apply_harness_cost_lane_policy,
     apply_harness_relevance_policy,
@@ -17,19 +24,16 @@ from nexus.engine.harness_route_policy import (
     build_semantic_failure_snapshot,
 )
 from nexus.engine.harness_sensors import build_harness_preflight_sensor
-from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
+from nexus.engine.local_assist_recommendation import build_local_assist_recommendation
 from nexus.engine.planner.ab_evaluator import build_decision_trace
 from nexus.engine.planner.policy_applier import apply_learning_policy
 from nexus.engine.planner.skill_mount_evidence import (
     build_skill_mount_evidence,
     runtime_policy_overlay_skill_requests,
 )
+from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
-from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
-from nexus.engine.local_assist_recommendation import build_local_assist_recommendation
-from nexus.core.lite_route_oracle import lite_route_safety_blockers
 from nexus.research.isolation_policy import decide_research_isolation
-from nexus.contracts.workforce_admission import WorkforceDemand, WorkforceDemands
 
 PENDING_EXECUTOR_CAPABILITIES: set[str] = set()
 
@@ -689,6 +693,7 @@ class CapabilityPlanner:
     def plan(
         self,
         *,
+        execution_world: str = "product_runtime",
         task_desc: str,
         task_type: str,
         route: dict[str, Any],
@@ -699,6 +704,7 @@ class CapabilityPlanner:
         skills: list[dict[str, Any]] | None = None,
         replan_authorization: ExecutionReplanAuthorization | None = None,
     ) -> CapabilityPlan:
+        execution_world = require_execution_world(execution_world)
         pillars = pillars or {}
         codeintel = codeintel or {}
         phase_trace = phase_trace or {}
@@ -941,6 +947,11 @@ class CapabilityPlanner:
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
         signal_snapshot["route_truth_source"] = "CapabilityPlanner"
+        execution_topology = self._decide_execution_topology(route)
+        signal_snapshot["execution_world"] = execution_world
+        signal_snapshot["execution_topology"] = execution_topology
+        signal_snapshot["canonical_execution_topology"] = execution_topology
+        signal_snapshot["canonical_execution_topology_source"] = "CapabilityPlanner:topology_facts"
         signal_snapshot["local_assist_recommendation"] = build_local_assist_recommendation(
             task_desc=task_desc,
             task_type=task_type,
@@ -1024,9 +1035,10 @@ class CapabilityPlanner:
                 if canonical_workforce
                 else os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY", "single_local_model")
             )
-            signal_snapshot["execution_topology"] = topology
+            signal_snapshot["executor_topology"] = topology
 
-            # P3-I2: Difficulty router — override topology based on task difficulty
+            # Legacy P3 difficulty scoring is advisory only.  CapabilityPlanner's
+            # canonical topology decision above is the sole route authority.
             if os.environ.get("NEXUS_ENABLE_CLOUD_WITH_LOCAL_ASSIST_SHADOW", "0") == "1":
                 difficulty = str(route.get("difficulty", "") or "").lower()
                 if not difficulty:
@@ -1041,23 +1053,23 @@ class CapabilityPlanner:
                         difficulty = "medium"
 
                 signal_snapshot["task_difficulty"] = difficulty
-                signal_snapshot["route_policy_version"] = "p3_difficulty_router_v1"
+                signal_snapshot["p3_difficulty_advisory_version"] = "p3_difficulty_advisory_v1"
 
                 if difficulty in ("medium", "hard"):
                     signal_snapshot["p3_shadow_route"] = True
-                    signal_snapshot["execution_topology"] = "cloud_with_local_assist"
+                    signal_snapshot["suggested_executor_topology"] = "cloud_with_local_assist"
                     signal_snapshot["cloud_used"] = False
                     signal_snapshot["cloud_candidate_generated"] = False
                     signal_snapshot["local_assist_used"] = False
                     signal_snapshot["assist_stages_activated"] = []
                     signal_snapshot["p3_route_status"] = "shadow_no_cloud_endpoint"
-                    signal_snapshot["route_selected_by"] = "p3_difficulty_router"
-                    signal_snapshot["route_reason"] = f"difficulty={difficulty}_shadow_enabled"
+                    signal_snapshot["p3_advisory_source"] = "difficulty_signal"
+                    signal_snapshot["p3_advisory_reason"] = f"difficulty={difficulty}_shadow_enabled"
                 else:
                     signal_snapshot["p3_shadow_route"] = False
-                    signal_snapshot["execution_topology"] = "local_only"
-                    signal_snapshot["route_selected_by"] = "p3_difficulty_router"
-                    signal_snapshot["route_reason"] = "difficulty=easy"
+                    signal_snapshot["suggested_executor_topology"] = "local_only"
+                    signal_snapshot["p3_advisory_source"] = "difficulty_signal"
+                    signal_snapshot["p3_advisory_reason"] = "difficulty=easy"
             if topology == "local_committee_only":
                 signal_snapshot["committee_profile"] = "qwen_3b_judge_plus_qwen_7b_plus_deepseek_6_7b"
                 signal_snapshot["local_committee_enabled"] = True
@@ -1121,7 +1133,49 @@ class CapabilityPlanner:
             score=score,
             signal_snapshot=signal_snapshot,
             execution_depth=execution_depth,
+            execution_world=execution_world,
+            execution_topology=execution_topology,
         )
+
+    @staticmethod
+    def _decide_execution_topology(route: dict[str, Any]) -> str:
+        """Choose physical task topology from bounded authority facts only.
+
+        Transport ingress, provider/model fields and downstream executor
+        topology are deliberately excluded from this decision.
+        """
+        raw = route.get("topology_facts", {})
+        if not isinstance(raw, dict):
+            raise ValueError("topology_facts_must_be_mapping")
+        facts: dict[str, bool] = {}
+        for key, value in raw.items():
+            if not isinstance(key, str) or not isinstance(value, bool):
+                raise ValueError(f"topology_fact_must_be_bool:{key}")
+            facts[key] = value
+
+        isolation_required = any(
+            facts.get(key, False)
+            for key in (
+                "isolation_required",
+                "delegation_required",
+                "cross_module",
+                "dirty_path_overlap",
+                "authority_changing_scope",
+                "security_sensitive_scope",
+                "candidate_required",
+            )
+        )
+        if isolation_required:
+            return CanonicalExecutionTopology.ISOLATED_TARGET.value
+        if facts.get("assisted_execution_required", False):
+            return CanonicalExecutionTopology.ASSISTED_CANONICAL.value
+        if facts.get("direct_canonical_eligible", False) and facts.get(
+            "owner_authorized", False
+        ):
+            return CanonicalExecutionTopology.DIRECT_CANONICAL.value
+        if facts.get("mutation_requested", False):
+            return CanonicalExecutionTopology.ISOLATED_TARGET.value
+        return CanonicalExecutionTopology.ASSISTED_CANONICAL.value
 
     @staticmethod
     def _runtime_policy_overlay_skill_requests(

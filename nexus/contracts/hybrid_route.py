@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping
+
+from nexus.contracts.execution_identity import (
+    require_execution_topology,
+    require_execution_world,
+)
 
 HYBRID_ROUTE_DECISION_SCHEMA = "nexus.hybrid_route_decision.v1"
 
@@ -35,6 +40,8 @@ class Authority(str, Enum):
 
 @dataclass(frozen=True)
 class HybridRouteDecision:
+    execution_world: str = "product_runtime"
+    execution_topology: str = "ASSISTED_CANONICAL"
     route_mode: RouteMode = RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY
     public_claim_allowed: bool = False
     production_ready: bool = False
@@ -58,6 +65,12 @@ class HybridRouteDecision:
     degradation_reason_chain: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "execution_world", require_execution_world(self.execution_world))
+        object.__setattr__(
+            self,
+            "execution_topology",
+            require_execution_topology(self.execution_topology),
+        )
         blockers = validate_hybrid_route_decision(self.to_dict())
         if blockers:
             raise ValueError(";".join(blockers))
@@ -65,6 +78,8 @@ class HybridRouteDecision:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
+            "execution_world": self.execution_world,
+            "execution_topology": self.execution_topology,
             "route_mode": self.route_mode.value if hasattr(self.route_mode, "value") else str(self.route_mode),
             "public_claim_allowed": self.public_claim_allowed,
             "production_ready": self.production_ready,
@@ -90,6 +105,8 @@ class HybridRouteDecision:
 
 def hybrid_route_decision_from_payload(payload: Mapping[str, Any]) -> HybridRouteDecision:
     return HybridRouteDecision(
+        execution_world=str(payload.get("execution_world", "product_runtime")),
+        execution_topology=str(payload.get("execution_topology", "ASSISTED_CANONICAL")),
         route_mode=_coerce_enum(payload.get("route_mode", RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY.value), RouteMode, "route_mode"),
         public_claim_allowed=bool(payload.get("public_claim_allowed", False)),
         production_ready=bool(payload.get("production_ready", False)),
@@ -116,6 +133,8 @@ def hybrid_route_decision_from_payload(payload: Mapping[str, Any]) -> HybridRout
 
 def build_hybrid_route_decision(
     *,
+    execution_world: str = "product_runtime",
+    execution_topology: str = "ASSISTED_CANONICAL",
     route_mode: RouteMode | str = RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY,
     public_claim_allowed: bool = False,
     production_ready: bool = False,
@@ -137,6 +156,8 @@ def build_hybrid_route_decision(
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     decision = HybridRouteDecision(
+        execution_world=execution_world,
+        execution_topology=execution_topology,
         route_mode=_coerce_enum(route_mode, RouteMode, "route_mode"),
         public_claim_allowed=public_claim_allowed,
         production_ready=production_ready,
@@ -166,6 +187,15 @@ def validate_hybrid_route_decision(payload: Mapping[str, Any]) -> list[str]:
     schema = payload.get("schema")
     if schema != HYBRID_ROUTE_DECISION_SCHEMA:
         blockers.append("invalid_schema")
+
+    try:
+        require_execution_world(payload.get("execution_world"))
+    except ValueError:
+        blockers.append("invalid_execution_world")
+    try:
+        require_execution_topology(payload.get("execution_topology"))
+    except ValueError:
+        blockers.append("invalid_execution_topology")
 
     route_truth_source = payload.get("route_truth_source")
     if route_truth_source != "CapabilityPlanner":

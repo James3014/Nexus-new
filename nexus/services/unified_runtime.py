@@ -1315,6 +1315,7 @@ class UnifiedRuntimeRequest:
     skills: tuple[Mapping[str, Any], ...] = ()
     local_request: Any = None
     evidence_refs: tuple[str, ...] = ()
+    canonical_context: Mapping[str, Any] | None = None
     canonical_planning_bundle: CanonicalPlanningBundle | None = None
     schema: str = REQUEST_SCHEMA
 
@@ -1334,6 +1335,18 @@ class UnifiedRuntimeRequest:
             raise ValueError("at_least_one_runtime_route_required")
         if self.local_enabled and self.local_request is None:
             raise ValueError("local_request_required")
+        if self.canonical_context is not None:
+            if not isinstance(self.canonical_context, Mapping):
+                raise TypeError("canonical_context_must_be_mapping")
+            allowed = {
+                "execution_world",
+                "transport_ingress",
+                "task_facts",
+                "authority_inputs",
+            }
+            unexpected = sorted(set(self.canonical_context) - allowed)
+            if unexpected:
+                raise ValueError(f"canonical_context_field_forbidden:{unexpected[0]}")
         if self.canonical_planning_bundle is not None:
             if not isinstance(self.canonical_planning_bundle, CanonicalPlanningBundle):
                 raise TypeError("canonical_planning_bundle_must_be_CanonicalPlanningBundle")
@@ -1349,10 +1362,32 @@ def build_canonical_runtime_context(request: UnifiedRuntimeRequest) -> Canonical
         raw_features = request.route.get("route_features")
         if isinstance(raw_features, Mapping):
             route_features = raw_features
+    identity = dict(request.canonical_context or {})
+    bound_context = (
+        request.canonical_planning_bundle.context
+        if request.canonical_planning_bundle is not None
+        else None
+    )
+    execution_world = str(
+        identity.get("execution_world")
+        or (bound_context.execution_world if bound_context is not None else "product_runtime")
+    )
+    transport_ingress = str(
+        identity.get("transport_ingress")
+        or (bound_context.transport_ingress if bound_context is not None else "direct")
+    )
+    task_facts = identity.get("task_facts")
+    if task_facts is None and bound_context is not None:
+        task_facts = bound_context.task_facts
+    authority_inputs = identity.get("authority_inputs")
+    if authority_inputs is None and bound_context is not None:
+        authority_inputs = bound_context.authority_inputs
     return CanonicalTaskContext(
         task_id=request.task_id,
         task_type=request.task_type,
         task_desc=request.task_statement,
+        execution_world=execution_world,
+        transport_ingress=transport_ingress,
         execution_channels=tuple(
             channel
             for channel, enabled in (
@@ -1362,6 +1397,8 @@ def build_canonical_runtime_context(request: UnifiedRuntimeRequest) -> Canonical
             if enabled
         ),
         route_features=route_features,
+        task_facts=task_facts or {},
+        authority_inputs=authority_inputs or {},
         pillars=request.pillars,
         codeintel=request.codeintel,
         phase_trace=request.phase_trace,
@@ -1380,6 +1417,8 @@ def canonical_execution_identity(bundle: CanonicalPlanningBundle) -> dict[str, A
         "decision_hash": payload["decision_hash"],
         "projection_hash": payload["projection_hash"],
         "execution_decision_authority": payload["execution_decision_authority"],
+        "execution_world": bundle.decision.execution_world,
+        "canonical_execution_topology": bundle.decision.execution_topology,
         "execution_decision": payload["execution_decision"],
         "canonical_execution_projection": payload["canonical_execution_projection"],
     }
@@ -3221,6 +3260,12 @@ class UnifiedRuntime:
                 }
                 if canonical_execution is not None:
                     terminal_receipt["canonical_execution"] = canonical_execution
+                    terminal_receipt["execution_world"] = canonical_execution[
+                        "execution_world"
+                    ]
+                    terminal_receipt["canonical_execution_topology"] = canonical_execution[
+                        "canonical_execution_topology"
+                    ]
                 if gateway_invocation_authority is not None:
                     terminal_receipt["gateway_invocation_authority"] = gateway_invocation_authority
                 if local_model_invocation_authority is not None:
@@ -4381,6 +4426,10 @@ class UnifiedRuntime:
         }
         if canonical_execution is not None:
             receipt["canonical_execution"] = canonical_execution
+            receipt["execution_world"] = canonical_execution["execution_world"]
+            receipt["canonical_execution_topology"] = canonical_execution[
+                "canonical_execution_topology"
+            ]
         if workforce_admission_payload is not None:
             context_trace["workforce_admission_lineage"] = workforce_lineage
             receipt["context_trace"] = context_trace

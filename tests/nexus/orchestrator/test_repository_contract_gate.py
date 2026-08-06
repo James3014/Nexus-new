@@ -156,6 +156,85 @@ def test_repository_contract_gate_policy_hash_is_deterministic(tmp_path):
     assert first.passed is True
 
 
+def test_committed_candidate_recheck_binds_exact_commit_tree_and_policy(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=True)
+    contract = _contract(
+        controller_root,
+        target_root,
+        task_id="committed-recheck",
+        target_sha=target_sha,
+        controller_sha=controller_sha,
+        allowed_files=["bounded.txt"],
+        verifier_commands=["python3 -c 'print(\"pass\")'"],
+    )
+    (controller_root / "bounded.txt").write_text("candidate\n", encoding="utf-8")
+    _git(controller_root, "add", "bounded.txt")
+    _git(controller_root, "commit", "-m", "candidate")
+    candidate_commit = _git(controller_root, "rev-parse", "HEAD")
+    candidate_tree = _git(controller_root, "rev-parse", "HEAD^{tree}")
+    gate = RepositoryContractGate(WorktreeManager(str(target_root)))
+    policy_hash = gate._policy_revision_hash(
+        target_sha,
+        gate._policy_input_hashes(controller_root, target_sha),
+    )
+
+    accepted = gate.evaluate_committed_candidate(
+        contract=contract,
+        candidate_commit=candidate_commit,
+        candidate_tree_sha=candidate_tree,
+        expected_policy_revision_hash=policy_hash,
+    )
+    tampered = gate.evaluate_committed_candidate(
+        contract=contract,
+        candidate_commit=candidate_commit,
+        candidate_tree_sha="0" * 40,
+        expected_policy_revision_hash=policy_hash,
+    )
+
+    assert accepted.passed is True
+    assert accepted.blocking_reasons == ()
+    assert tampered.passed is False
+    assert "integration_candidate_identity_mismatch" in tampered.blocking_reasons
+
+
+def test_committed_candidate_recheck_rejects_rename_even_when_both_paths_are_allowed(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=True)
+    contract = _contract(
+        controller_root,
+        target_root,
+        task_id="committed-rename-recheck",
+        target_sha=target_sha,
+        controller_sha=controller_sha,
+        allowed_files=["bounded.txt", "renamed.txt"],
+        verifier_commands=["python3 -c 'print(\"pass\")'"],
+    )
+    _git(controller_root, "mv", "bounded.txt", "renamed.txt")
+    _git(controller_root, "commit", "-m", "rename candidate")
+    candidate_commit = _git(controller_root, "rev-parse", "HEAD")
+    gate = RepositoryContractGate(WorktreeManager(str(target_root)))
+    policy_hash = gate._policy_revision_hash(
+        target_sha,
+        gate._policy_input_hashes(controller_root, target_sha),
+    )
+
+    receipt = gate.evaluate_committed_candidate(
+        contract=contract,
+        candidate_commit=candidate_commit,
+        candidate_tree_sha=_git(controller_root, "rev-parse", "HEAD^{tree}"),
+        expected_policy_revision_hash=policy_hash,
+    )
+
+    assert receipt.passed is False
+    assert (
+        "integration_candidate_rename_copy_forbidden:bounded.txt->renamed.txt"
+        in receipt.blocking_reasons
+    )
+
+
 def test_new_persistent_markdown_outside_tasks_blocked(tmp_path):
     controller_root = tmp_path / "controller"
     target_root = tmp_path / "targets"

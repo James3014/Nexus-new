@@ -29,12 +29,10 @@ def test_mcp_cli_direct_normalizers_produce_equivalent_canonical_context() -> No
     cli = canonical_mcp_ingress.build_cli_execution_context(
         **_task(),
         workspace_revision="rev-worldabc-red",
-        execution_world="development_task",
     )
     direct = canonical_mcp_ingress.build_direct_execution_context(
         **_task(),
         workspace_revision="rev-worldabc-red",
-        execution_world="development_task",
     )
     assert mcp["execution_world"] == cli["execution_world"] == direct["execution_world"] == "development_task"
     assert mcp["transport_ingress"] == "mcp"
@@ -127,7 +125,25 @@ def test_unified_runtime_receipt_binds_local_armor_lineage_to_canonical_identity
         workspace_revision="rev-worldabc-red",
         task_statement="bounded local armor probe",
         task_type="bugfix",
-        route={"workspace_root": str(tmp_path)},
+        route={
+            "workspace_root": str(tmp_path),
+            "workforce_admission_enabled": True,
+            "injected_transport": True,
+            "online_enabled": False,
+            "local_enabled": True,
+            "workforce_bindings": {
+                "local": {
+                    "worker_id": "local_coder_7b",
+                    "controls": [
+                        "small_scope",
+                        "parser",
+                        "compile",
+                        "focused_tests",
+                        "reversible_application",
+                    ],
+                }
+            },
+        },
         online_enabled=False,
         local_enabled=True,
         local_request={"task_id": "worldabc-local-armor-red"},
@@ -141,4 +157,6 @@ def test_unified_runtime_receipt_binds_local_armor_lineage_to_canonical_identity
     assert receipt["canonical_execution"]["execution_world"] == "local_armor"
     assert receipt["execution_world"] == "local_armor"
     assert receipt["canonical_execution_topology"] == bundle.plan.execution_topology
+    assert receipt["root_receipt"]["execution_world"] == "local_armor"
+    assert receipt["root_receipt"]["canonical_execution_topology"] == bundle.plan.execution_topology
     assert receipt["local"]["response"]["world_c_receipt"]["canonical_execution_hash"] == receipt["canonical_execution"]["context_hash"]

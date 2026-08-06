@@ -277,7 +277,8 @@ def test_canonical_product_verified_repair_topology_is_planner_owned(
     request = captured["request"]
     assert bool(result) is True
     assert request.local_request.action == "verified-subtask"
-    assert request.local_request.planner_snapshot["execution_topology"] == "localheal_pipeline"
+    assert request.local_request.planner_snapshot["execution_topology"] == "ISOLATED_TARGET"
+    assert request.local_request.planner_snapshot["executor_topology"] == "localheal_pipeline"
     assert request.local_request.planner_snapshot["executor_provider"] == "workforce_admission"
     assert request.local_request.planner_snapshot["executor_model"] == "workforce_admission"
     assert request.route["workforce_bindings"]["local"]["worker_id"] == "local_coder_7b"

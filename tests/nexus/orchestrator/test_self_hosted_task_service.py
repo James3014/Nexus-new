@@ -36,6 +36,10 @@ from nexus.orchestrator.self_hosted_task_service import (
     resolve_execution_lane,
     validate_task_card_binding,
 )
+from nexus.orchestrator.repository_contract_gate import (
+    RepositoryContractGate,
+    RepositoryContractGateReceipt,
+)
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
@@ -1281,6 +1285,157 @@ def test_integration_failure_is_persisted(tmp_path, monkeypatch):
     assert state["status"] == "APPROVED"
     assert state["promotion_status"] == "APPROVED"
     assert state.get("push_performed") is not True
+
+
+def test_integrate_approved_rechecks_exact_candidate_before_integration(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    task_id = "integration-recheck"
+    request = _real_request(tmp_path, task_id=task_id)
+    request["allowed_files"] = ["README"]
+    contract = service.build_contract(request)
+    controller = Path(request["controller_repo_root"])
+    (controller / "README").write_text("candidate\n", encoding="utf-8")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "candidate")
+    candidate_commit = _git(controller, "rev-parse", "HEAD")
+    candidate_tree = _git(controller, "rev-parse", "HEAD^{tree}")
+    packet = {
+        "candidate_commit_sha": candidate_commit,
+        "candidate_tree_sha": candidate_tree,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    closure = _closure_context(
+        task_id,
+        candidate_commit,
+        candidate_tree_sha=candidate_tree,
+    )
+    grant = {
+        **closure["approval_context"],
+        "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "attempt-1",
+            "status": "APPROVED",
+            "promotion_status": "APPROVED",
+            "request": request,
+            "contract": contract.model_dump(mode="json"),
+            "promotion_packet": packet,
+            "verified_receipt": {
+                "repository_contract_gate_passed": True,
+                "repository_contract_policy_revision_hash": "a" * 64,
+            },
+            "approved_binding": {**packet, "approval_grant": grant},
+            "external_acceptance": closure["external_acceptance"],
+            "integration_authorization": closure["integration_authorization"],
+        },
+    )
+    seen = {}
+
+    def block_recheck(self, **kwargs):
+        seen.update(kwargs)
+        return RepositoryContractGateReceipt(
+            passed=False,
+            mode="shadow",
+            policy_revision_hash="a" * 64,
+            findings=(),
+            blocking_reasons=("integration_candidate_identity_mismatch",),
+        )
+
+    monkeypatch.setattr(
+        RepositoryContractGate, "evaluate_committed_candidate", block_recheck
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("integration invoked")),
+    )
+
+    with pytest.raises(RuntimeError, match="REPOSITORY_CONTRACT_RECHECK_FAILED"):
+        service.integrate_approved(task_id)
+
+    assert seen["candidate_commit"] == candidate_commit
+    assert seen["candidate_tree_sha"] == candidate_tree
+    assert seen["expected_policy_revision_hash"] == "a" * 64
+    assert service._read_state(task_id)["status"] == "APPROVED"
+
+
+def test_integrate_approved_rechecks_again_at_locked_apply_boundary(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    task_id = "integration-apply-boundary-recheck"
+    request = _real_request(tmp_path, task_id=task_id)
+    request["allowed_files"] = ["README"]
+    contract = service.build_contract(request)
+    controller = Path(request["controller_repo_root"])
+    (controller / "README").write_text("candidate\n", encoding="utf-8")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "candidate")
+    candidate_commit = _git(controller, "rev-parse", "HEAD")
+    candidate_tree = _git(controller, "rev-parse", "HEAD^{tree}")
+    packet = {
+        "candidate_commit_sha": candidate_commit,
+        "candidate_tree_sha": candidate_tree,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    closure = _closure_context(task_id, candidate_commit, candidate_tree_sha=candidate_tree)
+    grant = {
+        **closure["approval_context"],
+        "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "attempt-1",
+            "status": "APPROVED",
+            "promotion_status": "APPROVED",
+            "request": request,
+            "contract": contract.model_dump(mode="json"),
+            "promotion_packet": packet,
+            "verified_receipt": {
+                "repository_contract_gate_passed": True,
+                "repository_contract_policy_revision_hash": "a" * 64,
+            },
+            "approved_binding": {**packet, "approval_grant": grant},
+            "external_acceptance": closure["external_acceptance"],
+            "integration_authorization": closure["integration_authorization"],
+        },
+    )
+    calls = []
+
+    def two_phase_recheck(self, **kwargs):
+        calls.append(kwargs)
+        return RepositoryContractGateReceipt(
+            passed=len(calls) == 1,
+            mode="shadow",
+            policy_revision_hash="a" * 64,
+            findings=(),
+            blocking_reasons=(
+                () if len(calls) == 1 else ("integration_candidate_identity_mismatch",)
+            ),
+        )
+
+    monkeypatch.setattr(
+        RepositoryContractGate, "evaluate_committed_candidate", two_phase_recheck
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("integration invoked")),
+    )
+
+    with pytest.raises(RuntimeError, match="REPOSITORY_CONTRACT_RECHECK_FAILED"):
+        service.integrate_approved(task_id)
+
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+    assert service._read_state(task_id)["merge_performed"] is False
 
 
 def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):

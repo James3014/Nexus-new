@@ -34,10 +34,12 @@ def test_difficulty_easy_routes_local_only():
     planner = CapabilityPlanner()
     plan = planner.plan(task_desc="test", task_type="bug", route={"difficulty": "easy", "pillar_signals": {}})
     ss = plan.signal_snapshot
-    assert ss.get("execution_topology") == "local_only"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "single_local_model"
+    assert ss.get("suggested_executor_topology") == "local_only"
     assert ss.get("p3_shadow_route") is False
-    assert ss.get("route_selected_by") == "p3_difficulty_router"
-    assert ss.get("route_reason") == "difficulty=easy"
+    assert ss.get("route_selected_by") is None
+    assert ss.get("p3_advisory_reason") == "difficulty=easy"
     assert ss.get("task_difficulty") == "easy"
 
 
@@ -52,10 +54,12 @@ def test_difficulty_medium_routes_cloud_with_assist():
     planner = CapabilityPlanner()
     plan = planner.plan(task_desc="test", task_type="bug", route={"difficulty": "medium", "pillar_signals": {}})
     ss = plan.signal_snapshot
-    assert ss.get("execution_topology") == "cloud_with_local_assist"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "single_local_model"
+    assert ss.get("suggested_executor_topology") == "cloud_with_local_assist"
     assert ss.get("p3_shadow_route") is True
-    assert ss.get("route_selected_by") == "p3_difficulty_router"
-    assert ss.get("route_reason") == "difficulty=medium_shadow_enabled"
+    assert ss.get("route_selected_by") is None
+    assert ss.get("p3_advisory_reason") == "difficulty=medium_shadow_enabled"
 
 
 def test_difficulty_hard_routes_cloud_with_assist():
@@ -69,10 +73,12 @@ def test_difficulty_hard_routes_cloud_with_assist():
     planner = CapabilityPlanner()
     plan = planner.plan(task_desc="test", task_type="bug", route={"difficulty": "hard", "pillar_signals": {}})
     ss = plan.signal_snapshot
-    assert ss.get("execution_topology") == "cloud_with_local_assist"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "single_local_model"
+    assert ss.get("suggested_executor_topology") == "cloud_with_local_assist"
     assert ss.get("p3_shadow_route") is True
-    assert ss.get("route_selected_by") == "p3_difficulty_router"
-    assert ss.get("route_reason") == "difficulty=hard_shadow_enabled"
+    assert ss.get("route_selected_by") is None
+    assert ss.get("p3_advisory_reason") == "difficulty=hard_shadow_enabled"
 
 
 def test_difficulty_flag_off_preserves_existing():
@@ -85,7 +91,8 @@ def test_difficulty_flag_off_preserves_existing():
     planner = CapabilityPlanner()
     plan = planner.plan(task_desc="test", task_type="bug", route={"difficulty": "hard", "pillar_signals": {}})
     ss = plan.signal_snapshot
-    assert ss.get("execution_topology") == "local_committee_only"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "local_committee_only"
     assert ss.get("p3_shadow_route") is None or ss.get("p3_shadow_route") is False
     assert ss.get("task_difficulty") is None or ss.get("task_difficulty") == ""
 
@@ -102,9 +109,9 @@ def test_difficulty_router_receipt_fields_present():
     plan = planner.plan(task_desc="test", task_type="bug", route={"difficulty": "medium", "pillar_signals": {}})
     ss = plan.signal_snapshot
     assert ss.get("task_difficulty") == "medium"
-    assert ss.get("route_policy_version") == "p3_difficulty_router_v1"
-    assert ss.get("route_selected_by") == "p3_difficulty_router"
-    assert ss.get("route_reason") == "difficulty=medium_shadow_enabled"
+    assert ss.get("p3_difficulty_advisory_version") == "p3_difficulty_advisory_v1"
+    assert ss.get("route_selected_by") is None
+    assert ss.get("p3_advisory_reason") == "difficulty=medium_shadow_enabled"
 
 
 def test_difficulty_heuristic_hard():

@@ -453,7 +453,19 @@ def execute_canonical_product_task(
         task_id=task_id,
         task_type=task_type,
         task_desc=str(task_text),
+        execution_world=str(context.get("execution_world") or "product_runtime"),
+        transport_ingress=str(context.get("transport_ingress") or "direct"),
         execution_channels=("online", "local") if local_enabled else ("online",),
+        task_facts={
+            "mutation_requested": bool(allowed_files),
+            "candidate_required": verified_world_c,
+        },
+        authority_inputs={
+            "direct_canonical_eligible": False,
+            "isolation_required": verified_world_c,
+            "owner_authorized": False,
+            "assisted_execution_required": not verified_world_c,
+        },
         route_features=route_features,
         codeintel=codeintel,
     )
@@ -540,6 +552,12 @@ def execute_canonical_product_task(
         codeintel=codeintel,
         local_request=local_request,
         evidence_refs=(f"canonical-product:{task_id}:request",),
+        canonical_context={
+            "execution_world": canonical_context.execution_world,
+            "transport_ingress": canonical_context.transport_ingress,
+            "task_facts": dict(canonical_context.task_facts),
+            "authority_inputs": dict(canonical_context.authority_inputs),
+        },
         canonical_planning_bundle=bundle,
     )
 

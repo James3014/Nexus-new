@@ -70,9 +70,11 @@ def test_p3_e2e_easy_local_only():
     ss = plan.signal_snapshot
 
     # Planner verification
-    assert ss.get("execution_topology") == "local_only"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "single_local_model"
+    assert ss.get("suggested_executor_topology") == "local_only"
     assert ss.get("task_difficulty") == "easy"
-    assert ss.get("route_selected_by") == "p3_difficulty_router"
+    assert ss.get("route_selected_by") is None
     assert ss.get("p3_shadow_route") is False
 
     # Executor
@@ -106,9 +108,15 @@ def test_p3_e2e_medium_cloud_assist_success():
     ss = plan.signal_snapshot
 
     # Planner verification
-    assert ss.get("execution_topology") == "cloud_with_local_assist"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "single_local_model"
+    assert ss.get("suggested_executor_topology") == "cloud_with_local_assist"
     assert ss.get("task_difficulty") == "medium"
-    assert ss.get("route_selected_by") == "p3_difficulty_router"
+    assert ss.get("route_selected_by") is None
+
+    # The legacy cloud-assist executor remains explicitly testable, but the
+    # difficulty advisor no longer has authority to select it.
+    ss = {**ss, "executor_topology": ss["suggested_executor_topology"]}
 
     # Executor with FakeProvider (real patch)
     req = LocalModelExecutorRequest(
@@ -161,8 +169,11 @@ def test_p3_e2e_hard_escalation():
     ss = plan.signal_snapshot
 
     # Planner verification
-    assert ss.get("execution_topology") == "cloud_with_local_assist"
+    assert ss.get("execution_topology") == "ASSISTED_CANONICAL"
+    assert ss.get("executor_topology") == "single_local_model"
+    assert ss.get("suggested_executor_topology") == "cloud_with_local_assist"
     assert ss.get("task_difficulty") == "hard"
+    ss = {**ss, "executor_topology": ss["suggested_executor_topology"]}
 
     # Executor with EmptyProvider (empty output → retry fails)
     req = LocalModelExecutorRequest(
