@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import os
-import re
 import shutil
 import subprocess
 from typing import Any
@@ -38,6 +37,46 @@ class IsolatedApplyReceipt:
     public_claim_allowed: bool = False
     production_ready: bool = False
     applied_patch_hash_source: str = ""
+
+
+def _canonicalize_effective_diff(diff_text: str) -> str:
+    """Canonicalize one target's selected/applied effect for hash binding.
+
+    Git may add or drop pure blank *unchanged* context when it renders the
+    applied diff.  Exclude only those lines; hunk order, nonblank context, and
+    every added or removed payload line remain part of the identity.  Target,
+    source, successful apply, isolation, and verifier checks are separate gates.
+    """
+    output: list[str] = []
+    hunk_lines: list[str] = []
+    in_hunk = False
+
+    def flush_hunk() -> None:
+        nonlocal hunk_lines, in_hunk
+        if not in_hunk:
+            return
+        old_count = sum(1 for line in hunk_lines if not line.startswith("+"))
+        new_count = sum(1 for line in hunk_lines if not line.startswith("-"))
+        output.append(f"@@ -0,{old_count} +0,{new_count} @@")
+        output.extend(hunk_lines)
+        hunk_lines = []
+        in_hunk = False
+
+    for raw_line in diff_text.replace("\r\n", "\n").split("\n"):
+        line = raw_line.rstrip()
+        if line.startswith("@@"):
+            flush_hunk()
+            in_hunk = True
+            continue
+        if not in_hunk or not raw_line.startswith(("-", "+", " ")):
+            continue
+        operation = raw_line[0]
+        content = raw_line[1:].rstrip()
+        if operation == " " and not content:
+            continue
+        hunk_lines.append(f"{operation}{content}")
+    flush_hunk()
+    return "\n".join(output).strip()
 
 
 def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApplyReceipt:
@@ -145,46 +184,8 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
         )
         actual_diff = diff_res.stdout.decode("utf-8")
 
-        def canonicalize_diff(diff_text: str) -> str:
-            lines = []
-            # 1. Normalize line endings (CRLF -> LF)
-            raw_lines = diff_text.replace("\r\n", "\n").split("\n")
-            for line in raw_lines:
-                # 2. Strip trailing whitespaces only to ignore minor trailing spaces
-                line_rstrip = line.rstrip()
-
-                # 3. Skip git diff metadata headers
-                if line_rstrip.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
-                    continue
-
-                # 4. Standardize hunk headers without trusting model-provided line
-                # starts.  ``git apply`` may validly relocate a hunk when the
-                # candidate's coordinates are stale, while the changed/context
-                # lines remain identical.  Counts stay bound so a different
-                # patch shape cannot silently compare equal.
-                if line_rstrip.startswith("@@"):
-                    m = re.match(
-                        r"^@@\s+-\d+(?:,(\d+))?\s+\+\d+(?:,(\d+))?\s+@@",
-                        line_rstrip,
-                    )
-                    if m:
-                        old_count = m.group(1) or "1"
-                        new_count = m.group(2) or "1"
-                        lines.append(f"@@ -0,{old_count} +0,{new_count} @@")
-                    continue
-
-                # 5. For code modifications (+, -, space context), keep the exact indentation and whitespaces
-                if line_rstrip.startswith(("-", "+", " ")):
-                    op = line_rstrip[0]
-                    content = line[1:].rstrip()  # Keep the exact code payload including leading indentation and internal spaces
-                    lines.append(f"{op}{content}")
-                    continue
-
-            # 6. Join lines and strip start/end empty lines
-            return "\n".join(lines).strip()
-
-        canonical_applied = canonicalize_diff(actual_diff)
-        canonical_selected = canonicalize_diff(request.unified_diff)
+        canonical_applied = _canonicalize_effective_diff(actual_diff)
+        canonical_selected = _canonicalize_effective_diff(request.unified_diff)
 
         applied_hash = hashlib.sha256(canonical_applied.encode("utf-8")).hexdigest()
         selected_hash = hashlib.sha256(canonical_selected.encode("utf-8")).hexdigest()

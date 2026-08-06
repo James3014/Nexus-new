@@ -207,3 +207,67 @@ def test_apply_hash_ignores_stale_hunk_line_start(tmp_path) -> None:
     assert receipt.selected_candidate_hash_matches_applied is True
     assert receipt.applied_patch_hash == receipt.selected_candidate_hash
     assert receipt.selected_candidate_hash != hashlib.sha256(patch.encode()).hexdigest()
+
+
+def test_apply_hash_ignores_git_added_unchanged_context(tmp_path) -> None:
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    target = source / "target.py"
+    target.write_text(
+        "class Marker:\n"
+        "    pass\n"
+        "\n"
+        "def target(value):\n"
+        "    try:\n"
+        "        return str(value)\n"
+        "    except ValueError:\n"
+        "        raise\n"
+        "\n"
+        "def untouched():\n"
+        "    return True\n",
+        encoding="utf-8",
+    )
+    patch = (
+        "--- a/target.py\n"
+        "+++ b/target.py\n"
+        "@@ -4,5 +4,5 @@\n"
+        " def target(value):\n"
+        "     try:\n"
+        "-        return str(value)\n"
+        "+        return value if isinstance(value, str) else str(value)\n"
+        "     except ValueError:\n"
+        "         raise\n"
+    )
+
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="git-added-context",
+            source_root=str(source),
+            target_file="target.py",
+            unified_diff=patch,
+            selected_candidate_hash=_canonical_candidate_hash(patch),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts"),
+        )
+    )
+
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.candidate_output_isolated is True
+    assert receipt.selected_candidate_hash_matches_applied is True
+    assert receipt.applied_patch_hash == receipt.selected_candidate_hash
+
+
+def test_apply_hash_still_binds_nonblank_context_and_changed_payload() -> None:
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+
+    patch = "@@ -1,2 +1,2 @@\n def target():\n-    return 1\n+    return 2\n"
+    context_tamper = "@@ -1,2 +1,2 @@\n def other():\n-    return 1\n+    return 2\n"
+    payload_tamper = "@@ -1,2 +1,2 @@\n def target():\n-    return 1\n+    return 3\n"
+    blank_line_change = "@@ -1 +1,2 @@\n def target():\n+\n"
+
+    candidate_hash = _canonical_candidate_hash(patch)
+    assert candidate_hash != _canonical_candidate_hash(context_tamper)
+    assert candidate_hash != _canonical_candidate_hash(payload_tamper)
+    assert candidate_hash != _canonical_candidate_hash(blank_line_change)

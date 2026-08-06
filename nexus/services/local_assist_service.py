@@ -24,6 +24,7 @@ from nexus.services.local_heal.isolated_verifier import (
 )
 from nexus.services.local_heal.isolated_workspace_apply import (
     IsolatedApplyRequest,
+    _canonicalize_effective_diff,
     run_isolated_workspace_apply,
 )
 from nexus.services.local_heal.local_model_executor import (
@@ -248,24 +249,7 @@ def _recount_unified_diff(diff_text: str) -> str:
 
 def _canonical_candidate_hash(diff_text: str) -> str:
     """Match the isolated-apply hash normalization contract."""
-    lines: list[str] = []
-    for raw_line in diff_text.replace("\r\n", "\n").split("\n"):
-        line = raw_line.rstrip()
-        if line.startswith(("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file")):
-            continue
-        if line.startswith("@@"):
-            match = re.match(
-                r"^@@\s+-\d+(?:,(\d+))?\s+\+\d+(?:,(\d+))?\s+@@",
-                line,
-            )
-            if match:
-                old_count = match.group(1) or "1"
-                new_count = match.group(2) or "1"
-                lines.append(f"@@ -0,{old_count} +0,{new_count} @@")
-            continue
-        if line.startswith(("-", "+", " ")):
-            lines.append(f"{line[0]}{raw_line[1:].rstrip()}")
-    return _hash_text("\n".join(lines).strip())
+    return _hash_text(_canonicalize_effective_diff(diff_text))
 
 
 def _safe_relative_path(value: str, *, field_name: str) -> str:
