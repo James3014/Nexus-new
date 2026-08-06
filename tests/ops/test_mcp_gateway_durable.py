@@ -134,6 +134,48 @@ def test_status_is_json_serializable_and_does_not_expose_process_output(monkeypa
     assert "stdout" not in encoded and "stderr" not in encoded and "SECRET" not in encoded
     assert set(payload) == {"gateway", "devspace"}
 
+def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    def runner(*args):
+        class Result:
+            returncode = 113
+            stdout = ""
+            stderr = f'Bad request.\nCould not find service "{args[-1].rsplit("/", 1)[-1]}" in domain for user gui: {os.getuid()}\n'
+        return Result()
+    payload = g.manage("status", runner=runner)
+    assert all(not item["loaded"] and item["returncode"] == 113 for item in payload.values())
+
+def test_status_rejects_unrelated_launchctl_failure(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    class Result:
+        returncode = 113
+        stdout = ""
+        stderr = "Bad request.\nCould not find service \"other.service\" in domain for user gui: 501\n"
+    with pytest.raises(g.GateError, match="launchctl command failed"):
+        g.manage("status", runner=lambda *args: Result())
+
+def test_install_tolerates_real_absent_bootout(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    def runner(*args):
+        class Result:
+            returncode = 3 if args[1] == "bootout" else 0
+            stdout = ""
+            stderr = "Boot-out failed: 3: No such process\n" if args[1] == "bootout" else ""
+        return Result()
+    result = g.manage("install", root=tmp_path, devspace_hash=HASH, runner=runner)
+    assert result["labels"] == list(g.LABELS.values())
+
+def test_install_rejects_unrelated_bootout_failure(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    def runner(*args):
+        class Result:
+            returncode = 3 if args[1] == "bootout" else 0
+            stdout = ""
+            stderr = "Boot-out failed: 3: Operation not permitted\n" if args[1] == "bootout" else ""
+        return Result()
+    with pytest.raises(g.GateError, match="launchctl command failed"):
+        g.manage("install", root=tmp_path, devspace_hash=HASH, runner=runner)
+
 def test_serve_devspace_rechecks_cli_at_exec_boundary(monkeypatch, tmp_path):
     head = setup(monkeypatch, tmp_path)
     pin = hashlib.sha256(b"identity").hexdigest()

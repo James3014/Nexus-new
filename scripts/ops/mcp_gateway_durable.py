@@ -97,12 +97,27 @@ def manage(action: str, *, root: Path = CANONICAL_ROOT, expected_head: str | Non
            runner: Callable[..., str] | None = None) -> dict:
     devspace_root = devspace_root or DEVSPACE_ROOT; node_path = node_path or NODE_PATH
     run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+    def absent_service(result, args) -> bool:
+        """Recognize only launchctl's documented missing per-user service forms."""
+        code = getattr(result, "returncode", result[0] if isinstance(result, tuple) else 0)
+        output = ((getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or ""))
+        output = str(output).strip()
+        if len(args) < 3 or args[0] != "launchctl":
+            return False
+        target = str(args[-1])
+        label = target.rsplit("/", 1)[-1]
+        if args[1] == "print" and code == 113:
+            expected = rf'Bad request\.\s*Could not find service "{re.escape(label)}" in domain for user gui:\s*{os.getuid()}\s*'
+            return re.fullmatch(expected, output, flags=re.IGNORECASE | re.DOTALL) is not None
+        if args[1] == "bootout" and code == 3:
+            return re.fullmatch(r"Boot-out failed:\s*3:\s*No such process", output,
+                                flags=re.IGNORECASE) is not None
+        return False
     def invoke(*args):
         result = run(*args)
         code = getattr(result, "returncode", result[0] if isinstance(result, tuple) else 0)
         if code not in (0, None):
-            text = ((getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")).lower()
-            if text.strip() in {"launchctl: service not found", "could not find service"}: return result
+            if absent_service(result, args): return result
             raise GateError("launchctl command failed")
         return result
     if action in ("preflight", "render", "install"):
