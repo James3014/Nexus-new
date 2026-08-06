@@ -344,6 +344,39 @@ def test_canonical_product_online_deny_removes_online_runtime_demand(
     assert set(request.route["workforce_bindings"]) == {"local"}
 
 
+def test_canonical_product_rejects_online_deny_when_no_local_channel(
+    monkeypatch,
+    tmp_path,
+):
+    import pytest
+
+    from nexus.engine.canonical_task_seam import execute_canonical_product_task
+
+    class _UnexpectedGateway:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("gateway must not be constructed without a runtime channel")
+
+    monkeypatch.setattr(
+        "nexus.services.gateway.BattlesuitGateway",
+        _UnexpectedGateway,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="canonical_product_no_execution_channel_enabled",
+    ):
+        execute_canonical_product_task(
+            "audit runtime without an enabled execution channel",
+            tmp_path,
+            execution_context={
+                "task_id": "canonical-no-runtime-channel",
+                "workspace_revision": "rev-no-runtime-channel",
+                "local_assist_mode": "disabled",
+                "online_policy": "deny",
+            },
+        )
+
+
 def test_canonical_product_rejects_caller_route_override(tmp_path):
     import pytest
 

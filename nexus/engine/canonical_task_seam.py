@@ -408,6 +408,8 @@ def execute_canonical_product_task(
         raise ValueError("canonical_product_verifier_command_invalid")
 
     local_enabled = mode == "advisor"
+    if online_policy == "deny" and not local_enabled:
+        raise ValueError("canonical_product_no_execution_channel_enabled")
     verified_world_c = bool(local_enabled and allowed_files and target_file and verifier_command)
     if local_enabled and not allowed_files:
         raise ValueError("canonical_product_local_allowed_files_missing")
