@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
@@ -10,7 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerStatus, run_cli_worker
+from nexus.executors.cli_worker import (
+    CliWorkerRequest,
+    CliWorkerStatus,
+    bounded_environment_receipt,
+    run_cli_worker,
+)
 from nexus.orchestrator.worktree_manager import get_canonical_git_hooks_dir
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -104,26 +110,215 @@ class ControlledIntegrationManager:
         if branch != "nexus/integration" and not branch.startswith("nexus/integration/"):
             raise ValueError("integration branch must be nexus/integration or nexus/integration/*")
 
-    def _verify_commands(self, commands: Sequence[str], cwd: Path) -> tuple[bool, str | None]:
-        for command in commands:
-            try:
-                tokens = tuple(shlex.split(command))
-                if len(tokens) < 2:
-                    return False, f"invalid verifier command: {command}"
-                result = run_cli_worker(
-                    CliWorkerRequest(
-                        executable=tokens[0],
-                        argv=tokens[1:],
-                        cwd=str(cwd),
-                        timeout_seconds=300.0,
-                        env={"PYTHONDONTWRITEBYTECODE": "1"},
-                    )
+    @staticmethod
+    def _command_intent(
+        command: str,
+    ) -> tuple[str, tuple[str, ...], dict[str, str]]:
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+            lexer.whitespace_split = True
+            tokens = tuple(lexer)
+        except ValueError as exc:
+            raise RuntimeError("staging verifier command is malformed") from exc
+        if not tokens:
+            raise RuntimeError("staging verifier command is malformed")
+
+        assignments: dict[str, str] = {}
+        assignment_pattern = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+        index = 0
+        while index < len(tokens):
+            match = assignment_pattern.fullmatch(tokens[index])
+            if match is None:
+                if "=" in tokens[index] and index == 0:
+                    raise RuntimeError("staging verifier environment is malformed")
+                break
+            name, value = match.groups()
+            if name != "PYTHONDONTWRITEBYTECODE" or value != "1":
+                raise RuntimeError("staging verifier environment is not admitted")
+            if name in assignments and assignments[name] != value:
+                raise RuntimeError("staging verifier environment is conflicting")
+            assignments[name] = value
+            index += 1
+        if index >= len(tokens):
+            raise RuntimeError("staging verifier command is malformed")
+
+        executable = tokens[index]
+        argv = tokens[index + 1 :]
+        if (
+            executable in {";", "&&", "||", "|", "<", ">"}
+            or not executable.strip()
+            or executable.startswith("-")
+            or ".." in Path(executable).parts
+            or any(token in {";", "&&", "||", "|", "<", ">"} for token in argv)
+        ):
+            raise RuntimeError("staging verifier command is not admitted")
+        for arg_index, token in enumerate(argv):
+            if re.search(r"[\x00\r\n]", token):
+                raise RuntimeError("staging verifier argv is malformed")
+            if any(char in token for char in ";&|<>()$`") and not (
+                arg_index > 0 and argv[arg_index - 1] == "-c"
+            ):
+                raise RuntimeError("staging verifier argv is not admitted")
+            if assignment_pattern.fullmatch(token):
+                raise RuntimeError("staging verifier environment position is invalid")
+        assignments.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+        return executable, argv, assignments
+
+    @staticmethod
+    def _admitted_manifest(
+        state: Mapping[str, Any],
+        contract: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        """Bind staging verifiers to the successful Candidate evidence.
+
+        Contract commands are human-readable intent.  They are never resolved
+        again through the integration process' ambient ``PATH``.  The only
+        executable authority is the ordered, successful verifier evidence
+        already sealed into the verified Candidate receipt.
+        """
+        commands = tuple(str(item) for item in contract.get("verifier_commands") or ())
+        if not commands:
+            return ()
+        receipt = state.get("verified_receipt")
+        if not isinstance(receipt, Mapping):
+            raise RuntimeError("staging verifier evidence is missing")
+        evidence = receipt.get("verifier_evidence")
+        if not isinstance(evidence, (list, tuple)) or len(evidence) != len(commands):
+            raise RuntimeError("staging verifier evidence order mismatch")
+
+        admitted: list[dict[str, Any]] = []
+        for index, (command, item) in enumerate(zip(commands, evidence, strict=True)):
+            if not isinstance(item, Mapping):
+                raise RuntimeError("staging verifier evidence is malformed")
+            executable_intent, argv_intent, bounded_env = (
+                ControlledIntegrationManager._command_intent(command)
+            )
+            if str(item.get("command") or "") != command:
+                raise RuntimeError("staging verifier command mismatch")
+            argv = item.get("argv")
+            if (
+                not isinstance(argv, (list, tuple))
+                or not all(isinstance(value, str) for value in argv)
+                or tuple(argv) != argv_intent
+            ):
+                raise RuntimeError("staging verifier argv mismatch")
+            executable = Path(str(item.get("executable_identity") or "")).expanduser()
+            if (
+                not executable.is_absolute()
+                or not executable.is_file()
+                or not os.access(executable, os.X_OK)
+                or executable.name != Path(executable_intent).name
+                or (
+                    Path(executable_intent).is_absolute()
+                    and str(executable) != str(Path(executable_intent).expanduser())
                 )
-            except (OSError, ValueError) as exc:
-                return False, f"invalid verifier command: {command}: {exc}"
-            if result.status is not CliWorkerStatus.COMPLETED or result.exit_code != 0:
-                return False, f"integration verifier failed: {command}"
-        return True, None
+            ):
+                raise RuntimeError("staging verifier executable identity is invalid")
+            expected_sha = str(item.get("executable_sha256") or "")
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+                raise RuntimeError("staging verifier executable SHA is missing")
+            try:
+                actual_sha = hashlib.sha256(executable.read_bytes()).hexdigest()
+            except OSError as exc:
+                raise RuntimeError("staging verifier executable is unreadable") from exc
+            if actual_sha != expected_sha:
+                raise RuntimeError("staging verifier executable SHA drift")
+            if (
+                str(item.get("status") or "") != CliWorkerStatus.COMPLETED.value
+                or item.get("exit_code") != 0
+                or bool(item.get("timed_out"))
+                or bool(item.get("process_group_killed"))
+            ):
+                raise RuntimeError("staging verifier evidence is not successful")
+            evidence_env = item.get("env")
+            expected_env = bounded_environment_receipt(bounded_env)
+            if (
+                not isinstance(evidence_env, (list, tuple))
+                or not all(
+                    isinstance(pair, (list, tuple))
+                    and len(pair) == 2
+                    and all(isinstance(value, str) for value in pair)
+                    for pair in evidence_env
+                )
+                or tuple(tuple(pair) for pair in evidence_env) != expected_env
+            ):
+                raise RuntimeError("staging verifier environment receipt mismatch")
+            admitted.append({
+                "schema": "nexus.integration_verifier_identity.v1",
+                "index": index,
+                "command": command,
+                "executable_identity": str(executable),
+                "executable_sha256": expected_sha,
+                "argv": list(argv),
+                "env": dict(bounded_env),
+            })
+        return tuple(admitted)
+
+    @staticmethod
+    def _admitted_commands(
+        state: Mapping[str, Any],
+        contract: Mapping[str, Any],
+    ) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        return tuple(
+            (
+                str(item["executable_identity"]),
+                tuple(str(value) for value in item["argv"]),
+            )
+            for item in ControlledIntegrationManager._admitted_manifest(state, contract)
+        )
+
+    @staticmethod
+    def _bound_manifest(
+        state: Mapping[str, Any],
+        contract: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        manifest = ControlledIntegrationManager._admitted_manifest(state, contract)
+        persisted = state.get("integration_verifier_manifest")
+        if manifest and (
+            not isinstance(persisted, (list, tuple))
+            or list(manifest) != list(persisted)
+        ):
+            raise RuntimeError("staging verifier manifest binding mismatch")
+        if not manifest and persisted not in (None, [], ()):
+            raise RuntimeError("staging verifier manifest binding mismatch")
+        return manifest
+
+    @staticmethod
+    def _execute_manifest(
+        manifest: Sequence[Mapping[str, Any]],
+        cwd: Path,
+    ) -> None:
+        for verifier in manifest:
+            executable = str(verifier["executable_identity"])
+            expected_sha = str(verifier["executable_sha256"])
+            try:
+                current_sha = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+            except OSError as exc:
+                raise RuntimeError("staging verifier executable is unreadable") from exc
+            if current_sha != expected_sha:
+                raise RuntimeError("staging verifier executable SHA drift")
+            result = run_cli_worker(
+                CliWorkerRequest(
+                    executable=executable,
+                    argv=tuple(str(value) for value in verifier["argv"]),
+                    cwd=str(cwd),
+                    timeout_seconds=300.0,
+                    env=dict(verifier["env"]),
+                )
+            )
+            if (
+                result.executable_identity != executable
+                or result.executable_sha256 != expected_sha
+                or result.status is not CliWorkerStatus.COMPLETED
+                or result.exit_code != 0
+            ):
+                raise RuntimeError(
+                    "staging verifier failed: "
+                    f"{verifier['command']} status={result.status.value} "
+                    f"exit_code={result.exit_code} "
+                    f"stdout_sha256={result.stdout_sha256} "
+                    f"stderr_sha256={result.stderr_sha256}"
+                )
 
     def integrate_task_state(
         self,
@@ -170,6 +365,7 @@ class ControlledIntegrationManager:
             raise RuntimeError("candidate tree does not bind to promotion packet")
         if self._git(["rev-parse", f"{target_base_revision}^{{commit}}"], controller_root) != target_base_revision:
             raise RuntimeError("target base revision is not present")
+        admitted_verifiers = self._bound_manifest(state, contract)
 
         self.integration_root.mkdir(parents=True, exist_ok=True)
         integration_path = self.integration_root / task_id
@@ -194,12 +390,7 @@ class ControlledIntegrationManager:
         integration_base_sha = self._git(["rev-parse", "HEAD"], integration_path)
         try:
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], integration_path)
-            passed, reason = self._verify_commands(
-                list(contract.get("verifier_commands") or []), integration_path
-            )
-            if not passed:
-                self._git(["reset", "--merge", integration_base_sha], integration_path)
-                raise RuntimeError(reason or "integration verifier failed")
+            self._execute_manifest(admitted_verifiers, integration_path)
             integration_sha = self._git(["rev-parse", "HEAD"], integration_path)
         except Exception:
             subprocess.run(["git", "merge", "--abort"], cwd=integration_path, capture_output=True, text=True)
@@ -268,6 +459,8 @@ class ControlledIntegrationManager:
         if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
             raise RuntimeError("canonical/integration worktree must be clean before apply")
 
+        admitted_verifiers = self._bound_manifest(state, contract)
+
         staging_path = Path(staging_root).expanduser().resolve() / task_id
         if staging_path.exists():
             raise RuntimeError("integration staging Target already exists")
@@ -279,14 +472,7 @@ class ControlledIntegrationManager:
         branch_head_after = expected_head
         try:
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], staging_path)
-            verifier_commands = state.get("verifier_argv_commands") or contract.get("verifier_commands") or ()
-            for command in verifier_commands:
-                tokens = tuple(command) if isinstance(command, (list, tuple)) else tuple(shlex.split(str(command)))
-                if len(tokens) < 1:
-                    raise RuntimeError(f"invalid staging verifier command: {command}")
-                result = subprocess.run(tokens, cwd=staging_path, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise RuntimeError(f"staging verifier failed: {command}")
+            self._execute_manifest(admitted_verifiers, staging_path)
             staging_sha = self._git(["rev-parse", "HEAD"], staging_path)
             if apply:
                 if self._git(["rev-parse", f"{integration_branch}^{{commit}}"], controller_root) != expected_head:

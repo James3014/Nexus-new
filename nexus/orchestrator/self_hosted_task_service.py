@@ -5268,8 +5268,9 @@ class SelfHostedTaskService:
 
         The public Gateway supplies only these two typed inputs.  This service
         derives the preview and authorization envelope from the persisted
-        APPROVED Candidate, current repository HEAD, and runtime identity, then
-        atomically records the closure binding for the existing integrate path.
+        APPROVED Candidate (or its exact non-applied PRE_APPLY failure), current
+        repository HEAD, and runtime identity, then atomically records the
+        closure binding for the existing integrate path.
         """
         if not isinstance(external_acceptance, ExternalAcceptanceReceipt):
             raise RuntimeError("EXTERNAL_ACCEPTANCE_TYPED_REQUIRED")
@@ -5281,15 +5282,34 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         if str(state.get("task_id") or "") != task_id:
             raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
-        if state.get("status") != "APPROVED" or state.get("promotion_status") != "APPROVED":
+        failed_pre_apply = (
+            state.get("status") == "INTEGRATION_FAILED_PRE_APPLY"
+            and state.get("promotion_status") == "INTEGRATION_FAILED_PRE_APPLY"
+        )
+        if not failed_pre_apply and (
+            state.get("status") != "APPROVED"
+            or state.get("promotion_status") != "APPROVED"
+        ):
             raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
+        if failed_pre_apply:
+            failed_execution = state.get("integration_execution")
+            if (
+                state.get("merge_performed")
+                or state.get("integration_result_sha")
+                or not isinstance(failed_execution, Mapping)
+                or failed_execution.get("stage") != "PRE_APPLY"
+                or failed_execution.get("merge_performed") is not False
+                or failed_execution.get("branch_head_before")
+                != failed_execution.get("branch_head_after")
+            ):
+                raise RuntimeError("CLOSURE_PRE_APPLY_FAILURE_REQUIRED")
         if "integration_closure_binding" in state and (not isinstance(state.get("integration_closure_binding"), Mapping) or not state.get("integration_closure_binding")):
             raise RuntimeError("CLOSURE_BINDING_MALFORMED")
         existing = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else None
         if existing:
             if "integration_approval_grant" not in state or not isinstance(state.get("integration_approval_grant"), Mapping) or not state.get("integration_approval_grant"):
                 raise RuntimeError("CLOSURE_BINDING_MALFORMED")
-            if state.get("merge_performed") or state.get("integration_receipt") or state.get("integration_result_sha") or state.get("integration_execution") or state.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
+            if state.get("merge_performed") or state.get("integration_receipt") or state.get("integration_result_sha") or (state.get("integration_execution") and not failed_pre_apply) or state.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
                 raise RuntimeError("CLOSURE_REBIND_AFTER_INTEGRATION_FORBIDDEN")
             prior_history = state.get("integration_closure_history")
             if "integration_closure_history" in state and not isinstance(prior_history, list):
@@ -5342,9 +5362,11 @@ class SelfHostedTaskService:
             )
             projection = dict(existing.get("approval_projection") or {key: persisted_grant.get(key) for key in approval_keys})
             same_approval_id = str(existing.get("approval_id") or persisted_grant.get("approval_id") or "") == str(approval.get("approval_id") or "")
+            if failed_pre_apply and same_approval_id:
+                raise RuntimeError("CLOSURE_FAILED_APPROVAL_REUSE")
             if same_approval_id and projection != {key: approval.get(key) for key in approval_keys}:
                 raise RuntimeError("CLOSURE_APPROVAL_REPLAY_DRIFT")
-            if replay:
+            if replay and not failed_pre_apply:
                 return {**state, "closure_binding": dict(existing), "duplicate": True, "integration_performed": False}
         attempt_id = str(state.get("attempt_id") or "")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
@@ -5401,6 +5423,18 @@ class SelfHostedTaskService:
             allow_consumed=False,
         )
         contract_data = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
+        verifier_manifest = ControlledIntegrationManager._admitted_manifest(
+            state,
+            contract_data,
+        )
+        verifier_manifest_payload = [dict(item) for item in verifier_manifest]
+        verifier_manifest_hash = hashlib.sha256(
+            json.dumps(
+                verifier_manifest_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         controller_root = Path(str(contract_data.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
         manager = WorktreeManager(root_dir=str(contract_data.get("target_worktree_root") or controller_root))
         current_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
@@ -5482,6 +5516,7 @@ class SelfHostedTaskService:
             "contract_kind": contract_kind,
             "contract_hash": contract_hash,
             "task_card_hash": str(task_card_hash or ""),
+            "verifier_manifest_sha256": verifier_manifest_hash,
             "preview": preview.to_dict(),
             "authorization_hash": authorization.authorization_hash,
         }
@@ -5492,10 +5527,23 @@ class SelfHostedTaskService:
         expected_prior_snapshot = json.dumps(_jsonable(dict(existing)) if existing else None, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         expected_history_snapshot = json.dumps(_jsonable(state.get("integration_closure_history")), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         expected_grant_snapshot = json.dumps(_jsonable(state.get("integration_approval_grant")), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected_failure_snapshot = json.dumps(
+            _jsonable(state.get("integration_execution")),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
-            if str(current.get("task_id") or "") != task_id or current.get("status") != "APPROVED" or current.get("promotion_status") != "APPROVED":
+            expected_status = (
+                "INTEGRATION_FAILED_PRE_APPLY" if failed_pre_apply else "APPROVED"
+            )
+            if (
+                str(current.get("task_id") or "") != task_id
+                or current.get("status") != expected_status
+                or current.get("promotion_status") != expected_status
+            ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             if current.get("attempt_id") != attempt_id:
                 raise RuntimeError("CLOSURE_ATTEMPT_DRIFT")
@@ -5523,6 +5571,15 @@ class SelfHostedTaskService:
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             if json.dumps(_jsonable(current.get("integration_approval_grant")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_grant_snapshot:
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if json.dumps(_jsonable(current.get("integration_execution")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_failure_snapshot:
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            current_contract = current.get("contract") if isinstance(current.get("contract"), Mapping) else {}
+            current_manifest = ControlledIntegrationManager._admitted_manifest(
+                current,
+                current_contract,
+            )
+            if list(current_manifest) != verifier_manifest_payload:
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             live_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
             live_status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
             if live_branch != integration_branch or live_status:
@@ -5533,7 +5590,7 @@ class SelfHostedTaskService:
             except OSError as exc:
                 raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_UNREADABLE") from exc
             if prior:
-                if current.get("merge_performed") or current.get("integration_receipt") or current.get("integration_result_sha") or current.get("integration_execution") or current.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
+                if current.get("merge_performed") or current.get("integration_receipt") or current.get("integration_result_sha") or (current.get("integration_execution") and not failed_pre_apply) or current.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
                     raise RuntimeError("CLOSURE_REBIND_AFTER_INTEGRATION_FORBIDDEN")
                 history = current.get("integration_closure_history")
                 if "integration_closure_history" in current and not isinstance(history, list):
@@ -5563,6 +5620,42 @@ class SelfHostedTaskService:
             current["integration_approval_grant"] = consumed
             current["integration_closure_binding"] = closure
             current["integration_closure_binding_hash"] = closure_hash
+            current["integration_verifier_manifest"] = verifier_manifest_payload
+            if failed_pre_apply:
+                failure_history = current.get("integration_failure_history")
+                if "integration_failure_history" in current and not isinstance(failure_history, list):
+                    raise RuntimeError("CLOSURE_FAILURE_HISTORY_MALFORMED")
+                if failure_history is None:
+                    failure_history = []
+                    current["integration_failure_history"] = failure_history
+                failure_history.append({
+                    "schema": "nexus.integration_failure_history.v1",
+                    "status": "INTEGRATION_FAILED_PRE_APPLY",
+                    "integration_error": current.get("integration_error"),
+                    "integration_status": current.get("integration_status"),
+                    "integration_execution": _jsonable(current.get("integration_execution")),
+                    "closure_binding_hash": prior.get("binding_hash") if prior else None,
+                    "approval_id": persisted_grant.get("approval_id"),
+                    "superseded_at": now,
+                })
+                current["status"] = "APPROVED"
+                current["promotion_status"] = "APPROVED"
+                current["terminal_status"] = "APPROVED"
+                current["final_disposition"] = "REBIND_READY"
+                current["integration_status"] = "REBIND_READY"
+                current["integration_error"] = None
+                current["integration_execution"] = None
+                current["state_retention_status"] = "ACTIVE"
+                current["archive_eligible"] = False
+                current["cleanup_eligible"] = False
+                status_history = current.get("status_history")
+                if not isinstance(status_history, list):
+                    raise RuntimeError("CLOSURE_STATUS_HISTORY_MALFORMED")
+                status_history.append({
+                    "at": now,
+                    "status": "APPROVED",
+                    "reason": "pre_apply_closure_rebind",
+                })
 
         persisted = self._mutate_state(task_id, mutate)
         if persisted is None:
@@ -5703,6 +5796,10 @@ class SelfHostedTaskService:
             "approved_binding",
             "external_acceptance",
             "integration_authorization",
+            "integration_approval_grant",
+            "integration_closure_binding",
+            "integration_closure_binding_hash",
+            "integration_verifier_manifest",
         )
 
         def binding_hash(bound_state: Mapping[str, Any]) -> str:
