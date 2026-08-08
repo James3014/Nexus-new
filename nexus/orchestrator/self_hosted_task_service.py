@@ -49,6 +49,7 @@ from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeMan
 from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
     trusted_runtime_manifest_hash,
+    validate_approval_grant,
     validate_architecture_approval,
 )
 from nexus.contracts.lifecycle_action import (
@@ -62,6 +63,7 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
@@ -3684,6 +3686,8 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+        if str(state.get("task_id") or "") != task_id:
+            raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
         if state.get("promotion_status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
             raise RuntimeError("candidate is not pending disposition")
         candidate_record = {
@@ -5250,6 +5254,199 @@ class SelfHostedTaskService:
         res = self._checkpoint(task_id, "PENDING_HUMAN_APPROVAL", updates, attempt_id=state.get("attempt_id"))
         return res or self._read_state(task_id) or state
 
+    def bind_candidate_integration_closure(
+        self,
+        task_id: str,
+        *,
+        external_acceptance: ExternalAcceptanceReceipt,
+        approval: Mapping[str, Any],
+        runtime_identity: Mapping[str, Any],
+        expected_canonical_head: str,
+        integration_branch: str = "nexus/integration/main",
+    ) -> dict[str, Any]:
+        """Bind external acceptance and a fresh integrate approval, without applying.
+
+        The public Gateway supplies only these two typed inputs.  This service
+        derives the preview and authorization envelope from the persisted
+        APPROVED Candidate, current repository HEAD, and runtime identity, then
+        atomically records the closure binding for the existing integrate path.
+        """
+        if not isinstance(external_acceptance, ExternalAcceptanceReceipt):
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_TYPED_REQUIRED")
+        approval_keys = {"schema", "approval_id", "approved_by", "issued_at", "expires_at", "bound_task_id", "bound_attempt_id", "bound_action_type", "approval_scope", "contract_kind", "contract_hash", "task_card_hash", "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "lifecycle_revision", "server_instance_id", "expected_canonical_head", "integration_branch", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash", "acceptance_receipt_hash"}
+        if set(approval) - approval_keys:
+            raise RuntimeError("CLOSURE_APPROVAL_SCHEMA_CLOSED")
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("status") != "APPROVED" or state.get("promotion_status") != "APPROVED":
+            raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
+        if str(state.get("task_id") or "") != task_id:
+            raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
+        attempt_id = str(state.get("attempt_id") or "")
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        candidate_commit = str(packet.get("candidate_commit_sha") or state.get("candidate_commit_sha") or "")
+        candidate_tree = str(packet.get("candidate_tree_sha") or state.get("candidate_tree_sha") or "")
+        candidate_state = str(packet.get("candidate_state_hash") or state.get("candidate_state_hash") or "")
+        verified_receipt_hash = str(packet.get("verified_receipt_hash") or state.get("verified_receipt_hash") or "")
+        approved_binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        old_approval = approved_binding.get("approval_grant") if isinstance(approved_binding.get("approval_grant"), Mapping) else {}
+        if not approved_binding or not old_approval.get("consumed_at") or old_approval.get("approval_scope") != "ALLOW_ACTION_ONCE":
+            raise RuntimeError("CLOSURE_APPROVED_BINDING_REQUIRED")
+        for field in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash"):
+            if not approved_binding.get(field) or str(approved_binding.get(field)) != str(packet.get(field)):
+                raise RuntimeError("CLOSURE_CANDIDATE_BINDING_DRIFT")
+        if external_acceptance.task_id != task_id or external_acceptance.attempt_id != attempt_id:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
+        if external_acceptance.candidate_commit != candidate_commit:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
+        approval_binding = {"candidate_commit_sha": candidate_commit, "candidate_tree_sha": candidate_tree, "candidate_state_hash": candidate_state, "verified_receipt_hash": verified_receipt_hash, "acceptance_receipt_hash": external_acceptance.receipt_hash}
+        if any(str(approval.get(key) or "") != str(value) for key, value in approval_binding.items()):
+            raise RuntimeError("CLOSURE_CANDIDATE_BINDING_DRIFT")
+        artifact_path = Path(external_acceptance.verifier_artifact).expanduser()
+        evidence_root = (self.state_dir / "acceptance-artifacts" / task_id).resolve()
+        try:
+            artifact_path.resolve().relative_to(evidence_root)
+        except ValueError as exc:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED") from exc
+        if not artifact_path.is_absolute() or ".git" in artifact_path.parts or not artifact_path.is_file():
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED")
+        try:
+            artifact_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_UNREADABLE") from exc
+        if artifact_digest != external_acceptance.receipt_hash:
+            raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_HASH_MISMATCH")
+        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
+        contract_hash = str(state.get("contract_hash") or "")
+        task_card_hash = state.get("task_card_hash")
+        owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
+        approval_validated = validate_approval_grant(
+            approval,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            action_type=LifecycleActionType.CANDIDATE_INTEGRATE.value,
+            task_card_hash=str(task_card_hash) if task_card_hash else None,
+            contract_kind=contract_kind,
+            contract_hash=contract_hash or None,
+            owner_inline_contract=owner_inline_contract,
+            tool_manifest_hash=str(runtime_identity.get("tool_manifest_hash") or ""),
+            full_tool_schema_hash=str(runtime_identity.get("full_tool_schema_hash") or ""),
+            permission_policy_hash=str(runtime_identity.get("permission_policy_hash") or ""),
+            lifecycle_revision=str(runtime_identity.get("lifecycle_revision") or ""),
+            server_instance_id=str(runtime_identity.get("server_instance_id") or ""),
+            allow_consumed=False,
+        )
+        contract_data = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
+        controller_root = Path(str(contract_data.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
+        manager = WorktreeManager(root_dir=str(contract_data.get("target_worktree_root") or controller_root))
+        current_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+        if not re.fullmatch(r"[0-9a-f]{40}", expected_canonical_head) or current_head != expected_canonical_head:
+            raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT")
+        if str(approval.get("expected_canonical_head") or expected_canonical_head) != expected_canonical_head:
+            raise RuntimeError("CLOSURE_HEAD_BINDING_MISMATCH")
+        status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+        if status:
+            raise RuntimeError("CLOSURE_CANONICAL_DIRTY")
+        if not approval.get("integration_branch") or integration_branch != str(approval.get("integration_branch")):
+            raise RuntimeError("CLOSURE_BRANCH_BINDING_MISMATCH")
+        current_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
+        if current_branch != integration_branch:
+            raise RuntimeError("CLOSURE_CANONICAL_BRANCH_DRIFT")
+        lease = state.get("lease") if isinstance(state.get("lease"), Mapping) else {}
+        target_id = str(lease.get("lease_id") or state.get("target_id") or task_id)
+        target_path = str(lease.get("target_worktree") or contract_data.get("target_repo_root") or "")
+        if not target_path:
+            raise RuntimeError("CLOSURE_TARGET_BINDING_REQUIRED")
+        verification_commands = tuple(str(command) for command in contract_data.get("verifier_commands") or ())
+        preview = TargetIntegrationLifecycle.build_preview(
+            task_id=task_id,
+            target_id=target_id,
+            candidate_commit=candidate_commit,
+            acceptance=external_acceptance,
+            canonical_branch=integration_branch,
+            expected_canonical_head=current_head,
+            verification_commands=verification_commands,
+            cleanup_target_id=target_id,
+            rollback="retain target and candidate ref",
+        )
+        dirty_baseline = hashlib.sha256(status.encode()).hexdigest()
+        authorization = TargetIntegrationLifecycle.authorize(
+            task_id=task_id,
+            campaign_id=str((state.get("request") or {}).get("campaign_id") or task_id),
+            task_card_hash=str(task_card_hash or contract_hash),
+            candidate_commit=candidate_commit,
+            candidate_receipt_hash=verified_receipt_hash,
+            acceptance_receipt_hash=external_acceptance.receipt_hash,
+            canonical_root=str(controller_root),
+            canonical_branch=integration_branch,
+            expected_canonical_head=current_head,
+            canonical_dirty_baseline=dirty_baseline,
+            preview=preview,
+            cleanup_target_id=target_id,
+            cleanup_target_path=target_path,
+            durable_ref=str(state.get("candidate_ref") or ""),
+            rollback="retain target and candidate ref",
+            issued_at=str(approval.get("issued_at") or _utc_now()),
+            expires_at=str(approval.get("expires_at") or "") or None,
+            attempt_id=attempt_id,
+            candidate_tree_sha=candidate_tree,
+            candidate_state_hash=candidate_state,
+            reviewer_id=external_acceptance.reviewer_id,
+            verifier_artifact_hash=artifact_digest,
+        )
+        authorization_dict = authorization.to_dict()
+        authorization_dict["authorization_hash"] = authorization.authorization_hash
+        closure = {
+            "schema": "nexus.candidate_integration_closure.v1",
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "candidate_commit_sha": candidate_commit,
+            "candidate_tree_sha": candidate_tree,
+            "candidate_state_hash": candidate_state,
+            "verified_receipt_hash": verified_receipt_hash,
+            "acceptance_receipt_hash": external_acceptance.receipt_hash,
+            "canonical_head": current_head,
+            "expected_canonical_head": expected_canonical_head,
+            "canonical_branch": integration_branch,
+            "runtime_identity": dict(runtime_identity),
+            "approval_id": str(approval.get("approval_id") or ""),
+            "preview": preview.to_dict(),
+            "authorization_hash": authorization.authorization_hash,
+        }
+        closure_hash = hashlib.sha256(json.dumps(closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        closure["binding_hash"] = closure_hash
+        now = _utc_now()
+        duplicate = False
+
+        def mutate(current: dict[str, Any]) -> None:
+            nonlocal duplicate
+            if current.get("attempt_id") != attempt_id:
+                raise RuntimeError("CLOSURE_ATTEMPT_DRIFT")
+            existing = current.get("integration_closure_binding") if isinstance(current.get("integration_closure_binding"), Mapping) else None
+            if existing:
+                if existing.get("binding_hash") == closure_hash:
+                    duplicate = True
+                    return
+                raise RuntimeError("CLOSURE_BINDING_DRIFT")
+            live_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+            if live_head != current_head:
+                raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT")
+            consumed = dict(approval)
+            consumed["consumed_at"] = now
+            consumed["validation_receipt"] = approval_validated
+            current["external_acceptance"] = external_acceptance.to_dict()
+            current["integration_authorization"] = authorization_dict
+            current["integration_preview"] = preview.to_dict()
+            current["integration_approval_grant"] = consumed
+            current["integration_closure_binding"] = closure
+            current["integration_closure_binding_hash"] = closure_hash
+
+        persisted = self._mutate_state(task_id, mutate)
+        if persisted is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        return {**persisted, "closure_binding": closure, "duplicate": duplicate, "integration_performed": False}
+
     def integrate_approved(
         self,
         task_id: str,
@@ -5278,7 +5475,8 @@ class SelfHostedTaskService:
 
         if runtime_identity is not None:
             approved = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
-            grant = approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None
+            integration_grant = state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None
+            grant = integration_grant or (approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None)
             if not grant or not grant.get("consumed_at"):
                 raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: persisted approval grant is missing consume evidence")
             contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
@@ -5296,6 +5494,23 @@ class SelfHostedTaskService:
                 if validated_inline.get("contract_hash") != contract_hash:
                     raise RuntimeError("CONTRACT_HASH_MISMATCH: persisted Owner Inline contract hash drifted")
                 task_card_hash = None
+            if integration_grant:
+                validate_approval_grant(
+                    integration_grant,
+                    task_id=task_id,
+                    attempt_id=str(state.get("attempt_id") or ""),
+                    action_type=LifecycleActionType.CANDIDATE_INTEGRATE.value,
+                    task_card_hash=task_card_hash,
+                    contract_kind=contract_kind,
+                    contract_hash=contract_hash,
+                    owner_inline_contract=state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None,
+                    tool_manifest_hash=str(runtime_identity.get("tool_manifest_hash") or ""),
+                    full_tool_schema_hash=str(runtime_identity.get("full_tool_schema_hash") or ""),
+                    permission_policy_hash=str(runtime_identity.get("permission_policy_hash") or ""),
+                    lifecycle_revision=str(runtime_identity.get("lifecycle_revision") or ""),
+                    server_instance_id=str(runtime_identity.get("server_instance_id") or ""),
+                    allow_consumed=True,
+                )
             expected_identity = {
                 "contract_kind": contract_kind,
                 "contract_hash": contract_hash,
@@ -5338,7 +5553,7 @@ class SelfHostedTaskService:
             raise RuntimeError("INTEGRATION_AUTHORIZATION_BRANCH_DRIFT")
         if "INTEGRATION_STAGING" not in authorization_obj.action_set or "APPLY_VERIFIED_INTEGRATION" not in authorization_obj.action_set:
             raise RuntimeError("INTEGRATION_AUTHORIZATION_ACTION_SET_INCOMPLETE")
-        grant = approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None
+        grant = (state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None) or (approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None)
         if not grant or not grant.get("consumed_at"):
             raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: one-shot approval grant is not consumed")
         if grant.get("consumed_at") and grant.get("approval_scope") != "ALLOW_ACTION_ONCE":

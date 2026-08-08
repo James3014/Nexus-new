@@ -37,6 +37,7 @@ from nexus.contracts.lifecycle_action import (
     build_action_envelope,
     build_owner_inline_contract,
 )
+from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
 from nexus.engine.canonical_task_seam import execute_canonical_product_task
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
@@ -2178,6 +2179,48 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_candidate_bind_integration",
+                "description": "Bind an independently accepted exact Candidate to a fresh CANDIDATE_INTEGRATE approval; prepares but does not apply integration.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["task_id", "expected_canonical_head", "external_acceptance", "approval"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "integration_branch": {"type": "string", "default": "nexus/integration/main"},
+                        "expected_canonical_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "external_acceptance": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["schema", "task_id", "attempt_id", "candidate_commit", "receipt_hash", "reviewer_id", "passed", "verifier_artifact"],
+                            "properties": {
+                                "schema": {"type": "string", "const": "nexus.external_acceptance_receipt.v1"},
+                                "task_id": {"type": "string"}, "attempt_id": {"type": "string"},
+                                "candidate_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                                "receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "reviewer_id": {"type": "string"}, "passed": {"type": "boolean", "const": True},
+                                "verifier_artifact": {"type": "string"},
+                            },
+                        },
+                        "approval": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["schema", "approval_id", "approved_by", "issued_at", "expires_at", "bound_task_id", "bound_attempt_id", "bound_action_type", "contract_kind", "contract_hash", "task_card_hash", "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "lifecycle_revision", "server_instance_id", "expected_canonical_head", "integration_branch", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash", "acceptance_receipt_hash"],
+                            "properties": {
+                                "schema": {"type": "string", "const": "nexus.approval.v2"}, "approval_id": {"type": "string"}, "approved_by": {"type": "string"},
+                                "issued_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"},
+                                "bound_task_id": {"type": "string"}, "bound_attempt_id": {"type": "string"},
+                                "bound_action_type": {"type": "string", "const": "CANDIDATE_INTEGRATE"},
+                                "approval_scope": {"type": "string", "const": "ALLOW_ACTION_ONCE", "default": "ALLOW_ACTION_ONCE"},
+                                "contract_kind": {"type": "string", "enum": ["TRACKED_TASK_CARD", "OWNER_INLINE"]}, "contract_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "task_card_hash": {"type": ["string", "null"]},
+                                "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "full_tool_schema_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "permission_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_revision": {"type": "string"}, "server_instance_id": {"type": "string"},
+                                "expected_canonical_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                                "integration_branch": {"type": "string"},
+                                "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "candidate_state_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verified_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "acceptance_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                            },
+                        },
+                    },
+                },
+            },
+            {
                 "name": "nexus_candidate_integrate",
                 "description": "Integrate an already approved exact Candidate binding without pushing.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "integration_branch": {"type": "string", "default": "nexus/integration/main"}}},
@@ -2488,6 +2531,81 @@ class UnifiedMCPGateway:
         payload["approval_receipt"] = approval_receipt
         return payload
 
+    def _candidate_bind_integration(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        forbidden = {"integration_authorization", "action_set", "approval_context", "shell"}
+        if forbidden.intersection(arguments):
+            raise GatewayInputError("CLOSURE_SCHEMA_CLOSED")
+        task_id = _text(arguments.get("task_id"), "task_id")
+        branch = str(arguments.get("integration_branch") or "nexus/integration/main").strip()
+        expected_head = _text(arguments.get("expected_canonical_head"), "expected_canonical_head")
+        if not re.fullmatch(r"[0-9a-f]{40}", expected_head):
+            raise GatewayInputError("expected_canonical_head is invalid")
+        if not branch or branch.startswith("-") or any(char in branch for char in "\n\r"):
+            raise GatewayInputError("integration_branch is invalid")
+        raw_acceptance = arguments.get("external_acceptance")
+        raw_approval = arguments.get("approval")
+        if not isinstance(raw_acceptance, Mapping) or not isinstance(raw_approval, Mapping):
+            raise GatewayInputError("typed external_acceptance and approval are required")
+        try:
+            acceptance = ExternalAcceptanceReceipt(**dict(raw_acceptance))
+        except Exception as exc:
+            raise GatewayInputError(f"EXTERNAL_ACCEPTANCE_INVALID: {exc}") from exc
+        state = self.service.get_task_snapshot(task_id, include_details=True)
+        if not isinstance(state, Mapping):
+            raise GatewayInputError("CANDIDATE_TASK_STATE_REQUIRED")
+        base = str(state.get("controller_revision") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", base):
+            raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
+        controller_root = Path(str(contract.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
+        live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
+        live_head = live_head_result.stdout.strip()
+        if live_head_result.returncode != 0 or live_head != expected_head:
+            raise GatewayInputError("CANDIDATE_BIND_HEAD_DRIFT")
+        allowed_files = [str(path) for path in contract.get("allowed_files") or [] if str(path).strip()]
+        if not allowed_files:
+            raise GatewayInputError("CANDIDATE_ALLOWED_PATHS_REQUIRED")
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        action_request = {"task_id": task_id, "integration_branch": branch, "expected_canonical_head": expected_head, "external_acceptance": dict(raw_acceptance), "approval": dict(raw_approval), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
+            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
+            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),
+            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),
+        }}
+        action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.CANDIDATE_INTEGRATE,
+            request=action_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=expected_head,
+            allowed_paths=allowed_files,
+            mutation=True,
+            permission_profile=PermissionProfile.INTEGRATE,
+            mutation_domain=MutationDomain.LIFECYCLE_STATE,
+        )
+        guard_receipt = pre_action_guard(action, request={"allowed_files": allowed_files}, current_head=live_head, tool_manifest_hash=TOOL_MANIFEST_REVISION)
+        result = self.service.bind_candidate_integration_closure(
+            task_id,
+            external_acceptance=acceptance,
+            approval=raw_approval,
+            expected_canonical_head=expected_head,
+            integration_branch=branch,
+            runtime_identity={
+                "task_card_hash": state.get("task_card_hash"),
+                "contract_kind": state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value,
+                "contract_hash": state.get("contract_hash"),
+                "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+                "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+                "permission_policy_hash": PERMISSION_POLICY_HASH,
+                "lifecycle_revision": LIFECYCLE_REVISION,
+                "server_instance_id": SERVER_INSTANCE_ID,
+            },
+        )
+        payload = self._recovery_payload(result, operation="candidate_bind_integration", include_state=True)
+        payload["guard_receipt"] = guard_receipt
+        payload["integration_performed"] = False
+        return payload
+
     def _candidate_integrate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(arguments.get("task_id"), "task_id")
         branch = str(arguments.get("integration_branch") or "nexus/integration/main").strip()
@@ -2509,7 +2627,16 @@ class UnifiedMCPGateway:
         contract_hash = str(state.get("contract_hash") or "").strip() or (task_card_hash or None)
         owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
         binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
-        approval_grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
+        approval_grant = (state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None) or (binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None)
+        persisted_authorization = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
+        expected_integration_head = str(persisted_authorization.get("expected_canonical_head") or base)
+        live_head = base
+        if isinstance(state.get("integration_approval_grant"), Mapping):
+            controller_root = Path(str(contract.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
+            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
+            live_head = live_head_result.stdout.strip()
+            if live_head_result.returncode != 0 or live_head != expected_integration_head:
+                raise GatewayInputError("CANDIDATE_INTEGRATE_HEAD_DRIFT")
         if contract_kind == ContractKind.TRACKED_TASK_CARD.value and not re.fullmatch(r"[0-9a-f]{64}", task_card_hash):
             raise LifecycleGuardError("CANDIDATE_TASK_CARD_HASH_REQUIRED", "tracked candidate integration requires a task card hash")
         if contract_kind == ContractKind.OWNER_INLINE.value and not contract_hash:
@@ -2520,7 +2647,7 @@ class UnifiedMCPGateway:
             approval_grant,
             task_id=task_id,
             attempt_id=str(state.get("attempt_id") or ""),
-            action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
+            action_type=LifecycleActionType.CANDIDATE_INTEGRATE.value if isinstance(state.get("integration_approval_grant"), Mapping) else LifecycleActionType.CANDIDATE_APPROVE.value,
             task_card_hash=task_card_hash,
             contract_kind=contract_kind,
             contract_hash=contract_hash,
@@ -2543,13 +2670,13 @@ class UnifiedMCPGateway:
             action_type=LifecycleActionType.CANDIDATE_INTEGRATE,
             request=action_request,
             tool_manifest_hash=TOOL_MANIFEST_REVISION,
-            expected_head=base,
+            expected_head=live_head,
             allowed_paths=allowed_files,
             mutation=True,
             permission_profile=PermissionProfile.INTEGRATE,
             mutation_domain=MutationDomain.INTEGRATION,
         )
-        guard_receipt = pre_action_guard(action, request={"allowed_files": allowed_files}, current_head=base, tool_manifest_hash=TOOL_MANIFEST_REVISION)
+        guard_receipt = pre_action_guard(action, request={"allowed_files": allowed_files}, current_head=live_head, tool_manifest_hash=TOOL_MANIFEST_REVISION)
         result = self.service.integrate_approved(
             task_id,
             integration_branch=branch,
@@ -3078,6 +3205,8 @@ class UnifiedMCPGateway:
             return self._assist_response(self._assist_refresh(task_id) or job, operation="result")
         if name == "nexus_candidate_approve":
             return self._candidate_approve(arguments)
+        if name == "nexus_candidate_bind_integration":
+            return self._candidate_bind_integration(arguments)
         if name == "nexus_candidate_integrate":
             return self._candidate_integrate(arguments)
         if name == "nexus_candidate_dispose":

@@ -5,6 +5,7 @@ import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -714,3 +715,122 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
     assert result["archive_eligible"] is False
     assert target.exists()
     assert (target / "untracked.txt").read_text(encoding="utf-8") == "must retain\n"
+
+
+def _approved_closure_service(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = {
+        "task_id": "closure-bind", "campaign_id": "campaign", "what": "closure", "why": "closure",
+        "controller_revision": base, "target_base_revision": base,
+        "controller_repo_root": str(root), "target_repo_root": str(tmp_path / "target"),
+        "target_worktree_root": str(tmp_path), "allowed_files": ["value.txt"],
+        "verifier_commands": [], "worker": "codex",
+    }
+    contract = service.build_contract(request)
+    packet = {
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"),
+        "candidate_state_hash": "d" * 64, "verified_receipt_hash": "e" * 64,
+    }
+    service._write_state("closure-bind", {
+        "task_id": "closure-bind", "attempt_id": "attempt-1", "status": "APPROVED", "promotion_status": "APPROVED",
+        "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
+        "contract_kind": "TRACKED_TASK_CARD", "task_card_hash": "c" * 64, "candidate_ref": "refs/nexus-candidate/closure-bind",
+        "controller_revision": base, "promotion_packet": packet,
+        "approved_binding": {**packet, "approval_grant": {"approval_scope": "ALLOW_ACTION_ONCE", "consumed_at": "2026-08-08T00:00:00+00:00"}},
+        "lease": {"lease_id": "lease-closure-bind", "target_worktree": str(tmp_path / "target")},
+    })
+    acceptance = _acceptance(candidate)
+    artifact_dir = tmp_path / "state" / "acceptance-artifacts" / "closure-bind"
+    artifact_dir.mkdir(parents=True)
+    artifact = artifact_dir / "verifier.txt"
+    artifact.write_text("accepted\n", encoding="utf-8")
+    artifact_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    acceptance = replace(acceptance, task_id="closure-bind", attempt_id="attempt-1", receipt_hash=artifact_hash, verifier_artifact=str(artifact))
+    runtime = {"tool_manifest_hash": "1" * 64, "full_tool_schema_hash": "2" * 64, "permission_policy_hash": "3" * 64, "lifecycle_revision": "lifecycle", "server_instance_id": "server"}
+    approval = {
+        "schema": "nexus.approval.v2", "approval_id": "integrate-approval", "approved_by": "owner",
+        "issued_at": "2026-08-08T00:00:00+00:00", "expires_at": "2099-08-08T00:00:00+00:00",
+        "bound_task_id": "closure-bind", "bound_attempt_id": "attempt-1", "bound_action_type": "CANDIDATE_INTEGRATE",
+        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD", "contract_hash": contract.contract_hash,
+        "task_card_hash": "c" * 64, "expected_canonical_head": base, "integration_branch": "nexus/integration/canary",
+        "candidate_commit_sha": candidate, "candidate_tree_sha": packet["candidate_tree_sha"], "candidate_state_hash": packet["candidate_state_hash"], "verified_receipt_hash": packet["verified_receipt_hash"], "acceptance_receipt_hash": acceptance.receipt_hash, **runtime,
+    }
+    return service, root, base, candidate, acceptance, approval, runtime
+
+
+def test_service_closure_binding_is_typed_idempotent_and_does_not_integrate(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    monkeypatch.setattr(service, "integrate_approved", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bind must not integrate")))
+    first = service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert first["integration_performed"] is False
+    assert first["status"] == "APPROVED"
+    second = service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert second["duplicate"] is True
+    assert second["integration_performed"] is False
+    assert (service._read_state("closure-bind") or {})["integration_approval_grant"]["consumed_at"]
+
+
+def test_service_closure_binding_rejects_tamper_and_head_drift(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    with pytest.raises(RuntimeError, match="CLOSURE_APPROVAL_SCHEMA_CLOSED"):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval={**approval, "action_set": ["APPLY_VERIFIED_INTEGRATION"]}, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    with pytest.raises(RuntimeError, match="EXTERNAL_ACCEPTANCE_BINDING_MISMATCH"):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=replace(acceptance, candidate_commit="f" * 40), approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    (root / "value.txt").write_text("drift\n")
+    _git(root, "commit", "-am", "head drift")
+    with pytest.raises(RuntimeError, match="CLOSURE_CANONICAL_HEAD_DRIFT"):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        (lambda state, approval: state["promotion_packet"].update(candidate_tree_sha="f" * 40), "CLOSURE_CANDIDATE_BINDING_DRIFT"),
+        (lambda state, approval: state["promotion_packet"].update(candidate_commit_sha="f" * 40), "CLOSURE_CANDIDATE_BINDING_DRIFT"),
+        (lambda state, approval: state["promotion_packet"].update(candidate_state_hash="f" * 64), "CLOSURE_CANDIDATE_BINDING_DRIFT"),
+        (lambda state, approval: state["promotion_packet"].update(verified_receipt_hash="f" * 64), "CLOSURE_CANDIDATE_BINDING_DRIFT"),
+        (lambda state, approval: state.update(task_id="other-task"), "CLOSURE_TASK_ID_DRIFT"),
+        (lambda state, approval: approval.update(bound_attempt_id="other-attempt"), "APPROVAL_BINDING_MISMATCH"),
+        (lambda state, approval: approval.update(task_card_hash="f" * 64), "APPROVAL_BINDING_MISMATCH"),
+        (lambda state, approval: approval.update(acceptance_receipt_hash="f" * 64), "CLOSURE_CANDIDATE_BINDING_DRIFT"),
+        (lambda state, approval: approval.update(integration_branch="nexus/integration/main"), "CLOSURE_BRANCH_BINDING_MISMATCH"),
+    ],
+)
+def test_closure_identity_matrix_fails_closed(tmp_path: Path, tamper, message, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    state = service._read_state("closure-bind")
+    tamper(state, approval)
+    if state.get("task_id") != "closure-bind":
+        monkeypatch.setattr(service, "_read_state", lambda task_id: state)
+    else:
+        service._write_state("closure-bind", state)
+    with pytest.raises((RuntimeError, ValueError), match=message):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+
+
+def test_closure_artifact_hash_mismatch_fails_closed(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    approval = {**approval, "acceptance_receipt_hash": "a" * 64}
+    with pytest.raises(RuntimeError, match="EXTERNAL_ACCEPTANCE_ARTIFACT_HASH_MISMATCH"):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=replace(acceptance, receipt_hash="a" * 64), approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+
+
+def test_bind_then_integrate_uses_fresh_integration_grant(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    state = service._read_state("closure-bind")
+    state["approved_binding"]["approval_grant"]["expires_at"] = "2020-01-01T00:00:00+00:00"
+    state["verified_receipt"] = _verified_gate_proof(root, service.build_contract(state["request"]))
+    service._write_state("closure-bind", state)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    monkeypatch.setattr(service, "_record_integration", lambda receipt, *, task_id=None: {"status": "INTEGRATED", "promotion_status": "INTEGRATED", "task_id": task_id})
+    monkeypatch.setattr(RepositoryContractGate, "evaluate_committed_candidate", lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()))
+    class FakeIntegrationManager:
+        def __init__(self, **kwargs):
+            pass
+        def integrate_authorized_task_state(self, *args, **kwargs):
+            return SimpleNamespace()
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", FakeIntegrationManager)
+    result = service.integrate_approved("closure-bind", integration_branch="nexus/integration/canary", runtime_identity=runtime)
+    assert result["status"] == "INTEGRATED"

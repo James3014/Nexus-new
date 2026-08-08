@@ -465,6 +465,28 @@ def test_public_candidate_approve_schema_requires_versioned_approval():
     assert architecture["additionalProperties"] is False
 
 
+def test_public_candidate_closure_schema_is_typed_and_closed():
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_candidate_bind_integration")
+    schema = spec["inputSchema"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"task_id", "expected_canonical_head", "external_acceptance", "approval"}
+    acceptance = schema["properties"]["external_acceptance"]
+    assert acceptance["properties"]["schema"]["const"] == "nexus.external_acceptance_receipt.v1"
+    assert acceptance["additionalProperties"] is False
+    approval = schema["properties"]["approval"]
+    assert approval["properties"]["bound_action_type"]["const"] == "CANDIDATE_INTEGRATE"
+    assert approval["additionalProperties"] is False
+
+
+def test_candidate_closure_dispatches_bind_only():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    calls = []
+    gateway._candidate_bind_integration = lambda arguments: calls.append("bind") or {"integration_performed": False}
+    gateway._candidate_integrate = lambda arguments: calls.append("integrate") or {"status": "INTEGRATED"}
+    assert gateway._call_tool("nexus_candidate_bind_integration", {"task_id": "t"})["integration_performed"] is False
+    assert calls == ["bind"]
+
+
 def test_candidate_approve_forwards_nested_architecture_ack_unchanged():
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
