@@ -1144,9 +1144,8 @@ def test_unique_commit_without_protection_is_blocked(sh2_repo):
     target_root = sh2_repo["target_root"]
     manager = WorktreeManager(root_dir=str(target_root))
 
-    contract = _contract(sh2_repo, task_id="unprotected-unique")
-    lease = manager.create_lease(contract)
-    target = Path(lease.target_worktree)
+    target = target_root / "unprotected-unique"
+    _git(controller, "worktree", "add", "--detach", str(target), _git(controller, "rev-parse", "HEAD"))
     (target / "src" / "allowed.txt").write_text("unique content\n", encoding="utf-8")
     _git(target, "add", "src/allowed.txt")
     _git(target, "commit", "-m", "unprotected unique commit")
@@ -1155,8 +1154,8 @@ def test_unique_commit_without_protection_is_blocked(sh2_repo):
         "unprotected-unique": {
             "task_id": "unprotected-unique",
             "status": "SUPERSEDED",
-            "lease": lease.__dict__,
-            "contract": contract.model_dump() if hasattr(contract, "model_dump") else contract.__dict__,
+            "lease": {},
+            "contract": {},
         }
     }
     inventory = manager.get_workspace_inventory(controller_root=controller, task_states=task_states)
@@ -1164,6 +1163,91 @@ def test_unique_commit_without_protection_is_blocked(sh2_repo):
 
     assert str(target.resolve()) in plan.groups["BLOCKED_UNPROTECTED_UNIQUE_COMMIT"]
     assert str(target.resolve()) not in plan.releasable_paths
+
+
+def test_inventory_exposes_deterministic_disposition_evidence(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root), process_checker=lambda _path: False)
+    passive = target_root / "passive-evidence"
+    _git(controller, "worktree", "add", "--detach", str(passive), _git(controller, "rev-parse", "HEAD"))
+
+    first = manager.get_workspace_inventory(controller_root=controller)
+    second = manager.get_workspace_inventory(controller_root=controller)
+    assert first.inventory_hash == second.inventory_hash
+    entry = next(item for item in first.worktrees if item.path == str(passive.resolve()))
+    assert entry.disposition == "RELEASABLE_REDUNDANT_CLEAN"
+    assert entry.process_active is False
+    assert entry.lock_present is False
+    assert entry.unique_commits == ()
+
+
+def test_active_process_is_fail_closed_in_direct_audit(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root), process_checker=lambda _path: True)
+    passive = target_root / "active-evidence"
+    _git(controller, "worktree", "add", "--detach", str(passive), _git(controller, "rev-parse", "HEAD"))
+
+    audit = manager.audit_direct_completion(
+        controller_root=controller,
+        expected_head=_git(controller, "rev-parse", "HEAD"),
+        expected_branch="main",
+        task_states={},
+    )
+    record = next(item for item in audit["aux_records"] if item["path"] == str(passive.resolve()))
+    assert record["process_active"] is True
+    assert "active_or_locked_worktree" in record["blockers"]
+    plan = manager.plan_convergence(manager.get_workspace_inventory(controller_root=controller))
+    assert str(passive.resolve()) in plan.blocked_paths
+    assert str(passive.resolve()) not in plan.releasable_paths
+
+
+def test_process_evidence_unavailable_is_surfaced_and_blocked(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root), process_checker=lambda _path: None)
+    passive = target_root / "unknown-process-evidence"
+    _git(controller, "worktree", "add", "--detach", str(passive), _git(controller, "rev-parse", "HEAD"))
+    inventory = manager.get_workspace_inventory(controller_root=controller)
+    entry = next(item for item in inventory.worktrees if item.path == str(passive.resolve()))
+    assert entry.process_evidence_unavailable is True
+    assert entry.disposition == "OWNER_DECISION_REQUIRED"
+    audit = manager.audit_direct_completion(
+        controller_root=controller,
+        expected_head=_git(controller, "rev-parse", "HEAD"),
+        expected_branch="main",
+        task_states={},
+    )
+    assert any(item.startswith("process_evidence_unavailable:") for item in audit["blockers"])
+
+
+def test_unique_commit_with_protected_branch_is_retained(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    manager = WorktreeManager(root_dir=str(target_root), process_checker=lambda _path: False)
+    passive = target_root / "protected-unique"
+    _git(controller, "worktree", "add", "-b", "codex/protected-unique", str(passive), _git(controller, "rev-parse", "HEAD"))
+    (passive / "protected.txt").write_text("protected\n", encoding="utf-8")
+    _git(passive, "add", "protected.txt")
+    _git(passive, "commit", "-m", "protected unique")
+    inventory = manager.get_workspace_inventory(controller_root=controller)
+    entry = next(item for item in inventory.worktrees if item.path == str(passive.resolve()))
+    assert entry.branch_protected is True
+    assert entry.disposition == "FORENSIC_RETAIN"
+    plan = manager.plan_convergence(inventory)
+    assert str(passive.resolve()) not in plan.releasable_paths
+
+
+def test_lsof_error_is_unavailable_not_clean(monkeypatch, tmp_path):
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "lsof: permission denied"
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    with pytest.raises(RuntimeError, match="process probe unavailable"):
+        WorktreeManager._path_has_process(tmp_path)
 
 
 def test_clean_redundant_terminal_classified_releasable_without_removal(sh2_repo):

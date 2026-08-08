@@ -86,8 +86,19 @@ class WorkspaceWorktreeEntry:
     is_dirty: bool
     reachable_from_controller: bool
     protected_by_ref: bool
+    branch_protected: bool = False
     task_id: Optional[str] = None
     blocker_reason: Optional[str] = None
+    # Evidence fields are intentionally primitive and deterministic so a
+    # frozen inventory can be hashed and replayed without process metadata.
+    unique_commits: tuple[str, ...] = ()
+    lifecycle_owner: Optional[str] = None
+    process_active: bool = False
+    process_evidence_unavailable: bool = False
+    lock_present: bool = False
+    current_review: bool = False
+    evidence_unavailable: bool = False
+    disposition: str = "OWNER_DECISION_REQUIRED"
 
 
 @dataclass(frozen=True)
@@ -824,9 +835,13 @@ class WorktreeManager:
     @staticmethod
     def _path_has_process(path: Path) -> bool:
         result = subprocess.run(
-            ["lsof", "+D", str(path)], capture_output=True, text=True
+            ["lsof", "+D", str(path)], capture_output=True, text=True, check=False
         )
-        return result.returncode == 0 and bool(result.stdout.strip())
+        if result.returncode == 0:
+            return bool(result.stdout.strip())
+        if result.returncode == 1 and not result.stderr.strip():
+            return False
+        raise RuntimeError(f"process probe unavailable for {path}: {result.stderr.strip() or result.returncode}")
 
     def capture_candidate(
         self,
@@ -1247,6 +1262,19 @@ class WorktreeManager:
 
             is_dirty = bool(self._status_bytes(wt_path))
 
+            # Git's porcelain worktree output emits ``locked`` when an
+            # operator explicitly protects a worktree.  Keep this signal
+            # separate from lifecycle ownership; either one is fail-closed.
+            lock_present = "locked" in reg
+            process_evidence_unavailable = False
+            try:
+                process_state = self.process_checker(wt_path)
+                process_evidence_unavailable = process_state is None
+                process_active = bool(process_state) if process_state is not None else False
+            except Exception:
+                process_active = False
+                process_evidence_unavailable = True
+
             reachable = False
             if head == c_head:
                 reachable = True
@@ -1257,12 +1285,39 @@ class WorktreeManager:
                 except Exception:
                     reachable = False
 
+            unique_commits_unavailable = False
+            try:
+                unique_commits = tuple(sorted(set(self._run_git(
+                    ["rev-list", f"{c_head}..{head}"], cwd=c_root
+                ).splitlines())))
+            except Exception:
+                unique_commits = ()
+                unique_commits_unavailable = True
+
             protected = head in protected_refs
+            registered_branch_ref = reg.get("branch", "")
+            branch_ref_unavailable = False
+            branch_ref_valid = False
+            if registered_branch_ref:
+                try:
+                    branch_ref_valid = self._run_git(
+                        ["rev-parse", f"{registered_branch_ref}^{{commit}}"], cwd=c_root
+                    ) == head
+                except Exception:
+                    branch_ref_unavailable = True
+            branch_protected = branch_ref_valid or protected or branch.startswith(
+                (
+                    "refs/nexus-candidates/", "refs/nexus-candidate-commits/", "refs/nexus-salvage/",
+                    "nexus-candidates/", "nexus-candidate-commits/", "nexus-salvage/",
+                )
+            )
 
             task_info = path_to_task.get(wt_str)
             mapped_task_id = task_info[0] if task_info else None
             task_st = task_info[1] if task_info else None
             task_status = task_st.get("status") if task_st else None
+            lifecycle_owner = mapped_task_id
+            current_review = task_status in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}
 
             classification = "KEEP_DIRTY_OR_UNKNOWN"
             blocker_reason = None
@@ -1297,6 +1352,45 @@ class WorktreeManager:
                     classification = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
                     blocker_reason = "unmapped_unique_commit"
 
+            if wt_path != c_root and (process_active or lock_present):
+                # Preserve the legacy classification names for compatibility,
+                # while making the disposition gate conservative.
+                blocker_reason = "active_process_or_lock"
+            if wt_path != c_root and (process_active or lock_present or process_evidence_unavailable or branch_ref_unavailable or unique_commits_unavailable):
+                classification = "KEEP_ACTIVE_OR_RETAINED" if (process_active or lock_present) else "KEEP_DIRTY_OR_UNKNOWN"
+            if wt_path == c_root:
+                disposition = "ACTIVE_RETAIN"
+            elif current_review or task_status in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+                disposition = "FORENSIC_RETAIN"
+            elif process_evidence_unavailable:
+                disposition = "OWNER_DECISION_REQUIRED"
+            elif process_active or lock_present or is_dirty:
+                disposition = "ACTIVE_RETAIN" if process_active or lock_present else "OWNER_DECISION_REQUIRED"
+            elif unique_commits_unavailable:
+                disposition = "OWNER_DECISION_REQUIRED"
+            elif branch_ref_unavailable:
+                disposition = "OWNER_DECISION_REQUIRED"
+            elif unique_commits and (protected or branch_protected):
+                disposition = "FORENSIC_RETAIN"
+            elif unique_commits and not protected:
+                disposition = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
+            elif task_status is not None and task_status not in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED"}:
+                disposition = "ACTIVE_RETAIN"
+            else:
+                disposition = "RELEASABLE_REDUNDANT_CLEAN"
+
+            if unique_commits and (protected or branch_protected):
+                classification = "KEEP_ACTIVE_OR_RETAINED"
+                blocker_reason = "protected_unique_commit"
+            elif branch_ref_unavailable or unique_commits_unavailable:
+                blocker_reason = "worktree_evidence_unavailable"
+            if process_evidence_unavailable:
+                blocker_reason = "process_evidence_unavailable"
+            elif branch_ref_unavailable:
+                blocker_reason = "branch_ref_evidence_unavailable"
+            elif unique_commits_unavailable:
+                blocker_reason = "unique_commit_evidence_unavailable"
+
             worktree_entries.append(
                 WorkspaceWorktreeEntry(
                     path=wt_str,
@@ -1306,8 +1400,19 @@ class WorktreeManager:
                     is_dirty=is_dirty,
                     reachable_from_controller=reachable,
                     protected_by_ref=protected,
+                    branch_protected=branch_protected,
                     task_id=mapped_task_id,
                     blocker_reason=blocker_reason,
+                    unique_commits=unique_commits,
+                    lifecycle_owner=lifecycle_owner,
+                    process_active=process_active,
+                    process_evidence_unavailable=process_evidence_unavailable,
+                    evidence_unavailable=(
+                        process_evidence_unavailable or branch_ref_unavailable or unique_commits_unavailable
+                    ),
+                    lock_present=lock_present,
+                    current_review=current_review,
+                    disposition=disposition,
                 )
             )
 
@@ -1322,6 +1427,8 @@ class WorktreeManager:
                     reachable_from_controller=False,
                     protected_by_ref=False,
                     blocker_reason="legacy_root_protected",
+                    lifecycle_owner=None,
+                    disposition="OWNER_DECISION_REQUIRED",
                 )
             )
 
@@ -1340,7 +1447,17 @@ class WorktreeManager:
                     "is_dirty": w.is_dirty,
                     "reachable_from_controller": w.reachable_from_controller,
                     "protected_by_ref": w.protected_by_ref,
+                    "branch_protected": w.branch_protected,
                     "task_id": w.task_id,
+                    "unique_commits": list(w.unique_commits),
+                    "lifecycle_owner": w.lifecycle_owner,
+                    "process_active": w.process_active,
+                    "process_evidence_unavailable": w.process_evidence_unavailable,
+                    "lock_present": w.lock_present,
+                    "current_review": w.current_review,
+                    "evidence_unavailable": w.evidence_unavailable,
+                    "disposition": w.disposition,
+                    "blocker_reason": w.blocker_reason,
                 }
                 for w in sorted(worktree_entries, key=lambda x: x.path)
             ],
@@ -1399,7 +1516,11 @@ class WorktreeManager:
         terminal = _DIRECT_TERMINAL_STATUSES
         exempt = {"PENDING_HUMAN_APPROVAL", "APPROVED"}
         for entry in inventory.worktrees:
-            if entry.path not in registered_paths or entry.path == inventory.controller_root:
+            if (
+                entry.path not in registered_paths
+                or entry.path == inventory.controller_root
+                or entry.path == inventory.legacy_root_path
+            ):
                 continue
             path = Path(entry.path)
             changed: list[str] = []
@@ -1429,6 +1550,27 @@ class WorktreeManager:
                 )
             ]
             record_blockers: list[str] = []
+            if entry.process_evidence_unavailable:
+                record_blockers.append("process_evidence_unavailable")
+                blockers.append(f"process_evidence_unavailable:{entry.path}")
+            if entry.disposition in {
+                "ACTIVE_RETAIN", "FORENSIC_RETAIN", "OWNER_DECISION_REQUIRED",
+                "BLOCKED_UNPROTECTED_UNIQUE_COMMIT",
+            }:
+                # The controller is intentionally omitted above; every
+                # non-canonical disposition is a typed, fail-closed signal.
+                if entry.disposition == "ACTIVE_RETAIN":
+                    record_blockers.append("active_or_locked_worktree")
+                    blockers.append(f"active_or_locked_worktree:{entry.path}")
+                elif entry.disposition == "FORENSIC_RETAIN":
+                    record_blockers.append("current_review_retention")
+                    blockers.append(f"current_review_retention:{entry.path}")
+                elif entry.disposition == "OWNER_DECISION_REQUIRED":
+                    record_blockers.append("owner_decision_required")
+                    blockers.append(f"owner_decision_required:{entry.path}")
+                else:
+                    record_blockers.append("unprotected_unique_commit")
+                    blockers.append(f"unprotected_unique_commit:{entry.path}")
             if active_target:
                 record_blockers.append("active_target")
                 blockers.append(f"active_target:{entry.path}")
@@ -1443,7 +1585,18 @@ class WorktreeManager:
                 "head": entry.head,
                 "branch": entry.branch,
                 "classification": entry.classification,
+                "disposition": entry.disposition,
                 "is_dirty": entry.is_dirty,
+                "process_active": entry.process_active,
+                "process_evidence_unavailable": entry.process_evidence_unavailable,
+                "lock_present": entry.lock_present,
+                "reachable_from_controller": entry.reachable_from_controller,
+                "unique_commits": list(entry.unique_commits),
+                "protected_by_ref": entry.protected_by_ref,
+                "branch_protected": entry.branch_protected,
+                "lifecycle_owner": entry.lifecycle_owner,
+                "current_review": entry.current_review,
+                "evidence_unavailable": entry.evidence_unavailable,
                 "task_id": task_id,
                 "task_status": status,
                 "changed_files": changed,
@@ -1478,6 +1631,9 @@ class WorktreeManager:
             "RELEASABLE_TERMINAL_TARGET": [],
             "RELEASABLE_REDUNDANT_CLEAN": [],
             "BLOCKED_UNPROTECTED_UNIQUE_COMMIT": [],
+            "ACTIVE_RETAIN": [],
+            "FORENSIC_RETAIN": [],
+            "OWNER_DECISION_REQUIRED": [],
         }
         blocker_codes_set: set[str] = set()
 
@@ -1489,16 +1645,28 @@ class WorktreeManager:
             if cls not in groups:
                 groups[cls] = []
             groups[cls].append(w.path)
+            if w.disposition in groups and w.path not in groups[w.disposition]:
+                groups[w.disposition].append(w.path)
             if w.blocker_reason:
                 blocker_codes_set.add(w.blocker_reason)
 
-        releasable_paths = sorted(groups["RELEASABLE_TERMINAL_TARGET"] + groups["RELEASABLE_REDUNDANT_CLEAN"])
+        releasable_paths = sorted(
+            w.path for w in inventory.worktrees
+            if w.disposition == "RELEASABLE_REDUNDANT_CLEAN"
+        )
         blocked_paths = sorted(
             groups["KEEP_DIRTY_OR_UNKNOWN"]
             + groups["KEEP_ACTIVE_OR_RETAINED"]
             + groups["BLOCKED_UNPROTECTED_UNIQUE_COMMIT"]
+            + [
+                w.path for w in inventory.worktrees
+                if w.disposition in {
+                    "ACTIVE_RETAIN", "FORENSIC_RETAIN", "OWNER_DECISION_REQUIRED",
+                    "BLOCKED_UNPROTECTED_UNIQUE_COMMIT",
+                }
+            ]
         )
-        blocked_paths = [p for p in blocked_paths if p != inventory.controller_root]
+        blocked_paths = sorted(set(p for p in blocked_paths if p != inventory.controller_root))
         blocker_codes = sorted(blocker_codes_set)
         affected_paths = sorted(set(releasable_paths) | set(blocked_paths))
 
