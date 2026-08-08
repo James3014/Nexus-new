@@ -1,0 +1,85 @@
+name: OpenWiki Manual Update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENWIKI_TELEMETRY_DISABLED: "1"
+  OPENWIKI_PROVIDER: gemini
+  OPENWIKI_MODEL_ID: gemini-3.6-flash
+
+jobs:
+  openwiki:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pinned OpenWiki
+        run: npm install --global openwiki@0.3.1
+
+      - name: Generate OpenWiki documentation
+        id: generate
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: openwiki code --update --print
+
+      - name: Restore controlled repository files
+        if: always()
+        run: git restore --source=HEAD -- AGENTS.md CLAUDE.md .github/workflows/openwiki-update.yml
+
+      - name: Reject governed Wiki mutation
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain -- nexus_wiki_vault/)" ]; then
+            echo "::error::OpenWiki modified nexus_wiki_vault/"
+            git status --porcelain -- nexus_wiki_vault/
+            exit 1
+          fi
+
+      - name: Reject changes outside openwiki
+        if: always()
+        shell: bash
+        run: |
+          bad="$(
+            {
+              git diff --name-only HEAD --
+              git ls-files --others --exclude-standard
+            } | sort -u | grep -v '^openwiki/' || true
+          )"
+
+          if [ -n "$bad" ]; then
+            echo "::error::Unexpected repository changes outside openwiki/"
+            printf '%s\n' "$bad"
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Upload OpenWiki artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwiki-${{ github.run_id }}
+          path: openwiki/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Propagate OpenWiki generation failure
+        if: steps.generate.outcome != 'success'
+        run: |
+          echo "::error::OpenWiki generation failed"
+          exit 1

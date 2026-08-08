@@ -1,0 +1,21 @@
+# Nexus OpenWiki bounded implementation-wiki input boundary
+
+# Governed Wiki and planning/governance material
+
+nexus_wiki_vault/
+tasks/
+.nexus/
+
+# Root/file aliases and response overlays
+
+nexus-evolve
+MUSE_PROTO.md
+
+# Runtime/generated local state
+
+.antigravitycli/
+.pyre/
+
+# Historical/alias incident pointer
+
+docs/incidents/LATEST_RCA.md
