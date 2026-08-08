@@ -107,6 +107,7 @@ Load the smallest authoritative surface that matches the task:
 - LocalHeal or another nested subsystem: read its nearest nested `AGENTS.md`.
 - Ordinary repository reads use targeted retrieval from the relevant lesson,
   ADR, report, or test; never full-corpus scanning by default.
+- Broad repository orientation: when `openwiki/quickstart.md` exists, it may be used as a `derived_non_authoritative` navigation index to locate candidate subsystems, paths, symbols, entrypoints, workflows, and tests. Verify every operational, wiring, runtime, authority, or current-state claim against current source, tests, or bound runtime evidence before relying on it. OpenWiki absence, staleness, nondeterministic page layout, or disagreement never overrides current source and never blocks direct source inspection.
 
 ## Authority invariants
 
