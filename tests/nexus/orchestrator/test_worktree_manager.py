@@ -1222,6 +1222,18 @@ def test_process_evidence_unavailable_is_surfaced_and_blocked(sh2_repo):
     assert any(item.startswith("process_evidence_unavailable:") for item in audit["blockers"])
 
 
+def test_inventory_skips_process_probe_for_controller(sh2_repo):
+    controller = sh2_repo["controller"]
+    target_root = sh2_repo["target_root"]
+    probed = []
+    manager = WorktreeManager(root_dir=str(target_root), process_checker=lambda path: probed.append(path) or False)
+    passive = target_root / "probe-aux"
+    _git(controller, "worktree", "add", "--detach", str(passive), _git(controller, "rev-parse", "HEAD"))
+    manager.get_workspace_inventory(controller_root=controller)
+    assert controller.resolve() not in probed
+    assert passive.resolve() in probed
+
+
 def test_unique_commit_with_protected_branch_is_retained(sh2_repo):
     controller = sh2_repo["controller"]
     target_root = sh2_repo["target_root"]

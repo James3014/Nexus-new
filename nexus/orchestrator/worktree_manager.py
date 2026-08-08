@@ -1267,13 +1267,16 @@ class WorktreeManager:
             # separate from lifecycle ownership; either one is fail-closed.
             lock_present = "locked" in reg
             process_evidence_unavailable = False
-            try:
-                process_state = self.process_checker(wt_path)
-                process_evidence_unavailable = process_state is None
-                process_active = bool(process_state) if process_state is not None else False
-            except Exception:
+            if wt_path == c_root:
                 process_active = False
-                process_evidence_unavailable = True
+            else:
+                try:
+                    process_state = self.process_checker(wt_path)
+                    process_evidence_unavailable = process_state is None
+                    process_active = bool(process_state) if process_state is not None else False
+                except Exception:
+                    process_active = False
+                    process_evidence_unavailable = True
 
             reachable = False
             if head == c_head:
