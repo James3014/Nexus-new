@@ -578,7 +578,7 @@ def test_committed_authority_change_requires_exact_approval_and_replay_is_blocke
     assert not initial.passed
     assert "architecture_approval_binding_mismatch" in initial.blocking_reasons
     now = datetime.now(timezone.utc)
-    approval = {"schema":"nexus.architecture_approval.v1","approval_id":"arch","approved_by":"owner","issued_at":(now - timedelta(minutes=1)).isoformat(),"expires_at":(now + timedelta(minutes=5)).isoformat(),"approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":contract.task_id,"bound_attempt_id":"attempt-1","candidate_commit_sha":candidate_commit,"candidate_tree_sha":candidate_tree,"authority_findings_sha256":initial.authority_findings_sha256,"consumed_at":now.isoformat()}
+    approval = {"schema":"nexus.architecture_approval.v1","approval_id":"arch","approved_by":"owner","issued_at":(now - timedelta(minutes=2)).isoformat(),"expires_at":(now - timedelta(seconds=30)).isoformat(),"approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":contract.task_id,"bound_attempt_id":"attempt-1","candidate_commit_sha":candidate_commit,"candidate_tree_sha":candidate_tree,"authority_findings_sha256":initial.authority_findings_sha256,"consumed_at":(now - timedelta(minutes=1)).isoformat()}
     accepted = gate.evaluate_committed_candidate(contract=contract, candidate_commit=candidate_commit, candidate_tree_sha=candidate_tree, expected_policy_revision_hash=policy_hash, architecture_approval=approval, task_id=contract.task_id, attempt_id="attempt-1")
     assert accepted.passed is True
     replay = gate.evaluate_committed_candidate(contract=contract, candidate_commit=candidate_commit, candidate_tree_sha=candidate_tree, expected_policy_revision_hash=policy_hash, architecture_approval=approval, task_id=contract.task_id, attempt_id="attempt-2")

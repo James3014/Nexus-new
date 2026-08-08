@@ -59,6 +59,12 @@ def test_consumed_architecture_approval_requires_valid_consume_window():
     assert validate_consumed_architecture_approval(valid, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)["consumed_at"]
     with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID"):
         validate_consumed_architecture_approval({**base, "consumed_at": (now-timedelta(minutes=3)).isoformat()}, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+    expired_now = {**base, "expires_at": (now - timedelta(minutes=1)).isoformat(), "consumed_at": (now - timedelta(minutes=2)).isoformat()}
+    assert validate_consumed_architecture_approval(expired_now, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)["consumed_at"]
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_NOT_CONSUMED"):
+        validate_consumed_architecture_approval({key: value for key, value in expired_now.items() if key != "consumed_at"}, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+    with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID"):
+        validate_consumed_architecture_approval({**base, "consumed_at": (now + timedelta(minutes=1)).isoformat()}, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
 
 
 def test_architecture_approval_expired_and_future_issued_fail_closed():
@@ -70,6 +76,21 @@ def test_architecture_approval_expired_and_future_issued_fail_closed():
     future = {**base, "issued_at": (now + timedelta(minutes=1)).isoformat(), "expires_at": (now + timedelta(minutes=5)).isoformat()}
     with pytest.raises(LifecycleGuardError, match="ARCHITECTURE_APPROVAL_EXPIRY_INVALID"):
         validate_architecture_approval(future, required=True, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("bound_task_id", "other-task"),
+    ("bound_attempt_id", "other-attempt"),
+    ("candidate_commit_sha", "f" * 40),
+    ("candidate_tree_sha", "f" * 40),
+    ("authority_findings_sha256", "f" * 64),
+])
+def test_consumed_architecture_approval_tampering_fails_closed(field, value):
+    now = datetime.now(timezone.utc)
+    approval = {"schema":"nexus.architecture_approval.v1","approval_id":"a","approved_by":"o","issued_at":(now-timedelta(minutes=2)).isoformat(),"expires_at":(now+timedelta(minutes=5)).isoformat(),"approval_scope":"ALLOW_ACTION_ONCE","bound_task_id":"task","bound_attempt_id":"attempt","candidate_commit_sha":"c"*40,"candidate_tree_sha":"d"*40,"authority_findings_sha256":"e"*64,"consumed_at":now.isoformat()}
+    approval[field] = value
+    with pytest.raises(LifecycleGuardError):
+        validate_consumed_architecture_approval(approval, task_id="task", attempt_id="attempt", candidate_commit_sha="c"*40, candidate_tree_sha="d"*40, authority_findings_sha256="e"*64)
 
 
 def _action(**kwargs):

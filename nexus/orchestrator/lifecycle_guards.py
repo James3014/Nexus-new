@@ -58,7 +58,7 @@ class LifecycleGuardError(RuntimeError):
         }
 
 
-def validate_architecture_approval(
+def _validate_architecture_approval_at(
     approval: Any,
     *,
     required: bool,
@@ -67,6 +67,7 @@ def validate_architecture_approval(
     candidate_commit_sha: str,
     candidate_tree_sha: str,
     authority_findings_sha256: str,
+    _validation_time: Optional[datetime] = None,
 ) -> dict[str, Any] | None:
     """Validate the narrow acknowledgement for a repository authority change."""
     if not required:
@@ -110,9 +111,12 @@ def validate_architecture_approval(
         expires = datetime.fromisoformat(str(approval.get("expires_at")).replace("Z", "+00:00"))
     except (TypeError, ValueError) as exc:
         raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRY_INVALID", "architecture approval timestamps are invalid") from exc
-    if issued.tzinfo is None or expires.tzinfo is None or expires <= issued or issued > datetime.now(timezone.utc):
+    validation_time = _validation_time or datetime.now(timezone.utc)
+    if validation_time.tzinfo is None:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRY_INVALID", "architecture approval validation time must be timezone-aware")
+    if issued.tzinfo is None or expires.tzinfo is None or expires <= issued or issued > validation_time:
         raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRY_INVALID", "architecture approval expiry must follow issuance")
-    if expires <= datetime.now(timezone.utc):
+    if expires <= validation_time:
         raise LifecycleGuardError("ARCHITECTURE_APPROVAL_EXPIRED", "architecture approval has expired")
     if approval.get("consumed_at"):
         raise LifecycleGuardError("ARCHITECTURE_APPROVAL_ALREADY_CONSUMED", "architecture approval is one-shot and already consumed")
@@ -123,6 +127,29 @@ def validate_architecture_approval(
     if str(approval.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
         raise LifecycleGuardError("ARCHITECTURE_APPROVAL_SCOPE_UNSUPPORTED", "architecture approval must be one-shot")
     return dict(approval)
+
+
+def validate_architecture_approval(
+    approval: Any,
+    *,
+    required: bool,
+    task_id: str,
+    attempt_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+    authority_findings_sha256: str,
+) -> dict[str, Any] | None:
+    """Validate an unconsumed approval against the current wall clock."""
+    return _validate_architecture_approval_at(
+        approval,
+        required=required,
+        task_id=task_id,
+        attempt_id=attempt_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        authority_findings_sha256=authority_findings_sha256,
+        _validation_time=datetime.now(timezone.utc),
+    )
 
 
 def validate_consumed_architecture_approval(
@@ -140,7 +167,17 @@ def validate_consumed_architecture_approval(
     consumed_at = approval.get("consumed_at")
     incoming = dict(approval)
     incoming.pop("consumed_at", None)
-    validated = validate_architecture_approval(
+    try:
+        issued = datetime.fromisoformat(str(approval.get("issued_at")).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(approval.get("expires_at")).replace("Z", "+00:00"))
+        consumed = datetime.fromisoformat(str(consumed_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is invalid") from exc
+    if consumed.tzinfo is None or issued.tzinfo is None or expires.tzinfo is None:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is outside approval lifetime")
+    if consumed > datetime.now(timezone.utc) or consumed < issued or consumed >= expires:
+        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is outside approval lifetime")
+    validated = _validate_architecture_approval_at(
         incoming,
         required=True,
         task_id=task_id,
@@ -148,15 +185,8 @@ def validate_consumed_architecture_approval(
         candidate_commit_sha=candidate_commit_sha,
         candidate_tree_sha=candidate_tree_sha,
         authority_findings_sha256=authority_findings_sha256,
+        _validation_time=consumed,
     )
-    try:
-        issued = datetime.fromisoformat(str(approval.get("issued_at")).replace("Z", "+00:00"))
-        expires = datetime.fromisoformat(str(approval.get("expires_at")).replace("Z", "+00:00"))
-        consumed = datetime.fromisoformat(str(consumed_at).replace("Z", "+00:00"))
-    except (TypeError, ValueError) as exc:
-        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is invalid") from exc
-    if consumed.tzinfo is None or consumed < issued or consumed >= expires:
-        raise LifecycleGuardError("ARCHITECTURE_APPROVAL_CONSUMED_AT_INVALID", "consume timestamp is outside approval lifetime")
     return {**validated, "consumed_at": str(consumed_at)}
 
 
