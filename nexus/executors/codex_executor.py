@@ -31,13 +31,16 @@ class CodexExecutionReceipt:
 
 
 class CodexCliExecutor:
-    DEFAULT_MODEL = "gpt-5.5"
+    DEFAULT_MODEL = "gpt-5.6-luna"
+    DEFAULT_REASONING_EFFORT = "medium"
+    VALID_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
 
     def __init__(
         self,
         executable: str = "codex",
         timeout_seconds: float = 900.0,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         on_process_group: Optional[Callable[[Optional[int]], None]] = None,
     ):
         self.executable = executable
@@ -45,6 +48,12 @@ class CodexCliExecutor:
         self.model = model if model is not None else (
             os.getenv("NEXUS_CODEX_WORKER_MODEL", "").strip() or self.DEFAULT_MODEL
         )
+        configured_effort = reasoning_effort if reasoning_effort is not None else os.getenv(
+            "NEXUS_CODEX_REASONING_EFFORT", ""
+        ).strip()
+        self.reasoning_effort = configured_effort or self.DEFAULT_REASONING_EFFORT
+        if self.reasoning_effort not in self.VALID_REASONING_EFFORTS:
+            raise ValueError("NEXUS_CODEX_REASONING_EFFORT must be one of low, medium, high, xhigh")
         self.on_process_group = on_process_group
 
     def _request(
@@ -65,6 +74,8 @@ class CodexCliExecutor:
             "--ephemeral",
             "-m",
             self.model,
+            "-c",
+            f"model_reasoning_effort={self.reasoning_effort}",
             "--json",
             "--sandbox",
             "workspace-write",
@@ -109,8 +120,14 @@ class CodexCliExecutor:
         lease: TargetWorktreeLease,
         *,
         prompt: str,
+        model: str | None = None,
     ) -> CodexExecutionReceipt:
-        request = self._request(contract, lease, prompt)
+        executor = self if model is None else CodexCliExecutor(
+            executable=self.executable, timeout_seconds=self.timeout_seconds,
+            model=model, reasoning_effort=self.reasoning_effort,
+            on_process_group=self.on_process_group,
+        )
+        request = executor._request(contract, lease, prompt)
         if self.on_process_group is None:
             result = run_cli_worker(request)
         else:

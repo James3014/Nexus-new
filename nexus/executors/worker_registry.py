@@ -29,8 +29,12 @@ class CodexWorkerAdapter:
         self.executor = executor or CodexCliExecutor()
 
     def preflight(self) -> WorkerPreflight:
-        executable = shutil.which(self.executor.executable)
-        resolved = str(Path(executable).resolve()) if executable else None
+        try:
+            resolved = resolve_registered_provider_executable(self.provider)
+            reason = "ready"
+        except ValueError as exc:
+            resolved = None
+            reason = str(exc)
         return WorkerPreflight(
             provider=self.provider,
             executable=resolved,
@@ -38,7 +42,7 @@ class CodexWorkerAdapter:
             authorized=resolved is not None,
             implementation_status="IMPLEMENTED",
             ready=resolved is not None,
-            reason="ready" if resolved else f"executable not found: {self.executor.executable}",
+            reason=reason,
         )
 
     def invoke(
@@ -49,16 +53,31 @@ class CodexWorkerAdapter:
         prompt: str,
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
+        model: Optional[str] = None,
     ) -> WorkerExecutionReceipt:
+        preflight = self.preflight()
+        if not preflight.ready:
+            raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
         executor = self.executor
-        if timeout_seconds is not None or on_process_group is not None:
+        if (
+            timeout_seconds is not None
+            or on_process_group is not None
+            or (
+                hasattr(self.executor, "executable")
+                and preflight.executable != getattr(self.executor, "executable", None)
+            )
+        ):
             executor = CodexCliExecutor(
-                executable=self.executor.executable,
-                timeout_seconds=timeout_seconds or self.executor.timeout_seconds,
-                model=self.executor.model,
+                executable=preflight.executable or getattr(self.executor, "executable", "codex"),
+                timeout_seconds=timeout_seconds or getattr(self.executor, "timeout_seconds", 900.0),
+                model=model or getattr(self.executor, "model", None),
+                reasoning_effort=getattr(self.executor, "reasoning_effort", None),
                 on_process_group=on_process_group,
             )
-        receipt = executor.invoke(contract, lease, prompt=prompt)
+        if model is None:
+            receipt = executor.invoke(contract, lease, prompt=prompt)
+        else:
+            receipt = executor.invoke(contract, lease, prompt=prompt, model=model)
         if receipt.worker_status == CliWorkerStatus.TIMED_OUT.value:
             outcome = WorkerOutcome.INCOMPLETE
         elif receipt.worker_status != CliWorkerStatus.COMPLETED.value or receipt.exit_code != 0:
@@ -149,13 +168,14 @@ class DirectCliWorkerAdapter:
         prompt: str,
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
+        model: Optional[str] = None,
     ) -> WorkerExecutionReceipt:
         preflight = self.preflight()
         if not preflight.ready:
             raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
         request = CliWorkerRequest(
             executable=self.executable,
-            argv=self.argv_builder(prompt, os.getenv(self.model_env, self.default_model)),
+            argv=self.argv_builder(prompt, model or os.getenv(self.model_env, self.default_model)),
             cwd=str(Path(lease.target_worktree).resolve()),
             timeout_seconds=timeout_seconds or 900.0,
         )
@@ -303,6 +323,7 @@ class AgyWorkerAdapter:
         prompt: str,
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
+        model: Optional[str] = None,
     ) -> WorkerExecutionReceipt:
         started_at = time.monotonic()
         preflight = self.preflight()
@@ -323,7 +344,7 @@ class AgyWorkerAdapter:
                 "--mode",
                 "accept-edits",
                 "--model",
-                self._model(),
+                model or self._model(),
                 "--print-timeout",
                 self._timeout_arg(call_timeout),
                 "--print",
@@ -632,11 +653,12 @@ class OllamaPatchWorkerAdapter:
         prompt: str,
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
+        model: Optional[str] = None,
     ) -> WorkerExecutionReceipt:
         preflight = self.preflight()
         if not preflight.ready:
             raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
-        model = os.getenv(self.model_env, "qwen2.5-coder:7b")
+        model = model or os.getenv(self.model_env, "qwen2.5-coder:7b")
         request = CliWorkerRequest(
             executable=self.executable,
             argv=("run", model, prompt + "\nReturn only a unified git diff beginning with diff --git."),

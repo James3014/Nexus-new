@@ -1317,6 +1317,16 @@ class SelfHostedTaskService:
         ]
         verifier_commands = [str(item) for item in request.get("verifier_commands", [])]
         protected_contracts = [str(item) for item in request.get("protected_contracts", [])]
+        if request.get("worker_candidate_ingress"):
+            authority_confirmation = request.get("authority_change_candidate_confirmation", False)
+            if not isinstance(authority_confirmation, bool):
+                raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
+            marker_present = "repository-authority-change.v1" in protected_contracts
+            if marker_present != authority_confirmation:
+                raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_MARKER_MISMATCH")
+            inline = request.get("owner_inline_contract")
+            if not isinstance(inline, Mapping) or inline.get("authority_change_candidate_confirmation", False) is not authority_confirmation:
+                raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_CONTRACT_MISMATCH")
         authorized_deletions = [str(item) for item in request.get("authorized_deletions", [])]
         base_worktree_root, target_repo_root = resolve_canonical_target_roots(
             task_id=task_id,
@@ -1620,6 +1630,7 @@ class SelfHostedTaskService:
                     contract,
                     lease,
                     prompt=self._prompt(contract),
+                    model=str(request.get("model") or "").strip() or None,
                     timeout_seconds=float(request.get("timeout_seconds", 900.0)),
                     on_process_group=on_process_group,
                 )
@@ -3278,6 +3289,26 @@ class SelfHostedTaskService:
             or self._request_hash(request)
         )
         states = self._submission_task_states()
+        if request.get("worker_candidate_ingress") and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
+            semantic_fields = (
+                "what", "why", "allowed_files", "verifier_commands", "worker", "worker_id",
+                "provider", "model", "controller_revision", "authority_change_candidate_confirmation",
+                "protected_contracts",
+            )
+            for current in states.values():
+                if current.get("task_id") != task_id or not current.get("request"):
+                    continue
+                prior = current.get("request") if isinstance(current.get("request"), Mapping) else {}
+                if prior.get("worker_candidate_ingress") is not True or str(prior.get("contract_kind") or "") != ContractKind.OWNER_INLINE.value:
+                    raise ValueError("WORKER_CANDIDATE_TASK_ID_CONFLICT")
+                if all(
+                    (bool(prior.get(field)) == bool(request.get(field)))
+                    if field == "authority_change_candidate_confirmation"
+                    else prior.get(field) == request.get(field)
+                    for field in semantic_fields
+                ):
+                    return {**self._with_task_action(current), "duplicate": True, "duplicate_action_id": current.get("action_id"), "idempotency_key": current.get("idempotency_key")}
+                raise ValueError("WORKER_CANDIDATE_TASK_ID_CONFLICT")
         if action and idempotency_key:
             for current in states.values():
                 if str(current.get("idempotency_key") or "") != idempotency_key:

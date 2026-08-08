@@ -87,6 +87,7 @@ def build_owner_inline_contract(
     expires_at: str,
     permission_profile: PermissionProfile = PermissionProfile.MUTATE_BOUNDED,
     worker_may_commit: bool = False,
+    authority_change_candidate_confirmation: bool = False,
 ) -> dict[str, Any]:
     """Create the immutable bounded Owner-inline authorization contract."""
     paths = [str(path) for path in allowed_files if str(path).strip()]
@@ -117,6 +118,8 @@ def build_owner_inline_contract(
         "worker_may_push": False,
         "authorized_deletions": False,
     }
+    if authority_change_candidate_confirmation:
+        contract["authority_change_candidate_confirmation"] = True
     contract["contract_hash"] = owner_inline_contract_hash(contract)
     return contract
 
@@ -128,6 +131,8 @@ def validate_owner_inline_contract(contract: Mapping[str, Any], *, expected_task
         raise ValueError("OWNER_INLINE_SCHEMA_INVALID")
     if value.get("owner_confirmation") is not True:
         raise ValueError("OWNER_INLINE_CONFIRMATION_REQUIRED")
+    if not isinstance(value.get("authority_change_candidate_confirmation", False), bool):
+        raise ValueError("OWNER_INLINE_AUTHORITY_CONFIRMATION_INVALID")
     if expected_task_id is not None and value.get("task_id") != expected_task_id:
         raise ValueError("OWNER_INLINE_TASK_ID_MISMATCH")
     if expected_head is not None and value.get("expected_head") != expected_head:

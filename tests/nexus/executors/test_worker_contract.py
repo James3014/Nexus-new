@@ -281,6 +281,23 @@ def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path):
     assert receipt.push_performed is False
 
 
+def test_codex_adapter_uses_registered_binary_override_and_fails_closed(tmp_path, monkeypatch):
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(executable))
+    adapter = CodexWorkerAdapter()
+    preflight = adapter.preflight()
+    assert preflight.ready is True
+    assert preflight.executable == str(executable.resolve())
+
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(tmp_path / "missing-codex"))
+    blocked = adapter.preflight()
+    assert blocked.ready is False
+    with pytest.raises(WorkerProviderUnavailable):
+        adapter.invoke(object(), object(), prompt="blocked")
+
+
 def test_ollama_adapter_applies_only_a_validated_unified_diff(tmp_path, monkeypatch):
     target = tmp_path / "target"
     target.mkdir()
@@ -371,6 +388,19 @@ def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatc
     agy_receipt = agy_adapter.invoke(contract, lease, prompt="test")
     assert agy_receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
     assert agy_receipt.evidence_complete is True
+
+
+def test_explicit_worker_model_is_used_in_direct_cli_argv(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from nexus.executors.worker_registry import DirectCliWorkerAdapter, _opencode_args
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: f"/bin/{name}")
+    captured = []
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda request, on_process_group=None: (captured.append(request) or CliWorkerResult(status=CliWorkerStatus.COMPLETED, executable_identity=request.executable, argv=request.argv, cwd=request.cwd, exit_code=0, stdout=b"{}", stderr=b"", wall_time_ms=1, process_group_id=None)))
+    adapter = DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args)
+    adapter.invoke(SimpleNamespace(task_id="model-task"), SimpleNamespace(target_worktree=str(tmp_path)), prompt="test", model="opencode/mimo-v2.5-free")
+    assert "opencode/mimo-v2.5-free" in captured[0].argv
+    assert "opencode/big-pickle" not in captured[0].argv
 
 
 def test_deterministic_resolver_all_gates_and_non_empty_diff():

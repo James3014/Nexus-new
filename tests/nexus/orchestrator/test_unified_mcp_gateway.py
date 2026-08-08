@@ -93,7 +93,7 @@ class FakeService:
 
     def submit_task(self, request):
         self.submitted.append(request)
-        return {"status": "DIRECT_CANONICAL_READY", "task_id": request["task_id"], "target_created": False, "state_created": False}
+        return {"status": "PENDING_HUMAN_APPROVAL", "task_id": request["task_id"], "target_created": True, "state_created": True}
 
 
 def test_canonical_request_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
@@ -125,6 +125,320 @@ def test_gateway_has_one_identity_and_bounded_public_surface():
     assert initialized["result"]["serverInfo"]["toolManifestRevision"] == TOOL_MANIFEST_REVISION
     assert len(listed["result"]["tools"]) == len(UnifiedMCPGateway.tool_specs())
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in UnifiedMCPGateway.tool_specs()}
+
+
+def test_worker_candidate_public_schema_is_typed_and_closed():
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_worker_candidate")
+    schema = spec["inputSchema"]
+    assert set(schema["required"]) == {"what", "why", "worker", "allowed_files", "verifier_commands", "owner_confirmation"}
+    assert schema["additionalProperties"] is False
+    properties = schema["properties"]
+    assert properties["authority_change_candidate_confirmation"] == {"type": "boolean", "default": False}
+    assert "authority_change_candidate_confirmation" not in schema["required"]
+    for forbidden in ("model", "provider", "command", "shell", "apply", "approval", "integration_branch", "push", "execution_lane", "preferred_worker"):
+        assert forbidden not in properties
+
+
+def test_worker_candidate_forwards_owner_inline_task_run_once(monkeypatch):
+    from nexus.contracts.lifecycle_action import ContractKind, LifecycleActionType
+
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    gateway_module = sys.modules["nexus.orchestrator.unified_mcp_gateway"]
+    head = "a" * 40
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: head)
+    arguments = {
+        "task_id": "worker-candidate-1",
+        "what": "bounded change",
+        "why": "prove candidate seam",
+        "worker": "worker-a",
+        "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"],
+        "owner_confirmation": True,
+    }
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    response = gateway.handle({"jsonrpc": "2.0", "id": 44, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "PENDING_HUMAN_APPROVAL"
+    assert len(service.submitted) == 1
+    request = service.submitted[0]
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+    effective, envelope = _validated_action_request(request)
+    assert envelope["request_hash"] == request["request_hash"]
+    assert effective["owner_inline_contract"]["contract_hash"] == request["contract_hash"]
+    assert request["provider"] == "agy"
+    assert request["model"] == "agy/model"
+    assert request["worker"] == "agy"
+    assert request["worker_id"] == "worker-a"
+    assert request["action"]["action_type"] == LifecycleActionType.TASK_RUN.value
+    assert request["action"]["contract_kind"] == ContractKind.OWNER_INLINE.value
+    assert request["action"]["permission_profile"] == "CANDIDATE"
+    assert request["action"]["task_card_path"] is None
+    assert request["action"]["task_card_hash"] is None
+    assert request["action"]["mutation_domain"] == "TARGET"
+    assert request["owner_inline_contract"]["contract_hash"] == request["action"]["contract_hash"]
+    assert request["protected_contracts"] == []
+    assert request.get("authority_change_candidate_confirmation", False) is False
+    assert request["owner_inline_contract"].get("authority_change_candidate_confirmation", False) is False
+    assert request["bound_action_request"]["protected_contracts"] == request["protected_contracts"]
+
+
+def test_worker_candidate_rejects_owner_without_submit():
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    args = {"what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": False}
+    response = gateway.handle({"jsonrpc": "2.0", "id": 45, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["isError"] is True
+    assert "OWNER_CONFIRMATION_REQUIRED" in response["result"]["structuredContent"]["error"]
+    assert service.submitted == []
+
+
+def test_worker_candidate_preflight_failure_submits_nothing(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "BLOCKED", "blocker": "VERSION_FAILED"})
+    args = {"what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+    response = gateway.handle({"jsonrpc": "2.0", "id": 46, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["isError"] is True
+    assert service.submitted == []
+
+
+def test_worker_candidate_rejects_verifier_injection_before_preflight(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: (_ for _ in ()).throw(AssertionError("preflight must not run")))
+    args = {"what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check; rm -rf /"], "owner_confirmation": True}
+    response = gateway.handle({"jsonrpc": "2.0", "id": 47, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["isError"] is True
+    assert service.submitted == []
+
+
+def test_worker_candidate_rejects_ambiguous_provider(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    workers = {
+        "worker-a": SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/a", state="ADMITTED"),
+        "worker-b": SimpleNamespace(worker_id="worker-b", provider="agy", model="agy/b", state="ADMITTED"),
+    }
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers=workers))
+    args = {"what": "x", "why": "y", "worker": "agy", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+    response = gateway.handle({"jsonrpc": "2.0", "id": 48, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["isError"] is True
+    assert "WORKER_AMBIGUOUS" in response["result"]["structuredContent"]["error"]
+    assert service.submitted == []
+
+
+def test_worker_candidate_rejects_experiment_or_unavailable_worker(monkeypatch):
+    for state, availability in (("EXPERIMENT_ONLY", "AVAILABLE"), ("ADMITTED", "UNAVAILABLE")):
+        service = FakeService()
+        gateway = UnifiedMCPGateway(service=service)
+        workers = {"worker-a": SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/a", state=state, availability=availability)}
+        monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers=workers))
+        args = {"what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+        response = gateway.handle({"jsonrpc": "2.0", "id": 49, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+        assert response["result"]["isError"] is True
+        assert service.submitted == []
+
+
+def test_worker_candidate_preserves_service_status(monkeypatch):
+    class StatusService(FakeService):
+        def submit_task(self, request):
+            self.submitted.append(request)
+            return {"status": "SUBMITTED", "task_id": request["task_id"], "duplicate": False}
+    service = StatusService()
+    gateway = UnifiedMCPGateway(service=service)
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED", "provider": "agy", "resolved_model": "agy/model"})
+    args = {"what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+    response = gateway.handle({"jsonrpc": "2.0", "id": 49, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["structuredContent"]["status"] == "SUBMITTED"
+
+
+
+
+def test_worker_candidate_rejects_bound_request_tamper():
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+    from nexus.contracts.lifecycle_action import LifecycleActionType, MutationDomain, PermissionProfile, build_action_envelope
+    bound = {"task_id": "tamper-1", "attempt_id": "attempt-1", "action_id": "action-1", "idempotency_key": "idem-1", "action_type": "TASK_RUN", "contract_kind": "OWNER_INLINE", "controller_revision": "a" * 40, "allowed_files": ["README.md"]}
+    action = build_action_envelope(task_id="tamper-1", action_type=LifecycleActionType.TASK_RUN, request=bound, tool_manifest_hash="b" * 64, expected_head="a" * 40, allowed_paths=["README.md"], mutation=True, contract_kind="OWNER_INLINE", contract_hash="c" * 64, permission_profile=PermissionProfile.MUTATE_BOUNDED, mutation_domain=MutationDomain.TARGET, attempt_id="attempt-1", action_id="action-1", idempotency_key="idem-1").model_dump(mode="json")
+    bound["controller_revision"] = "d" * 40
+    with __import__("pytest").raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        _validated_action_request({"action": action, "bound_action_request": bound})
+
+
+def test_worker_candidate_semantic_replay_and_conflict_use_service_gate(monkeypatch, tmp_path):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    args = {"task_id": "semantic-replay", "what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+    gateway.handle({"jsonrpc": "2.0", "id": 60, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    prior = service.submitted[0]
+    real = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    built_contract = real.build_contract(prior)
+    assert built_contract.protected_contracts == []
+    state = {"task_id": prior["task_id"], "status": "SUBMITTED", "request": prior, "action_id": prior["action_id"], "idempotency_key": prior["idempotency_key"]}
+    monkeypatch.setattr(real, "_submission_task_states", lambda: {prior["task_id"]: state})
+    duplicate = real.submit_task(prior)
+    assert duplicate["duplicate"] is True
+    prior_state = dict(prior)
+    prior_state["why"] = "previous semantic request"
+    monkeypatch.setattr(real, "_submission_task_states", lambda: {prior["task_id"]: {**state, "request": prior_state}})
+    conflict = dict(prior)
+    conflict["why"] = "changed"
+    with __import__("pytest").raises(ValueError, match="WORKER_CANDIDATE_TASK_ID_CONFLICT"):
+        real.submit_task(conflict)
+
+
+def test_worker_candidate_source_guard_has_no_promotion_or_direct_apply_calls():
+    import inspect
+    source = inspect.getsource(UnifiedMCPGateway._worker_candidate)
+    for forbidden in ("approve", "integrate", "push", "_apply_assisted_patch", "complete_direct_canonical"):
+        assert forbidden not in source
+
+
+def test_worker_candidate_explicit_authority_confirmation_binds_marker(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    args = {
+        "task_id": "authority-candidate", "what": "authority change", "why": "explicit owner review",
+        "worker": "worker-a", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "authority_change_candidate_confirmation": True,
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 71, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["isError"] is False
+    request = service.submitted[0]
+    assert request["protected_contracts"] == ["repository-authority-change.v1"]
+    assert request["authority_change_candidate_confirmation"] is True
+    assert request["owner_inline_contract"]["authority_change_candidate_confirmation"] is True
+    assert request["bound_action_request"]["authority_change_candidate_confirmation"] is True
+
+
+def test_worker_candidate_rejects_raw_authority_fields_before_submit(monkeypatch):
+    for field, value in (
+        ("protected_contracts", ["repository-authority-change.v1"]),
+        ("approval_context", {"approved": True}),
+        ("architecture_approval", {"schema": "nexus.architecture_approval.v1"}),
+        ("integration_authorization", {"approved": True}),
+    ):
+        service = FakeService()
+        gateway = UnifiedMCPGateway(service=service)
+        args = {
+            "what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"],
+            "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+            field: value,
+        }
+        response = gateway.handle({"jsonrpc": "2.0", "id": 72, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+        assert response["result"]["isError"] is True
+        assert "WORKER_CANDIDATE_UNKNOWN_FIELDS" in response["result"]["structuredContent"]["error"]
+        assert service.submitted == []
+
+
+def test_worker_candidate_authority_confirmation_tamper_breaks_bound_hash(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    args = {
+        "task_id": "authority-tamper", "what": "authority change", "why": "explicit owner review",
+        "worker": "worker-a", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "authority_change_candidate_confirmation": True,
+    }
+    gateway.handle({"jsonrpc": "2.0", "id": 73, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    request = dict(service.submitted[0])
+    bound = dict(request["bound_action_request"])
+    bound["authority_change_candidate_confirmation"] = False
+    request["bound_action_request"] = bound
+    with __import__("pytest").raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        _validated_action_request(request)
+
+
+def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(monkeypatch):
+    from nexus.orchestrator.self_hosted_task_service import _validated_action_request
+
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    gateway = UnifiedMCPGateway(service=FakeService())
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    args = {
+        "task_id": "authority-identity", "what": "authority change", "why": "explicit owner review",
+        "worker": "worker-a", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "authority_change_candidate_confirmation": True,
+    }
+    gateway.handle({"jsonrpc": "2.0", "id": 74, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    # Generate one exact request, then prove each identity dimension is bound.
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    gateway.handle({"jsonrpc": "2.0", "id": 75, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    original = service.submitted[0]
+    for field, value in (
+        ("task_id", "other-task"),
+        ("controller_revision", "b" * 40),
+        ("allowed_files", ["README.md"]),
+        ("authority_change_candidate_confirmation", False),
+    ):
+        tampered = dict(original)
+        bound = dict(original["bound_action_request"])
+        bound[field] = value
+        tampered["bound_action_request"] = bound
+        with __import__("pytest").raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+            _validated_action_request(tampered)
+
+
+def test_worker_candidate_ordinary_to_authority_same_task_conflicts_before_submit(monkeypatch, tmp_path):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    ordinary = {
+        "task_id": "authority-replay", "what": "bounded change", "why": "ordinary request",
+        "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"],
+        "owner_confirmation": True,
+    }
+    gateway.handle({"jsonrpc": "2.0", "id": 76, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": ordinary}})
+    prior = service.submitted[0]
+    real = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    state = {"task_id": prior["task_id"], "status": "SUBMITTED", "request": prior, "action_id": prior["action_id"], "idempotency_key": prior["idempotency_key"]}
+    monkeypatch.setattr(real, "_submission_task_states", lambda: {prior["task_id"]: state})
+    authority = dict(ordinary)
+    authority["authority_change_candidate_confirmation"] = True
+    gateway.handle({"jsonrpc": "2.0", "id": 77, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": authority}})
+    with __import__("pytest").raises(ValueError, match="WORKER_CANDIDATE_TASK_ID_CONFLICT"):
+        real.submit_task(service.submitted[1])
+
+
+def test_worker_candidate_head_drift_fails_before_submit(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
+    monkeypatch.setattr(sys.modules["nexus.orchestrator.unified_mcp_gateway"], "pre_action_guard", lambda *args, **kwargs: (_ for _ in ()).throw(LifecycleGuardError("HEAD_DRIFT", "head changed")))
+    args = {"task_id": "head-drift", "what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+    response = gateway.handle({"jsonrpc": "2.0", "id": 61, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
+    assert response["result"]["isError"] is True
+    assert service.submitted == []
 
 
 def test_manifest_status_and_recommended_tools_share_tools_list_truth():

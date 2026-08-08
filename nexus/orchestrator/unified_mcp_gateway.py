@@ -24,7 +24,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from uuid import uuid4
@@ -35,6 +35,7 @@ from nexus.contracts.lifecycle_action import (
     MutationDomain,
     PermissionProfile,
     build_action_envelope,
+    build_owner_inline_contract,
 )
 from nexus.engine.canonical_task_seam import execute_canonical_product_task
 from nexus.orchestrator.canonical_mcp_ingress import (
@@ -1756,6 +1757,130 @@ class UnifiedMCPGateway:
             return worker.provider, worker.model, worker.worker_id
         return key, model, None
 
+    def _resolve_worker_candidate(self, requested: str) -> tuple[str, str, str]:
+        """Resolve one admissible registered worker without accepting overrides."""
+        key = _text(requested, "worker", max_length=128).lower()
+        snapshot = self._workforce_loader.load()
+        def eligible(item: Any) -> bool:
+            return item.state not in NON_ADMISSIBLE_STATES and str(item.state).upper() != "EXPERIMENT_ONLY" and str(getattr(item, "availability", "AVAILABLE")).upper() == "AVAILABLE"
+        worker = snapshot.workers.get(key)
+        if worker is None:
+            matches = [item for item in snapshot.workers.values() if str(item.provider).lower() == key and eligible(item)]
+            if not matches:
+                raise GatewayInputError("WORKER_NOT_FOUND")
+            if len(matches) != 1:
+                raise GatewayInputError("WORKER_AMBIGUOUS")
+            worker = matches[0]
+        if not eligible(worker):
+            raise GatewayInputError(f"WORKER_NOT_ADMISSIBLE:{worker.worker_id}")
+        return str(worker.provider), str(worker.model), str(worker.worker_id)
+
+    def _worker_candidate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        allowed_keys = {
+            "task_id", "what", "why", "worker", "allowed_files", "verifier_commands",
+            "owner_confirmation", "authority_change_candidate_confirmation",
+        }
+        unknown = sorted(set(arguments) - allowed_keys)
+        if unknown:
+            raise GatewayInputError(f"WORKER_CANDIDATE_UNKNOWN_FIELDS:{','.join(unknown)}")
+        if arguments.get("owner_confirmation") is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        authority_confirmation = arguments.get("authority_change_candidate_confirmation", False)
+        if not isinstance(authority_confirmation, bool):
+            raise GatewayInputError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
+        what = _text(arguments.get("what"), "what", max_length=4000)
+        why = _text(arguments.get("why"), "why", max_length=4000)
+        task_id = self._task_id(arguments, what, why, [str(p).strip() for p in arguments.get("allowed_files") or []])
+        allowed = [str(path).strip() for path in arguments.get("allowed_files") or [] if str(path).strip()]
+        if not 1 <= len(allowed) <= 4:
+            raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
+        for path in allowed:
+            _safe_relative_path(path, "allowed_files")
+        verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
+        if not verifiers or len(verifiers) > 4:
+            raise GatewayInputError("verifier_commands must contain 1-4 bounded commands")
+        if any(any(token in command for token in (";", "&&", "||", "`", "$(", "|")) for command in verifiers):
+            raise GatewayInputError("verifier_commands must be bounded")
+        provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
+        preflight = self._provider_preflight({"provider": provider, "model": model})
+        if preflight.get("status") != "VERSION_VERIFIED":
+            raise GatewayInputError(str(preflight.get("blocker") or "WORKER_PREFLIGHT_FAILED"))
+        head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
+        issued = self._utc_now()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        contract = build_owner_inline_contract(
+            task_id=task_id, objective=what, allowed_files=allowed,
+            verifier_commands=verifiers, expected_head=head, issued_at=issued,
+            expires_at=expires, permission_profile=PermissionProfile.CANDIDATE,
+            worker_may_commit=False,
+            authority_change_candidate_confirmation=authority_confirmation,
+        )
+        contract_binding = {
+            "contract_kind": ContractKind.OWNER_INLINE.value,
+            "contract_hash": contract["contract_hash"],
+            "owner_inline_contract": contract,
+            "task_card_path": None, "task_card_hash": None,
+        }
+        bound = self._canonical_request(
+            task_id, what, why, allowed, verifiers, head,
+            contract_binding=contract_binding,
+        )
+        protected_contracts = ["repository-authority-change.v1"] if authority_confirmation else []
+        bound.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
+                      "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
+                      "worker_candidate_ingress": True,
+                      "protected_contracts": protected_contracts})
+        if authority_confirmation:
+            bound["authority_change_candidate_confirmation"] = True
+        action = build_action_envelope(
+            task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
+            request=bound, tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=head, allowed_paths=allowed, mutation=True,
+            task_card_path=None, task_card_hash=None,
+            contract_kind=ContractKind.OWNER_INLINE,
+            contract_hash=contract["contract_hash"],
+            permission_profile=PermissionProfile.CANDIDATE,
+            mutation_domain=MutationDomain.TARGET,
+        ).model_dump(mode="json")
+        bound.update({
+            "attempt_id": action["attempt_id"], "action_id": action["action_id"],
+            "idempotency_key": action["idempotency_key"],
+            "action_type": action["action_type"],
+        })
+        action = build_action_envelope(
+            task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
+            request=bound, tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=head, allowed_paths=allowed, mutation=True,
+            contract_kind=ContractKind.OWNER_INLINE,
+            contract_hash=contract["contract_hash"],
+            permission_profile=PermissionProfile.CANDIDATE,
+            mutation_domain=MutationDomain.TARGET,
+            attempt_id=bound["attempt_id"], action_id=bound["action_id"],
+            idempotency_key=bound["idempotency_key"],
+        ).model_dump(mode="json")
+        request = self._canonical_request(
+            task_id, what, why, allowed, verifiers, head,
+            action=action, contract_binding=contract_binding,
+            bound_action_request=bound,
+        )
+        request["request_hash"] = action["request_hash"]
+        request.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
+                        "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
+                        "worker_candidate_ingress": True})
+        if authority_confirmation:
+            request["authority_change_candidate_confirmation"] = True
+        request["protected_contracts"] = protected_contracts
+        current_head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "current_head", 40)
+        if current_head != head:
+            raise GatewayInputError("HEAD_DRIFT")
+        pre_action_guard(action, request=request, current_head=head, tool_manifest_hash=TOOL_MANIFEST_REVISION)
+        result = self.service.submit_task(request)
+        payload = dict(result or {})
+        payload.update({"schema": "nexus.worker_candidate.v1", "worker_id": worker_id,
+                        "provider": provider, "model": model, "preflight": preflight,
+                        "candidate_only": True})
+        return payload
+
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
         return [
@@ -1819,6 +1944,25 @@ class UnifiedMCPGateway:
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "maxItems": 1},
                     },
                     "additionalProperties": False,
+                },
+            },
+            {
+                "name": "nexus_worker_candidate",
+                "description": "Submit one explicit Owner Inline worker candidate through an isolated Target.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["what", "why", "worker", "allowed_files", "verifier_commands", "owner_confirmation"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "task_id": {"type": "string", "maxLength": 80},
+                        "what": {"type": "string", "maxLength": 4000},
+                        "why": {"type": "string", "maxLength": 4000},
+                        "worker": {"type": "string", "maxLength": 128},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
+                        "owner_confirmation": {"type": "boolean", "const": True},
+                        "authority_change_candidate_confirmation": {"type": "boolean", "default": False},
+                    },
                 },
             },
             {
@@ -2873,6 +3017,8 @@ class UnifiedMCPGateway:
             return self._diff(arguments)
         if name == "nexus_task_run":
             return self._task_run(arguments)
+        if name == "nexus_worker_candidate":
+            return self._worker_candidate(arguments)
         if name == "nexus_task_status":
             task_id = _text(arguments.get("task_id"), "task_id")
             assisted = self._assist_read(task_id)

@@ -99,7 +99,8 @@ def test_codex_executor_builds_fresh_target_bound_command(tmp_path, monkeypatch)
     request = captured["request"]
     assert receipt.provider == "codex"
     assert request.argv[:2] == ("exec", "--ephemeral")
-    assert request.argv[request.argv.index("-m") + 1] == "gpt-5.5"
+    assert request.argv[request.argv.index("-m") + 1] == "gpt-5.6-luna"
+    assert request.argv[request.argv.index("-c") + 1] == "model_reasoning_effort=medium"
     assert "resume" not in request.argv
     assert "--json" in request.argv
     assert "--sandbox" in request.argv
@@ -120,7 +121,20 @@ def test_codex_executor_uses_environment_model_or_blank_fallback(
 
     executor = CodexCliExecutor()
 
-    assert executor.model == (configured_model.strip() if configured_model and configured_model.strip() else "gpt-5.5")
+    assert executor.model == (configured_model.strip() if configured_model and configured_model.strip() else "gpt-5.6-luna")
+    assert executor.reasoning_effort == "medium"
+
+
+def test_codex_executor_rejects_invalid_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("NEXUS_CODEX_REASONING_EFFORT", "invalid")
+    with pytest.raises(ValueError, match="NEXUS_CODEX_REASONING_EFFORT"):
+        CodexCliExecutor()
+
+
+def test_codex_executor_uses_configured_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("NEXUS_CODEX_REASONING_EFFORT", "high")
+    executor = CodexCliExecutor()
+    assert executor.reasoning_effort == "high"
 
 
 def test_codex_executor_explicit_model_overrides_environment(monkeypatch):
