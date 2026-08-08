@@ -13,4 +13,5 @@ Repair the canonical Nexus MCP Candidate closure contract without creating a new
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `MCP-CANDIDATE-CLOSURE-CONVERGENCE-01` | `00-MCP-CANDIDATE-CLOSURE-CONVERGENCE-01.md` | ACTIVE | Owner confirmation |
+| 0 | `MCP-CANDIDATE-CLOSURE-CONVERGENCE-01` | `00-MCP-CANDIDATE-CLOSURE-CONVERGENCE-01.md` | SOURCE_COMPLETE | Owner confirmation |
+| 1 | `MCP-CANDIDATE-CLOSURE-CONSUMED-APPROVAL-01` | `01-MCP-CANDIDATE-CLOSURE-CONSUMED-APPROVAL-01.md` | ACTIVE | Order 0 source complete; live pre-apply reproduction `ARCHITECTURE_APPROVAL_EXPIRED` |
