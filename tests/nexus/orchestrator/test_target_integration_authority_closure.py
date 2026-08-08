@@ -834,3 +834,121 @@ def test_bind_then_integrate_uses_fresh_integration_grant(tmp_path: Path, monkey
     monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager", FakeIntegrationManager)
     result = service.integrate_approved("closure-bind", integration_branch="nexus/integration/canary", runtime_identity=runtime)
     assert result["status"] == "INTEGRATED"
+
+
+def test_closure_exact_replay_is_zero_probe_and_rebind_history_preserves_prior(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    before = json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":"))
+    monkeypatch.setattr(WorktreeManager, "_run_git", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("exact replay must not probe environment")))
+    replay = service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert replay["duplicate"] is True
+    assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before
+
+
+def test_closure_rebind_records_append_only_history(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    fresh_runtime = {**runtime, "server_instance_id": "server-2"}
+    fresh_approval = {**approval, "approval_id": "integrate-approval-2", "issued_at": "2026-08-08T00:01:00+00:00", "server_instance_id": "server-2"}
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=fresh_approval, runtime_identity=fresh_runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    state = service._read_state("closure-bind") or {}
+    assert len(state["integration_closure_history"]) == 1
+    prior = state["integration_closure_history"][0]
+    assert prior["closure_binding"]["binding_hash"]
+    assert prior["superseded_by"] == "integrate-approval-2"
+    assert prior["reason"] == "pre_apply_rebind"
+    assert state["integration_approval_grant"]["approval_id"] == "integrate-approval-2"
+    assert state.get("merge_performed") is not True
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda state: state.update(integration_result_sha="f" * 40),
+    lambda state: state.update(integration_closure_history=None),
+    lambda state: state["promotion_packet"].update(candidate_tree_sha="f" * 40),
+])
+def test_closure_rebind_rejects_immutable_or_applied_drift_without_write(tmp_path: Path, tamper):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    state = service._read_state("closure-bind") or {}
+    tamper(state)
+    service._write_state("closure-bind", state)
+    before = json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":"))
+    with pytest.raises(RuntimeError):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before
+
+
+def test_closure_rebind_rejects_acceptance_reviewer_and_artifact_drift(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    before = json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":"))
+    with pytest.raises(RuntimeError, match="CLOSURE_IMMUTABLE_BINDING_DRIFT"):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=replace(acceptance, reviewer_id="other"), approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    artifact = Path(acceptance.verifier_artifact)
+    artifact.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval={**approval, "approval_id": "fresh-artifact-check", "issued_at": "2026-08-08T00:03:00+00:00"}, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before
+
+
+def test_closure_rebind_accepts_fresh_canonical_head_pre_apply(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    (root / "value.txt").write_text("head drift\n", encoding="utf-8")
+    _git(root, "commit", "-am", "advance integration head")
+    fresh_head = _git(root, "rev-parse", "HEAD")
+    fresh_approval = {**approval, "approval_id": "integrate-approval-head-2", "issued_at": "2026-08-08T00:02:00+00:00", "expected_canonical_head": fresh_head}
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=fresh_approval, runtime_identity=runtime, expected_canonical_head=fresh_head, integration_branch="nexus/integration/canary")
+    assert len((service._read_state("closure-bind") or {}).get("integration_closure_history") or []) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("candidate_commit_sha", "f" * 40),
+    ("candidate_state_hash", "f" * 64),
+    ("verified_receipt_hash", "f" * 64),
+    ("contract_hash", "f" * 64),
+    ("task_card_hash", "f" * 64),
+])
+def test_rebind_identity_matrix_is_zero_write(tmp_path: Path, field: str, value: str):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    state = service._read_state("closure-bind") or {}
+    if field in {"candidate_commit_sha", "candidate_state_hash", "verified_receipt_hash"}:
+        state["promotion_packet"][field] = value
+    else:
+        state[field] = value
+    service._write_state("closure-bind", state)
+    before = json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":"))
+    fresh = {**approval, "approval_id": "matrix-fresh", "issued_at": "2026-08-08T00:04:00+00:00"}
+    with pytest.raises(RuntimeError):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=fresh, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("task_id", "other-task"), ("attempt_id", "other-attempt"),
+    ("candidate_tree_sha", "f" * 40), ("contract_kind", "OWNER_INLINE"),
+    ("canonical_branch", "nexus/integration/other"),
+    ("bound_action_type", "CANDIDATE_APPROVE"), ("approval_scope", "ALLOW_ACTION_TWICE"),
+])
+def test_rebind_closure_projection_matrix_is_zero_write(tmp_path: Path, field: str, value: str):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    state = service._read_state("closure-bind") or {}
+    state["integration_closure_binding"][field] = value
+    service._write_state("closure-bind", state)
+    before = json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":"))
+    fresh = {**approval, "approval_id": "projection-fresh", "issued_at": "2026-08-08T00:05:00+00:00"}
+    with pytest.raises(RuntimeError):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=fresh, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before
+
+
+def test_exact_replay_tampered_caller_approval_is_not_duplicate(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    before = json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":"))
+    with pytest.raises(RuntimeError):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval={**approval, "approved_by": "attacker"}, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before

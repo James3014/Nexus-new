@@ -5279,10 +5279,73 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        if state.get("status") != "APPROVED" or state.get("promotion_status") != "APPROVED":
-            raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
         if str(state.get("task_id") or "") != task_id:
             raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
+        if state.get("status") != "APPROVED" or state.get("promotion_status") != "APPROVED":
+            raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
+        if "integration_closure_binding" in state and (not isinstance(state.get("integration_closure_binding"), Mapping) or not state.get("integration_closure_binding")):
+            raise RuntimeError("CLOSURE_BINDING_MALFORMED")
+        existing = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else None
+        if existing:
+            if "integration_approval_grant" not in state or not isinstance(state.get("integration_approval_grant"), Mapping) or not state.get("integration_approval_grant"):
+                raise RuntimeError("CLOSURE_BINDING_MALFORMED")
+            if state.get("merge_performed") or state.get("integration_receipt") or state.get("integration_result_sha") or state.get("integration_execution") or state.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
+                raise RuntimeError("CLOSURE_REBIND_AFTER_INTEGRATION_FORBIDDEN")
+            prior_history = state.get("integration_closure_history")
+            if "integration_closure_history" in state and not isinstance(prior_history, list):
+                raise RuntimeError("CLOSURE_HISTORY_MALFORMED")
+            persisted_grant = state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else {}
+            packet_for_rebind = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+            immutable_state = {
+                "task_id": task_id,
+                "attempt_id": str(state.get("attempt_id") or ""),
+                "candidate_commit_sha": str(packet_for_rebind.get("candidate_commit_sha") or state.get("candidate_commit_sha") or ""),
+                "candidate_tree_sha": str(packet_for_rebind.get("candidate_tree_sha") or state.get("candidate_tree_sha") or ""),
+                "candidate_state_hash": str(packet_for_rebind.get("candidate_state_hash") or state.get("candidate_state_hash") or ""),
+                "verified_receipt_hash": str(packet_for_rebind.get("verified_receipt_hash") or state.get("verified_receipt_hash") or ""),
+                "contract_kind": str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value),
+                "contract_hash": str(state.get("contract_hash") or ""),
+                "task_card_hash": str(state.get("task_card_hash") or ""),
+            }
+            for field, value in immutable_state.items():
+                prior_value = existing.get(field)
+                if field not in existing and field not in {"contract_kind", "contract_hash", "task_card_hash"}:
+                    raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
+                if not prior_value and field == "contract_kind":
+                    prior_value = persisted_grant.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value
+                if not prior_value and field == "contract_hash":
+                    prior_value = persisted_grant.get("contract_hash") or ""
+                if not prior_value and field == "task_card_hash":
+                    prior_value = persisted_grant.get("task_card_hash") or ""
+                if prior_value is not None and str(prior_value or "") != value:
+                    raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
+            if str(existing.get("acceptance_receipt_hash") or "") != str(external_acceptance.receipt_hash) or str(existing.get("canonical_branch") or "") != str(integration_branch) or str(existing.get("bound_action_type") or persisted_grant.get("bound_action_type") or "") != LifecycleActionType.CANDIDATE_INTEGRATE.value or str(existing.get("approval_scope") or persisted_grant.get("approval_scope") or "") != "ALLOW_ACTION_ONCE":
+                raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
+            persisted_acceptance = state.get("external_acceptance")
+            if not isinstance(persisted_acceptance, Mapping) or dict(persisted_acceptance) != external_acceptance.to_dict():
+                raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
+            replay = (
+                str(existing.get("task_id") or "") == task_id
+                and str(existing.get("attempt_id") or "") == str(state.get("attempt_id") or "")
+                and str(existing.get("candidate_commit_sha") or "") == immutable_state["candidate_commit_sha"]
+                and str(existing.get("candidate_tree_sha") or "") == immutable_state["candidate_tree_sha"]
+                and str(existing.get("candidate_state_hash") or "") == immutable_state["candidate_state_hash"]
+                and str(existing.get("verified_receipt_hash") or "") == immutable_state["verified_receipt_hash"]
+                and str(existing.get("acceptance_receipt_hash") or "") == str(external_acceptance.receipt_hash)
+                and str(existing.get("canonical_branch") or "") == str(integration_branch)
+                and str(existing.get("expected_canonical_head") or existing.get("canonical_head") or "") == str(expected_canonical_head)
+                and dict(existing.get("runtime_identity") or {}) == dict(runtime_identity)
+                and str(existing.get("approval_id") or persisted_grant.get("approval_id") or "") == str(approval.get("approval_id") or "")
+                and str(existing.get("approval_issued_at") or persisted_grant.get("issued_at") or "") == str(approval.get("issued_at") or "")
+                and str(existing.get("approval_expires_at") or persisted_grant.get("expires_at") or "") == str(approval.get("expires_at") or "")
+                and dict(existing.get("approval_projection") or {key: persisted_grant.get(key) for key in approval_keys}) == {key: approval.get(key) for key in approval_keys}
+            )
+            projection = dict(existing.get("approval_projection") or {key: persisted_grant.get(key) for key in approval_keys})
+            same_approval_id = str(existing.get("approval_id") or persisted_grant.get("approval_id") or "") == str(approval.get("approval_id") or "")
+            if same_approval_id and projection != {key: approval.get(key) for key in approval_keys}:
+                raise RuntimeError("CLOSURE_APPROVAL_REPLAY_DRIFT")
+            if replay:
+                return {**state, "closure_binding": dict(existing), "duplicate": True, "integration_performed": False}
         attempt_id = str(state.get("attempt_id") or "")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         candidate_commit = str(packet.get("candidate_commit_sha") or state.get("candidate_commit_sha") or "")
@@ -5411,6 +5474,14 @@ class SelfHostedTaskService:
             "canonical_branch": integration_branch,
             "runtime_identity": dict(runtime_identity),
             "approval_id": str(approval.get("approval_id") or ""),
+            "approval_issued_at": str(approval.get("issued_at") or ""),
+            "approval_expires_at": str(approval.get("expires_at") or ""),
+            "approval_projection": {key: approval.get(key) for key in approval_keys},
+            "approval_scope": str(approval.get("approval_scope") or ""),
+            "bound_action_type": LifecycleActionType.CANDIDATE_INTEGRATE.value,
+            "contract_kind": contract_kind,
+            "contract_hash": contract_hash,
+            "task_card_hash": str(task_card_hash or ""),
             "preview": preview.to_dict(),
             "authorization_hash": authorization.authorization_hash,
         }
@@ -5418,17 +5489,68 @@ class SelfHostedTaskService:
         closure["binding_hash"] = closure_hash
         now = _utc_now()
         duplicate = False
+        expected_prior_snapshot = json.dumps(_jsonable(dict(existing)) if existing else None, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected_history_snapshot = json.dumps(_jsonable(state.get("integration_closure_history")), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected_grant_snapshot = json.dumps(_jsonable(state.get("integration_approval_grant")), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
+            if str(current.get("task_id") or "") != task_id or current.get("status") != "APPROVED" or current.get("promotion_status") != "APPROVED":
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             if current.get("attempt_id") != attempt_id:
                 raise RuntimeError("CLOSURE_ATTEMPT_DRIFT")
-            existing = current.get("integration_closure_binding") if isinstance(current.get("integration_closure_binding"), Mapping) else None
-            if existing:
-                if existing.get("binding_hash") == closure_hash:
-                    duplicate = True
-                    return
-                raise RuntimeError("CLOSURE_BINDING_DRIFT")
+            current_packet = current.get("promotion_packet") if isinstance(current.get("promotion_packet"), Mapping) else {}
+            for key, expected in {
+                "candidate_commit_sha": candidate_commit,
+                "candidate_tree_sha": candidate_tree,
+                "candidate_state_hash": candidate_state,
+                "verified_receipt_hash": verified_receipt_hash,
+            }.items():
+                if str(current_packet.get(key) or current.get(key) or "") != str(expected):
+                    raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if str(current.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value) != contract_kind or str(current.get("contract_hash") or "") != contract_hash or str(current.get("task_card_hash") or "") != str(task_card_hash or ""):
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            persisted_current_acceptance = current.get("external_acceptance")
+            if not isinstance(persisted_current_acceptance, Mapping) or dict(persisted_current_acceptance) != external_acceptance.to_dict():
+                if existing or persisted_current_acceptance is not None:
+                    raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if not existing and current.get("integration_approval_grant"):
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            prior = current.get("integration_closure_binding") if isinstance(current.get("integration_closure_binding"), Mapping) else None
+            if json.dumps(_jsonable(dict(prior)) if prior else None, sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_prior_snapshot:
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if json.dumps(_jsonable(current.get("integration_closure_history")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_history_snapshot:
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if json.dumps(_jsonable(current.get("integration_approval_grant")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_grant_snapshot:
+                raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            live_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
+            live_status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+            if live_branch != integration_branch or live_status:
+                raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT")
+            try:
+                if hashlib.sha256(artifact_path.read_bytes()).hexdigest() != external_acceptance.receipt_hash:
+                    raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_HASH_MISMATCH")
+            except OSError as exc:
+                raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_UNREADABLE") from exc
+            if prior:
+                if current.get("merge_performed") or current.get("integration_receipt") or current.get("integration_result_sha") or current.get("integration_execution") or current.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
+                    raise RuntimeError("CLOSURE_REBIND_AFTER_INTEGRATION_FORBIDDEN")
+                history = current.get("integration_closure_history")
+                if "integration_closure_history" in current and not isinstance(history, list):
+                    raise RuntimeError("CLOSURE_HISTORY_MALFORMED")
+                if history is None:
+                    history = []
+                    current["integration_closure_history"] = history
+                history.append({
+                    "closure_binding": _jsonable(dict(prior)),
+                    "approval_grant": _jsonable(current.get("integration_approval_grant")),
+                    "preview": _jsonable(current.get("integration_preview")),
+                    "authorization": _jsonable(current.get("integration_authorization")),
+                    "binding_hash": prior.get("binding_hash"),
+                    "superseded_at": now,
+                    "superseded_by": str(approval.get("approval_id") or ""),
+                    "reason": "pre_apply_rebind",
+                })
             live_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
             if live_head != current_head:
                 raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT")
