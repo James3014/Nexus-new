@@ -1,5 +1,5 @@
 import json
-import os, plistlib, hashlib, sys
+import os, plistlib, hashlib, subprocess, sys
 from pathlib import Path
 import pytest
 from scripts.ops import mcp_gateway_durable as g
@@ -12,6 +12,7 @@ def setup(monkeypatch, tmp_path, head="abc123", dirty="", branch="nexus/integrat
     g.ENV_PATH.write_text("export NEXUS_MCP_GATEWAY_TOKEN='SECRET'\nexport NEXUS_GATEWAY_HOST=127.0.0.1\n"); os.chmod(g.ENV_PATH, 0o600)
     vals = {"branch": branch, "status": dirty, "head": head}
     monkeypatch.setattr(g, "_git", lambda _r, *a: vals["head"] if a[0] == "rev-parse" else vals[a[0]])
+    monkeypatch.setattr(g, "_is_ancestor", lambda _r, _a, _d: True)
     monkeypatch.setattr(g, "PLISTS", {"gateway": tmp_path / "g.plist", "devspace": tmp_path / "d.plist"})
     monkeypatch.setattr(g, "LOG_DIR", tmp_path / "logs")
     (tmp_path / "generated").mkdir(exist_ok=True); (tmp_path / "dist").mkdir(exist_ok=True)
@@ -63,12 +64,20 @@ def test_main_propagates_devspace_paths_to_serve(monkeypatch, tmp_path):
     expected_node = tmp_path / "node"
     seen = {}
     monkeypatch.setattr(g, "serve", lambda kind, **kwargs: seen.update(kind=kind, **kwargs))
-    monkeypatch.setattr(sys, "argv", ["mcp_gateway_durable.py", "serve-devspace", "--expected-head", "head",
+    monkeypatch.setattr(sys, "argv", ["mcp_gateway_durable.py", "serve-devspace", "--launch-floor-head", "head",
                                        "--devspace-root", str(expected_root), "--node-path", str(expected_node),
                                        "--devspace-hash", HASH])
     assert g.main() == 0
-    assert seen == {"kind": "devspace", "expected_head": "head", "devspace_hash": HASH,
+    assert seen == {"kind": "devspace", "launch_floor_head": "head", "devspace_hash": HASH,
                     "devspace_root": expected_root, "node_path": expected_node}
+
+def test_main_expected_head_alias_maps_to_launch_floor(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    seen = {}
+    monkeypatch.setattr(g, "serve", lambda kind, **kwargs: seen.update(kind=kind, **kwargs))
+    monkeypatch.setattr(sys, "argv", ["mcp_gateway_durable.py", "serve-gateway", "--expected-head", "head"])
+    assert g.main() == 0
+    assert seen == {"kind": "gateway", "launch_floor_head": "head"}
 
 @pytest.mark.parametrize("mutate", [
     lambda root, node: (root / "generated/build-identity.json").write_text("tampered"),
@@ -181,7 +190,7 @@ def test_serve_devspace_rechecks_cli_at_exec_boundary(monkeypatch, tmp_path):
     pin = hashlib.sha256(b"identity").hexdigest()
     (tmp_path / "dist/cli.js").unlink()
     with pytest.raises(g.GateError, match="CLI missing"):
-        g.serve("devspace", root=tmp_path, expected_head=head, devspace_hash=pin,
+        g.serve("devspace", root=tmp_path, launch_floor_head=head, devspace_hash=pin,
                 devspace_root=tmp_path, node_path=g.NODE_PATH, execve=lambda *args: None)
 
 @pytest.mark.parametrize("kwargs", [{"dirty":" M x"}, {"branch":"wrong"}])
@@ -191,7 +200,8 @@ def test_gate_fail_closed(monkeypatch, tmp_path, kwargs):
 
 def test_head_and_hash_required(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path, head="actual")
-    with pytest.raises(g.GateError): g.manage("preflight", root=tmp_path, expected_head="expected", devspace_hash=HASH)
+    monkeypatch.setattr(g, "_is_ancestor", lambda _r, _a, _d: False)
+    with pytest.raises(g.GateError): g.manage("preflight", root=tmp_path, launch_floor_head="expected", devspace_hash=HASH)
     with pytest.raises(g.GateError): g.manage("preflight", root=tmp_path, devspace_hash=None)
 
 def test_install_twice_and_rollback(monkeypatch, tmp_path):
@@ -215,11 +225,100 @@ def test_status_reload_uninstall_manage_both(monkeypatch, tmp_path):
 
 def test_serve_gateway_exec_boundary(monkeypatch, tmp_path):
     head = setup(monkeypatch, tmp_path); seen = {}
-    g.serve("gateway", root=tmp_path, expected_head=head, execve=lambda *a: seen.update(argv=a[1], env=a[2]))
+    g.serve("gateway", root=tmp_path, launch_floor_head=head, execve=lambda *a: seen.update(argv=a[1], env=a[2]))
     assert seen["argv"][0].endswith(".venv/bin/python"); assert "SECRET" not in " ".join(seen["argv"])
     assert seen["env"]["NEXUS_CANONICAL_SOURCE_ROOT"] == str(tmp_path if False else g.CANONICAL_ROOT)
 
 def test_serve_devspace_hash_and_token_mapping(monkeypatch, tmp_path):
     head = setup(monkeypatch, tmp_path); (tmp_path / "generated/build-identity.json").write_text("identity"); node = tmp_path / "node"; node.write_text("x"); node.chmod(0o755)
-    pin = hashlib.sha256(b"identity").hexdigest(); seen = {}; g.serve("devspace", root=tmp_path, expected_head=head, devspace_hash=pin, devspace_root=tmp_path, node_path=node, execve=lambda *a: seen.update(argv=a[1], env=a[2]))
+    pin = hashlib.sha256(b"identity").hexdigest(); seen = {}; g.serve("devspace", root=tmp_path, launch_floor_head=head, devspace_hash=pin, devspace_root=tmp_path, node_path=node, execve=lambda *a: seen.update(argv=a[1], env=a[2]))
     assert seen["argv"][-1] == "serve"; assert seen["env"]["NEXUS_GATEWAY_PROXY_TOKEN"] == "SECRET"
+
+def _real_git_repo(tmp_path, branch="nexus/integration/main"):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", branch, str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    return repo
+
+def _commit(repo, msg):
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", msg], check=True)
+    return subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+def test_is_ancestor_exact_head(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    assert g._is_ancestor(repo, c1, c1)
+
+def test_is_ancestor_one_descendant(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    (repo / "a").write_text("2"); c2 = _commit(repo, "c2")
+    assert g._is_ancestor(repo, c1, c2)
+
+def test_is_ancestor_multiple_descendants(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    (repo / "a").write_text("2"); _commit(repo, "c2")
+    (repo / "a").write_text("3"); c3 = _commit(repo, "c3")
+    assert g._is_ancestor(repo, c1, c3)
+
+def test_is_ancestor_rewind_rejected(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    (repo / "a").write_text("2"); c2 = _commit(repo, "c2")
+    assert not g._is_ancestor(repo, c2, c1)
+
+def test_is_ancestor_divergent_history_rejected(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    (repo / "a").write_text("2"); _commit(repo, "c2")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "side", c1], check=True)
+    (repo / "b").write_text("side"); side = _commit(repo, "side")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "nexus/integration/main"], check=True)
+    assert not g._is_ancestor(repo, side, subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip())
+
+def test_is_ancestor_unknown_expected_commit_rejected(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    assert not g._is_ancestor(repo, "0" * 40, c1)
+
+def test_verify_gateway_forward_floor_descendant_passes(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); floor = _commit(repo, "c1")
+    (repo / "a").write_text("2"); _commit(repo, "c2")
+    (repo / "a").write_text("3"); _commit(repo, "c3")
+    monkeypatch.setattr(g, "CANONICAL_ROOT", repo)
+    assert g.verify_gateway(root=repo, launch_floor_head=floor)
+
+def test_verify_gateway_rewind_rejected(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); _commit(repo, "c1")
+    (repo / "a").write_text("2"); c2 = _commit(repo, "c2")
+    subprocess.run(["git", "-C", str(repo), "reset", "-q", "--hard", c2 + "~1"], check=True)
+    monkeypatch.setattr(g, "CANONICAL_ROOT", repo)
+    with pytest.raises(g.GateError, match="launch floor"): g.verify_gateway(root=repo, launch_floor_head=c2)
+
+def test_verify_gateway_divergent_history_rejected(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); c1 = _commit(repo, "c1")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "side", c1], check=True)
+    (repo / "b").write_text("side"); side = _commit(repo, "side")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "nexus/integration/main"], check=True)
+    (repo / "a").write_text("2"); _commit(repo, "c2")
+    monkeypatch.setattr(g, "CANONICAL_ROOT", repo)
+    with pytest.raises(g.GateError, match="launch floor"): g.verify_gateway(root=repo, launch_floor_head=side)
+
+def test_verify_gateway_unknown_floor_commit_rejected(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); _commit(repo, "c1")
+    monkeypatch.setattr(g, "CANONICAL_ROOT", repo)
+    with pytest.raises(g.GateError, match="launch floor"): g.verify_gateway(root=repo, launch_floor_head="0" * 40)
+
+def test_verify_gateway_no_floor_does_not_gate_on_head(monkeypatch, tmp_path):
+    repo = _real_git_repo(tmp_path)
+    (repo / "a").write_text("1"); _commit(repo, "c1")
+    monkeypatch.setattr(g, "CANONICAL_ROOT", repo)
+    assert g.verify_gateway(root=repo)
