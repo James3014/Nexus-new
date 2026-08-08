@@ -144,6 +144,54 @@ Do not infer that a component is absent merely because one bounded search did no
 
 Do not turn planned work into current implementation evidence.
 
+## Runtime-wiring evidence discipline
+
+A current class, module, function, or package definition proves implementation presence only. It does not by itself prove runtime wiring.
+
+Before assigning `wiring_status: WIRED`, require at least one current non-test physical wiring witness for every claimed runtime surface, such as:
+
+* a current caller;
+* a current entrypoint;
+* a current service or adapter registration;
+* a current dispatch path;
+* a current runtime receipt physically bound to that surface.
+
+Do not infer `MAIN_CLI`, `MCP_GATEWAY`, `LOCAL_RUNTIME`, `BENCHMARK`, or any other runtime surface merely from:
+
+* the component's directory or module name;
+* documentation or historical reports;
+* package exports;
+* tests, mocks, fixtures, or test helpers;
+* a benchmark-related name without a current benchmark caller;
+* architectural intent or roadmap text.
+
+If current evidence consists of the implementation definition plus test callers only:
+
+```yaml
+implementation_status: TEST_ONLY
+wiring_status: UNKNOWN
+runtime_surfaces:
+  - TEST
+authority_roles:
+  - NONE
+```
+
+Use `UNWIRED` instead of `UNKNOWN` only when an explicitly bounded current-source search provides sufficient negative evidence for the examined scope.
+
+Never upgrade a test-only caller into `LOCAL_RUNTIME` or `BENCHMARK` wiring.
+
+For every claimed non-TEST runtime surface, name the exact current caller, entrypoint, registration, dispatch path, or runtime receipt in `evidence_basis`.
+
+## Workflow trigger truth
+
+When describing a GitHub Actions workflow's trigger mode, inspect the current workflow's exact `on:` keys.
+
+`workflow_dispatch` means manual-only.
+
+Describe a workflow as scheduled only when the current workflow physically contains a `schedule:` trigger.
+
+Do not convert an intended future schedule, generic OpenWiki template wording, or historical workflow behavior into current operational truth.
+
 ## Surface-specific example rule
 
 If current evidence shows a component instantiated by the MCP Gateway but not by the main CLI, represent that as surface-specific wiring, for example:
