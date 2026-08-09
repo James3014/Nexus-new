@@ -1,14 +1,15 @@
 # TASK-OPENWIKI-INTEGRATION-PILOT-01 — OpenWiki canonical integration pilot scaffold
 
+- task_id: `TASK-OPENWIKI-INTEGRATION-PILOT-01`
 - **Campaign:** `CAMPAIGN-OPENWIKI-CANONICAL-INTEGRATION-PILOT-20260808`
-- **Status:** `ACTIVE`
+- status: `RETAINED_FOR_REVIEW`
 - **Source spec:** `SPEC-OPENWIKI-CANONICAL-INTEGRATION-PILOT-20260808`
 - **Source spec SHA-256:** `f07c242de66a8eb5a0c5b904c282cb03cb5b5a6678247ff4a5a7cdc13557d9e1`
 - **Source groups:** `OPENWIKI-PILOT-SCAFFOLD`
 - **Requirements:** `REQ-001; REQ-002; REQ-003; REQ-004; REQ-005; REQ-006`
 - **Acceptance:** `AC-001; AC-002; AC-003; AC-004; AC-005; AC-006`
 - **Auto-chain:** `false`
-- **Maximum claim:** `OPENWIKI_PILOT_SCAFFOLD_READY_FOR_MANUAL_CANARY`
+- **Maximum claim:** `OPENWIKI_PILOT_SCAFFOLD_PHYSICALLY_PRESENT_ACCEPTANCE_UNPROVEN`
 - **Depends on:** `none`
 - **Dependency unlock evidence:** `none`
 - **Task type:** `IMPLEMENTATION`
@@ -28,6 +29,10 @@ Create the bounded OpenWiki pilot scaffold without executing OpenWiki or integra
 ## Observable outcome
 
 Repository contains a manual-only, read-only OpenWiki pilot scaffold with V3 classification and fail-closed side-effect boundaries, without generated Wiki integration.
+
+For the current reconciliation, this observable outcome is a physical-state
+observation only. It is not acceptance, closure, canary, approval, integration,
+release, or production/public readiness evidence.
 
 ## Non-goals
 
@@ -73,6 +78,23 @@ DEC-003: ChatGPT owns contract authorship/review; Agy remains bounded Candidate 
 - **Required initial verification:** Re-read canonical root, branch, HEAD, dirty state, the exact source Spec SHA, Task Card bytes, and all mandatory source-audit paths immediately before implementation.
 - **Freshness rule:** A newer canonical HEAD is permitted only after re-reading the mandatory source-audit paths and proving that no relevant authority, allowed implementation path, or contract assumption changed; otherwise stop and rebind the Task Card before mutation.
 
+## Issue #11 reconciliation state
+
+- **Disposition:** `RETAINED_FOR_REVIEW`; do not mark this card `COMPLETED`.
+- **Physical scaffold:** The three historical implementation paths are
+  physically present in the current tree: `.openwikiignore`,
+  `openwiki/INSTRUCTIONS.md`, and `.github/workflows/openwiki-update.yml`.
+- **Missing historical evidence:** No bound AC-001 through AC-006 validator
+  output, exact Candidate commit/tree receipt, independent acceptance/closure
+  receipt, or manual canary receipt is available in the current task evidence
+  surface.
+- **Claim boundary:** The physical scaffold can be recorded as present, but
+  that presence cannot be promoted to acceptance, closure, canary success,
+  approval, integration, release, or production/public readiness.
+- **Reconcile edit scope:** This Owner-directed reconciliation may edit only
+  this card and its campaign `INDEX.md`. It does not create, modify, run, or
+  integrate the OpenWiki scaffold or generated Wiki content.
+
 ## MCP execution profile
 
 - **App/server and action snapshot:** `not applicable`
@@ -99,29 +121,42 @@ DEC-003: ChatGPT owns contract authorship/review; Agy remains bounded Candidate 
 - **Maximum touched production files:** `3`
 - **Maximum touched test files:** `0`
 
-## Unknown scan
+## Unknown scan (reconciled)
 
-- **Known facts:** The three implementation paths are not regular files at the specification snapshot; repository governance, Wiki authority, and existing GEMINI_API_KEY convention are identified.
+- **Known facts:** The three implementation paths are physically present in the
+  current tree; repository governance, Wiki authority, and the existing
+  GEMINI_API_KEY convention are identified.
 - **Assumptions requiring verification:** OpenWiki 0.3.1 remains installable and operational only at later canary time; implementation does not claim provider availability.
 - **Architecture risks:** Generated documentation may conflate implementation existence, wiring, runtime surface, and authority if V3 instructions are weakened.
-- **Evidence risks:** Static checks prove scaffold structure only and do not prove OpenWiki output quality or GitHub Actions runtime success.
+- **Evidence risks:** The current task surface lacks historical AC-001 through
+  AC-006 validator output, Candidate/closure receipt, independent acceptance,
+  and canary receipt. Static scaffold presence proves neither acceptance nor
+  OpenWiki output quality or GitHub Actions runtime success.
 - **Missing owner decision:** `none`
 
 ## Mandatory source audit
 
 Before mutation, re-read root `AGENTS.md`, the current OpenWiki source Spec, campaign INDEX, active Task Card, Wiki governance charter/authority manifest, and `.github/workflows/benchmark-ci.yml`.
 
-Verify that `.openwikiignore`, `openwiki/INSTRUCTIONS.md`, and `.github/workflows/openwiki-update.yml` still do not exist as regular files before treating them as Create scope.
+The historical implementation pass required verifying that `.openwikiignore`,
+`openwiki/INSTRUCTIONS.md`, and `.github/workflows/openwiki-update.yml` did not
+exist before treating them as Create scope. The current reconciliation records
+that those paths are now physically present; it does not treat that presence as
+acceptance or closure evidence.
 
 If an allowed implementation path already exists or any relevant authority changed, stop rather than silently converting Create scope into Edit scope.
 
 ## Start-state classification
 
-GUARD_PREEXISTS
+RETAINED_FOR_REVIEW
 
 ## RED or existing-guard proof
 
-Nexus already has repository authority, route authority, Wiki authority, Candidate, and Owner-only integration guards. The missing behavior is the bounded OpenWiki scaffold itself. This is not evidence of a production defect.
+Nexus already has repository authority, route authority, Wiki authority,
+Candidate, and Owner-only integration guards. The scaffold is physically
+present, but its historical acceptance/closure/canary evidence is missing.
+That evidence gap is the retained review condition and is not evidence of a
+production defect.
 
 ## Implementation constraints
 
@@ -164,7 +199,7 @@ No OpenWiki execution is permitted while implementing this Task Card.
 
 AC-001 through AC-006 must all be witnessed by the mandatory command manifest and complete Candidate diff.
 
-A worker-authored PASS report does not satisfy the gate without command evidence and independent review.
+A worker-authored PASS report does not satisfy the gate without command evidence and independent review. No such historical acceptance/closure receipt is currently available; therefore these gates remain unreconciled.
 
 ## Mandatory command manifest
 
@@ -185,6 +220,10 @@ Require the implementation Candidate base SHA, commit SHA, tree SHA, complete si
 
 Separate static scaffold evidence from any later OpenWiki canary evidence.
 
+Current reconciliation records physical scaffold presence only. It does not
+backfill absent historical validator, Candidate, acceptance, closure, or canary
+receipts.
+
 ## Independent review
 
 A reviewer independent from the Agy implementation pass must compare the exact Candidate against the source Spec, Task Card, complete diff, AC-001 through AC-006, command outputs, authority boundaries, and final state.
@@ -194,6 +233,7 @@ The reviewer cannot approve or integrate on behalf of the Owner.
 ## Exit conditions
 
 - **PASS:** All six acceptance criteria are physically witnessed, C1-C8 pass, the exact three-file Candidate scope is preserved, and no authority boundary is expanded.
+- **RETAINED_FOR_REVIEW:** Scaffold is physically present but historical acceptance, closure, independent review, or canary receipt evidence is missing. Do not claim `COMPLETED`.
 - **BLOCK:** Any out-of-scope mutation, authority expansion, generated Wiki commit, canonical OpenWiki execution, stale material source assumption, or verifier failure.
 - **Residual debt:** Actual OpenWiki generation quality and workflow-runtime behavior remain for a later manual canary.
 - **Next gate:** Independent Candidate acceptance before separate Owner approval/integration.
