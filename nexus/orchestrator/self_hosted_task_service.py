@@ -64,6 +64,11 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.contracts.autonomy_goal import AutonomyGoalGrant
+from nexus.orchestrator.autonomy_policy import (
+    AutonomySubmissionBinding,
+    project_autonomy_submission,
+)
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 
@@ -136,6 +141,30 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "__dict__"):
         return _jsonable(vars(value))
     return value
+
+
+def _validate_existing_autonomy_binding(
+    state: Mapping[str, Any],
+    grant: Optional[AutonomyGoalGrant],
+) -> None:
+    """Reject any attempt to add or replace autonomy after task creation."""
+    raw_binding = state.get("autonomy_submission_binding")
+    if grant is None:
+        if raw_binding is not None:
+            raise ValueError("AUTONOMY_GOAL_GRANT_REQUIRED")
+        return
+    if raw_binding is None:
+        raise ValueError("POST_SUBMISSION_GRANT_INJECTION")
+    try:
+        binding = AutonomySubmissionBinding.model_validate(raw_binding)
+    except Exception as exc:
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_INVALID") from exc
+    if binding.task_id != state.get("task_id"):
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
+    if binding.goal_id != grant.goal_id or binding.grant_hash != grant.grant_hash:
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
+    if not project_autonomy_submission(state).get("eligible"):
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
 
 
 def _utc_now() -> str:
@@ -3630,6 +3659,20 @@ class SelfHostedTaskService:
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         request, _ = _validated_action_request(request)
         task_id = self._resolve_current_execution_task_id(request)
+        raw_autonomy_grant = request.get("autonomy_goal_grant")
+        autonomy_grant: Optional[AutonomyGoalGrant] = None
+        if raw_autonomy_grant is not None:
+            if not isinstance(raw_autonomy_grant, Mapping):
+                raise ValueError("AUTONOMY_GOAL_GRANT_INVALID")
+            try:
+                autonomy_grant = AutonomyGoalGrant.model_validate(raw_autonomy_grant)
+            except Exception as exc:
+                raise ValueError("AUTONOMY_GOAL_GRANT_INVALID") from exc
+            now = datetime.now(timezone.utc)
+            if autonomy_grant.issued_at > now:
+                raise ValueError("AUTONOMY_GOAL_GRANT_NOT_YET_VALID")
+            if autonomy_grant.expires_at <= now:
+                raise ValueError("AUTONOMY_GOAL_GRANT_EXPIRED")
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
         if action and not self.ephemeral:
             # The service remains lifecycle authority; this synchronous guard
@@ -3653,6 +3696,10 @@ class SelfHostedTaskService:
             or self._request_hash(request)
         )
         states = self._submission_task_states()
+        for current in states.values():
+            if current.get("task_id") != task_id:
+                continue
+            _validate_existing_autonomy_binding(current, autonomy_grant)
         if request.get("worker_candidate_ingress") and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
             semantic_fields = (
                 "what", "why", "allowed_files", "verifier_commands", "worker", "worker_id",
@@ -3702,12 +3749,26 @@ class SelfHostedTaskService:
         requested_lane = str(request.get("execution_lane") or "").strip().upper()
         if requested_lane in {"", "DIRECT_CANONICAL"}:
             if lane["eligible"]:
+                if autonomy_grant is not None:
+                    raise ValueError("AUTONOMY_DIRECT_CANONICAL_UNSUPPORTED")
                 return self._submit_direct_canonical(request, task_id)
             if requested_lane == "DIRECT_CANONICAL" and str(request.get("worker", "primary")).strip().lower() in {"", "primary", "codex"}:
                 raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
         contract = self.build_contract(request)
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
+        if autonomy_grant is not None:
+            if autonomy_grant.collaboration_base.head_sha != contract.controller_revision:
+                raise ValueError("AUTONOMY_COLLABORATION_BASE_MISMATCH")
+            try:
+                scope_allowed = all(
+                    autonomy_grant.path_policy.allows(str(path).rstrip("/"))
+                    for path in contract.allowed_files
+                )
+            except ValueError as exc:
+                raise ValueError("AUTONOMY_TASK_SCOPE_INVALID") from exc
+            if not scope_allowed:
+                raise ValueError("AUTONOMY_TASK_SCOPE_EXCEEDED")
         existing_states = list(self._submission_task_states().values())
         for current in existing_states:
             current_key = str(current.get("idempotency_key") or "")
@@ -3832,8 +3893,32 @@ class SelfHostedTaskService:
             "merge_performed": False,
             "push_performed": False,
         }
+        if autonomy_grant is not None:
+            autonomy_binding = AutonomySubmissionBinding.issue(
+                task_id=contract.task_id,
+                initial_attempt_id=attempt_id,
+                action_request_hash=action_request_hash,
+                contract_hash=contract.contract_hash,
+                controller_revision=contract.controller_revision,
+                repository=autonomy_grant.repository,
+                collaboration_base=autonomy_grant.collaboration_base,
+                allowed_paths=tuple(
+                    str(path).rstrip("/") for path in contract.allowed_files
+                ),
+                goal_id=autonomy_grant.goal_id,
+                grant_hash=autonomy_grant.grant_hash,
+            )
+            state.update({
+                "autonomy_goal_id": autonomy_grant.goal_id,
+                "autonomy_goal_grant_hash": autonomy_grant.grant_hash,
+                "autonomy_mode": "SHADOW",
+                "autonomy_submission_binding": autonomy_binding.model_dump(
+                    mode="json"
+                ),
+            })
         existing, created = self._create_state(contract.task_id, state)
         if not created:
+            _validate_existing_autonomy_binding(existing, autonomy_grant)
             retained_retry = (
                 existing.get("status") == "RETAINED_FOR_REVIEW"
                 and existing.get("promotion_status") == "NOT_CREATED"
@@ -4898,6 +4983,7 @@ class SelfHostedTaskService:
             "blocker": self._projected_blocker(state),
             "retry_authorized": state.get("retry_authorized"),
             "task_action": action,
+            "autonomy": project_autonomy_submission(state),
         }
 
     def get_receipt(self, task_id: str) -> Optional[dict[str, Any]]:
