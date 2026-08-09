@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: issue16-g2-frozen-same-oracle
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
@@ -63,3 +63,11 @@ Maximum claim: same-oracle Candidate evidence.
 ## Block classification
 
 `RECOVERABLE_BLOCK` for bounded verifier defects; `HARD_BLOCK` for authority conflict.
+
+## Completion receipt
+
+- Implementation commit: `a574923a8fdc85cb4c8b90baa5073199b2528df6`
+- Exact-commit independent review: ACCEPT
+- Exact tests: 37 passed
+- Command, material, workspace identity, tamper/drift, receipt, Ruff format,
+  diff, scope, and deletion gates passed
