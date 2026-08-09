@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: IMPLEMENTED_PENDING_PR
+status: COMPLETE
 task_id: github-issue-21-route-authority-wording
 campaign_id: github-issue-21-route-authority-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/21
@@ -67,3 +67,9 @@ Maximum changed files: 5.
 - `RECOVERABLE_BLOCK`: test or formatting failure within allowed scope.
 - `HARD_BLOCK`: source contradicts Issue #21 or another authority requires
   runtime/policy changes.
+
+## Completion evidence
+
+- Issue #21 closed after PR #24 merged.
+- Merge commit: `b14a929ee74586cdfc2d595412aabe2882745039`.
+- Scope of completion: governance/documentation wording convergence only.
