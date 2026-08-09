@@ -24,14 +24,25 @@ FINDINGS = _corpus.FINDINGS
 
 
 CLASSIFICATIONS = {"invariant", "regression", "compatibility", "security"}
-SCENARIOS = {"normal", "boundary", "failure", "authority_conflict", "partial_state", "recovery", "idempotency", "malformed_input", "stale_state"}
+SCENARIOS = {
+    "normal",
+    "boundary",
+    "failure",
+    "authority_conflict",
+    "partial_state",
+    "recovery",
+    "idempotency",
+    "malformed_input",
+    "stale_state",
+}
 STATUSES = {"covered", "finding"}
 
 
 def _probe_workforce_wording() -> tuple[bool, str]:
     text = (ROOT / "docs/arch/MODEL_WORKFORCE_POLICY.md").read_text(encoding="utf-8")
     forbidden = [
-        phrase for phrase in ("## 6. Routing policy", "Nexus must route in this order:")
+        phrase
+        for phrase in ("## 6. Routing policy", "Nexus must route in this order:")
         if phrase in text
     ]
     return not forbidden, "forbidden_phrases=" + ",".join(forbidden)
@@ -46,11 +57,19 @@ def _probe_manifest_updater_idempotency() -> tuple[bool, str]:
         target.parent.mkdir(parents=True)
         shutil.copy2(source_manifest, target)
         first_run = subprocess.run(
-            [sys.executable, str(updater)], cwd=temp_root, capture_output=True, text=True, check=False,
+            [sys.executable, str(updater)],
+            cwd=temp_root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         first_bytes = target.read_bytes()
         second_run = subprocess.run(
-            [sys.executable, str(updater)], cwd=temp_root, capture_output=True, text=True, check=False,
+            [sys.executable, str(updater)],
+            cwd=temp_root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         second_bytes = target.read_bytes()
         data = json.loads(second_bytes)
@@ -135,7 +154,8 @@ def main() -> int:
 
     errors = validate_corpus()
     selected = [
-        case for case in CASES
+        case
+        for case in CASES
         if (not args.classification or case.classification == args.classification)
         and (not args.scenario or case.scenario == args.scenario)
         and (not args.case_ids or case.case_id in args.case_ids)
@@ -144,24 +164,27 @@ def main() -> int:
         unknown = sorted(set(args.case_ids) - {case.case_id for case in CASES})
         errors.extend(f"unknown_case:{case_id}" for case_id in unknown)
 
-    executable = [
-        case for case in selected
-        if case.status == "covered" or args.include_findings
-    ]
+    executable = [case for case in selected if case.status == "covered" or args.include_findings]
     nodeids = sorted({nodeid for case in executable for nodeid in case.automated_tests})
     result = {
         "schema": "nexus.golden_behavior_eval.v1",
-        "source_revision": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip(),
+        "source_revision": subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
+        ).stdout.strip(),
         "case_count": len(CASES),
         "selected_case_count": len(selected),
         "test_bound_case_count": sum(bool(case.automated_tests) for case in selected),
         "probe_bound_case_count": sum(bool(case.finding_probe) for case in selected),
-        "default_automated_case_count": sum(case.status == "covered" and bool(case.automated_tests) for case in selected),
+        "default_automated_case_count": sum(
+            case.status == "covered" and bool(case.automated_tests) for case in selected
+        ),
         "finding_case_count": sum(case.status == "finding" for case in selected),
         "findings_included_in_eval": args.include_findings,
         "test_node_count": len(nodeids),
         "validation_errors": errors,
-        "findings": {case.finding_id: FINDINGS[case.finding_id] for case in selected if case.finding_id},
+        "findings": {
+            case.finding_id: FINDINGS[case.finding_id] for case in selected if case.finding_id
+        },
     }
     exit_code = 0 if not errors else 2
     if args.include_findings and not errors:
@@ -178,7 +201,12 @@ def main() -> int:
         env = dict(os.environ)
         env["NEXUS_CANONICAL_SOURCE_ROOT"] = str(ROOT)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        completed = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *nodeids], cwd=ROOT, env=env, check=False)
+        completed = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *nodeids],
+            cwd=ROOT,
+            env=env,
+            check=False,
+        )
         result["pytest_exit_code"] = completed.returncode
         if completed.returncode != 0:
             exit_code = completed.returncode

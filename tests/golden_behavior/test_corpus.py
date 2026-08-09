@@ -14,7 +14,10 @@ def test_corpus_has_requested_size_and_taxonomy() -> None:
     assert 50 <= len(CASES) <= 100
     assert {case.scenario for case in CASES} == SCENARIOS
     assert {case.classification for case in CASES} == {
-        "invariant", "regression", "compatibility", "security",
+        "invariant",
+        "regression",
+        "compatibility",
+        "security",
     }
 
 
@@ -50,11 +53,7 @@ def test_resolved_policy_lane_finding_is_now_covered() -> None:
 
 
 def test_testable_open_findings_bind_automated_probes() -> None:
-    probes = {
-        case.case_id: case.finding_probe
-        for case in CASES
-        if case.finding_probe
-    }
+    probes = {case.case_id: case.finding_probe for case in CASES if case.finding_probe}
     assert probes == {
         "GB-082": "workforce_wording",
         "GB-083": "manifest_updater_idempotency",
