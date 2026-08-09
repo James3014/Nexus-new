@@ -937,6 +937,42 @@ class SelfHostedTaskService:
         return cls._terminal_failure_blocker(state)
 
     @classmethod
+    def _settled_candidate_less_final_block(cls, state: Mapping[str, Any]) -> bool:
+        """Identify a terminal failure whose retry is historical, not required."""
+        if (
+            state.get("status") != "FINAL_BLOCK"
+            or state.get("promotion_status") != "NOT_CREATED"
+            or state.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            or state.get("cleanup_blocker")
+            or state.get("reconciliation_required") is True
+            or state.get("reconciliation_status") not in {None, "RECONCILED", "NOT_REQUIRED"}
+            or state.get("reconciliation_decision") not in {None, "NO_MUTATION_OBSERVED"}
+            or state.get("uncertain_mutation") is True
+            or state.get("candidate_created") not in {None, False}
+            or state.get("candidate_status") not in {None, "", "NOT_CREATED", "FINAL_BLOCK"}
+            or state.get("state_retention_status") not in {None, "TERMINAL", "ARCHIVED"}
+            or state.get("approved_binding")
+            or state.get("integration_receipt")
+            or state.get("integration_result_sha")
+            or state.get("merge_performed")
+        ):
+            return False
+
+        candidate = state.get("promotion_packet")
+        candidate_fields = (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+            "candidate_ref",
+        )
+        if any(state.get(field) for field in candidate_fields):
+            return False
+        if isinstance(candidate, Mapping) and any(candidate.get(field) for field in candidate_fields):
+            return False
+        return True
+
+    @classmethod
     def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         status = str(state.get("status") or "UNKNOWN")
         promotion_status = str(state.get("promotion_status") or "")
@@ -1012,6 +1048,9 @@ class SelfHostedTaskService:
             else:
                 next_action = "inspect_receipt_and_candidate"
                 recommended_tool = "nexus_self_hosted_get_receipt"
+            if cls._settled_candidate_less_final_block(state):
+                action_state = "TERMINAL"
+                attention_required = False
         elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
             action_state = "ACTION_REQUIRED"
             attention_required = True
