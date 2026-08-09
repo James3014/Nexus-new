@@ -19,8 +19,10 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Codex implements a Ready Issue on an issue-specific branch such as
   `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
   request to `main`.
-- Codex and other coding agents do not push directly to, merge, force-push, or
-  delete `main`. Review and final merge authority remain with the Owner.
+- Codex and other coding agents never direct-push, force-push, or delete
+  `main`. Manual, legacy, and non-autonomy-enabled work remains Owner-reviewed
+  and Owner-authorized for final merge. The bounded autonomy exception below
+  applies only to this program's autonomy-enabled Goals.
 - The local runtime repository and this sanitized collaboration repository have
   intentionally separate histories. Never treat SHA mismatch as missing work,
   or normal-merge, rebase, or cherry-pick local runtime history into GitHub
@@ -37,6 +39,10 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   number, exact head, current base/main, complete diff, Goal Grant identity,
   independent acceptance, CI/check evidence, unresolved threads or blockers,
   and current authorization validity. A moved PR head fails closed.
+- Under that exception, only the designated integration action may perform the
+  exact-head merge after all listed gates pass; it may not direct-push `main`,
+  broaden the Goal Grant, or merge manual/legacy work. This bounded exception
+  is the specific, non-general authorization for an autonomy-enabled Goal.
 - A Ready Issue defines GitHub collaboration scope only. It does not bypass
   Task Card or lifecycle requirements for delegated, isolated,
   lifecycle/security/schema, Candidate, approval, integration, release, or
@@ -72,8 +78,11 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Implementation and commit, Candidate creation, verification, approval,
   integration, push, and release are distinct authorities and evidence stages.
 - An agent may implement, test, commit, push an authorized issue branch, and
-  open a PR. It cannot convert its own implementation or Candidate into
-  approval, integration, merge, release, or production truth.
+  open a PR. For manual/legacy work it cannot convert its own implementation
+  or Candidate into approval, integration, merge, release, or production truth.
+  For this program's autonomy-enabled Goals, a separate designated integration
+  action may perform only the exact machine-authorized merge after independent
+  acceptance and fresh merge-gate verification.
 - GitHub review/merge does not silently perform Nexus lifecycle approval or
   runtime integration. Local Nexus runtime actions keep their existing formal
   authority and evidence requirements until a separate migration changes them.

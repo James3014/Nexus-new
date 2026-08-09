@@ -148,3 +148,16 @@ The historical maximum claim for this diagnosis is
 platform is permanently fixed. Record the event, host-side error, ingress
 observation, process-health observation, and evidence timestamp before any
 independent remediation.
+
+### Required evidence fields
+
+The classification is valid only when the receipt or incident note preserves:
+
+- the exact host-side error and action/tool name;
+- the event timestamp and repository/runtime identity;
+- the corresponding DevSpace and Gateway ingress observations;
+- the server-process health observation and its evidence source; and
+- the operator or system that made the classification.
+
+These fields make the boundary auditable; they do not authorize a Gateway
+restart or change the claim ceiling.
