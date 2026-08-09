@@ -1630,6 +1630,103 @@ def test_noncompleted_probe_states_never_write_readiness_evidence(tmp_path):
     assert not (tmp_path / "assisted_provider_jobs" / "probe_evidence").exists()
 
 
+@pytest.mark.parametrize("status", ["FAILED", "CANCELLED"])
+def test_settled_assisted_failure_is_not_currently_actionable(status):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway._assist_response({
+        "task_id": "settled-assist",
+        "status": status,
+        "process_cleanup": True,
+        "durable_exit_marker": True,
+        "uncertain_mutation": False,
+        "provider_error": "retained evidence",
+        "stdout_sha256": "a" * 64,
+    })
+
+    assert response["attention_required"] is False
+    assert response["next_action"] == "nexus_task_retry"
+    assert response["recommended_tool"] == "nexus_task_retry"
+    assert response["provider_error"] == "retained evidence"
+    assert response["stdout_sha256"] == "a" * 64
+    assert response["durable_exit_marker"] is True
+
+
+@pytest.mark.parametrize(("status", "unresolved"), [
+    ("FAILED", {"durable_exit_marker": False}),
+    ("CANCELLED", {"durable_exit_marker": False}),
+    ("FAILED", {"durable_exit_marker": True, "uncertain_mutation": True}),
+    ("CANCELLED", {"durable_exit_marker": True, "uncertain_mutation": True}),
+])
+def test_assisted_terminal_failure_fails_closed_on_exit_or_mutation_uncertainty(status, unresolved):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    job = {
+        "task_id": "uncertain-assist",
+        "status": status,
+        "process_cleanup": True,
+        "provider_error": "retained evidence",
+        **unresolved,
+    }
+
+    response = gateway._assist_response(job)
+
+    assert response["attention_required"] is True
+    assert response["next_action"] == "nexus_task_retry"
+    assert response["provider_error"] == "retained evidence"
+    assert response["durable_exit_marker"] is unresolved["durable_exit_marker"]
+    assert response["uncertain_mutation"] is bool(unresolved.get("uncertain_mutation"))
+
+
+@pytest.mark.parametrize("job", [
+    {"status": "FAILED", "process_cleanup": False},
+    {"status": "FAILED", "process_cleanup": True, "cleanup_error": "busy"},
+    {"status": "CANCELLED", "process_cleanup": True, "reconciliation_required": True},
+])
+def test_unsettled_assisted_failure_remains_actionable(job):
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    response = gateway._assist_response({"task_id": "unsettled-assist", **job})
+
+    assert response["attention_required"] is True
+    assert response["next_action"] == "nexus_task_retry"
+
+
+def test_unknown_assisted_state_requires_reconciliation():
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    response = gateway._assist_response({
+        "task_id": "unknown-assist",
+        "status": "UNKNOWN_REQUIRES_RECONCILE",
+        "reconciliation_required": True,
+    })
+
+    assert response["attention_required"] is True
+    assert response["next_action"] == "nexus_task_reconcile"
+
+
+def test_assisted_public_list_and_gateway_count_share_classification(monkeypatch, tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    jobs = [
+        {"task_id": "settled", "status": "FAILED", "process_cleanup": True, "durable_exit_marker": True},
+        {"task_id": "settled-cancelled", "status": "CANCELLED", "process_cleanup": True, "durable_exit_marker": True},
+        {"task_id": "failed-cleanup", "status": "FAILED", "process_cleanup": False, "durable_exit_marker": True},
+        {"task_id": "unknown", "status": "UNKNOWN_REQUIRES_RECONCILE", "reconciliation_required": True, "pid": 999999},
+        {"task_id": "running", "status": "RUNNING"},
+    ]
+    for job in jobs:
+        gateway._assist_write(job)
+
+    listed = gateway._task_list_actionable({})
+    listed_ids = {item["task_id"] for item in listed["tasks"]}
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    status = gateway._gateway_status()
+
+    assert listed_ids == {"failed-cleanup", "unknown"}
+    assert listed["actionable_count"] == 2
+    assert status["pending_actions"] == 3
+
+
 def test_model_probe_failure_redacts_stderr_and_exposes_digest(monkeypatch, tmp_path):
     secret = "Authorization: Bearer SUPERSECRET"
     class FailedPopen:

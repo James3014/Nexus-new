@@ -2652,6 +2652,73 @@ def test_final_block_clean_no_candidate_recommends_same_task_retry(tmp_path):
 
     assert action["next_action"] == "retry_same_task"
     assert action["recommended_tool"] == "nexus_self_hosted_retry"
+    assert action["action_state"] == "TERMINAL"
+    assert action["attention_required"] is False
+
+
+@pytest.mark.parametrize("cleanup_decision", ["REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"])
+def test_clean_candidate_less_final_block_preserves_optional_retry_and_evidence(tmp_path, cleanup_decision):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("settled-failure", {
+        "task_id": "settled-failure",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": cleanup_decision,
+        "candidate_created": False,
+        "candidate_status": "FINAL_BLOCK",
+        "state_retention_status": "TERMINAL",
+        "reconciliation_status": "RECONCILED",
+        "reconciliation_decision": "NO_MUTATION_OBSERVED",
+        "uncertain_mutation": False,
+        "error": "provider failed",
+    })
+
+    state = service.get_task("settled-failure")
+    action = state["task_action"]
+
+    assert action["action_state"] == "TERMINAL"
+    assert action["attention_required"] is False
+    assert action["next_action"] == "retry_same_task"
+    assert action["recommended_tool"] == "nexus_self_hosted_retry"
+    assert state["error"] == "provider failed"
+    assert service.list_actionable_tasks()["actionable_count"] == 0
+
+
+@pytest.mark.parametrize("state", [
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED"},
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "cleanup_blocker": "unknown"},
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "reconciliation_required": True},
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "promotion_packet": {"candidate_commit_sha": "c" * 40}},
+    {"status": "FINAL_BLOCK", "promotion_status": "PENDING_HUMAN_APPROVAL", "cleanup_decision": "REMOVED"},
+    {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED"},
+    {"status": "INTEGRATION_FAILED", "promotion_status": "INTEGRATION_FAILED", "cleanup_decision": "REMOVED", "approved_binding": {"candidate_commit_sha": "c" * 40}},
+])
+def test_unresolved_failure_states_remain_actionable(state):
+    action = SelfHostedTaskService._task_action_envelope({"task_id": "unresolved", **state})
+
+    assert action["attention_required"] is True
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("candidate_created", True),
+    ("candidate_status", "PENDING_HUMAN_APPROVAL"),
+    ("state_retention_status", "ACTIVE"),
+    ("reconciliation_decision", "RETAINED_FOR_REVIEW"),
+    ("uncertain_mutation", True),
+])
+def test_clean_final_block_fails_closed_on_hidden_unresolved_state(field, value):
+    state = {
+        "task_id": "hidden-unresolved",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "REMOVED",
+        field: value,
+    }
+
+    action = SelfHostedTaskService._task_action_envelope(state)
+
+    assert action["attention_required"] is True
+    assert action["action_state"] == "FINAL_BLOCK"
 
 
 def test_duplicate_task_card_hash_returns_existing_task_and_retry_action(tmp_path):
@@ -3895,7 +3962,7 @@ def test_close_task_without_candidate_final_block_success(tmp_path):
     service._write_state(task_id, state)
 
     actionable_before = service.list_actionable_tasks()
-    assert any(t["task_id"] == task_id for t in actionable_before["tasks"])
+    assert not any(t["task_id"] == task_id for t in actionable_before["tasks"])
 
     result = service.close_task_without_candidate(task_id, superseded_by="ref-evidence-789")
 

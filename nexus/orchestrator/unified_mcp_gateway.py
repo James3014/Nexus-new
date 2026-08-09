@@ -1626,14 +1626,35 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
-    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+    @staticmethod
+    def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:
+        """Project one Assisted job into current action and pending-count state."""
         status = str(job.get("status") or "UNKNOWN")
         terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
-        result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
+        reconciliation_required = status == "UNKNOWN_REQUIRES_RECONCILE" or bool(job.get("reconciliation_required"))
+        cleanup_settled = job.get("process_cleanup") is True and not job.get("cleanup_error")
+        settled_failure = (
+            status in {"FAILED", "CANCELLED"}
+            and not reconciliation_required
+            and cleanup_settled
+            and job.get("durable_exit_marker") is True
+            and not job.get("uncertain_mutation")
+        )
         if status == "UNKNOWN_REQUIRES_RECONCILE":
             next_action = "nexus_task_reconcile"
         else:
+            result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
             next_action = result_tool if not terminal else ("none" if status == "COMPLETED" else "nexus_task_retry")
+        return {
+            "attention_required": status == "UNKNOWN_REQUIRES_RECONCILE" or (status in {"FAILED", "CANCELLED"} and not settled_failure),
+            "next_action": next_action,
+            "recommended_tool": next_action,
+            "pending": not terminal or status == "UNKNOWN_REQUIRES_RECONCILE",
+        }
+
+    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+        status = str(job.get("status") or "UNKNOWN")
+        action = self._assist_action(job)
         return {
             "schema": "nexus.assisted_provider_job.v1",
             "operation": operation,
@@ -1673,6 +1694,7 @@ class UnifiedMCPGateway:
             "authentication_evidence": job.get("authentication_evidence"),
             "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
             "reconciliation_required": bool(job.get("reconciliation_required", False)),
+            "uncertain_mutation": bool(job.get("uncertain_mutation", False)),
             "context_arm": job.get("context_arm"),
             "context_arm_applied": bool(job.get("context_arm_applied", False)),
             "context_arm_semantics": job.get("context_arm_semantics", "record_only_not_applied"),
@@ -1691,9 +1713,9 @@ class UnifiedMCPGateway:
             "connector_disconnected_at": job.get("connector_disconnected_at"),
             "reconnected_at": job.get("reconnected_at"),
             "artifacts": {"stdout": job.get("stdout_artifact"), "stderr": job.get("stderr_artifact")},
-            "attention_required": status in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"},
-            "next_action": next_action,
-            "recommended_tool": next_action,
+            "attention_required": action["attention_required"],
+            "next_action": action["next_action"],
+            "recommended_tool": action["recommended_tool"],
         }
 
     def _assist_submit(self, arguments: Mapping[str, Any], *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
@@ -3033,8 +3055,10 @@ class UnifiedMCPGateway:
                 job = json.loads(job_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if isinstance(job, Mapping) and job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
-                pending_actions += 1
+            if isinstance(job, Mapping):
+                action = self._assist_action(job)
+                if action["pending"] or action["attention_required"]:
+                    pending_actions += 1
         action_sha_current, action_contract_ok, action_contract_reasons = _action_contract_fingerprint()
         permission_sha_current, permission_contract_ok, permission_contract_reasons = _permission_enforcement_fingerprint()
         freshness = _evaluate_freshness(
@@ -3148,9 +3172,11 @@ class UnifiedMCPGateway:
                 job = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if not isinstance(job, Mapping) or job.get("status") not in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"}:
+            if not isinstance(job, Mapping):
                 continue
-            tasks.append(self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list"))
+            response = self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list")
+            if response.get("attention_required") is True:
+                tasks.append(response)
         return {
             "schema": "nexus.task_actionable_list.v1",
             "actionable_count": len(tasks),
