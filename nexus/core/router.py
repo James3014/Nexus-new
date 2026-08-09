@@ -5,6 +5,11 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from nexus.learning.learning_closure_effectiveness import (
+    normalize_learning_episode,
+    append_learning_episode,
+    canonical_learning_episode_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,14 +304,60 @@ class SkillsRouter:
             receipts = []
 
         # 5. [P26] OutcomeMemory 學習寫回
+        raw_task_id = context.get("task_id") or ""
+        if not raw_task_id:
+            if isinstance(plan, dict):
+                raw_task_id = plan.get("task_id", "")
+            elif plan:
+                raw_task_id = getattr(plan, "task_id", "")
+        receipt_dicts = []
+        for receipt in receipts:
+            if hasattr(receipt, "to_dict"):
+                receipt_dicts.append(receipt.to_dict())
+            elif hasattr(receipt, "__dict__"):
+                receipt_dicts.append(dict(vars(receipt)))
+            elif isinstance(receipt, dict):
+                receipt_dicts.append(dict(receipt))
+        all_receipts_passed = bool(receipt_dicts) and all(
+            bool(item.get("gate_passed")) for item in receipt_dicts
+        )
+        terminal_outcome = (
+            "SUCCEEDED" if all_receipts_passed
+            else "FAILED" if receipt_dicts
+            else "UNVERIFIED"
+        )
+        learning_log = canonical_learning_episode_path(Path(self.project_root))
+        episode = normalize_learning_episode(
+            task_id=str(raw_task_id),
+            attempt_id=str(context.get("attempt_id") or "router"),
+            action_id=decision_id,
+            source="skills_router",
+            terminal_outcome=terminal_outcome,
+            terminal_evidence={
+                "status": "SUCCESS" if receipt_dicts else "UNVERIFIED",
+                "receipt": bool(receipt_dicts),
+                "verifier_status": "pass" if all_receipts_passed else "failed" if receipt_dicts else "missing",
+            },
+            phase_receipts=receipt_dicts,
+            receipts=receipt_dicts,
+            retrieved_lesson_ids=tuple(context.get("retrieved_lesson_ids") or ()),
+            applied_lesson_ids=tuple(context.get("applied_lesson_ids") or ()),
+            learning_write_succeeded=True,
+            idempotency_key=str(context.get("idempotency_key") or ""),
+        )
+        episode_written = append_learning_episode(learning_log, episode)
+        if not episode_written:
+            logger.warning("[OutcomeMemory] canonical learning episode write failed; not a learning success")
         try:
-            learning_log = Path(self.project_root) / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
-            learning_log.parent.mkdir(parents=True, exist_ok=True)
-            with open(learning_log, "a", encoding="utf-8") as handle:
+            projection_log = Path(self.project_root) / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+            projection_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(projection_log, "a", encoding="utf-8") as handle:
                 for cap_receipt in receipts:
                     plan_id = getattr(plan, "plan_id", None) if not isinstance(plan, dict) else plan.get("plan_id")
                     task_id = getattr(plan, "task_id", None) if not isinstance(plan, dict) else plan.get("task_id")
                     row = {
+                        "episode_id": episode["episode_id"],
+                        "source_schema": episode["schema"],
                         "plan_id": plan_id,
                         "task_id": task_id,
                         "capability_name": cap_receipt.capability_name,
@@ -316,20 +367,12 @@ class SkillsRouter:
                     }
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         except Exception as e:
-            logger.debug("[OutcomeMemory] learning_closure writeback failed: %s", e)
+            logger.warning("[OutcomeMemory] learning_closure projection writeback failed: %s", e)
 
         # M1: Learning loop write endpoint — sync OutcomeMemoryManager after learning_closure
         if os.environ.get("NEXUS_LEARNING_LOOP_WRITE_ENABLED", "1") == "1":
             try:
                 from nexus.learning.outcome_memory import OutcomeMemoryManager, build_episode_from_receipts
-                raw_task_id = context.get("task_id") or ""
-                if not raw_task_id:
-                    if isinstance(plan, dict):
-                        raw_task_id = plan.get("task_id", "")
-                    elif plan:
-                        raw_task_id = getattr(plan, "task_id", "")
-                    else:
-                        raw_task_id = ""
                 ep_task_id = raw_task_id
                 episode = build_episode_from_receipts(
                     task_id=str(ep_task_id),
@@ -514,4 +557,3 @@ class SkillsRouter:
             "metrics": metrics,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-

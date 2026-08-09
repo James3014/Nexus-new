@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUCCESS_CLASSIFICATIONS = {"verifier_pass", "correct_abstain"}
+SUCCESS_CLASSIFICATIONS = {"verifier_pass"}
 
 
 def retrieve_successful_repair_patterns(
@@ -31,7 +31,13 @@ def retrieve_successful_repair_patterns(
 
     results: list[dict[str, Any]] = []
     try:
+        from nexus.learning.learning_episode_projection import project_learning_entries, semantic_projection_key
+    except Exception:
+        project_learning_entries = None
+        semantic_projection_key = None
+    try:
         with path.open("r", encoding="utf-8", errors="replace") as f:
+            rows = []
             for line in f:
                 line = line.strip()
                 if not line:
@@ -41,9 +47,21 @@ def retrieve_successful_repair_patterns(
                 except json.JSONDecodeError:
                     continue
 
+                rows.append(rec)
+            projected = project_learning_entries(rows) if project_learning_entries else []
+            eligible_keys = {row["projection_key"] for row in projected if row.get("retrieval_eligible") and row.get("pattern_type") == "verifier_pass"}
+            grouped: dict[str, dict[str, Any]] = {}
+            for rec in rows:
                 classification = rec.get("classification", "")
                 if classification not in SUCCESS_CLASSIFICATIONS:
                     continue
+                key = semantic_projection_key(rec) if semantic_projection_key else str(rec.get("lesson_id") or "")
+                if key not in eligible_keys or key in grouped:
+                    continue
+                grouped[key] = rec
+
+            for rec in grouped.values():
+                classification = rec.get("classification", "")
 
                 results.append({
                     "classification": classification,
@@ -51,14 +69,16 @@ def retrieve_successful_repair_patterns(
                     "task_id": str(rec.get("task_id", "")),
                     "lesson_id": str(rec.get("lesson_id", "")),
                     "provenance": str(rec.get("receipt_id", "") or rec.get("provenance", "")),
+                    "pattern_type": "success",
+                    "uplift_eligible": bool((rec.get("stages") or {}).get("outcome_uplift_observed", False)),
                 })
-
-                if len(results) >= limit:
-                    break
     except (OSError, IOError):
         return []
 
-    return results
+    if query_hint:
+        tokens = {token for token in query_hint.lower().split() if token}
+        results.sort(key=lambda row: sum(token in row["summary"].lower() for token in tokens), reverse=True)
+    return results[:limit]
 
 
 def format_research_patterns_for_prompt(

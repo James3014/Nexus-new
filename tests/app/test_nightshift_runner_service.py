@@ -131,3 +131,15 @@ def test_nightshift_unified_request_uses_gateway_provider(tmp_path: Path):
     assert seen["provider"] == "codex"
     assert response["patch"] == "value = 2\n"
     assert raw == "raw"
+
+
+def test_nightshift_persists_canonical_episode_without_memory_store(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("nexus.research.learn_mode.LearnModeService.ask", lambda *_args, **_kwargs: {"citations": []})
+    runner = AutoResearchNightShift(project_root=tmp_path, task="episode nightshift")
+    runner.memory_store = None
+    closure = runner._persist_learning_closure("FAILED", "tier2", 0.0)
+    assert closure["learning_episode_status"] == "PASS"
+    ledger = tmp_path / ".nexus" / "memory" / "learning_episodes.jsonl"
+    assert ledger.exists()
+    runner._persist_learning_closure("FAILED", "tier2", 0.0)
+    assert len(ledger.read_text(encoding="utf-8").splitlines()) == 1

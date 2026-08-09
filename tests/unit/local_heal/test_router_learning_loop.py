@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from nexus.core.router import SkillsRouter
 
@@ -123,3 +124,61 @@ def test_router_existing_learning_closure_unchanged(tmp_path: Path):
                 assert len(lines) == 2  # existing + new
                 last_row = json.loads(lines[-1])
                 assert last_row["capability_name"] == "cap_b"
+
+
+def test_router_empty_receipts_are_unverified_not_success(tmp_path: Path):
+    router = _setup_router(tmp_path)
+    context = {"task_id": "t-empty", "task_desc": "no receipt"}
+    with patch(SELECTOR_PATH) as MockSel:
+        MockSel.return_value.select_capabilities.return_value = _MockPlan()
+        with patch(EXECUTOR_PATH) as MockCtrl:
+            MockCtrl.return_value.execute_plan.return_value = []
+            with patch(OUTCOME_PATH):
+                router.route_candidates("R", context)
+    ledger = tmp_path / ".nexus" / "memory" / "learning_episodes.jsonl"
+    episode = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
+    assert episode["terminal_outcome"] == "UNVERIFIED"
+    assert episode["stages"]["outcome_measured"] is False
+
+
+def test_localheal_adoption_requires_patch_and_verifier_receipts():
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
+    from nexus.services.local_heal.memory_trace import MemoryTrace
+
+    orchestrator = HealOrchestrator.__new__(HealOrchestrator)
+    ctx = SimpleNamespace(op=SimpleNamespace(
+        _memory_influence_trace=MemoryTrace(
+            trace_status="TRACE_AVAILABLE",
+            prompt_included=True,
+            memory_evidence_ids=["lesson-1"],
+        ),
+        applied_patch_hash="patch-hash",
+        selected_candidate_hash_matches_applied=True,
+        verifier_receipt=SimpleNamespace(verifier_status="pass", receipt_id="verifier-1"),
+        patch_receipt_path="patch-1",
+    ))
+
+    orchestrator._record_authoritative_memory_adoption(ctx)
+
+    assert ctx.op.applied_lesson_ids == ["lesson-1"]
+    assert ctx.op.applied_lesson_attribution["lesson-1"]["verifier_receipt"] == "verifier-1"
+
+
+def test_localheal_adoption_fails_closed_without_receipts():
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
+    from nexus.services.local_heal.memory_trace import MemoryTrace
+
+    orchestrator = HealOrchestrator.__new__(HealOrchestrator)
+    ctx = SimpleNamespace(op=SimpleNamespace(
+        _memory_influence_trace=MemoryTrace(
+            trace_status="TRACE_AVAILABLE",
+            prompt_included=True,
+            memory_evidence_ids=["lesson-1"],
+        ),
+        solve_eligible=True,
+    ))
+
+    orchestrator._record_authoritative_memory_adoption(ctx)
+
+    assert ctx.op.applied_lesson_ids == []
+    assert ctx.op.applied_lesson_attribution == {}

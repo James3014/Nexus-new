@@ -16,6 +16,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+_QUALIFICATION = {
+    "repeatability": True,
+    "prevention_rule": "verified repair rule",
+    "authority_qualification": True,
+}
+
 
 class TestRepairPatternRetrieval:
     """Repair pattern adapter should retrieve only success patterns."""
@@ -34,6 +40,10 @@ class TestRepairPatternRetrieval:
                 "summary": "SEARCH must be exact verbatim copy",
                 "task_id": "task-1",
                 "lesson_id": "lh-001",
+                "terminal_outcome": "SUCCEEDED",
+                "terminal_evidence": {"receipt": "receipt://task-1"},
+                "qualification_status": "QUALIFIED",
+                "qualification": _QUALIFICATION,
             }, f)
             f.write("\n")
             json.dump({
@@ -89,8 +99,44 @@ class TestRepairPatternRetrieval:
             path = f.name
 
         patterns = retrieve_successful_repair_patterns(path, limit=5)
-        assert len(patterns) == 1
-        assert patterns[0]["classification"] == "correct_abstain"
+        assert patterns == []
+
+    def test_verifier_pass_requires_evidence_and_qualified_terminal(self):
+        from nexus.services.local_heal.repair_pattern_retrieval import retrieve_successful_repair_patterns
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            json.dump({
+                "classification": "verifier_pass",
+                "summary": "no evidence",
+                "task_id": "task-no-evidence",
+                "lesson_id": "random",
+                "terminal_outcome": "SUCCEEDED",
+            }, f)
+            f.write("\n")
+            f.flush()
+            path = f.name
+        assert retrieve_successful_repair_patterns(path, limit=5) == []
+
+    def test_query_hint_prioritizes_matching_summary(self):
+        from nexus.services.local_heal.repair_pattern_retrieval import retrieve_successful_repair_patterns
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            for idx, summary in enumerate(("unrelated pattern", "target exact pattern")):
+                json.dump({
+                    "classification": "verifier_pass",
+                    "summary": summary,
+                    "task_id": f"task-{idx}",
+                    "lesson_id": f"lesson-{idx}",
+                    "terminal_outcome": "SUCCEEDED",
+                    "terminal_evidence": {"receipt": f"receipt://task-{idx}"},
+                    "qualification_status": "QUALIFIED",
+                    "qualification": _QUALIFICATION,
+                }, f)
+                f.write("\n")
+            f.flush()
+            path = f.name
+        patterns = retrieve_successful_repair_patterns(path, limit=2, query_hint="target")
+        assert patterns[0]["summary"] == "target exact pattern"
 
     def test_pattern_bounded_size(self):
         """
@@ -107,6 +153,10 @@ class TestRepairPatternRetrieval:
                     "summary": f"Pattern {i}",
                     "task_id": f"task-{i}",
                     "lesson_id": f"lh-{i}",
+                    "terminal_outcome": "SUCCEEDED",
+                    "terminal_evidence": {"receipt": f"receipt://task-{i}"},
+                    "qualification_status": "QUALIFIED",
+                    "qualification": _QUALIFICATION,
                 }, f)
                 f.write("\n")
             f.flush()

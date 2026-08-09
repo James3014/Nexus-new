@@ -17,6 +17,7 @@ class RetrievedLesson:
     source: str
     pattern_type: str
     task_id: str = ""
+    occurrence_count: int = 1
 
     @property
     def scoring_delta(self) -> float:
@@ -44,12 +45,31 @@ class LocalJsonlLessonStore:
         if not self.path.exists():
             return []
         tokens = {token for token in query_text.lower().replace("_", " ").split() if len(token) >= 3}
-        rows: list[tuple[float, dict[str, Any]]] = []
+        raw_rows: list[dict[str, Any]] = []
         for line in self.path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if isinstance(item, dict):
+                raw_rows.append(item)
+        try:
+            from nexus.learning.learning_episode_projection import project_learning_entries, semantic_projection_key
+            projected = project_learning_entries(raw_rows)
+        except Exception:
+            return []
+        representatives: dict[str, dict[str, Any]] = {}
+        for item in raw_rows:
+            key = semantic_projection_key(item) if semantic_projection_key else str(item.get("lesson_id") or item.get("task_id") or "")
+            representatives.setdefault(key, item)
+        rows: list[tuple[float, dict[str, Any]]] = []
+        for projection in projected:
+            if not projection.get("retrieval_eligible", False) and projection.get("pattern_type") == "verifier_pass":
+                continue
+            key = str(projection.get("projection_key") or "")
+            item = dict(representatives.get(key) or projection)
+            item["occurrence_count"] = int(projection.get("occurrence_count", 1) or 1)
+            item["projection_key"] = key
             text = " ".join(str(item.get(key, "")) for key in ("lesson_id", "task_id", "classification", "summary", "source"))
             lowered = text.lower().replace("_", " ")
             overlap = sum(1 for token in tokens if token in lowered)
@@ -268,20 +288,55 @@ class MemoryRetrievalAdapter:
             return []
 
         lessons: list[RetrievedLesson] = []
-        seen: set[tuple[str, str]] = set()
+        try:
+            from nexus.learning.learning_episode_projection import project_learning_entries, semantic_projection_key
+            projection_by_key = {
+                row["projection_key"]: row for row in project_learning_entries(raw_rows)
+            }
+        except Exception as exc:
+            self.last_metadata["status"] = "projection_failed"
+            self.last_metadata["failure_reason"] = exc.__class__.__name__
+            self.last_metadata["no_memory_match"] = True
+            return []
+        representatives: dict[str, dict[str, Any]] = {}
         for row in raw_rows:
+            key = semantic_projection_key(row)
+            representatives.setdefault(key, row)
+
+        seen_legacy: set[tuple[str, str]] = set()
+        for key, projection in projection_by_key.items():
+            if projection.get("pattern_type") == "verifier_pass" and not projection.get("retrieval_eligible", False):
+                continue
+            row = dict(representatives.get(key) or projection)
+            occurrence_count = int(projection.get("occurrence_count", 1) or 1)
             provenance = str(row.get("provenance") or row.get("receipt_id") or row.get("evidence_ref") or "").strip()
             if not provenance:
                 self.last_metadata["rejected_without_provenance"] += 1
                 continue
+            if provenance == "receipt:pending":
+                terminal_evidence = row.get("terminal_evidence")
+                evidence_provenance = (
+                    terminal_evidence.get("receipt") or terminal_evidence.get("verifier")
+                    if isinstance(terminal_evidence, dict)
+                    else ""
+                )
+                if not evidence_provenance:
+                    self.last_metadata["rejected_without_provenance"] += 1
+                    continue
+                provenance = str(evidence_provenance)
             finding_id = str(row.get("lesson_id") or row.get("finding_id") or row.get("id") or row.get("task_id") or "lesson")
-            summary = str(row.get("summary") or row.get("lesson") or row.get("body") or row.get("content") or "")
-            fingerprint = (finding_id, provenance)
-            if fingerprint in seen:
+            legacy_key = (finding_id, provenance)
+            if legacy_key in seen_legacy:
                 continue
-            seen.add(fingerprint)
+            seen_legacy.add(legacy_key)
+            summary = str(row.get("summary") or row.get("lesson") or row.get("body") or row.get("content") or "")
             classification = str(row.get("classification") or row.get("pattern_type") or "").lower()
-            pattern_type = "failure" if any(token in classification for token in ("fail", "unsupported", "gap", "owner")) else "success"
+            if classification in {"correct_abstain", "abstain"}:
+                pattern_type = "abstain"
+            elif any(token in classification for token in ("fail", "unsupported", "gap", "owner")):
+                pattern_type = "failure"
+            else:
+                pattern_type = "success"
             lessons.append(
                 RetrievedLesson(
                     finding_id=finding_id,
@@ -291,6 +346,7 @@ class MemoryRetrievalAdapter:
                     source=str(row.get("source") or self.last_metadata["source"]),
                     pattern_type=pattern_type,
                     task_id=str(row.get("task_id") or ""),
+                    occurrence_count=occurrence_count,
                 )
             )
 
@@ -412,6 +468,7 @@ class MemoryRetrievalAdapter:
                     source=lesson.source,
                     pattern_type=lesson.pattern_type,
                     task_id=lesson.task_id,
+                    occurrence_count=lesson.occurrence_count,
                 )
             )
 

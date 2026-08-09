@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 
 LEARNING_EXPERIENCE_SCHEMA_VERSION = "nexus_learning_experience.v1"
 RUNTIME_LEARNING_CLOSURE_SCHEMA = "nexus.runtime_learning_closure.v1"
+NEXUS_LEARNING_EPISODE_SCHEMA = "nexus.learning_episode.v1"
 RUNTIME_LEARNING_PHASE_CHAIN = ("S", "P", "D", "X", "R", "A", "C")
 PHASE_CHAIN = ("S", "P", "X", "D", "R", "A", "C")
 HIGH_COST_CAPABILITIES = {
@@ -140,6 +142,20 @@ def build_runtime_learning_closure(
 
     disposition = str(lesson_disposition or "shadow")
     write_ok = bool(learning_write_succeeded)
+    canonical = build_nexus_learning_episode(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        action_id=action_id,
+        source="runtime_closure",
+        terminal_outcome=outcome,
+        terminal_evidence=terminal_evidence,
+        phase_receipts=phase_receipts,
+        retrieved_lesson_ids=retrieved_lesson_ids,
+        applied_lesson_ids=applied_lesson_ids,
+        qualification=qualification,
+        lesson_disposition=disposition,
+        learning_write_succeeded=write_ok,
+    )
     episode = {
         "schema": RUNTIME_LEARNING_CLOSURE_SCHEMA,
         "task_id": str(task_id),
@@ -152,16 +168,136 @@ def build_runtime_learning_closure(
         "terminal_evidence": dict(terminal_evidence or {}),
         "uncertain_mutation": bool(uncertain_mutation),
         "auto_replay_allowed": False,
-        "retrieved_lesson_ids": [str(item) for item in retrieved_lesson_ids],
-        "applied_lesson_ids": [str(item) for item in applied_lesson_ids],
+        "retrieved_lesson_ids": list(canonical["retrieved_lesson_ids"]),
+        "applied_lesson_ids": list(canonical["applied_lesson_ids"]),
         "lesson_disposition": disposition,
         "qualification": dict(qualification or {}),
         "learning_write_succeeded": write_ok,
         "primary_task_success": bool(primary_task_success and write_ok),
         "learning_blocker": "" if write_ok else "LEARNING_WRITE_FAILED",
+        "episode_id": canonical["episode_id"],
+        "idempotency_key": canonical["idempotency_key"],
+        "source_schema": NEXUS_LEARNING_EPISODE_SCHEMA,
+        "stages": canonical["stages"],
+        "qualification_status": canonical["qualification_status"],
+        "outcome_uplift_observed": canonical["stages"]["outcome_uplift_observed"],
     }
     validate_runtime_learning_closure(episode)
     return episode
+
+
+def build_nexus_learning_episode(
+    *,
+    task_id: str,
+    attempt_id: str = "",
+    action_id: str = "",
+    source: str = "unknown",
+    terminal_outcome: str = "UNVERIFIED",
+    terminal_evidence: dict[str, Any] | None = None,
+    phase_receipts: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    receipts: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    retrieved_lesson_ids: list[str] | tuple[str, ...] = (),
+    applied_lesson_ids: list[str] | tuple[str, ...] = (),
+    qualification: dict[str, Any] | None = None,
+    lesson_disposition: str = "shadow",
+    learning_write_succeeded: bool = True,
+    idempotency_key: str = "",
+) -> dict[str, Any]:
+    """Normalize every Nexus producer into one evidence-gated episode envelope."""
+    task = str(task_id or "unknown")
+    attempt = str(attempt_id or "")
+    action = str(action_id or "")
+    producer = str(source or "unknown")
+    identity = idempotency_key or f"{task}:{attempt}:{action}:{producer}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    evidence = dict(terminal_evidence or {})
+    phase = [dict(item) for item in phase_receipts if isinstance(item, dict)]
+    raw_receipts = [dict(item) for item in receipts if isinstance(item, dict)]
+    retrieved = sorted({str(item) for item in retrieved_lesson_ids if str(item)})
+    # Adoption is only attributable to lessons that were actually retrieved.
+    applied = sorted({str(item) for item in applied_lesson_ids if str(item)} & set(retrieved))
+    verifier_status = str(evidence.get("verifier_status") or "").strip().lower()
+    has_outcome_evidence = bool(evidence) and bool(
+        evidence.get("verifier") or evidence.get("receipt") or evidence.get("paired_verifier")
+        or (verifier_status and verifier_status not in {"missing", "unverified", "unknown"})
+        # A generic status is not verifier evidence; producers must identify
+        # the verifier/receipt that measured the terminal outcome.
+    )
+    qual = dict(qualification or {})
+    qualified = bool(
+        has_outcome_evidence and qual.get("repeatability") and qual.get("prevention_rule")
+        and qual.get("authority_qualification")
+    )
+    outcome_measured = has_outcome_evidence and str(terminal_outcome).upper() in {
+        "SUCCEEDED", "SUCCESS", "FAILED", "CANCELLED", "BLOCKED", "REJECTED"
+    }
+    stages = {
+        "recorded": bool(learning_write_succeeded),
+        "retrieved": bool(retrieved),
+        "applied": bool(applied),
+        "outcome_measured": outcome_measured,
+        "outcome_uplift_observed": bool(qualified and paired_memory_uplift_observed(evidence)),
+    }
+    episode = {
+        "schema": NEXUS_LEARNING_EPISODE_SCHEMA,
+        "source_schema": NEXUS_LEARNING_EPISODE_SCHEMA,
+        "episode_id": f"lep:{digest}",
+        "idempotency_key": identity,
+        "task_id": task,
+        "attempt_id": attempt,
+        "action_id": action,
+        "producer": producer,
+        "terminal_outcome": str(terminal_outcome or "UNVERIFIED").upper(),
+        "terminal_evidence": evidence,
+        "phase_receipts": phase,
+        "receipts": raw_receipts,
+        "retrieved_lesson_ids": retrieved,
+        "applied_lesson_ids": applied,
+        "qualification": qual,
+        "qualification_status": "QUALIFIED" if qualified else "UNQUALIFIED",
+        "lesson_disposition": str(lesson_disposition or "shadow"),
+        "stages": stages,
+        "auto_replay_allowed": False,
+        "learning_write_succeeded": bool(learning_write_succeeded),
+    }
+    validate_nexus_learning_episode(episode)
+    return episode
+
+
+def validate_nexus_learning_episode(episode: dict[str, Any]) -> None:
+    required = ("schema", "source_schema", "episode_id", "idempotency_key", "task_id", "producer", "terminal_evidence", "stages")
+    missing = [name for name in required if name not in episode]
+    if missing:
+        raise ValueError(f"NEXUS_LEARNING_EPISODE_INCOMPLETE:{','.join(missing)}")
+    if episode.get("schema") != NEXUS_LEARNING_EPISODE_SCHEMA:
+        raise ValueError("NEXUS_LEARNING_EPISODE_SCHEMA_INVALID")
+    if episode.get("auto_replay_allowed") is not False:
+        raise ValueError("NEXUS_LEARNING_EPISODE_AUTO_REPLAY_FORBIDDEN")
+    stages = episode.get("stages") or {}
+    if stages.get("outcome_uplift_observed") and not stages.get("outcome_measured"):
+        raise ValueError("NEXUS_LEARNING_EPISODE_UPLIFT_WITHOUT_OUTCOME")
+    if episode.get("qualification_status") == "QUALIFIED" and not stages.get("outcome_measured"):
+        raise ValueError("NEXUS_LEARNING_EPISODE_QUALIFICATION_WITHOUT_EVIDENCE")
+
+
+def paired_memory_uplift_observed(evidence: dict[str, Any]) -> bool:
+    """Require a true memory_off/on paired verifier before claiming uplift."""
+    pair = evidence.get("paired_verifier") if isinstance(evidence.get("paired_verifier"), dict) else evidence
+    off = pair.get("memory_off") if isinstance(pair.get("memory_off"), dict) else {}
+    on = pair.get("memory_on") if isinstance(pair.get("memory_on"), dict) else {}
+    fingerprint = str(pair.get("task_fingerprint") or pair.get("task_id") or "")
+    off_fp = str(off.get("task_fingerprint") or off.get("task_id") or fingerprint)
+    on_fp = str(on.get("task_fingerprint") or on.get("task_id") or fingerprint)
+    if not fingerprint or off_fp != fingerprint or on_fp != fingerprint:
+        return False
+    off_status = str(off.get("verifier_status") or off.get("status") or "").lower()
+    on_status = str(on.get("verifier_status") or on.get("status") or "").lower()
+    if off_status not in {"failed", "fail", "blocked", "rejected"} or on_status not in {"passed", "pass", "success", "succeeded"}:
+        return False
+    return bool(
+        (off.get("artifact") or off.get("artifact_ref") or off.get("receipt"))
+        and (on.get("artifact") or on.get("artifact_ref") or on.get("receipt"))
+    )
 
 
 def validate_runtime_learning_closure(episode: dict[str, Any]) -> None:

@@ -156,3 +156,95 @@ def test_learning_writeback_disabled_is_stable_and_does_not_write(monkeypatch) -
             assert {key: evidence[key] for key in expected} == expected
         assert not path.exists()
         assert not hasattr(ctx, "outcome_memory_writeback")
+
+
+def test_learning_episode_preserves_receipts_and_rejects_unattributed_applied(tmp_path):
+    op = SimpleNamespace(
+        instance_id="task-episode",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        idempotency_key="idem-episode",
+        terminal_outcome="SUCCEEDED",
+        solve_eligible=True,
+        failure_reason="",
+        receipt_path="receipt://verifier",
+        retrieved_lesson_ids=["lesson-1"],
+        applied_lesson_ids=["lesson-1"],
+        capability_receipts=[{"name": "repair_loop", "selected": True, "invoked": True, "evidence_present": True}],
+    )
+    result = LearningClosureBridge(path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False).write_lesson(SimpleNamespace(op=op))
+    assert result["schema"] == "nexus.local_heal.learning_closure.v1"
+    assert result["source_schema"] == "nexus.learning_episode.v1"
+    assert result["capability_receipts"]
+    assert result["retrieved_lesson_ids"] == ["lesson-1"]
+    assert result["applied_lesson_ids"] == []
+    assert result["idempotency_key"] == "idem-episode"
+
+
+def test_learning_episode_write_is_idempotent(tmp_path):
+    op = SimpleNamespace(
+        instance_id="task-idem",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        idempotency_key="idem-fixed",
+        terminal_outcome="FAILED",
+        failure_reason="verifier failed",
+        receipt_path="receipt://verifier",
+        capability_receipts=[{"name": "repair_loop", "selected": True}],
+    )
+    bridge = LearningClosureBridge(path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False)
+    first = bridge.write_lesson(SimpleNamespace(op=op))
+    second = bridge.write_lesson(SimpleNamespace(op=op))
+    assert first["episode_id"] == second["episode_id"]
+    ledger = tmp_path / ".nexus" / "memory" / "learning_episodes.jsonl"
+    assert len(ledger.read_text().splitlines()) == 1
+
+
+def test_candidate_projection_is_idempotent(tmp_path):
+    op = SimpleNamespace(
+        instance_id="task-candidate-idem",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        idempotency_key="candidate-idem",
+    )
+    bridge = LearningClosureBridge(
+        path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False
+    )
+    candidate = _candidate()
+    first = bridge.write_envelope_lesson(op, candidate, True, "policy", "pass")
+    second = bridge.write_envelope_lesson(op, candidate, True, "policy", "pass")
+    assert first["episode_id"] == second["episode_id"]
+    assert len((tmp_path / "closure.jsonl").read_text().splitlines()) == 1
+
+
+def test_canonical_ledger_failure_is_explicit_and_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "nexus.learning.learning_closure_effectiveness.append_learning_episode",
+        lambda path, episode: False,
+    )
+    op = SimpleNamespace(instance_id="task-ledger-fail", failure_reason="parser")
+    result = LearningClosureBridge(path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False).write_lesson(op)
+    assert result["learning_write_succeeded"] is False
+    assert result["learning_write_status"] == "canonical_ledger_write_failed"
+    assert result["learning_blocker"] == "canonical_ledger_write_failed"
+
+
+def test_learning_closure_does_not_project_outcome_memory_after_canonical_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "nexus.learning.learning_closure_effectiveness.append_learning_episode",
+        lambda path, episode: False,
+    )
+    monkeypatch.setattr(
+        "nexus.learning.outcome_memory.OutcomeMemoryManager.save_episode_and_tune_sync",
+        lambda *args, **kwargs: pytest.fail("outcome memory must not outrun canonical ledger"),
+    )
+    op = SimpleNamespace(instance_id="task-ledger-fail", failure_reason="parser")
+    bridge = LearningClosureBridge(
+        path=tmp_path / "closure.jsonl", project_root=tmp_path, enable_findings=False
+    )
+
+    result = write_learning_closure(op, bridge)
+
+    assert result["writeback_status"] == "failed_non_blocking"
+    assert result["learning_write_succeeded"] is False
+    assert result["outcome_memory_writeback"] == "skipped"

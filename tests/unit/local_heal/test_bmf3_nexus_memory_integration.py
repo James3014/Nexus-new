@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from nexus.research.findings_vector_sync import MemoryRepositoryFindingsVectorSync
@@ -18,6 +19,12 @@ from nexus.services.local_heal.memory_trace import MemoryTrace, build_memory_tra
 from nexus.services.local_heal.native_evidence_packet import NativeEvidencePacketBuilder
 from nexus.services.local_heal.orchestrator import HealOrchestrator
 from nexus.services.local_heal.receipt import _extract_memory_trace
+
+_QUALIFICATION = {
+    "repeatability": True,
+    "prevention_rule": "verified repair rule",
+    "authority_qualification": True,
+}
 
 
 class FakeStore:
@@ -84,7 +91,10 @@ def test_local_jsonl_store_reads_existing_learning_closure_rows(tmp_path):
     path = tmp_path / "learning_closure.jsonl"
     path.write_text(
         '{"lesson_id":"lh-jsonl","task_id":"C_1","classification":"verifier_pass",'
-        '"summary":"format output owner","provenance":"receipt:jsonl"}\n',
+        '"summary":"format output owner","provenance":"receipt:jsonl",'
+        '"terminal_outcome":"SUCCEEDED","terminal_evidence":{"receipt":"receipt:jsonl"},'
+        '"qualification_status":"QUALIFIED","qualification":{"repeatability":true,'
+        '"prevention_rule":"verified repair rule","authority_qualification":true}}\n',
         encoding="utf-8",
     )
     store = LocalJsonlLessonStore(path)
@@ -108,6 +118,65 @@ def test_memory_adapter_deduplicates_across_sources():
     lessons = adapter.retrieve(query_text="same", limit=5)
 
     assert [lesson.finding_id for lesson in lessons] == ["dup-1"]
+
+
+def test_memory_adapter_semantic_dedupe_ignores_random_ids_and_pending_receipts():
+    adapter = MemoryRetrievalAdapter(
+        NexusCompositeLessonStore([
+            FakeStore([
+                {"lesson_id": "random-a", "task_id": "task-1", "classification": "verifier_pass", "summary": "same repair pattern", "provenance": "receipt:pending", "terminal_outcome": "SUCCEEDED", "terminal_evidence": {"receipt": "receipt:valid"}, "qualification_status": "QUALIFIED", "qualification": _QUALIFICATION},
+                {"lesson_id": "random-b", "task_id": "task-1", "classification": "verifier_pass", "summary": "same repair pattern", "provenance": "receipt:pending", "terminal_outcome": "SUCCEEDED", "terminal_evidence": {"receipt": "receipt:valid"}, "qualification_status": "QUALIFIED", "qualification": _QUALIFICATION},
+            ])
+        ])
+    )
+    lessons = adapter.retrieve(query_text="same repair", limit=5)
+    assert len(lessons) == 1
+    assert lessons[0].occurrence_count == 2
+    assert lessons[0].provenance == "receipt:valid"
+
+
+def test_memory_adapter_rejects_pending_receipts_without_terminal_evidence():
+    adapter = MemoryRetrievalAdapter(
+        NexusCompositeLessonStore([
+            FakeStore([
+                {
+                    "lesson_id": "random-pending",
+                    "task_id": "task-pending",
+                    "classification": "verifier_pass",
+                    "summary": "unqualified repair",
+                    "provenance": "receipt:pending",
+                }
+            ])
+        ])
+    )
+
+    assert adapter.retrieve(query_text="unqualified repair", limit=5) == []
+
+
+def test_local_jsonl_projection_preserves_occurrence_count_through_adapter(tmp_path):
+    path = tmp_path / "learning_closure.jsonl"
+    rows = [
+        {
+            "lesson_id": f"random-{index}",
+            "task_id": "task-jsonl-dedupe",
+            "classification": "verifier_pass",
+            "summary": "same qualified repair",
+            "provenance": "receipt:verified",
+            "terminal_outcome": "SUCCEEDED",
+            "terminal_evidence": {"receipt": "receipt:verified"},
+            "qualification_status": "QUALIFIED",
+            "qualification": _QUALIFICATION,
+        }
+        for index in range(2)
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    lessons = MemoryRetrievalAdapter(LocalJsonlLessonStore(path)).retrieve(
+        query_text="same qualified repair", limit=5
+    )
+
+    assert len(lessons) == 1
+    assert lessons[0].occurrence_count == 2
 
 
 def test_memory_repository_lesson_store_is_fail_open():
