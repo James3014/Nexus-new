@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: github-issue-34-crosswalk-consumption
 campaign_id: github-issue-34-crosswalk-consumption-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/34
@@ -87,6 +87,19 @@ Maximum changed files: 4.
 Maximum claim: the canonical Wiki coverage surface consumes and reports the
 deterministic OpenWiki authority crosswalk. It does not make OpenWiki
 authoritative and does not prove all documentation is complete.
+
+## Completion receipt
+
+- Authority card SHA-256 before mutation:
+  `9d3bcc4be594c86d9b4675e71136264f8ce1882b5df64e9da1ad44db32b8e58b`.
+- Implementation commit: `a96e9180a`.
+- Exact card suite: 44 passed.
+- Ruff check and format check: passed.
+- `git diff --check`: passed.
+- Independent review: ACCEPT; no P0/P1 findings after the caller-controlled
+  canonical-report bypass was removed and covered by regression.
+- Scope: exactly the two implementation files plus this campaign's two Task
+  Card files; no deletions or forbidden drift/compiler/manifest mutation.
 
 ## Block classification
 
