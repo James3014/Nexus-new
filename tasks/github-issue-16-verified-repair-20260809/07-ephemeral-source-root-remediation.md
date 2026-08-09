@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: issue16-g4b-ephemeral-source-root
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
@@ -54,6 +54,23 @@ The default path rejects a source under `/tmp`, `/private/tmp`, or another
 existing Armor ephemeral marker before copying. The existing explicit
 allowance permits bounded test/rehearsal fixtures. Both behaviors are tested
 without relying on platform-specific pytest temp paths.
+
+## Completion receipt
+
+- exact implementation commit:
+  `d118833eafae427a852b26156c62c90dcaec849c`
+- parent: `f6d6f95c0788c77350c0411ebb5e8de079ede50d`
+- independent exact-commit review: `ACCEPT`
+- focused World-C receipt verification: `32 passed`
+- Issue #16 campaign union: `180 passed`
+- changed-file Ruff check and preview-format check: passed
+- changed-file Pyright: `0 errors`
+- `git diff --check`: passed
+- security result: ephemeral World-C source roots fail closed by default; only
+  the existing explicit `NEXUS_ARMOR_ALLOW_EPHEMERAL` test/rehearsal allowance
+  permits them
+- scope result: implementation/test changes confined to the two allowed files;
+  no authority surface was widened
 
 ## Block classification
 

@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: completed
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
 ordered_cards:
@@ -12,8 +12,8 @@ ordered_cards:
   - 05-risk-triggered-mutation-assurance.md
   - 06-false-green-verified-repair.md
   - 07-ephemeral-source-root-remediation.md
-current_frontier: 07-ephemeral-source-root-remediation.md
-frontier_status: ACTIVE
+current_frontier: null
+frontier_status: COMPLETED
 completed_cards:
   - 01-physical-reproduction-provenance.md
   - 02-frozen-same-oracle.md
@@ -21,6 +21,7 @@ completed_cards:
   - 04-world-c-adequacy-projection.md
   - 05-risk-triggered-mutation-assurance.md
   - 06-false-green-verified-repair.md
+  - 07-ephemeral-source-root-remediation.md
 blocked_cards: []
 AUTO_CHAIN: false
 ---
@@ -69,3 +70,12 @@ review, 13 focused tests, 175 campaign-union tests, adversarial provenance
 checks, and fixed calibration with all five known-wrong repairs rejected.
 
 Campaign terminal status: `VERIFIED_REPAIR_GATES_IMPLEMENTED`.
+
+Current G4b card SHA-256:
+`6cc811047d8dfede010c5a9368bdc2be3ad87a8f26b240449683b8c1905cdb1e`.
+
+G4b completed at exact implementation commit
+`d118833eafae427a852b26156c62c90dcaec849c` after independent exact-commit
+review, 32 focused tests, 180 campaign-union tests, Ruff, Pyright, and the
+Linux `/tmp` impact regression. The campaign is terminal with the ephemeral
+World-C source-root false green closed fail-closed.
