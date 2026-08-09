@@ -24,6 +24,10 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     UnifiedMCPGateway,
     _compile_agy_command,
 )
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader  # noqa: E402
+from nexus.services.runtime_workforce_admission import (  # noqa: E402
+    evaluate_runtime_workforce_admission,
+)
 
 
 class FakeService:
@@ -133,6 +137,42 @@ def _ready_preflight(**overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def _valid_local_dispatch():
+    demands = {
+        "schema": "nexus.workforce_demands.v1", "route_authority": "CapabilityPlanner",
+        "demands": [{
+            "schema": "nexus.workforce_demand.v1", "demand_id": "gateway-dispatch-1",
+            "execution_channel": "local", "requested_role": "bounded_code_candidate",
+            "minimum_autonomy": "L1", "context_class": "nexus_bounded", "mutation_intent": True,
+            "external_verification_required": True, "route_authority": "CapabilityPlanner",
+        }],
+    }
+    admission = evaluate_runtime_workforce_admission(
+        demands,
+        {"local": {"worker_id": "local_coder_7b", "provider": "ollama", "model": "qwen2.5-coder:7b-instruct", "controls": ["focused_tests", "compile", "parser", "small_scope", "reversible_application"]}},
+        WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
+    ).to_dict()
+    return demands, admission
+
+
+def _valid_online_agy_dispatch():
+    demands = {
+        "schema": "nexus.workforce_demands.v1", "route_authority": "CapabilityPlanner",
+        "demands": [{
+            "schema": "nexus.workforce_demand.v1", "demand_id": "gateway-online-agy-1",
+            "execution_channel": "online", "requested_role": "fast_bounded_implementation",
+            "minimum_autonomy": "L1", "context_class": "nexus_bounded", "mutation_intent": True,
+            "external_verification_required": True, "route_authority": "CapabilityPlanner",
+        }],
+    }
+    admission = evaluate_runtime_workforce_admission(
+        demands,
+        {"online": {"worker_id": "agy_flash", "provider": "agy", "model": "gemini-3.6-flash-high", "controls": ["task_card", "allowed_files", "mandatory_commands", "independent_verification"]}},
+        WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
+    ).to_dict()
+    return demands, admission
 
 
 def _patch_probe_version(monkeypatch):
@@ -264,6 +304,122 @@ def test_worker_candidate_forwards_owner_inline_task_run_once(monkeypatch):
     assert request["bound_action_request"]["protected_contracts"] == request["protected_contracts"]
 
 
+def test_worker_candidate_uses_planner_admission_identity_and_rejects_override(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    gateway_module = sys.modules["nexus.orchestrator.unified_mcp_gateway"]
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
+    demands, admission = _valid_local_dispatch()
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
+        provider="ollama", requested_model="qwen2.5-coder:7b-instruct", resolved_model="qwen2.5-coder:7b-instruct",
+    ))
+    arguments = {
+        "task_id": "governed-dispatch-1", "what": "bounded change", "why": "admitted dispatch",
+        "worker": "local_coder_7b", "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "workforce_demands": demands, "workforce_admission": admission,
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 801, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+    assert response["result"]["isError"] is False, response["result"].get("structuredContent")
+    request = service.submitted[0]
+    assert request["worker_id"] == "local_coder_7b"
+    assert request["provider"] == "ollama"
+    assert request["model"] == "qwen2.5-coder:7b-instruct"
+    assert request["workforce_admission"]["aggregate_binding_hash"] == admission["aggregate_binding_hash"]
+
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    arguments["worker"] = "different-worker"
+    response = gateway.handle({"jsonrpc": "2.0", "id": 802, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+    assert response["result"]["isError"] is True
+    assert "WORKFORCE_ADMISSION_WORKER_MISMATCH" in response["result"]["structuredContent"]["error"]
+    assert service.submitted == []
+
+
+def test_worker_candidate_auto_dispatches_admitted_online_agy_end_to_end(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    gateway_module = sys.modules["nexus.orchestrator.unified_mcp_gateway"]
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
+    demands, admission = _valid_online_agy_dispatch()
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
+        provider="agy", requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+    ))
+    arguments = {
+        "task_id": "governed-online-agy-1", "what": "bounded online change", "why": "prove agy admission seam",
+        "worker": "auto", "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "workforce_demands": demands, "workforce_admission": admission,
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 803, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+    assert response["result"]["isError"] is False, response["result"].get("structuredContent")
+    request = service.submitted[0]
+    assert request["worker"] == "agy"
+    assert request["worker_id"] == "agy_flash"
+    assert request["provider"] == "agy"
+    assert request["model"] == "gemini-3.6-flash-high"
+    assert request["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert request["workforce_admission"]["aggregate_binding_hash"] == admission["aggregate_binding_hash"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("provider", "wrong-provider", "WORKER_PREFLIGHT_PROVIDER_MISMATCH"),
+        ("requested_model", "wrong-requested-model", "WORKER_PREFLIGHT_REQUESTED_MODEL_MISMATCH"),
+        ("resolved_model", "wrong-resolved-model", "WORKER_PREFLIGHT_RESOLVED_MODEL_MISMATCH"),
+    ],
+)
+def test_worker_candidate_rejects_preflight_identity_mismatch_before_submit(
+    monkeypatch, field, value, code,
+):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    demands, admission = _valid_online_agy_dispatch()
+    preflight = _ready_preflight(
+        provider="agy", requested_model="gemini-3.6-flash-high",
+        resolved_model="gemini-3.6-flash-high",
+    )
+    preflight[field] = value
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: preflight)
+    arguments = {
+        "task_id": f"governed-online-agy-preflight-{field}",
+        "what": "bounded online change", "why": "preflight identity gate",
+        "worker": "auto", "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "workforce_demands": demands, "workforce_admission": admission,
+    }
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 805, "method": "tools/call",
+        "params": {"name": "nexus_worker_candidate", "arguments": arguments},
+    })
+    assert response["result"]["isError"] is True
+    assert code in response["result"]["structuredContent"]["error"]
+    assert service.submitted == []
+
+
+def test_worker_candidate_quarantines_current_block_before_preflight_or_submit(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    demands, admission = _valid_online_agy_dispatch()
+    blocked = json.loads(json.dumps(admission))
+    blocked["overall_decision"] = "BLOCK"
+    monkeypatch.setattr(
+        gateway, "_provider_preflight",
+        lambda arguments: (_ for _ in ()).throw(AssertionError("quarantined dispatch must not preflight")),
+    )
+    arguments = {
+        "task_id": "governed-online-agy-blocked", "what": "blocked change", "why": "quarantine gate",
+        "worker": "auto", "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"], "owner_confirmation": True,
+        "workforce_demands": demands, "workforce_admission": blocked,
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 804, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
+    assert response["result"]["isError"] is True
+    assert "WORKFORCE_ADMISSION_BINDING_INVALID" in response["result"]["structuredContent"]["error"]
+    assert service.submitted == []
+
+
 def test_worker_candidate_rejects_owner_without_submit():
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
@@ -341,8 +497,13 @@ def test_worker_candidate_preserves_service_status(monkeypatch):
 
 
 def test_worker_candidate_rejects_bound_request_tamper():
+    from nexus.contracts.lifecycle_action import (
+        LifecycleActionType,
+        MutationDomain,
+        PermissionProfile,
+        build_action_envelope,
+    )
     from nexus.orchestrator.self_hosted_task_service import _validated_action_request
-    from nexus.contracts.lifecycle_action import LifecycleActionType, MutationDomain, PermissionProfile, build_action_envelope
     bound = {"task_id": "tamper-1", "attempt_id": "attempt-1", "action_id": "action-1", "idempotency_key": "idem-1", "action_type": "TASK_RUN", "contract_kind": "OWNER_INLINE", "controller_revision": "a" * 40, "allowed_files": ["README.md"]}
     action = build_action_envelope(task_id="tamper-1", action_type=LifecycleActionType.TASK_RUN, request=bound, tool_manifest_hash="b" * 64, expected_head="a" * 40, allowed_paths=["README.md"], mutation=True, contract_kind="OWNER_INLINE", contract_hash="c" * 64, permission_profile=PermissionProfile.MUTATE_BOUNDED, mutation_domain=MutationDomain.TARGET, attempt_id="attempt-1", action_id="action-1", idempotency_key="idem-1").model_dump(mode="json")
     bound["controller_revision"] = "d" * 40
@@ -666,8 +827,8 @@ def test_owner_inline_candidate_approval_uses_generic_contract_binding(monkeypat
 
 
 def test_owner_inline_gateway_bind_and_integrate_forward_nested_hash(monkeypatch):
-    from nexus.contracts.lifecycle_action import build_owner_inline_contract
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
+    from nexus.contracts.lifecycle_action import build_owner_inline_contract
 
     service = FakeService()
     inline = build_owner_inline_contract(
@@ -1116,6 +1277,7 @@ def test_version_verified_alone_never_authorizes_worker_execution():
     ready, blocker = gateway._provider_execution_ready(
         {
             "status": "VERSION_VERIFIED",
+            "provider": "agy",
             "model_reachable": True,
             "requested_model_verified": True,
             "authenticated": True,
