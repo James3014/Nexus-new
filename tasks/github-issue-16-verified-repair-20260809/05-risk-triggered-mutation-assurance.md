@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: PENDING_G4
+status: READY
 task_id: issue16-g5-mutation-assurance
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16

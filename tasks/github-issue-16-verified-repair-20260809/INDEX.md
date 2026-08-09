@@ -11,12 +11,13 @@ ordered_cards:
   - 04-world-c-adequacy-projection.md
   - 05-risk-triggered-mutation-assurance.md
   - 06-false-green-verified-repair.md
-current_frontier: 04-world-c-adequacy-projection.md
+current_frontier: 05-risk-triggered-mutation-assurance.md
 frontier_status: READY
 completed_cards:
   - 01-physical-reproduction-provenance.md
   - 02-frozen-same-oracle.md
   - 03-regression-suite-binding.md
+  - 04-world-c-adequacy-projection.md
 blocked_cards: []
 AUTO_CHAIN: false
 ---
@@ -40,3 +41,10 @@ review and verification.
 
 Current G4 card SHA-256:
 `f6f88cab2e1bae1018890e3ea3f35c9fdba7d08c7e8e12572f5bfe66b5a27b73`.
+
+G4 completed at exact implementation commit
+`d3690597a2f827dda2365c9576fd3abd606689b4` after exact-commit independent
+review and verification.
+
+Current G5 card SHA-256:
+`615a6f6ff87782ac1867d670c5ac08485fdd36e3115bfe9ff9f8839009430943`.

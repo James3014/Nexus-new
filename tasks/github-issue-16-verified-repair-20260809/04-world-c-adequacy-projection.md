@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: issue16-g4-world-c-adequacy
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
@@ -48,3 +48,11 @@ binding. `public_claim_allowed=false`. Maximum claim: bounded internal adequacy.
 ## Block classification
 
 `RECOVERABLE_BLOCK` for projection defects; `HARD_BLOCK` for receipt authority conflict.
+
+## Completion receipt
+
+- Implementation commit: `d3690597a2f827dda2365c9576fd3abd606689b4`
+- Exact-commit independent review: ACCEPT; no P0/P1 findings
+- G1-G4 suite: 137 passed; adversarial probes: 17 passed
+- Upstream receipt/hash/identity, RootReceipt, tamper, ephemeral-default,
+  public-claim, Ruff differential, diff, scope, and deletion gates passed
