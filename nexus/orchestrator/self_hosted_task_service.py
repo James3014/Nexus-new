@@ -76,6 +76,44 @@ TERMINAL_STATUSES = frozenset({
 PENDING_CANDIDATE_STATUSES = frozenset({
     "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
 })
+
+
+def resolve_contract_identity(
+    state: Mapping[str, Any],
+    *,
+    expected_task_id: str,
+    expected_head: Optional[str] = None,
+) -> dict[str, Any]:
+    """Resolve the approval identity while preserving the service contract hash."""
+    contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
+    task_card_hash = str(state.get("task_card_hash") or "").strip() or None
+    contract_hash = str(state.get("contract_hash") or "").strip() or task_card_hash
+    owner_inline_contract = (
+        state.get("owner_inline_contract")
+        if isinstance(state.get("owner_inline_contract"), Mapping)
+        else None
+    )
+    if contract_kind == ContractKind.OWNER_INLINE.value:
+        try:
+            owner_inline_contract = validate_owner_inline_contract(
+                owner_inline_contract or {},
+                expected_task_id=expected_task_id,
+                expected_head=expected_head,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "CONTRACT_HASH_MISMATCH: persisted Owner Inline contract is invalid"
+            ) from exc
+        contract_hash = owner_inline_contract["contract_hash"]
+        task_card_hash = None
+    elif contract_kind != ContractKind.TRACKED_TASK_CARD.value:
+        raise RuntimeError("APPROVAL_CONTRACT_KIND_UNSUPPORTED")
+    return {
+        "contract_kind": contract_kind,
+        "contract_hash": contract_hash,
+        "task_card_hash": task_card_hash,
+        "owner_inline_contract": owner_inline_contract,
+    }
 RESUMABLE_STATUSES = frozenset({
     "WORKER_COMPLETED",
     "WORKER_ESCALATING",
@@ -5363,6 +5401,11 @@ class SelfHostedTaskService:
             request.get("task_card_required") or request.get("lifecycle_identity_required")
         ):
             raise RuntimeError("EPHEMERAL_PROMOTION_FORBIDDEN: rehearsal state cannot be approved")
+        identity = resolve_contract_identity(
+            state,
+            expected_task_id=task_id,
+            expected_head=str(state.get("controller_revision") or ""),
+        )
         packet = state.get("promotion_packet") or {}
         expected = {
             "candidate_commit_sha": candidate_commit_sha,
@@ -5374,6 +5417,37 @@ class SelfHostedTaskService:
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
         grant = dict(approval_context or {}) if approval_context is not None else None
+        public_grant_identity_fields = (
+            "bound_task_id",
+            "bound_attempt_id",
+            "bound_action_type",
+            "contract_kind",
+            "contract_hash",
+            "tool_manifest_hash",
+            "full_tool_schema_hash",
+            "permission_policy_hash",
+            "lifecycle_revision",
+            "server_instance_id",
+        )
+        complete_public_grant = grant is not None and all(
+            str(grant.get(field) or "").strip() for field in public_grant_identity_fields
+        )
+        if identity["contract_kind"] == ContractKind.OWNER_INLINE.value or complete_public_grant:
+            validate_approval_grant(
+                grant,
+                task_id=task_id,
+                attempt_id=str(state.get("attempt_id") or ""),
+                action_type=LifecycleActionType.CANDIDATE_APPROVE.value,
+                task_card_hash=identity["task_card_hash"],
+                contract_kind=identity["contract_kind"],
+                contract_hash=identity["contract_hash"],
+                owner_inline_contract=identity["owner_inline_contract"],
+                tool_manifest_hash=str(grant.get("tool_manifest_hash") or ""),
+                full_tool_schema_hash=str(grant.get("full_tool_schema_hash") or ""),
+                permission_policy_hash=str(grant.get("permission_policy_hash") or ""),
+                lifecycle_revision=str(grant.get("lifecycle_revision") or ""),
+                server_instance_id=str(grant.get("server_instance_id") or ""),
+            )
         architecture_approval = grant.get("architecture_approval") if isinstance(grant, Mapping) else None
         receipt = state.get("verified_receipt") if isinstance(state.get("verified_receipt"), Mapping) else {}
         authority_required = bool(packet.get("authority_change_required") or receipt.get("authority_change_required"))
@@ -5437,11 +5511,56 @@ class SelfHostedTaskService:
                 integration_authorization["authorization_hash"] = authorization_obj.authorization_hash
         now = _utc_now()
         duplicate = False
+        initial_status = state.get("status")
+        initial_promotion_status = state.get("promotion_status")
+        service_contract_hash = str(state.get("contract_hash") or "")
+        packet_snapshot = json.dumps(
+            _jsonable(packet), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        receipt_snapshot = json.dumps(
+            _jsonable(receipt), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
             if current.get("attempt_id") != state.get("attempt_id"):
                 raise RuntimeError("task attempt ownership changed")
+            current_identity = resolve_contract_identity(
+                current,
+                expected_task_id=task_id,
+                expected_head=str(current.get("controller_revision") or ""),
+            )
+            current_packet = (
+                current.get("promotion_packet")
+                if isinstance(current.get("promotion_packet"), Mapping)
+                else {}
+            )
+            current_receipt = (
+                current.get("verified_receipt")
+                if isinstance(current.get("verified_receipt"), Mapping)
+                else {}
+            )
+            if (
+                current.get("status") != initial_status
+                or current.get("promotion_status") != initial_promotion_status
+                or str(current.get("contract_hash") or "") != service_contract_hash
+                or current_identity != identity
+                or json.dumps(
+                    _jsonable(current_packet),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                != packet_snapshot
+                or json.dumps(
+                    _jsonable(current_receipt),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                != receipt_snapshot
+            ):
+                raise RuntimeError("APPROVAL_BINDING_CONCURRENCY_DRIFT")
             existing = current.get("approved_binding") if isinstance(current.get("approved_binding"), Mapping) else {}
             existing_grant = existing.get("approval_grant") if isinstance(existing.get("approval_grant"), Mapping) else None
             if grant is not None and current.get("promotion_status") == "APPROVED" and existing_grant:
@@ -5737,6 +5856,16 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         if str(state.get("task_id") or "") != task_id:
             raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
+        identity = resolve_contract_identity(
+            state,
+            expected_task_id=task_id,
+            expected_head=str(state.get("controller_revision") or ""),
+        )
+        runtime_identity = dict(runtime_identity)
+        for key in ("contract_kind", "contract_hash", "task_card_hash", "owner_inline_contract"):
+            if key in runtime_identity and runtime_identity[key] != identity[key]:
+                raise RuntimeError("CLOSURE_RUNTIME_IDENTITY_MISMATCH")
+        runtime_identity.update(identity)
         failed_pre_apply = (
             state.get("status") == "INTEGRATION_FAILED_PRE_APPLY"
             and state.get("promotion_status") == "INTEGRATION_FAILED_PRE_APPLY"
@@ -5779,9 +5908,9 @@ class SelfHostedTaskService:
                 "candidate_tree_sha": str(packet_for_rebind.get("candidate_tree_sha") or state.get("candidate_tree_sha") or ""),
                 "candidate_state_hash": str(packet_for_rebind.get("candidate_state_hash") or state.get("candidate_state_hash") or ""),
                 "verified_receipt_hash": str(packet_for_rebind.get("verified_receipt_hash") or state.get("verified_receipt_hash") or ""),
-                "contract_kind": str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value),
-                "contract_hash": str(state.get("contract_hash") or ""),
-                "task_card_hash": str(state.get("task_card_hash") or ""),
+                "contract_kind": identity["contract_kind"],
+                "contract_hash": identity["contract_hash"] or "",
+                "task_card_hash": identity["task_card_hash"] or "",
             }
             for field, value in immutable_state.items():
                 prior_value = existing.get(field)
@@ -5858,10 +5987,10 @@ class SelfHostedTaskService:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_UNREADABLE") from exc
         if artifact_digest != external_acceptance.receipt_hash:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_HASH_MISMATCH")
-        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
-        contract_hash = str(state.get("contract_hash") or "")
-        task_card_hash = state.get("task_card_hash")
-        owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
+        contract_kind = identity["contract_kind"]
+        contract_hash = identity["contract_hash"]
+        task_card_hash = identity["task_card_hash"]
+        owner_inline_contract = identity["owner_inline_contract"]
         approval_validated = validate_approval_grant(
             approval,
             task_id=task_id,
@@ -5989,6 +6118,7 @@ class SelfHostedTaskService:
             separators=(",", ":"),
             ensure_ascii=False,
         )
+        service_contract_hash = str(state.get("contract_hash") or "")
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
@@ -6012,7 +6142,15 @@ class SelfHostedTaskService:
             }.items():
                 if str(current_packet.get(key) or current.get(key) or "") != str(expected):
                     raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            if str(current.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value) != contract_kind or str(current.get("contract_hash") or "") != contract_hash or str(current.get("task_card_hash") or "") != str(task_card_hash or ""):
+            current_identity = resolve_contract_identity(
+                current,
+                expected_task_id=task_id,
+                expected_head=str(current.get("controller_revision") or ""),
+            )
+            if (
+                str(current.get("contract_hash") or "") != service_contract_hash
+                or current_identity != identity
+            ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             persisted_current_acceptance = current.get("external_acceptance")
             if not isinstance(persisted_current_acceptance, Mapping) or dict(persisted_current_acceptance) != external_acceptance.to_dict():
@@ -6150,21 +6288,18 @@ class SelfHostedTaskService:
             grant = integration_grant or (approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None)
             if not grant or not grant.get("consumed_at"):
                 raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: persisted approval grant is missing consume evidence")
-            contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
-            contract_hash = state.get("contract_hash")
-            task_card_hash = state.get("task_card_hash")
-            if contract_kind == ContractKind.OWNER_INLINE.value:
-                try:
-                    validated_inline = validate_owner_inline_contract(
-                        state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else {},
-                        expected_task_id=task_id,
-                        expected_head=str(state.get("controller_revision") or ""),
-                    )
-                except ValueError as exc:
-                    raise RuntimeError("CONTRACT_HASH_MISMATCH: persisted Owner Inline contract is invalid") from exc
-                if validated_inline.get("contract_hash") != contract_hash:
-                    raise RuntimeError("CONTRACT_HASH_MISMATCH: persisted Owner Inline contract hash drifted")
-                task_card_hash = None
+            identity = resolve_contract_identity(
+                state,
+                expected_task_id=task_id,
+                expected_head=str(state.get("controller_revision") or ""),
+            )
+            for key in ("contract_kind", "contract_hash", "task_card_hash", "owner_inline_contract"):
+                if key in runtime_identity and runtime_identity[key] != identity[key]:
+                    raise RuntimeError("APPROVAL_RUNTIME_IDENTITY_MISMATCH")
+            contract_kind = identity["contract_kind"]
+            contract_hash = identity["contract_hash"]
+            task_card_hash = identity["task_card_hash"]
+            owner_inline_contract = identity["owner_inline_contract"]
             if integration_grant:
                 validate_approval_grant(
                     integration_grant,
@@ -6174,7 +6309,7 @@ class SelfHostedTaskService:
                     task_card_hash=task_card_hash,
                     contract_kind=contract_kind,
                     contract_hash=contract_hash,
-                    owner_inline_contract=state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None,
+                    owner_inline_contract=owner_inline_contract,
                     tool_manifest_hash=str(runtime_identity.get("tool_manifest_hash") or ""),
                     full_tool_schema_hash=str(runtime_identity.get("full_tool_schema_hash") or ""),
                     permission_policy_hash=str(runtime_identity.get("permission_policy_hash") or ""),
@@ -6230,6 +6365,12 @@ class SelfHostedTaskService:
         if grant.get("consumed_at") and grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
             raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
 
+        boundary_identity = resolve_contract_identity(
+            state,
+            expected_task_id=task_id,
+            expected_head=str(state.get("controller_revision") or ""),
+        )
+
         c_dict = state.get("contract") or {}
         request_dict = state.get("request") or {
             "what": c_dict.get("objective", "integration task"),
@@ -6256,6 +6397,11 @@ class SelfHostedTaskService:
             "integration_closure_binding",
             "integration_closure_binding_hash",
             "integration_verifier_manifest",
+            "controller_revision",
+            "contract_kind",
+            "contract_hash",
+            "task_card_hash",
+            "owner_inline_contract",
         )
 
         def binding_hash(bound_state: Mapping[str, Any]) -> str:
@@ -6333,6 +6479,13 @@ class SelfHostedTaskService:
                 if integrating is None:
                     raise RuntimeError("INTEGRATION_STATE_MISSING_AT_APPLY_BOUNDARY")
                 if binding_hash(integrating) != approved_binding_hash:
+                    raise RuntimeError("INTEGRATION_BINDING_DRIFT_AT_APPLY_BOUNDARY")
+                final_identity = resolve_contract_identity(
+                    integrating,
+                    expected_task_id=task_id,
+                    expected_head=str(integrating.get("controller_revision") or ""),
+                )
+                if final_identity != boundary_identity:
                     raise RuntimeError("INTEGRATION_BINDING_DRIFT_AT_APPLY_BOUNDARY")
                 final_request = integrating.get("request") or request_dict
                 final_contract = self.build_contract(final_request)

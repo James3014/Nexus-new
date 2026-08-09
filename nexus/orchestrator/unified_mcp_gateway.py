@@ -50,7 +50,11 @@ from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
     validate_approval_grant,
 )
-from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
+from nexus.orchestrator.self_hosted_task_service import (
+    CANONICAL_SOURCE_ROOT,
+    SelfHostedTaskService,
+    resolve_contract_identity,
+)
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.services.unified_runtime import (
     LOCAL_ONLY_PROVIDERS,
@@ -3113,10 +3117,14 @@ class UnifiedMCPGateway:
         if not re.fullmatch(r"[0-9a-f]{40}", base):
             raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-        task_card_hash = str(state.get("task_card_hash")).strip() if state.get("task_card_hash") else None
-        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
-        contract_hash = str(state.get("contract_hash") or "").strip() or (task_card_hash or None)
-        owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
+        try:
+            identity = resolve_contract_identity(state, expected_task_id=task_id, expected_head=base)
+        except RuntimeError as exc:
+            raise GatewayInputError(str(exc)) from exc
+        contract_kind = identity["contract_kind"]
+        contract_hash = identity["contract_hash"]
+        task_card_hash = identity["task_card_hash"]
+        owner_inline_contract = identity["owner_inline_contract"]
         if contract_kind == ContractKind.TRACKED_TASK_CARD.value and not re.fullmatch(r"[0-9a-f]{64}", task_card_hash):
             raise GatewayInputError("CANDIDATE_TASK_CARD_HASH_REQUIRED")
         if contract_kind == ContractKind.OWNER_INLINE.value and not contract_hash:
@@ -3192,6 +3200,10 @@ class UnifiedMCPGateway:
         base = str(state.get("controller_revision") or "").strip()
         if not re.fullmatch(r"[0-9a-f]{40}", base):
             raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
+        try:
+            identity = resolve_contract_identity(state, expected_task_id=task_id, expected_head=base)
+        except RuntimeError as exc:
+            raise GatewayInputError(str(exc)) from exc
         contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
         controller_root = Path(str(contract.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
         live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
@@ -3227,9 +3239,7 @@ class UnifiedMCPGateway:
             expected_canonical_head=expected_head,
             integration_branch=branch,
             runtime_identity={
-                "task_card_hash": state.get("task_card_hash"),
-                "contract_kind": state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value,
-                "contract_hash": state.get("contract_hash"),
+                **identity,
                 "tool_manifest_hash": TOOL_MANIFEST_REVISION,
                 "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
                 "permission_policy_hash": PERMISSION_POLICY_HASH,
@@ -3258,10 +3268,14 @@ class UnifiedMCPGateway:
         if not allowed_files:
             raise GatewayInputError("CANDIDATE_ALLOWED_PATHS_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-        task_card_hash = str(state.get("task_card_hash")).strip() if state.get("task_card_hash") else None
-        contract_kind = str(state.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value)
-        contract_hash = str(state.get("contract_hash") or "").strip() or (task_card_hash or None)
-        owner_inline_contract = state.get("owner_inline_contract") if isinstance(state.get("owner_inline_contract"), Mapping) else None
+        try:
+            identity = resolve_contract_identity(state, expected_task_id=task_id, expected_head=base)
+        except RuntimeError as exc:
+            raise LifecycleGuardError("CONTRACT_HASH_MISMATCH", str(exc)) from exc
+        contract_kind = identity["contract_kind"]
+        contract_hash = identity["contract_hash"]
+        task_card_hash = identity["task_card_hash"]
+        owner_inline_contract = identity["owner_inline_contract"]
         binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
         approval_grant = (state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None) or (binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None)
         persisted_authorization = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
@@ -3317,9 +3331,7 @@ class UnifiedMCPGateway:
             task_id,
             integration_branch=branch,
             runtime_identity={
-                "task_card_hash": task_card_hash,
-                "contract_kind": contract_kind,
-                "contract_hash": contract_hash,
+                **identity,
                 "tool_manifest_hash": TOOL_MANIFEST_REVISION,
                 "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
                 "permission_policy_hash": PERMISSION_POLICY_HASH,

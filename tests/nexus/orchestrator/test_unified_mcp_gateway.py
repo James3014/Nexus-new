@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 repo_root = str(Path(__file__).resolve().parents[3])
 if repo_root in sys.path:
     sys.path.remove(repo_root)
@@ -27,6 +29,8 @@ class FakeService:
         self.submitted = []
         self.completed = []
         self.approved_binding = None
+        self.bound_runtime_identity = None
+        self.integrated_runtime_identity = None
 
     def lifecycle_status(self):
         return {"active_targets": 0, "actionable_count": 0}
@@ -86,7 +90,17 @@ class FakeService:
         return {"task_id": task_id, "status": "APPROVED", "promotion_status": "APPROVED", "approved_binding": binding, "task_action": {"task_id": task_id, "task_status": "APPROVED", "attention_required": True, "next_action": "nexus_candidate_integrate", "recommended_tool": "nexus_candidate_integrate"}}
 
     def integrate_approved(self, task_id, **kwargs):
+        self.integrated_runtime_identity = dict(kwargs.get("runtime_identity") or {})
         return {"task_id": task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED", "task_action": {"task_id": task_id, "task_status": "INTEGRATED", "attention_required": False, "next_action": "none", "recommended_tool": "none"}}
+
+    def bind_candidate_integration_closure(self, task_id, **kwargs):
+        self.bound_runtime_identity = dict(kwargs.get("runtime_identity") or {})
+        return {
+            "task_id": task_id,
+            "status": "APPROVED",
+            "promotion_status": "APPROVED",
+            "integration_performed": False,
+        }
 
     def dispose_candidate(self, task_id, **kwargs):
         return {"task_id": task_id, "status": kwargs["disposition"], "promotion_status": kwargs["disposition"], "task_action": {"task_id": task_id, "task_status": kwargs["disposition"], "attention_required": False, "next_action": "none", "recommended_tool": "none"}}
@@ -612,7 +626,7 @@ def test_owner_inline_candidate_approval_uses_generic_contract_binding(monkeypat
         state = original_snapshot(task_id, include_details=include_details)
         state.update({
             "contract_kind": "OWNER_INLINE",
-            "contract_hash": inline["contract_hash"],
+            "contract_hash": "f" * 64,
             "owner_inline_contract": inline,
             "task_card_hash": None,
         })
@@ -620,6 +634,18 @@ def test_owner_inline_candidate_approval_uses_generic_contract_binding(monkeypat
 
     service.get_task_snapshot = owner_snapshot
     gateway = UnifiedMCPGateway(service=service)
+    wrong_approval = _approval(
+        contract_kind="OWNER_INLINE",
+        contract_hash="f" * 64,
+        task_card_hash=None,
+        owner_inline_contract=inline,
+    )
+    rejected = gateway.handle({"jsonrpc": "2.0", "id": 413, "method": "tools/call", "params": {"name": "nexus_candidate_approve", "arguments": {
+        "task_id": "recover-1", "candidate_commit_sha": "a" * 40, "candidate_tree_sha": "a" * 40,
+        "candidate_state_hash": "b" * 64, "verified_receipt_hash": "b" * 64, "approval": wrong_approval,
+    }}})
+    assert rejected["result"]["isError"] is True
+    assert service.approved_binding is None
     approval = _approval(
         contract_kind="OWNER_INLINE",
         contract_hash=inline["contract_hash"],
@@ -633,6 +659,92 @@ def test_owner_inline_candidate_approval_uses_generic_contract_binding(monkeypat
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "APPROVED"
     assert payload["approval_receipt"]["contract_kind"] == "OWNER_INLINE"
+    assert payload["approval_receipt"]["contract_hash"] == inline["contract_hash"]
+    assert service.approved_binding["approval_grant"]["contract_hash"] == inline["contract_hash"]
+
+
+def test_owner_inline_gateway_bind_and_integrate_forward_nested_hash(monkeypatch):
+    from nexus.contracts.lifecycle_action import build_owner_inline_contract
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    service = FakeService()
+    inline = build_owner_inline_contract(
+        task_id="recover-1",
+        objective="bind exact nested owner inline identity",
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        expected_head="a" * 40,
+        issued_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+    )
+    approval = _approval(
+        contract_kind="OWNER_INLINE",
+        contract_hash=inline["contract_hash"],
+        task_card_hash=None,
+        owner_inline_contract=inline,
+    )
+    approval.update({
+        "bound_action_type": "CANDIDATE_INTEGRATE",
+        "expected_canonical_head": "a" * 40,
+        "integration_branch": "nexus/integration/main",
+        "candidate_commit_sha": "a" * 40,
+        "candidate_tree_sha": "a" * 40,
+        "candidate_state_hash": "b" * 64,
+        "verified_receipt_hash": "b" * 64,
+        "acceptance_receipt_hash": "d" * 64,
+    })
+    service.approved_binding = {"approval_grant": approval}
+    original_snapshot = service.get_task_snapshot
+
+    def owner_snapshot(task_id, *, include_details=False):
+        state = original_snapshot(task_id, include_details=include_details)
+        state.update({
+            "contract_kind": "OWNER_INLINE",
+            "contract_hash": "f" * 64,
+            "owner_inline_contract": inline,
+            "task_card_hash": None,
+            "integration_approval_grant": {**approval, "consumed_at": datetime.now(timezone.utc).isoformat()},
+            "integration_authorization": {"expected_canonical_head": "a" * 40},
+        })
+        return state
+
+    service.get_task_snapshot = owner_snapshot
+    monkeypatch.setattr(
+        gateway_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="a" * 40 + "\n", stderr=""),
+    )
+    monkeypatch.setattr(gateway_module, "pre_action_guard", lambda *args, **kwargs: {"gate_passed": True})
+    gateway = UnifiedMCPGateway(service=service)
+    acceptance = {
+        "schema": "nexus.external_acceptance_receipt.v1",
+        "task_id": "recover-1",
+        "attempt_id": "attempt-recovery",
+        "candidate_commit": "a" * 40,
+        "receipt_hash": "d" * 64,
+        "reviewer_id": "James",
+        "passed": True,
+        "verifier_artifact": "/tmp/not-read-by-fake-service",
+    }
+    bound = gateway._candidate_bind_integration({
+        "task_id": "recover-1",
+        "expected_canonical_head": "a" * 40,
+        "external_acceptance": acceptance,
+        "approval": approval,
+    })
+    assert bound["integration_performed"] is False
+    assert service.bound_runtime_identity["contract_hash"] == inline["contract_hash"]
+    assert service.bound_runtime_identity["owner_inline_contract"] == inline
+
+    approval["contract_hash"] = "f" * 64
+    with pytest.raises(Exception, match="APPROVAL_BINDING_MISMATCH"):
+        gateway._candidate_integrate({"task_id": "recover-1"})
+    assert service.integrated_runtime_identity is None
+    approval["contract_hash"] = inline["contract_hash"]
+    integrated = gateway._candidate_integrate({"task_id": "recover-1"})
+    assert integrated["status"] == "INTEGRATED"
+    assert service.integrated_runtime_identity["contract_hash"] == inline["contract_hash"]
+    assert service.integrated_runtime_identity["owner_inline_contract"] == inline
 
 
 def test_cline_parser_extracts_final_patch_from_json_event_array():

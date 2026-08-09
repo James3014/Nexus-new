@@ -4,6 +4,7 @@ import subprocess
 import hashlib
 import json
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from nexus.contracts.target_integration_lifecycle import (
 )
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.contracts.lifecycle_action import build_owner_inline_contract
 from nexus.orchestrator.worktree_manager import WorktreeManager
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
@@ -53,6 +55,260 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str]:
 def _status_hash(root: Path) -> str:
     status = _git(root, "status", "--porcelain=v1", "--untracked-files=all")
     return hashlib.sha256(status.encode()).hexdigest()
+
+
+def test_direct_service_approval_uses_nested_owner_inline_hash(
+    tmp_path: Path, monkeypatch
+):
+    task_id = "service-inline-approval"
+    attempt_id = "attempt-inline-approval"
+    head = "a" * 40
+    inline = build_owner_inline_contract(
+        task_id=task_id,
+        objective="approve exact nested Owner Inline identity",
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        expected_head=head,
+        issued_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=(datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+    )
+    packet = {
+        "candidate_commit_sha": "b" * 40,
+        "candidate_tree_sha": "c" * 40,
+        "candidate_state_hash": "d" * 64,
+        "verified_receipt_hash": "e" * 64,
+    }
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=False
+    )
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "controller_revision": head,
+        "contract_kind": "OWNER_INLINE",
+        "contract_hash": "f" * 64,
+        "task_card_hash": None,
+        "owner_inline_contract": inline,
+        "request": {},
+        "promotion_packet": packet,
+    })
+    now = datetime.now(timezone.utc)
+    approval = {
+        "schema": "nexus.approval.v2",
+        "approval_id": "approval-inline",
+        "approved_by": "James",
+        "issued_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "bound_task_id": task_id,
+        "bound_attempt_id": attempt_id,
+        "bound_action_type": "CANDIDATE_APPROVE",
+        "approval_scope": "ALLOW_ACTION_ONCE",
+        "contract_kind": "OWNER_INLINE",
+        "contract_hash": "f" * 64,
+        "task_card_hash": None,
+        "tool_manifest_hash": "1" * 64,
+        "full_tool_schema_hash": "2" * 64,
+        "permission_policy_hash": "3" * 64,
+        "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+        "server_instance_id": "server-inline",
+    }
+    before = service._state_path(task_id).read_bytes()
+    with pytest.raises(RuntimeError, match="CONTRACT_HASH_MISMATCH|APPROVAL_BINDING_MISMATCH"):
+        service.approve_promotion(task_id, approval_context=approval, **packet)
+    assert service._state_path(task_id).read_bytes() == before
+
+    approval["contract_hash"] = inline["contract_hash"]
+    valid_state = service._read_state(task_id)
+    for tamper in (
+        lambda state: state.update(controller_revision="9" * 40),
+        lambda state: state.update(
+            owner_inline_contract={**inline, "task_id": "other-task"}
+        ),
+    ):
+        altered = json.loads(json.dumps(valid_state))
+        tamper(altered)
+        service._write_state(task_id, altered)
+        tampered_bytes = service._state_path(task_id).read_bytes()
+        with pytest.raises(RuntimeError, match="CONTRACT_HASH_MISMATCH"):
+            service.approve_promotion(task_id, approval_context=approval, **packet)
+        assert service._state_path(task_id).read_bytes() == tampered_bytes
+    service._write_state(task_id, valid_state)
+
+    raced_inline = build_owner_inline_contract(
+        task_id=task_id,
+        objective="different valid contract introduced during approval",
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        expected_head=head,
+        issued_at=inline["issued_at"],
+        expires_at=inline["expires_at"],
+    )
+    original_mutate = service._mutate_state
+    raced_bytes = None
+
+    def race_before_lock(race_task_id, mutator):
+        nonlocal raced_bytes
+        raced = service._read_state(race_task_id)
+        raced["owner_inline_contract"] = raced_inline
+        service._write_state(race_task_id, raced)
+        raced_bytes = service._state_path(race_task_id).read_bytes()
+        return original_mutate(race_task_id, mutator)
+
+    monkeypatch.setattr(service, "_mutate_state", race_before_lock)
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_CONCURRENCY_DRIFT"):
+        service.approve_promotion(task_id, approval_context=approval, **packet)
+    assert service._state_path(task_id).read_bytes() == raced_bytes
+
+    monkeypatch.setattr(service, "_mutate_state", original_mutate)
+    service._write_state(task_id, valid_state)
+    result = service.approve_promotion(task_id, approval_context=approval, **packet)
+    assert result["status"] == "APPROVED"
+    stored = service._read_state(task_id)
+    assert stored["approved_binding"]["approval_grant"]["contract_hash"] == inline["contract_hash"]
+
+
+def test_owner_inline_service_bind_and_integrate_use_nested_hash(
+    tmp_path: Path, monkeypatch
+):
+    service, root, base, _, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    inline = build_owner_inline_contract(
+        task_id="closure-bind",
+        objective="bind and integrate exact nested Owner Inline identity",
+        allowed_files=["value.txt"],
+        verifier_commands=["/usr/bin/true"],
+        expected_head=base,
+        issued_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=(datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+    )
+    state = service._read_state("closure-bind")
+    state.update({
+        "contract_kind": "OWNER_INLINE",
+        "contract_hash": "f" * 64,
+        "task_card_hash": None,
+        "owner_inline_contract": inline,
+    })
+    service._write_state("closure-bind", state)
+    owner_approval = {
+        **approval,
+        "contract_kind": "OWNER_INLINE",
+        "contract_hash": inline["contract_hash"],
+        "task_card_hash": None,
+    }
+    top_level_approval = {**owner_approval, "contract_hash": "f" * 64}
+    before = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="CLOSURE_RUNTIME_IDENTITY_MISMATCH"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            external_acceptance=acceptance,
+            approval=owner_approval,
+            runtime_identity={**runtime, "contract_hash": "f" * 64},
+            expected_canonical_head=base,
+            integration_branch="nexus/integration/canary",
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+    with pytest.raises(RuntimeError, match="CONTRACT_HASH_MISMATCH|APPROVAL_BINDING_MISMATCH"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            external_acceptance=acceptance,
+            approval=top_level_approval,
+            runtime_identity=runtime,
+            expected_canonical_head=base,
+            integration_branch="nexus/integration/canary",
+        )
+    assert service._state_path("closure-bind").read_bytes() == before
+
+    bound = service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=owner_approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    assert bound["integration_performed"] is False
+    stored = service._read_state("closure-bind")
+    assert stored["integration_approval_grant"]["contract_hash"] == inline["contract_hash"]
+    assert stored["integration_closure_binding"]["contract_hash"] == inline["contract_hash"]
+    bound_bytes = service._state_path("closure-bind").read_bytes()
+    with pytest.raises(RuntimeError, match="APPROVAL_RUNTIME_IDENTITY_MISMATCH"):
+        service.integrate_approved(
+            "closure-bind",
+            integration_branch="nexus/integration/canary",
+            runtime_identity={**runtime, "contract_hash": "f" * 64},
+        )
+    assert service._state_path("closure-bind").read_bytes() == bound_bytes
+
+    monkeypatch.setattr(
+        service,
+        "_record_integration",
+        lambda receipt, *, task_id=None: {
+            "status": "INTEGRATED",
+            "promotion_status": "INTEGRATED",
+            "task_id": task_id,
+        },
+    )
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+
+    class FakeIntegrationManager:
+        calls = 0
+
+        def __init__(self, **kwargs):
+            pass
+
+        def integrate_authorized_task_state(self, *args, **kwargs):
+            type(self).calls += 1
+            return SimpleNamespace()
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        FakeIntegrationManager,
+    )
+    bound_state = json.loads(json.dumps(service._read_state("closure-bind")))
+    raced_inline = build_owner_inline_contract(
+        task_id="closure-bind",
+        objective="different valid contract introduced before apply",
+        allowed_files=["value.txt"],
+        verifier_commands=["/usr/bin/true"],
+        expected_head=base,
+        issued_at=inline["issued_at"],
+        expires_at=inline["expires_at"],
+    )
+    original_checkpoint = service._checkpoint
+
+    def race_at_integrating(task_id, status, updates, *, attempt_id=None):
+        result = original_checkpoint(
+            task_id, status, updates, attempt_id=attempt_id
+        )
+        if status == "INTEGRATING":
+            raced = service._read_state(task_id)
+            raced["owner_inline_contract"] = raced_inline
+            service._write_state(task_id, raced)
+        return result
+
+    monkeypatch.setattr(service, "_checkpoint", race_at_integrating)
+    with pytest.raises(RuntimeError, match="INTEGRATION_BINDING_DRIFT_AT_APPLY_BOUNDARY"):
+        service.integrate_approved(
+            "closure-bind",
+            integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
+    assert FakeIntegrationManager.calls == 0
+
+    monkeypatch.setattr(service, "_checkpoint", original_checkpoint)
+    service._write_state("closure-bind", bound_state)
+    result = service.integrate_approved(
+        "closure-bind",
+        integration_branch="nexus/integration/canary",
+        runtime_identity=runtime,
+    )
+    assert result["status"] == "INTEGRATED"
+    assert FakeIntegrationManager.calls == 1
 
 
 def _verified_gate_proof(root: Path, contract) -> dict[str, object]:
