@@ -15,7 +15,7 @@ openwiki:
 
 # Governance Gates & Completion Contracts
 
-Nexus Singularity OS uses fail-closed **Governance Gates** and structured **Completion Envelopes** to ensure that task execution and code modifications meet strict verification criteria before delivery.
+Nexus Singularity OS uses fail-closed **Governance Gates** and structured **Completion Envelopes** to ensure that task execution and code modifications dispatched via `[NexusCLI](../runtime/cli-and-cueline.md)` or `[UnifiedMCPGateway](../runtime/mcp-gateway.md)` meet strict verification criteria before delivery.
 
 > 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository/agent governance authority. [`CapabilityPlanner`](../routing/capability-planner.md) is the sole route/capability-selection authority; [`HybridRouteDecision`](../routing/capability-planner.md) is its derived decision contract/projection, not a second selector. OpenWiki is `derived_non_authoritative` and holds zero approval or release authority.
 

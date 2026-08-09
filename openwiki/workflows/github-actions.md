@@ -15,7 +15,7 @@ openwiki:
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository contains 9 GitHub Actions workflow definitions under `.github/workflows/`. In accordance with the **Workflow Trigger Truth** rule, trigger modes are strictly derived from exact `on:` key declarations in source YAML files.
+The repository contains 9 GitHub Actions workflow definitions under `.github/workflows/`. In accordance with the **Workflow Trigger Truth** rule, trigger modes are strictly derived from exact `on:` key declarations in source YAML files. These workflows execute automated test harnesses cataloged in `[Validation Suites](../testing/validation-and-benchmarks.md)` and enforce verification contracts defined in `[Governance Gates](../governance/gates-and-contracts.md)`.
 
 ---
 

@@ -137,6 +137,7 @@ implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
   - LOCAL_RUNTIME
+  - CI
 authority_roles:
   - DERIVED_ONLY
 evidence_basis:

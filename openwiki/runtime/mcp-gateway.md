@@ -15,7 +15,7 @@ openwiki:
 
 # MCP Gateway & Ingress Protocols
 
-The **Model Context Protocol (MCP) Gateway** exposes Nexus capabilities to external agents, MCP tools, and HTTP clients. It translates incoming tool calls into canonical task contexts while delegating route authorization strictly to `[CapabilityPlanner](../routing/capability-planner.md)`.
+The **Model Context Protocol (MCP) Gateway** exposes Nexus capabilities to external agents, MCP tools, and HTTP clients. It translates incoming tool calls into canonical task contexts while delegating route authorization strictly to `[CapabilityPlanner](../routing/capability-planner.md)` and delivery verification to `[CompletionEnforcer](../governance/gates-and-contracts.md)`.
 
 ---
 
