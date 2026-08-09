@@ -1,4 +1,4 @@
-name: Nexus Scoped Security Scan (nexus/core blocking)
+name: Nexus Exact-Base Bandit CI
 
 on:
   push:
@@ -6,39 +6,163 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   bandit:
-    name: Bandit Scan (nexus/core blocking)
+    name: Exact-base Bandit regression gate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Initialize evidence
+        run: |
+          mkdir -p "$RUNNER_TEMP/nexus-ci-bandit"
+          printf '%s\n' '{"classification":"CI_BOOTSTRAP_DEFECT","blocking":true,"reason":"Bandit gate did not reach classification"}' > "$RUNNER_TEMP/nexus-ci-bandit/classification.json"
+      - name: Checkout exact head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Remove checkout credentials
+        run: |
+          set -euo pipefail
+          credential_count=0
+          host_credential_count=0
+          while IFS= read -r entry; do
+            credential_count=$((credential_count + 1))
+            key="${entry%% *}"
+            credential_file="${entry#* }"
+            case "$credential_file" in
+              "$RUNNER_TEMP"/git-credentials-*.config)
+                host_credential_count=$((host_credential_count + 1))
+                rm -f -- "$credential_file"
+                ;;
+              /github/runner_temp/git-credentials-*.config) ;;
+              *)
+                echo "unexpected checkout credential path: $credential_file" >&2
+                exit 1
+                ;;
+            esac
+            git config --local --unset-all "$key"
+          done < <(git config --local --get-regexp '^includeif\.gitdir:.*\.path$' || true)
+          if [ "$credential_count" -eq 0 ] || [ "$host_credential_count" -eq 0 ]; then
+            echo "checkout credential includeIf entries are missing" >&2
+            exit 1
+          fi
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          if git config --local --get-regexp '^includeif\.gitdir:.*\.path$' >/dev/null; then
+            echo "checkout credentials remain configured" >&2
+            exit 1
+          fi
+      - name: Link persistent evidence directory
+        run: ln -s "$RUNNER_TEMP/nexus-ci-bandit" .ci-bandit
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Install dependencies
+      - name: Install uv and dependencies
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           uv sync --frozen --all-groups --all-extras
+      - name: Resolve exact revisions and worktree
+        id: revisions
         env:
-          UV_SYSTEM_PYTHON: 0
-
-      - name: Run Bandit (nexus/core only, medium+ severity, medium+ confidence)
-        id: bandit
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          uv run bandit -r nexus/core -ll -ii; echo "exit_code=$?" >> $GITHUB_OUTPUT
-
-      - name: Report Result
+          set -euo pipefail
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
+          fi
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          BASE_WORKTREE=$(mktemp -d /tmp/nexus-bandit-base.XXXXXX)
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml .bandit bandit.yaml; then
+            git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' > .ci-bandit/changed.nul
+          else
+            { git ls-tree -r -z --name-only "$BASE_SHA" -- nexus/core; git ls-tree -r -z --name-only "$HEAD_SHA" -- nexus/core; } \
+              | .venv/bin/python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
+              > .ci-bandit/changed.nul
+          fi
+          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+      - name: Run Bandit on exact base and head
+        id: bandit
+        env:
+          BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' CHANGED < .ci-bandit/changed.nul || true
+          run_bandit() {
+            local root="$1" output="$2" prefix="$3"
+            local files=()
+            for path in "${CHANGED[@]}"; do
+              if [ -f "$root/$path" ]; then files+=("$path"); fi
+            done
+            if [ "${#files[@]}" -eq 0 ]; then
+              printf '{"results":[]}\n' > "$output"
+              echo "${prefix}_exit=0" >> "$GITHUB_OUTPUT"
+              return
+            fi
+            set +e
+            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/bandit" -q -f json -ll -ii "${files[@]}") > "$output"
+            local status=$?
+            set -e
+            echo "${prefix}_exit=$status" >> "$GITHUB_OUTPUT"
+          }
+          run_bandit "$BASE_WORKTREE" .ci-bandit/base.json base
+          run_bandit "$GITHUB_WORKSPACE" .ci-bandit/head.json head
+      - name: Classify Bandit regression
+        run: |
+          set +e
+          .venv/bin/python scripts/ops/exact_base_tool_gate.py \
+            --tool bandit \
+            --base .ci-bandit/base.json \
+            --head .ci-bandit/head.json \
+            --base-root "${{ steps.revisions.outputs.base_worktree }}" \
+            --head-root "$GITHUB_WORKSPACE" \
+            --base-exit-code "${{ steps.bandit.outputs.base_exit }}" \
+            --head-exit-code "${{ steps.bandit.outputs.head_exit }}" \
+            --output .ci-bandit/classification.json
+          STATUS=$?
+          echo '## Exact-base Bandit classification' >> "$GITHUB_STEP_SUMMARY"
+          cat .ci-bandit/classification.json >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"
+      - name: Remove exact base worktree
+        if: always() && steps.revisions.outputs.base_worktree != ''
+        run: git worktree remove --force "${{ steps.revisions.outputs.base_worktree }}"
+      - name: Install gitlink metadata for checkout post-cleanup
         if: always()
         run: |
-          echo "## Bandit Scan (nexus/core blocking)" >> $GITHUB_STEP_SUMMARY
-          echo "Exit code: ${{ steps.bandit.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
-          echo "This scan blocks CI if medium+ findings are detected in nexus/core." >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+      - name: Upload Bandit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-base-bandit-${{ github.sha }}
+          path: ${{ runner.temp }}/nexus-ci-bandit/
+          if-no-files-found: error
+          retention-days: 14
