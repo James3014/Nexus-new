@@ -11,9 +11,10 @@ ordered_cards:
   - 04-world-c-adequacy-projection.md
   - 05-risk-triggered-mutation-assurance.md
   - 06-false-green-verified-repair.md
-current_frontier: 01-physical-reproduction-provenance.md
+current_frontier: 02-frozen-same-oracle.md
 frontier_status: READY
-completed_cards: []
+completed_cards:
+  - 01-physical-reproduction-provenance.md
 blocked_cards: []
 AUTO_CHAIN: false
 ---
