@@ -33,7 +33,7 @@ jobs:
           submodules: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
-      - name: Remove checkout credentials and install gitlink cleanup metadata
+      - name: Remove checkout credentials
         run: |
           set -euo pipefail
           credential_count=0
@@ -65,19 +65,6 @@ jobs:
             echo "checkout credentials remain configured" >&2
             exit 1
           fi
-          while IFS= read -r -d '' index_entry; do
-            mode="${index_entry%% *}"
-            if [ "$mode" != "160000" ]; then
-              continue
-            fi
-            gitlink_path="${index_entry#*$'\t'}"
-            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
-              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
-              git config --file .gitmodules "submodule.${gitlink_path}.url" .
-            fi
-          done < <(git ls-files --stage -z)
-          git submodule foreach --recursive ':'
-
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-impact" .ci-impact
 
@@ -160,20 +147,27 @@ jobs:
             --directory "$BASE_WORKTREE" \
             --frozen --all-groups --all-extras
 
-      - name: Run mapped tests on exact base
+      - name: Run mapped tests on exact base source
         run: |
-          set -euo pipefail
-          "${{ steps.base-worktree.outputs.path }}/.venv/bin/python" "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
+          set +e
+          .venv/bin/python "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
             --plan .ci-impact/plan.json \
             --cwd "${{ steps.base-worktree.outputs.path }}" \
             --revision "${{ steps.base.outputs.sha }}" \
             --result .ci-impact/base-result.json \
             --junit "$GITHUB_WORKSPACE/.ci-impact/base-junit.xml" \
             --stdout "$GITHUB_WORKSPACE/.ci-impact/base-stdout.log"
+          RUN_STATUS=$?
+          if [ ! -s .ci-impact/base-result.json ]; then
+            echo "base run did not emit classification evidence" >&2
+            exit 2
+          fi
+          echo "base run evidence exit: $RUN_STATUS"
+          exit 0
 
       - name: Run mapped tests on exact head
         run: |
-          set -euo pipefail
+          set +e
           .venv/bin/python "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
             --plan .ci-impact/plan.json \
             --cwd "$GITHUB_WORKSPACE" \
@@ -181,6 +175,13 @@ jobs:
             --result .ci-impact/head-result.json \
             --junit "$GITHUB_WORKSPACE/.ci-impact/head-junit.xml" \
             --stdout "$GITHUB_WORKSPACE/.ci-impact/head-stdout.log"
+          RUN_STATUS=$?
+          if [ ! -s .ci-impact/head-result.json ]; then
+            echo "head run did not emit classification evidence" >&2
+            exit 2
+          fi
+          echo "head run evidence exit: $RUN_STATUS"
+          exit 0
 
       - name: Classify exact-base regression
         run: |
@@ -212,6 +213,23 @@ jobs:
         if: always() && steps.base-worktree.outputs.path != ''
         run: git worktree remove --force "${{ steps.base-worktree.outputs.path }}"
 
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+
       - name: Archive impact evidence 📦
         if: always()
         uses: actions/upload-artifact@v4
@@ -237,7 +255,7 @@ jobs:
           persist-credentials: true
           submodules: false
           ref: ${{ github.sha }}
-      - name: Remove checkout credentials and install gitlink cleanup metadata
+      - name: Remove checkout credentials
         run: |
           set -euo pipefail
           credential_count=0
@@ -269,18 +287,6 @@ jobs:
             echo "checkout credentials remain configured" >&2
             exit 1
           fi
-          while IFS= read -r -d '' index_entry; do
-            mode="${index_entry%% *}"
-            if [ "$mode" != "160000" ]; then
-              continue
-            fi
-            gitlink_path="${index_entry#*$'\t'}"
-            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
-              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
-              git config --file .gitmodules "submodule.${gitlink_path}.url" .
-            fi
-          done < <(git ls-files --stage -z)
-          git submodule foreach --recursive ':'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -293,6 +299,22 @@ jobs:
         env:
           NEXUS_TEST_MODE: CI
           PYTHONPATH: .
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

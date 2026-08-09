@@ -32,7 +32,7 @@ jobs:
           persist-credentials: true
           submodules: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      - name: Remove checkout credentials and install gitlink cleanup metadata
+      - name: Remove checkout credentials
         run: |
           set -euo pipefail
           credential_count=0
@@ -64,19 +64,6 @@ jobs:
             echo "checkout credentials remain configured" >&2
             exit 1
           fi
-          while IFS= read -r -d '' index_entry; do
-            mode="${index_entry%% *}"
-            if [ "$mode" != "160000" ]; then
-              continue
-            fi
-            gitlink_path="${index_entry#*$'\t'}"
-            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
-              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
-              git config --file .gitmodules "submodule.${gitlink_path}.url" .
-            fi
-          done < <(git ls-files --stage -z)
-          git submodule foreach --recursive ':'
-
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-bandit" .ci-bandit
       - uses: actions/setup-python@v5
@@ -129,7 +116,7 @@ jobs:
               return
             fi
             set +e
-            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/bandit" -f json -ll -ii "${files[@]}") > "$output"
+            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/bandit" -q -f json -ll -ii "${files[@]}") > "$output"
             local status=$?
             set -e
             echo "${prefix}_exit=$status" >> "$GITHUB_OUTPUT"
@@ -155,6 +142,22 @@ jobs:
       - name: Remove exact base worktree
         if: always() && steps.revisions.outputs.base_worktree != ''
         run: git worktree remove --force "${{ steps.revisions.outputs.base_worktree }}"
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
       - name: Upload Bandit evidence
         if: always()
         uses: actions/upload-artifact@v4
