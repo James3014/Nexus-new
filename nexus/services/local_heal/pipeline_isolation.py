@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
 
-from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
-
+from nexus.services.local_heal.armor_artifact_storage import (
+    ENV_ARMOR_ALLOW_EPHEMERAL,
+    is_ephemeral_path,
+    make_isolated_workspace,
+)
 
 _IGNORED_NAMES = {
     ".git",
@@ -21,6 +25,15 @@ _IGNORED_NAMES = {
 }
 
 
+def _ephemeral_source_allowed() -> bool:
+    return str(os.environ.get(ENV_ARMOR_ALLOW_EPHEMERAL, "") or "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+        "yes",
+    }
+
+
 def prepare_world_c_workspace(
     source_root: str | Path,
     task_id: str,
@@ -32,6 +45,8 @@ def prepare_world_c_workspace(
     source = Path(source_root).expanduser().resolve()
     if not source.is_dir():
         raise ValueError("world_c_source_root_missing")
+    if is_ephemeral_path(source) and not _ephemeral_source_allowed():
+        raise ValueError(f"World C source root must not be ephemeral OS temp: {source}")
     safe_task = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(task_id)).strip("-") or "unknown"
     target = make_isolated_workspace(prefix=f"world-c-{safe_task[:32]}-")
 
