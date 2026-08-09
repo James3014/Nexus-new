@@ -3,8 +3,6 @@ import json
 import logging
 import os
 import shlex
-from pathlib import Path
-import sys
 import time
 from typing import Dict, Any, Optional, Tuple
 
@@ -35,16 +33,17 @@ class MCPDelegator:
                     return cmd if isinstance(cmd, list) else shlex.split(cmd)
             except json.JSONDecodeError:
                 logger.error("Failed to parse NEXUS_MCP_MAPPING")
+
+        # Legacy self-hosted tools may only use an exact explicit mapping. A
+        # global default server cannot bypass this deprecation boundary.
+        if tool.startswith("nexus_self_hosted_"):
+            return None
         
         # Check default server env
         default_server = os.getenv("MCP_DEFAULT_SERVER")
         if default_server:
             return shlex.split(default_server)
 
-        if tool.startswith("nexus_self_hosted_"):
-            repo_root = Path(__file__).resolve().parents[2]
-            return [sys.executable, str(repo_root / "scripts/ops/nexus_self_hosted_mcp.py")]
-        
         # Safe default for internal mempalace tools
         if tool.startswith("mempalace_"):
             return ["python", "-m", "nexus-mempalace.mempalace.mcp_server"]
@@ -135,6 +134,22 @@ class MCPDelegator:
         
         command = self._get_server_command(tool)
         if not command:
+            if tool.startswith("nexus_self_hosted_"):
+                return {
+                    "status": "DEPRECATED",
+                    "tool": tool,
+                    "tenant_id": tenant_id,
+                    "tokens_consumed": 0,
+                    "error_code": "LEGACY_SELF_HOSTED_DEFAULT_DISABLED",
+                    "error": (
+                        "Implicit legacy self-hosted MCP is disabled; configure "
+                        "NEXUS_MCP_MAPPING for an explicit compatibility route."
+                    ),
+                    "deprecation": {
+                        "replacement": "nexus_worker_candidate",
+                        "explicit_mapping_required": True,
+                    },
+                }
             if self._is_serena_route(tool, command) and self.serena_fail_open:
                 logger.warning("serena_no_server_configured -> degraded_success")
                 return self._degraded_success(tool, tenant_id, args, reason="serena_no_server_configured")

@@ -116,7 +116,7 @@ def test_stable_task_id_rejects_version_suffix_retry_pattern():
         stable_task_id("Do work", ["a.py"], explicit="do-work-v2")
 
 
-def test_build_request_defaults_to_direct_without_retired_target_fields(tmp_path: Path):
+def test_build_request_defaults_to_governed_isolated_target(tmp_path: Path):
     repo = _repo(tmp_path)
     target_root = tmp_path / "self-hosted-lifecycle-targets"
     request = build_request(
@@ -132,10 +132,10 @@ def test_build_request_defaults_to_direct_without_retired_target_fields(tmp_path
     assert request["controller_revision"] == head
     assert request["target_base_revision"] == head
     assert request["controller_repo_root"] == str(repo.resolve())
-    assert request["execution_lane"] == "DIRECT_CANONICAL"
-    assert request["primary_agent"] is True
-    assert "target_worktree_root" not in request
-    assert "target_repo_root" not in request
+    assert request["execution_lane"] == "ISOLATED_TARGET"
+    assert request["primary_agent"] is False
+    assert request["target_worktree_root"] == str((tmp_path / "nexus-runtime-targets").resolve())
+    assert request["target_repo_root"] == str((tmp_path / "nexus-runtime-targets" / "chatgpt-delivery-cutover").resolve())
     assert "direct_delivery_allowed" not in request
     assert request["delivery_channel"] == "chatgpt_connector_nexus_bash"
 
@@ -213,7 +213,7 @@ def test_launch_submits_once_then_surfaces_integration_command(tmp_path: Path):
     )
 
 
-def test_default_delivery_returns_direct_finish_action_without_wait(tmp_path: Path):
+def test_default_delivery_uses_governed_target_without_direct_finish(tmp_path: Path):
     repo = _repo(tmp_path)
     service = FakeSelfHostedService()
     payload = run_delivery_cutover(
@@ -226,12 +226,43 @@ def test_default_delivery_returns_direct_finish_action_without_wait(tmp_path: Pa
         service=service,
     )
 
-    assert payload["execution_lane"] == "DIRECT_CANONICAL"
-    assert payload["completion_surface"] == "nexus_task_finish"
-    assert payload["next_action"] == "edit_canonical_checkout"
-    assert service.waited == []
+    assert payload["execution_lane"] == "ISOLATED_TARGET"
+    assert payload["managed_target"]["target_repo_root"].endswith("/chatgpt-direct-small-task")
+    assert payload["submitted"] is True
+    assert service.waited == ["chatgpt-direct-small-task"]
     assert "direct_delivery_allowed" not in payload
-    assert "managed_target" not in payload
+
+
+def test_explicit_primary_direct_delivery_is_distinct(tmp_path: Path):
+    repo = _repo(tmp_path)
+    request = build_request(
+        what="Fix one bounded README typo",
+        why="Small canonical task",
+        task_id="chatgpt-direct-primary-task",
+        controller_repo_root=repo,
+        allowed_files=["README.md"],
+        verifier_commands=["git diff --check"],
+        worker="primary",
+        execution_preference="DIRECT_CANONICAL",
+    )
+    assert request["execution_lane"] == "DIRECT_CANONICAL"
+    assert request["primary_agent"] is True
+    assert "target_repo_root" not in request
+
+
+@pytest.mark.parametrize("worker", ["agy", "codex"])
+def test_direct_delivery_rejects_remote_worker(tmp_path: Path, worker: str):
+    repo = _repo(tmp_path)
+    with pytest.raises(Exception, match="explicit primary"):
+        build_request(
+            what="Fix one bounded README typo",
+            why="Small canonical task",
+            controller_repo_root=repo,
+            allowed_files=["README.md"],
+            verifier_commands=["git diff --check"],
+            worker=worker,
+            execution_preference="DIRECT_CANONICAL",
+        )
 
 
 def test_action_command_reports_missing_approval_binding():

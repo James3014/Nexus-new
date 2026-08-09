@@ -251,10 +251,13 @@ def build_request(
     normalized_worker = str(worker or "auto").strip().lower() or "auto"
     if normalized_worker not in {"auto", "codex", "primary", "agy", "gemini", "opencode", "mimo", "ollama"}:
         raise ChatGPTDeliveryCutoverError("worker is unsupported")
-    direct = (
-        requested_preference == "DIRECT_CANONICAL"
-        or requested_preference == "auto" and normalized_worker in {"auto", "codex", "primary"}
-    )
+    # Automatic and delegated delivery is governed through an isolated Target.
+    # Direct canonical mutation remains only an explicit primary-agent choice.
+    if requested_preference == "DIRECT_CANONICAL" and normalized_worker != "primary":
+        raise ChatGPTDeliveryCutoverError(
+            "DIRECT_CANONICAL requires explicit primary worker authority"
+        )
+    direct = requested_preference == "DIRECT_CANONICAL"
     execution_lane = "DIRECT_CANONICAL" if direct else "ISOLATED_TARGET"
     # The service owns Target derivation.  Keep this compatibility field only
     # for the governed isolated request and always derive the canonical root.

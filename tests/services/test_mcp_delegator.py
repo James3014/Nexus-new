@@ -87,7 +87,7 @@ async def test_serena_no_server_degrades_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_self_hosted_tools_use_bundled_nexus_server_by_default(monkeypatch):
+async def test_self_hosted_tools_fail_closed_without_explicit_mapping(monkeypatch):
     monkeypatch.delenv("MCP_DEFAULT_SERVER", raising=False)
     delegator = MCPDelegator()
 
@@ -97,9 +97,44 @@ async def test_self_hosted_tools_use_bundled_nexus_server_by_default(monkeypatch
         args={"task_id": "missing-task"},
     )
 
+    assert result["status"] == "DEPRECATED"
+    assert result["tool"] == "nexus_self_hosted_get_task"
+    assert result["error_code"] == "LEGACY_SELF_HOSTED_DEFAULT_DISABLED"
+    assert result["deprecation"]["replacement"] == "nexus_worker_candidate"
+
+
+@pytest.mark.asyncio
+async def test_self_hosted_tools_ignore_global_default_server(monkeypatch):
+    mock_path = os.path.join(os.path.dirname(__file__), "mock_mcp_server.py")
+    monkeypatch.delenv("NEXUS_MCP_MAPPING", raising=False)
+    monkeypatch.setenv("MCP_DEFAULT_SERVER", f"{sys.executable} {mock_path}")
+    delegator = MCPDelegator()
+    result = await delegator.delegate_mcp(
+        tool="nexus_self_hosted_get_task",
+        tenant_id="tenant_123",
+        args={"task_id": "missing-task"},
+    )
+    assert result["status"] == "DEPRECATED"
+    assert result["error_code"] == "LEGACY_SELF_HOSTED_DEFAULT_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_self_hosted_explicit_mapping_remains_supported(monkeypatch):
+    mock_path = os.path.join(os.path.dirname(__file__), "mock_mcp_server.py")
+    monkeypatch.setenv(
+        "NEXUS_MCP_MAPPING",
+        __import__("json").dumps(
+            {"nexus_self_hosted_get_task": [sys.executable, mock_path]}
+        ),
+    )
+    delegator = MCPDelegator()
+    result = await delegator.delegate_mcp(
+        tool="nexus_self_hosted_get_task",
+        tenant_id="tenant_123",
+        args={"task_id": "missing-task"},
+    )
     assert result["status"] == "SUCCESS"
     assert result["tool"] == "nexus_self_hosted_get_task"
-    assert result["data"] is None
 
 
 @pytest.mark.asyncio
