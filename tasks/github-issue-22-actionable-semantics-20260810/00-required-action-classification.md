@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: github-issue-22-actionable-semantics
 campaign_id: github-issue-22-actionable-semantics-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/22
@@ -95,6 +95,23 @@ Maximum changed files: 6.
 Maximum claim: covered self-hosted and Assisted projections distinguish
 unresolved required action from settled historical retryable records. This does
 not delete history, reconcile tasks, or change lifecycle authority.
+
+## Completion receipt
+
+- Reconciled authority card SHA-256 before implementation commit:
+  `1ffb6ec9218145735e95c45c9190cbc1e39ce989b3d98286fff0b777ba7b3a81`.
+- Implementation commit: `aeeb19db1`.
+- Exact card suite: 321 passed with 6 pre-existing warnings.
+- Adversarial review: 31 self-hosted hidden-state combinations and 10 Assisted
+  settlement/reconciliation/uncertainty combinations passed; ACCEPT with no
+  P0/P1.
+- Exact-base Ruff differential: zero new findings; base and Candidate each
+  report the same eight findings.
+- Exact-base format differential: zero new failures; the same four files are
+  unformatted at base and Candidate.
+- `git diff --check`: passed.
+- Scope: exactly four implementation/test files plus campaign receipts; no
+  deletions or lifecycle/runtime mutation.
 
 ## Block classification
 
