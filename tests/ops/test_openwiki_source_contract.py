@@ -40,13 +40,9 @@ def test_openwiki_has_no_degraded_generated_diagram_markers() -> None:
 
 def test_openwiki_issue10_claims_match_current_inventory() -> None:
     quickstart = (OPENWIKI_ROOT / "quickstart.md").read_text(encoding="utf-8")
-    workflows = (OPENWIKI_ROOT / "workflows" / "github-actions.md").read_text(
-        encoding="utf-8"
-    )
+    workflows = (OPENWIKI_ROOT / "workflows" / "github-actions.md").read_text(encoding="utf-8")
     mcp = (OPENWIKI_ROOT / "runtime" / "mcp-gateway.md").read_text(encoding="utf-8")
-    routing = (OPENWIKI_ROOT / "routing" / "capability-planner.md").read_text(
-        encoding="utf-8"
-    )
+    routing = (OPENWIKI_ROOT / "routing" / "capability-planner.md").read_text(encoding="utf-8")
 
     workflow_files = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
     listed_files = re.findall(r"\| `([^`]+\.yml)` \|", workflows)
