@@ -5,10 +5,10 @@ Policy Lane Gate Tests — 驗證 hard/soft/shadow 三種 lane 的通過與阻�
 Usage:
     python -m pytest tests/ops/test_policy_lane_gate.py -v
 """
-import json
-import pytest
+
 from pathlib import Path
-from scripts.ops.check_policy_lane_gate import check_lane_gate, load_manifest, find_policy
+
+from scripts.ops.check_policy_lane_gate import check_lane_gate, find_policy, load_manifest
 from scripts.ops.check_policy_override_receipt import validate_override_receipt
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
@@ -16,12 +16,13 @@ MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "poli
 
 # ─── Hard Lane Tests ──────────────────────────────────────────────────
 
+
 class TestHardLane:
     """Hard lane: public claim, cutover, 3B promotion, evidence verifier."""
 
     def test_hard_lane_modify_without_drill_blocked(self):
         """Hard lane: modify without rollback drill → BLOCK."""
-        result = check_lane_gate("P-CLAIM-02", "modify")
+        result = check_lane_gate("P-TEST-NODRILL-01", "modify")
         assert result["allowed"] is False
         assert result["lane"] == "hard"
         assert "ROLLBACK_DRILL_MISSING" in result["errors"]
@@ -58,6 +59,7 @@ class TestHardLane:
 
 # ─── Soft Lane Tests ──────────────────────────────────────────────────
 
+
 class TestSoftLane:
     """Soft lane: internal policy wording, low-risk parameters."""
 
@@ -84,7 +86,7 @@ class TestSoftLane:
             "scope": "COST_MODEL tuning",
             "expiry": "2099-12-31T23:59:59Z",
             "rollback_plan": "Revert to previous version",
-            "created_at": "2026-06-15T00:00:00Z"
+            "created_at": "2026-06-15T00:00:00Z",
         }
         result = check_lane_gate("P-COST-01", "modify", override_receipt=override)
         assert result["allowed"] is True
@@ -100,7 +102,7 @@ class TestSoftLane:
             "scope": "COST_MODEL tuning",
             "expiry": "2020-01-01T00:00:00Z",
             "rollback_plan": "Revert",
-            "created_at": "2019-01-01T00:00:00Z"
+            "created_at": "2019-01-01T00:00:00Z",
         }
         result = check_lane_gate("P-COST-01", "modify", override_receipt=override)
         assert result["allowed"] is False
@@ -108,6 +110,7 @@ class TestSoftLane:
 
 
 # ─── Shadow Lane Tests ────────────────────────────────────────────────
+
 
 class TestShadowLane:
     """Shadow lane: observation-only, 3B shadow, Rust shadow dual-run."""
@@ -145,6 +148,7 @@ class TestShadowLane:
 
 # ─── Override Receipt Tests ───────────────────────────────────────────
 
+
 class TestOverrideReceipt:
     """Override receipt validation."""
 
@@ -159,7 +163,7 @@ class TestOverrideReceipt:
             "scope": "COST_MODEL.read_file",
             "expiry": "2099-12-31T23:59:59Z",
             "rollback_plan": "Revert to P-COST-01.1.0.0",
-            "created_at": "2026-06-15T00:00:00Z"
+            "created_at": "2026-06-15T00:00:00Z",
         }
         result = validate_override_receipt(receipt)
         assert result["valid"] is True
@@ -176,7 +180,7 @@ class TestOverrideReceipt:
             "scope": "evidence verifier",
             "expiry": "2099-12-31T23:59:59Z",
             "rollback_plan": "None",
-            "created_at": "2026-06-15T00:00:00Z"
+            "created_at": "2026-06-15T00:00:00Z",
         }
         result = validate_override_receipt(receipt)
         assert result["valid"] is False
@@ -193,7 +197,7 @@ class TestOverrideReceipt:
             "scope": "budget tuning",
             "expiry": "2020-01-01T00:00:00Z",
             "rollback_plan": "Revert",
-            "created_at": "2019-01-01T00:00:00Z"
+            "created_at": "2019-01-01T00:00:00Z",
         }
         result = validate_override_receipt(receipt)
         assert result["valid"] is False
@@ -213,6 +217,7 @@ class TestOverrideReceipt:
 
 # ─── Manifest Structure Tests ─────────────────────────────────────────
 
+
 class TestManifestStructure:
     """Verify manifest v2 structure."""
 
@@ -220,15 +225,16 @@ class TestManifestStructure:
         """Manifest v2 loads successfully."""
         manifest = load_manifest()
         assert manifest["manifest_version"] == "2.0.0"
-        assert len(manifest["policies"]) == 27
+        assert len(manifest["policies"]) == 28
 
     def test_all_policies_have_lane(self):
         """Every policy must have a lane assignment."""
         manifest = load_manifest()
         for policy in manifest["policies"]:
             assert "lane" in policy, f"{policy['policy_id']} missing lane"
-            assert policy["lane"] in ("hard", "soft", "shadow"), \
+            assert policy["lane"] in ("hard", "soft", "shadow"), (
                 f"{policy['policy_id']} has invalid lane: {policy['lane']}"
+            )
 
     def test_all_policies_have_risk_tier(self):
         """Every policy must have a risk_tier."""
@@ -263,7 +269,7 @@ class TestManifestStructure:
         assert policy["override_mode"] == "blocked"
 
     def test_hard_lane_count_increased(self):
-        """Hard lane count should be 10 (including P-CONTAM-01)."""
+        """Hard lane count should be 11 (including P-CONTAM-01)."""
         manifest = load_manifest()
         hard_count = sum(1 for p in manifest["policies"] if p["lane"] == "hard")
-        assert hard_count == 10
+        assert hard_count == 11
