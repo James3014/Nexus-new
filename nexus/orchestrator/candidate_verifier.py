@@ -86,6 +86,30 @@ class CandidateVerifier:
         self.worktree_manager = worktree_manager
 
     @staticmethod
+    def validate_static_contract(contract: SelfHostedTaskContract, target: str = ".") -> None:
+        """Validate verifier/contract inputs without touching the candidate or invoking a provider.
+
+        This is intentionally a pure preflight gate.  In particular, command
+        tokenization is performed here so malformed shlex input (including an
+        unmatched quote) fails before a worker subprocess can be started.
+        """
+        allowed = getattr(contract, "allowed_files", None)
+        if not isinstance(allowed, (list, tuple)) or not allowed or any(
+            not isinstance(path, str) or not path.strip() for path in allowed
+        ):
+            raise ValueError("invalid task contract allowed_files")
+        commands = getattr(contract, "verifier_commands", None)
+        if not isinstance(commands, (list, tuple)):
+            raise ValueError("invalid verifier command manifest")
+        try:
+            deduplicated = CandidateVerifier._deduplicate_verifier_commands(tuple(str(item) for item in commands))
+            request_target = target if Path(target).is_dir() else "."
+            for command in deduplicated:
+                CandidateVerifier._build_verifier_request(command, request_target)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid verifier contract: {exc}") from exc
+
+    @staticmethod
     def _protected_gate(
         candidate: CandidateDiffReceipt,
         protected_paths: Mapping[str, str],

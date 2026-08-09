@@ -1,4 +1,4 @@
-from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
+from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, classify_worker_failure
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 
 
@@ -83,3 +83,14 @@ def test_legacy_proven_outcome_fails_closed_in_policy():
 
     assert decision.action == "BLOCK"
     assert decision.next_provider is None
+
+
+def test_failure_taxonomy_blocks_deterministic_and_allows_transient():
+    deterministic = _receipt("cheap", WorkerOutcome.FAILED.value)
+    deterministic = WorkerExecutionReceipt(**{**deterministic.__dict__, "failure_reason": "malformed verifier command"})
+    assert classify_worker_failure(deterministic) == "deterministic"
+    assert WorkerEscalationPolicy("cheap", "strong").decide([deterministic]).action == "BLOCK"
+
+    transient = WorkerExecutionReceipt(**{**deterministic.__dict__, "failure_reason": "quota exceeded"})
+    assert classify_worker_failure(transient) == "transient"
+    assert WorkerEscalationPolicy("cheap", "strong").decide([transient]).action == "ESCALATE"

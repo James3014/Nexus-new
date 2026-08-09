@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
+from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, classify_worker_failure
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,8 @@ class WorkerEscalationPolicy:
             )
         if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
             return EscalationDecision("VERIFY", None, "worker execution completed; verification required")
+        if classify_worker_failure(latest) == "deterministic":
+            return EscalationDecision("BLOCK", None, "deterministic worker failure must not escalate")
         attempted = {attempt.provider for attempt in attempts}
         next_provider = next(
             (provider for provider in (self.provider_order or (self.strong_provider,)) if provider not in attempted),

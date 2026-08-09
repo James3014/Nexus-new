@@ -67,6 +67,30 @@ def _request(tmp_path: Path, **overrides):
     return values
 
 
+def test_checkpoint_telemetry_aggregates_attempts_and_keeps_cost_unmeasured(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    now = datetime.now(timezone.utc).isoformat()
+    service._write_state("telemetry-task", {
+        "task_id": "telemetry-task",
+        "status": "SUBMITTED",
+        "submitted_at": now,
+        "worker_started_at": now,
+        "executions": [
+            {"provider_calls": 2, "provider_attempt_count": 2, "wall_time_ms": 7},
+            {"provider_calls": 1, "provider_attempt_count": 1, "wall_time_ms": 3},
+        ],
+    })
+    service._checkpoint("telemetry-task", "WORKER_COMPLETED")
+    telemetry = service._read_state("telemetry-task")["telemetry"]
+    assert telemetry["provider_calls"] == 3
+    assert telemetry["provider_attempts"] == 3
+    assert telemetry["tokens"] is None
+    assert telemetry["cost"] is None
+    assert telemetry["token_status"] == "unmeasured"
+    assert telemetry["cost_status"] == "unmeasured"
+    assert telemetry["savings_claim_allowed"] is False
+
+
 def _closure_context(
     task_id: str,
     candidate: str,

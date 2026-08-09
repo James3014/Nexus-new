@@ -65,6 +65,27 @@ def test_build_verifier_request_rejects_unsafe_command_formats(tmp_path, command
         CandidateVerifier._build_verifier_request(command, str(tmp_path))
 
 
+def test_static_contract_rejects_malformed_verifier_before_invocation(tmp_path):
+    contract = SelfHostedTaskContract(
+        task_id="static-invalid",
+        objective="preflight",
+        controller_revision="a" * 40,
+        target_base_revision="b" * 40,
+        controller_repo_root=str(tmp_path),
+        target_repo_root=str(tmp_path / "target"),
+        target_worktree_root=str(tmp_path),
+        allowed_files=["bounded.txt"],
+        verifier_commands=["python3 -c 'unterminated"],
+        protected_contracts=[],
+        preferred_provider="codex",
+        maximum_provider_calls=1,
+        mutation_mode=MutationMode.WORKING_TREE_ONLY,
+        human_approval_required=True,
+    )
+    with pytest.raises(ValueError, match="invalid verifier contract"):
+        CandidateVerifier.validate_static_contract(contract, str(tmp_path))
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [

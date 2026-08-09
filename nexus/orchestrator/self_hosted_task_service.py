@@ -1216,6 +1216,14 @@ class SelfHostedTaskService:
                 previous_telemetry = state.get("telemetry") or {}
                 executions = state.get("executions") or ([state.get("execution")] if state.get("execution") else [])
                 provider_time_ms = sum(int(item.get("wall_time_ms") or 0) for item in executions if isinstance(item, Mapping))
+                provider_calls = sum(int(item.get("provider_calls") or 0) for item in executions if isinstance(item, Mapping))
+                provider_attempts = sum(
+                    int(item.get("provider_attempt_count"))
+                    if item.get("provider_attempt_count") is not None
+                    else 1
+                    for item in executions
+                    if isinstance(item, Mapping)
+                )
                 verified = state.get("verified_receipt") or {}
                 verifier_time_ms = sum(int(item.get("wall_time_ms") or 0) for item in verified.get("verifier_evidence") or [] if isinstance(item, Mapping))
                 worktree_time_ms = int(previous_telemetry.get("worktree_time_ms") or 0)
@@ -1226,6 +1234,13 @@ class SelfHostedTaskService:
                     "wall_time_ms": wall_time_ms,
                     "worker_wall_time_ms": worker_wall_time_ms,
                     "provider_time_ms": provider_time_ms,
+                    "provider_calls": provider_calls,
+                    "provider_attempts": provider_attempts,
+                    "tokens": None,
+                    "cost": None,
+                    "token_status": "unmeasured",
+                    "cost_status": "unmeasured",
+                    "savings_claim_allowed": False,
                     "verifier_time_ms": verifier_time_ms,
                     "worktree_time_ms": worktree_time_ms,
                     "commit_hook_time_ms": commit_hook_time_ms,
@@ -1679,6 +1694,13 @@ class SelfHostedTaskService:
         else:
             lease = self._lease_from_state(state)
 
+        # Pure contract/verifier validation must complete before the first
+        # provider invocation.  This also catches unmatched shlex quotes and
+        # malformed manifests without consuming provider budget.
+        static_validator = getattr(CandidateVerifier, "validate_static_contract", None)
+        if static_validator is not None:
+            static_validator(contract, lease.target_worktree)
+
         execution = state.get("execution")
         while status in {"WORKER_RUNNING", "WORKER_COMPLETED"}:
             if status == "WORKER_RUNNING":
@@ -1690,15 +1712,31 @@ class SelfHostedTaskService:
                     or contract.preferred_provider
                     or "codex"
                 )
+                consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
+                configured_budget = int(fast_lane_values["maximum_provider_calls"])
+                remaining_calls = configured_budget - consumed_calls
+                if remaining_calls <= 0:
+                    raise RuntimeError("maximum_provider_calls aggregate budget exhausted")
+                invoke_contract = contract
+                if remaining_calls != configured_budget and hasattr(contract, "model_copy"):
+                    invoke_contract = contract.model_copy(update={"maximum_provider_calls": remaining_calls})
                 execution_receipt = self.worker_registry.invoke(
                     provider,
-                    contract,
+                    invoke_contract,
                     lease,
                     prompt=self._prompt(contract),
                     model=str(request.get("model") or "").strip() or None,
                     timeout_seconds=float(request.get("timeout_seconds", 900.0)),
                     on_process_group=on_process_group,
                 )
+                reported_calls = int(execution_receipt.provider_calls)
+                reported_attempts = execution_receipt.provider_attempt_count
+                if reported_calls < 0 or reported_calls > remaining_calls:
+                    raise RuntimeError("provider execution receipt exceeded aggregate call budget")
+                if reported_attempts is not None and (
+                    int(reported_attempts) < 0 or int(reported_attempts) > remaining_calls
+                ):
+                    raise RuntimeError("provider execution receipt exceeded aggregate attempt budget")
                 attempts.append(execution_receipt)
                 execution = execution_receipt
                 update(

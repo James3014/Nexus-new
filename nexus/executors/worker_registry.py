@@ -105,6 +105,7 @@ class CodexWorkerAdapter:
             merge_performed=receipt.merge_performed,
             push_performed=False,
             failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else "Codex execution did not complete successfully",
+            provider_attempt_count=getattr(receipt, "provider_attempt_count", None),
         )
 
 

@@ -207,6 +207,16 @@ class WorkerExecutionReceipt:
     provider_attempt_count: Optional[int] = None
 
 
+def classify_worker_failure(receipt: WorkerExecutionReceipt) -> str:
+    """Return the fail-closed escalation class for an execution receipt."""
+    if receipt.timed_out or receipt.outcome in (WorkerOutcome.INCOMPLETE.value, WorkerOutcome.INCOMPLETE):
+        return "transient"
+    text = str(receipt.failure_reason or "").lower()
+    deterministic = ("malformed", "invalid contract", "contract invalid", "syntaxerror", "syntax error",
+                     "verifier", "scope", "forbidden", "policy", "unsupported", "parse error", "argument error")
+    return "deterministic" if any(marker in text for marker in deterministic) else "transient"
+
+
 class WorkerProviderUnavailable(RuntimeError):
     """Raised when a provider is known but cannot be invoked safely."""
 
