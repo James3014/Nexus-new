@@ -1,17 +1,26 @@
-from pathlib import Path
+import hashlib
 import re
 import subprocess
-from typing import Any, Dict
-from nexus.services.local_heal.interface import IPhase, PhaseResult, ReproductionInput, ReproductionOutput
-from nexus.services.local_heal.reproduction import ReproductionRunner
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from nexus.engine.local_model_policy import LocalModelPolicy
+from nexus.services.local_heal.context import HealContext
 from nexus.services.local_heal.env_denoiser import EnvDenoiser
 from nexus.services.local_heal.env_recipe_registry import EnvRecipeRegistry
-from nexus.services.local_heal.workspace_provision import WorkspaceProvisionChecker
-from nexus.services.local_heal.context import HealContext
-from nexus.engine.local_model_policy import LocalModelPolicy
-from nexus.services.local_heal.model_result import classify_model_exception
-from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
 from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
+from nexus.services.local_heal.interface import (
+    IPhase,
+    PhaseResult,
+    ReproductionInput,
+    ReproductionOutput,
+    ReproductionProvenance,
+)
+from nexus.services.local_heal.llm_client import ILLMClient, OllamaLLMClient
+from nexus.services.local_heal.model_result import classify_model_exception
+from nexus.services.local_heal.reproduction import ReproductionRunner
+from nexus.services.local_heal.workspace_provision import WorkspaceProvisionChecker
+
 
 class ReproductionPhase(IPhase):
     """Phase 1: Reproduction (建立物理證據)"""
@@ -31,6 +40,112 @@ class ReproductionPhase(IPhase):
         else:
             self.llm_client = None
 
+    @staticmethod
+    def _hash(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def _exit_status(self) -> Optional[int]:
+        status = getattr(self.repro_runner, "last_exit_status", None)
+        return status if isinstance(status, int) and not isinstance(status, bool) else None
+
+    @staticmethod
+    def _valid_sha256(value: object) -> bool:
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    def _provenance(self, source_kind: str, input_data: ReproductionInput, script: str = "", evidence: str = "", exit_status: Optional[int] = None, reproduced: Optional[bool] = None) -> ReproductionProvenance:
+        source_identity = source_kind
+        command = ()
+        cwd = ""
+        physical = False
+        reason_code = {
+            "descriptive": "descriptive_evidence",
+            "pre_supplied": "pre_supplied_evidence",
+            "skip": "skip_reproduction",
+        }.get(source_kind, "unbound_source")
+        if source_kind == "physical":
+            executable = getattr(self.repro_runner, "python_executable", "")
+            if not isinstance(executable, str) or not executable:
+                executable = input_data.python_executable or "python3"
+            expected_command = (executable, "reproduce_bug.py")
+            runner_command = getattr(self.repro_runner, "last_command", ())
+            command_bound = (
+                isinstance(runner_command, tuple)
+                and runner_command == expected_command
+                and all(isinstance(part, str) for part in runner_command)
+            )
+            command = runner_command if command_bound else expected_command
+            cwd = str(input_data.repo_dir.resolve())
+            identity_fn = getattr(self.repro_runner, "workspace_identity", None)
+            identity = identity_fn() if callable(identity_fn) else ("", False)
+            identity_bound = (
+                isinstance(identity, tuple)
+                and len(identity) == 2
+                and isinstance(identity[0], str)
+                and identity[1] is True
+                and re.fullmatch(
+                    r"HEAD=[0-9a-f]{40,64};WORKSPACE_SHA256=[0-9a-f]{64}", identity[0]
+                )
+                is not None
+            )
+            if identity_bound:
+                source_identity = identity[0]
+            runner_script_sha256 = getattr(self.repro_runner, "last_script_sha256", "")
+            script_bound = self._valid_sha256(runner_script_sha256)
+            status_bound = isinstance(exit_status, int) and not isinstance(exit_status, bool)
+            runner_reason = getattr(self.repro_runner, "last_reason_code", "")
+            runner_reason = runner_reason if isinstance(runner_reason, str) else ""
+            physical = (
+                identity_bound
+                and status_bound
+                and command_bound
+                and script_bound
+                and exit_status != 0
+                and runner_reason == "physical_fail"
+                and reproduced is True
+            )
+            if not status_bound:
+                reason_code = (
+                    runner_reason
+                    if runner_reason in {
+                        "execution_timeout",
+                        "execution_exception",
+                        "pre_subprocess_failure",
+                    }
+                    else "missing_exit_status"
+                )
+            elif not identity_bound:
+                reason_code = "unbound_source"
+            elif not command_bound:
+                reason_code = "unbound_command"
+            elif not script_bound:
+                reason_code = "unbound_script"
+            elif runner_reason == "physical_fail" and reproduced is not True:
+                reason_code = "inconsistent_execution"
+            elif runner_reason:
+                reason_code = runner_reason
+            else:
+                reason_code = "unclassified_execution"
+        else:
+            runner_script_sha256 = ""
+        return ReproductionProvenance(
+            source_kind=source_kind,
+            source_identity=source_identity,
+            command=command,
+            cwd=cwd,
+            script_sha256=(
+                runner_script_sha256
+                if source_kind == "physical" and self._valid_sha256(runner_script_sha256)
+                else self._hash(script)
+                if script
+                else ""
+            ),
+            source_sha256=self._hash(source_identity) if physical else "",
+            evidence_sha256=self._hash(evidence) if evidence else "",
+            exit_status=exit_status,
+            reason_code=reason_code,
+            physical=physical,
+        )
+
     def run(self, input_data: ReproductionInput, auto_heal_enabled: bool = False) -> ReproductionOutput:
         """Stateless TDD-ready execution logic with self-correction retry loop."""
         repro_script = input_data.repro_script
@@ -38,6 +153,7 @@ class ReproductionPhase(IPhase):
         env_denoise_receipt: Dict[str, Any] = {}
         success = False
         evidence = ""
+        provenance = self._provenance("descriptive", input_data)
 
         # 1. 產生重現腳本 (含 Self-Correction Retry Loop)
         if not repro_script:
@@ -57,7 +173,7 @@ class ReproductionPhase(IPhase):
 
             if not self.llm_client:
                 model_decision["status"] = "NO_LLM_CLIENT"
-                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_LLM_CLIENT", model_decision=model_decision)
+                return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason="NO_LLM_CLIENT", model_decision=model_decision, provenance=provenance)
 
             max_retries = 2 # 減少重試次數以節省時間
             current_prompt = base_prompt
@@ -87,6 +203,7 @@ class ReproductionPhase(IPhase):
 
                     # 測試執行生成的腳本
                     success, evidence = self.repro_runner.run_repro(repro_script)
+                    provenance = self._provenance("physical", input_data, repro_script, evidence, self._exit_status(), success)
 
                     # 如果成功 (Return code != 0, 觸發 assert 或 exception)，跳出迴圈
                     if success:
@@ -111,14 +228,15 @@ class ReproductionPhase(IPhase):
                     reason = classify_model_exception(e)
                     model_decision["status"] = reason
                     model_decision["detail"] = str(e)[:500]
-                    return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason=reason, model_decision=model_decision)
+                    return ReproductionOutput(success=False, reproduced=False, repro_evidence="", error_reason=reason, model_decision=model_decision, provenance=provenance)
 
             if not repro_script:
                 model_decision["status"] = "NO_REPRO_SCRIPT"
-                return ReproductionOutput(success=False, reproduced=False, repro_evidence=last_error, error_reason="NO_REPRO_SCRIPT", model_decision=model_decision)
+                return ReproductionOutput(success=False, reproduced=False, repro_evidence=last_error, error_reason="NO_REPRO_SCRIPT", model_decision=model_decision, provenance=provenance)
         else:
             # 如果輸入已經有腳本，則執行一次
             success, evidence = self.repro_runner.run_repro(repro_script)
+            provenance = self._provenance("physical", input_data, repro_script, evidence, self._exit_status(), success)
 
         # 3. Deterministic recipe-based env fix (NEW: S1-A)
         recipe_registry = EnvRecipeRegistry()
@@ -176,6 +294,7 @@ class ReproductionPhase(IPhase):
                 
                 # Re-try reproduction after recipe fix
                 success, evidence = self.repro_runner.run_repro(repro_script)
+                provenance = self._provenance("physical", input_data, repro_script, evidence, self._exit_status(), success)
                 
                 # Record recipe execution in env_denoise_receipt
                 env_denoise_receipt = {
@@ -207,6 +326,7 @@ class ReproductionPhase(IPhase):
                     self.repro_runner.python_executable = python_executable
                 # 換環境後重跑
                 success, evidence = self.repro_runner.run_repro(repro_script)
+                provenance = self._provenance("physical", input_data, repro_script, evidence, self._exit_status(), success)
 
         if not success or not evidence or len(evidence.strip()) < 10:
             if self.repro_runner.is_environment_failure(evidence):
@@ -220,21 +340,23 @@ class ReproductionPhase(IPhase):
 
             # 結構化壓縮證據
             truncated_evidence = EvidenceCompactor.compact(evidence, limit=3000)
-            return ReproductionOutput(success=False, reproduced=False, repro_evidence=truncated_evidence, error_reason=reason, env_denoise=env_denoise_receipt, model_decision=model_decision)
+            return ReproductionOutput(success=False, reproduced=False, repro_evidence=truncated_evidence, error_reason=reason, env_denoise=env_denoise_receipt, model_decision=model_decision, provenance=provenance)
 
         # 成功重現時也壓縮證據以防 Context 爆炸
         truncated_evidence = EvidenceCompactor.compact(evidence, limit=3000)
-        return ReproductionOutput(success=True, reproduced=True, repro_evidence=truncated_evidence, env_denoise=env_denoise_receipt, model_decision=model_decision)
+        return ReproductionOutput(success=True, reproduced=True, repro_evidence=truncated_evidence, env_denoise=env_denoise_receipt, model_decision=model_decision, provenance=provenance)
 
     def execute(self, ctx: HealContext) -> PhaseResult:
         if ctx.op.repro_evidence:
             ctx.op.reproduced = True
+            ctx.op.reproduction_provenance = self._provenance("pre_supplied", ReproductionInput(ctx.op.instance_id, ctx.op.repo_dir, ctx.op.problem_statement, ctx.op.repro_script, ctx.op.python_executable), evidence=ctx.op.repro_evidence)
             return PhaseResult(success=True)
 
         # P0: SWE-bench mode — skip unreliable LLM reproduction, use issue description as evidence
         if ctx.op.skip_reproduction:
             ctx.op.repro_evidence = ctx.op.problem_statement[:3000]
             ctx.op.reproduced = True
+            ctx.op.reproduction_provenance = self._provenance("skip", ReproductionInput(ctx.op.instance_id, ctx.op.repo_dir, ctx.op.problem_statement, ctx.op.repro_script, ctx.op.python_executable), evidence=ctx.op.repro_evidence)
             return PhaseResult(success=True)
 
         # S3: Workspace provisioning check
@@ -258,6 +380,7 @@ class ReproductionPhase(IPhase):
 
         ctx.op.repro_evidence = output.repro_evidence
         ctx.op.reproduced = output.reproduced
+        ctx.op.reproduction_provenance = output.provenance
         if output.env_denoise:
             ctx.op.env_denoise = output.env_denoise
         if output.model_decision:

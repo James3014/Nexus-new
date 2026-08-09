@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, List, Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 
 @dataclass(frozen=True)
 class PhaseResult:
@@ -19,6 +20,27 @@ class ReproductionInput:
     python_executable: str
 
 @dataclass(frozen=True)
+class ReproductionProvenance:
+    source_kind: str = "descriptive"
+    source_identity: str = ""
+    command: Tuple[str, ...] = field(default_factory=tuple)
+    cwd: str = ""
+    script_sha256: str = ""
+    source_sha256: str = ""
+    evidence_sha256: str = ""
+    exit_status: Optional[int] = None
+    reason_code: str = "descriptive_evidence"
+    physical: bool = False
+
+    @property
+    def kind(self) -> str:
+        return self.source_kind
+
+    @property
+    def evidence_hash(self) -> str:
+        return self.evidence_sha256
+
+@dataclass(frozen=True)
 class ReproductionOutput:
     success: bool
     reproduced: bool
@@ -26,6 +48,7 @@ class ReproductionOutput:
     error_reason: str = ""
     env_denoise: Dict[str, Any] = field(default_factory=dict)
     model_decision: Dict[str, Any] = field(default_factory=dict)
+    provenance: ReproductionProvenance = field(default_factory=ReproductionProvenance)
 
     @property
     def failure_reason(self) -> str:

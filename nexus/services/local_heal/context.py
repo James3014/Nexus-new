@@ -1,8 +1,10 @@
-import json
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Any, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from nexus.services.local_heal.errors import PatchError
+from nexus.services.local_heal.interface import LocalizedFile, RepairPlan, ReproductionProvenance
+
 
 @dataclass
 class GovernanceContext:
@@ -16,8 +18,6 @@ class GovernanceContext:
     actual_reason_family: str = "unknown"
     stop_layer_matched: bool = False
     family_matched: bool = False
-
-from nexus.services.local_heal.interface import RepairPlan, LocalizedFile
 
 @dataclass
 class OperationalContext:
@@ -35,6 +35,7 @@ class OperationalContext:
     repro_script: str = ""
     repro_evidence: str = ""
     reproduced: bool = False
+    reproduction_provenance: ReproductionProvenance = field(default_factory=ReproductionProvenance)
     
     # Phase 2: Planning
     plan: Optional[RepairPlan] = None
