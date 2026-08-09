@@ -17,8 +17,6 @@ sys.path.insert(0, repo_root)
 
 import pytest
 
-from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
-from nexus.executors.worker_registry import WorkerRegistry
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionType,
@@ -30,21 +28,31 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.executors.worker_contract import (
+    SUPPORTED_WORKER_PROVIDERS,
+    WorkerExecutionReceipt,
+    WorkerOutcome,
+    WorkerPreflight,
+)
+from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.repository_contract_gate import (
+    RepositoryContractGate,
+    RepositoryContractGateReceipt,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     SelfHostedTaskService,
     resolve_canonical_target_roots,
     resolve_execution_lane,
     validate_task_card_binding,
-)
-from nexus.orchestrator.repository_contract_gate import (
-    RepositoryContractGate,
-    RepositoryContractGateReceipt,
+    validate_workforce_dispatch_binding,
 )
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
     get_canonical_git_hooks_dir,
 )
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
 
 def _request(tmp_path: Path, **overrides):
@@ -65,6 +73,207 @@ def _request(tmp_path: Path, **overrides):
     }
     values.update(overrides)
     return values
+
+
+def _valid_local_dispatch():
+    demands = {
+        "schema": "nexus.workforce_demands.v1",
+        "route_authority": "CapabilityPlanner",
+        "demands": [{
+            "schema": "nexus.workforce_demand.v1",
+            "demand_id": "dispatch-local-1",
+            "execution_channel": "local",
+            "requested_role": "bounded_code_candidate",
+            "minimum_autonomy": "L1",
+            "context_class": "nexus_bounded",
+            "mutation_intent": True,
+            "external_verification_required": True,
+            "route_authority": "CapabilityPlanner",
+        }],
+    }
+    admission = evaluate_runtime_workforce_admission(
+        demands,
+        {"local": {
+            "worker_id": "local_coder_7b",
+            "provider": "ollama",
+            "model": "qwen2.5-coder:7b-instruct",
+            "controls": ["focused_tests", "compile", "parser", "small_scope", "reversible_application"],
+        }},
+        WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
+    ).to_dict()
+    return demands, admission
+
+
+def _valid_online_agy_dispatch():
+    demands = {
+        "schema": "nexus.workforce_demands.v1",
+        "route_authority": "CapabilityPlanner",
+        "demands": [{
+            "schema": "nexus.workforce_demand.v1",
+            "demand_id": "service-online-agy-1",
+            "execution_channel": "online",
+            "requested_role": "fast_bounded_implementation",
+            "minimum_autonomy": "L1",
+            "context_class": "nexus_bounded",
+            "mutation_intent": True,
+            "external_verification_required": True,
+            "route_authority": "CapabilityPlanner",
+        }],
+    }
+    admission = evaluate_runtime_workforce_admission(
+        demands,
+        {"online": {
+            "worker_id": "agy_flash",
+            "provider": "agy",
+            "model": "gemini-3.6-flash-high",
+            "controls": ["task_card", "allowed_files", "mandatory_commands", "independent_verification"],
+        }},
+        WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
+    ).to_dict()
+    return demands, admission
+
+
+def test_workforce_dispatch_binding_is_canonical_and_fail_closed():
+    demands, admission = _valid_local_dispatch()
+    binding = validate_workforce_dispatch_binding({
+        "workforce_demands": demands,
+        "workforce_admission": admission,
+    })
+    assert binding["worker_id"] == "local_coder_7b"
+    assert binding["provider"] == "ollama"
+    assert binding["model"] == "qwen2.5-coder:7b-instruct"
+    assert binding["aggregate_binding_hash"] == admission["aggregate_binding_hash"]
+
+    blocked = dict(admission)
+    blocked["overall_decision"] = "BLOCK"
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding({"workforce_demands": demands, "workforce_admission": blocked})
+
+    mismatched = json.loads(json.dumps(admission))
+    mismatched["records"][0]["decision"]["resolved_model"] = "tampered-model"
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding({"workforce_demands": demands, "workforce_admission": mismatched})
+
+
+def test_build_contract_binds_selected_admission_identity_and_rejects_override(tmp_path):
+    demands, admission = _valid_local_dispatch()
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(
+        tmp_path,
+        task_id="admitted-dispatch",
+        worker="auto",
+        model="qwen2.5-coder:7b-instruct",
+        execution_lane="ISOLATED_TARGET",
+        workforce_demands=demands,
+        workforce_admission=admission,
+    )
+    contract = service.build_contract(request)
+    assert contract.preferred_provider == "ollama"
+    assert contract.provider_order == ["ollama"]
+
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_FALLBACK_UNADMITTED"):
+        service.build_contract({**request, "fallback_worker": "opencode"})
+
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_MODEL_MISMATCH"):
+        service.build_contract({**request, "model": "tampered-model"})
+
+
+def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tmp_path, monkeypatch):
+    demands, admission = _valid_online_agy_dispatch()
+    calls = []
+
+    class FakeAgyAdapter:
+        provider = "agy"
+
+        def preflight(self):
+            return WorkerPreflight(
+                provider="agy", executable="/bin/agy", executable_available=True,
+                authorized=True, implementation_status="IMPLEMENTED", ready=True, reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, model=None, **options):
+            calls.append((self.provider, model, contract.task_id, lease.target_worktree))
+            return WorkerExecutionReceipt(
+                provider="agy", task_id=contract.task_id,
+                target_worktree=lease.target_worktree, worker_status="COMPLETED",
+                outcome=WorkerOutcome.EXECUTION_COMPLETED.value, exit_code=0,
+                executable_identity="/bin/agy", argv=("agy", model or ""),
+                stdout_sha256="a" * 64, stderr_sha256="b" * 64, wall_time_ms=1,
+                process_group_id=None, process_group_killed=False, timed_out=False,
+                provider_calls=1, evidence_complete=True, commit_created=False,
+                merge_performed=False, push_performed=False,
+            )
+
+    adapter = FakeAgyAdapter()
+    registry = WorkerRegistry({provider: adapter for provider in SUPPORTED_WORKER_PROVIDERS})
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False, ephemeral=True,
+    )
+    request = _request(
+        tmp_path, task_id="service-online-agy-1", worker="auto",
+        model="gemini-3.6-flash-high", execution_lane="ISOLATED_TARGET",
+        workforce_demands=demands, workforce_admission=admission,
+    )
+    contract = service.build_contract(request)
+    binding = validate_workforce_dispatch_binding(request)
+    attempt_id = "a" * 32
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "SUBMITTED", "attempt_id": attempt_id,
+        "request": request, "workforce_dispatch": binding,
+        "workforce_policy_hash": binding["policy_hash"], "workforce_binding_hash": binding["binding_hash"],
+        "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
+        "selected_worker_id": binding["worker_id"], "selected_provider": binding["provider"],
+        "selected_model": binding["model"], "provider_order": [binding["provider"]],
+        "worker_provider": binding["provider"], "fallback_lineage": [], "attempts": [{"attempt_id": attempt_id}],
+        "executions": [], "submitted_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            self.root_dir = root_dir
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            pass
+
+        def prepare_task(self, contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1", lease_id="agy-lease",
+                task_id=contract.task_id, controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"), target_branch="nexus/task/agy",
+                initial_head="b" * 40, initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64, created_from_exact_revision=True,
+                commit_created=False, merge_performed=False,
+            )
+
+    class FakeVerifier:
+        @staticmethod
+        def validate_static_contract(contract, target):
+            return None
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", FakeController)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier", FakeVerifier)
+
+    def update(status, values):
+        service._checkpoint(contract.task_id, status, values, attempt_id=attempt_id)
+        if status == "WORKER_COMPLETED":
+            raise RuntimeError("stop after registry receipt")
+
+    with pytest.raises(RuntimeError, match="stop after registry receipt"):
+        service._run_default_resumable(
+            contract, request, update, task_id=contract.task_id, attempt_id=attempt_id,
+        )
+
+    persisted = service._read_state(contract.task_id)
+    assert calls == [("agy", "gemini-3.6-flash-high", contract.task_id, str(tmp_path / "target"))]
+    assert persisted["selected_worker_id"] == "agy_flash"
+    assert persisted["selected_provider"] == "agy"
+    assert persisted["selected_model"] == "gemini-3.6-flash-high"
+    assert persisted["execution"]["provider"] == "agy"
+    assert persisted["execution"]["outcome"] == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert persisted["fallback_lineage"] == []
 
 
 def test_checkpoint_telemetry_aggregates_attempts_and_keeps_cost_unmeasured(tmp_path):

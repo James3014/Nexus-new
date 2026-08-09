@@ -52,6 +52,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
     resolve_contract_identity,
+    validate_workforce_dispatch_binding,
 )
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.services.unified_runtime import (
@@ -964,7 +965,19 @@ class UnifiedMCPGateway:
         key = str(provider or "").strip().lower()
         return key in ONLINE_CLI_SPEC_REGISTRY and key not in LOCAL_ONLY_PROVIDERS
 
-    def _provider_execution_ready(self, preflight: Mapping[str, Any], *, provider: str) -> tuple[bool, Optional[str]]:
+    def _provider_execution_ready(
+        self,
+        preflight: Mapping[str, Any],
+        *,
+        provider: str,
+        model: Optional[str] = None,
+    ) -> tuple[bool, Optional[str]]:
+        if preflight.get("provider") != provider:
+            return False, "WORKER_PREFLIGHT_PROVIDER_MISMATCH"
+        if model is not None and preflight.get("requested_model") != model:
+            return False, "WORKER_PREFLIGHT_REQUESTED_MODEL_MISMATCH"
+        if model is not None and preflight.get("resolved_model") != model:
+            return False, "WORKER_PREFLIGHT_RESOLVED_MODEL_MISMATCH"
         if str(preflight.get("status") or "") != "VERSION_VERIFIED":
             return False, str(preflight.get("blocker") or "WORKER_PREFLIGHT_FAILED")
         blocker = str(preflight.get("blocker") or "")
@@ -2451,6 +2464,7 @@ class UnifiedMCPGateway:
         allowed_keys = {
             "task_id", "what", "why", "worker", "allowed_files", "verifier_commands",
             "owner_confirmation", "authority_change_candidate_confirmation",
+            "workforce_demands", "workforce_admission", "planner_output",
         }
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
@@ -2473,9 +2487,24 @@ class UnifiedMCPGateway:
             raise GatewayInputError("verifier_commands must contain 1-4 bounded commands")
         if any(any(token in command for token in (";", "&&", "||", "`", "$(", "|")) for command in verifiers):
             raise GatewayInputError("verifier_commands must be bounded")
-        provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
+        dispatch_binding = validate_workforce_dispatch_binding(arguments)
+        if dispatch_binding is not None:
+            requested_worker = str(arguments.get("worker") or "").strip().lower()
+            if requested_worker not in {
+                "auto", dispatch_binding["worker_id"].lower(), dispatch_binding["provider"].lower(),
+            }:
+                raise GatewayInputError("WORKFORCE_ADMISSION_WORKER_MISMATCH")
+            provider = dispatch_binding["provider"]
+            model = dispatch_binding["model"]
+            worker_id = dispatch_binding["worker_id"]
+        else:
+            provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
         preflight = self._provider_preflight({"provider": provider, "model": model})
-        ready, blocker = self._provider_execution_ready(preflight, provider=provider)
+        ready, blocker = self._provider_execution_ready(
+            preflight,
+            provider=provider,
+            model=model if dispatch_binding is not None else None,
+        )
         if not ready:
             detail = blocker or "WORKER_PREFLIGHT_FAILED"
             if preflight.get("next_action"):
@@ -2536,6 +2565,9 @@ class UnifiedMCPGateway:
                       "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                       "worker_candidate_ingress": True,
                       "protected_contracts": protected_contracts})
+        if dispatch_binding is not None:
+            bound["workforce_demands"] = dispatch_binding["demands"]
+            bound["workforce_admission"] = dispatch_binding["admission"]
         bound.update(readiness_binding)
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
@@ -2574,6 +2606,9 @@ class UnifiedMCPGateway:
         request.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
                         "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                         "worker_candidate_ingress": True})
+        if dispatch_binding is not None:
+            request["workforce_demands"] = dispatch_binding["demands"]
+            request["workforce_admission"] = dispatch_binding["admission"]
         request.update(readiness_binding)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
@@ -2670,6 +2705,9 @@ class UnifiedMCPGateway:
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
                         "owner_confirmation": {"type": "boolean", "const": True},
                         "authority_change_candidate_confirmation": {"type": "boolean", "default": False},
+                        "workforce_demands": {"type": "object"},
+                        "workforce_admission": {"type": "object"},
+                        "planner_output": {"type": "object"},
                     },
                 },
             },
