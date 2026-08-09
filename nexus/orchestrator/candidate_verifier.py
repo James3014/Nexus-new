@@ -77,6 +77,8 @@ class VerifiedCandidateReceipt:
     verification_wall_time_ms: int = 0
     authority_change_required: bool = False
     authority_findings_sha256: str = ""
+    collaboration_gate_passed: bool = True
+    collaboration_provenance: Optional[dict[str, object]] = None
 
 
 class CandidateVerifier:
@@ -327,6 +329,13 @@ class CandidateVerifier:
         verifier_state_failures: list[str] = []
         if post_verifier.candidate_state_hash != current.candidate_state_hash:
             verifier_state_failures.append("verifier_mutated_candidate_state")
+        collaboration_passed = (
+            candidate.collaboration_provenance
+            == current.collaboration_provenance
+            == post_verifier.collaboration_provenance
+        )
+        if not collaboration_passed:
+            verifier_state_failures.append("collaboration_provenance_changed")
 
         scope_passed = post_verifier.allowed_scope_passed
         authorized_deletions = tuple(sorted(set(contract.authorized_deletions)))
@@ -393,4 +402,6 @@ class CandidateVerifier:
                 json.dumps(verifier_manifest, separators=(",", ":")).encode("utf-8")
             ).hexdigest(),
             verification_wall_time_ms=max(0, int((time.monotonic() - verification_started) * 1000)),
+            collaboration_gate_passed=collaboration_passed,
+            collaboration_provenance=post_verifier.collaboration_provenance,
         )

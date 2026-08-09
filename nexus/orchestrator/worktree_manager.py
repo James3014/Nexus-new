@@ -6,6 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Callable, Dict, Mapping, Optional, Sequence
 
+from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
 
@@ -34,6 +35,7 @@ class TargetWorktreeLease:
     commit_created: bool
     merge_performed: bool
     target_detached: bool = False
+    collaboration_provenance: Optional[dict[str, object]] = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,7 @@ class CandidateDiffReceipt:
     merge_performed: bool
     public_claim_allowed: bool
     production_ready: bool
+    collaboration_provenance: Optional[dict[str, object]] = None
 
 
 @dataclass(frozen=True)
@@ -310,6 +313,7 @@ class WorktreeManager:
     ) -> TargetWorktreeLease:
         controller_root, target_path, target_root = self._resolved_paths(contract)
         self._verify_target_boundary(controller_root, target_path, target_root)
+        CollaborationRealmVerifier.verify_submission(contract)
         controller_status = self._verify_controller(contract)
         resolved_target_revision = self._run_git(
             ["rev-parse", f"{contract.target_base_revision}^{{commit}}"],
@@ -320,6 +324,8 @@ class WorktreeManager:
 
         target_branch = f"nexus/task/{contract.task_id}"
         target_detached = False
+        target_created_this_call = False
+        branch_created_this_call = False
         active_targets = self._active_target_worktrees(
             controller_root,
             target_path,
@@ -350,6 +356,7 @@ class WorktreeManager:
                 branch_head = None
             if branch_head is None:
                 add_args = ["worktree", "add", "-b", target_branch, str(target_path), contract.target_base_revision]
+                branch_created_this_call = True
             else:
                 if branch_head != contract.target_base_revision:
                     protected = self._run_git(
@@ -396,6 +403,7 @@ class WorktreeManager:
                 else:
                     add_args = ["worktree", "add", str(target_path), target_branch]
             self._run_git(add_args, cwd=controller_root)
+            target_created_this_call = True
 
         initial_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
         actual_branch = self._run_git(["branch", "--show-current"], cwd=target_path)
@@ -406,6 +414,34 @@ class WorktreeManager:
             raise RuntimeError("Target worktree branch does not match the lease identity")
         if initial_status:
             raise RuntimeError("Target worktree must be clean")
+        try:
+            collaboration_provenance = CollaborationRealmVerifier.verify_target(
+                contract, target_path, initial_head,
+            )
+        except Exception as verification_error:
+            if target_created_this_call:
+                rollback_failures: list[str] = []
+                try:
+                    self._run_git(
+                        ["worktree", "remove", "--force", str(target_path)],
+                        cwd=controller_root,
+                    )
+                except RuntimeError as exc:
+                    rollback_failures.append(f"worktree:{exc}")
+                if branch_created_this_call:
+                    try:
+                        self._run_git(
+                            ["branch", "-D", target_branch],
+                            cwd=controller_root,
+                        )
+                    except RuntimeError as exc:
+                        rollback_failures.append(f"branch:{exc}")
+                if rollback_failures:
+                    detail = ";".join(rollback_failures)
+                    raise RuntimeError(
+                        f"COLLABORATION_REALM_TARGET_ROLLBACK_FAILED:{detail}"
+                    ) from verification_error
+            raise
 
         return TargetWorktreeLease(
             schema="nexus.target_worktree_lease.v1",
@@ -422,6 +458,7 @@ class WorktreeManager:
             commit_created=False,
             merge_performed=False,
             target_detached=target_detached,
+            collaboration_provenance=collaboration_provenance or None,
         )
 
     def protect_candidate(
@@ -862,6 +899,9 @@ class WorktreeManager:
             raise RuntimeError("Controller changed after the target lease was created")
 
         target_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
+        collaboration_provenance = CollaborationRealmVerifier.verify_target(
+            contract, target_path, target_head,
+        )
         committed_changed: list[str] = []
         committed_deleted: list[str] = []
         if target_head != lease.initial_head:
@@ -917,6 +957,11 @@ class WorktreeManager:
             status_bytes=target_status,
             tracked_diff_sha256=tracked_diff_sha256,
             untracked_content_hashes=untracked_content_hashes,
+            collaboration_binding_hash=(
+                contract.collaboration_realm.binding_hash
+                if getattr(contract, "collaboration_realm", None) is not None
+                else ""
+            ),
         )
 
         return CandidateDiffReceipt(
@@ -946,6 +991,7 @@ class WorktreeManager:
             merge_performed=False,
             public_claim_allowed=False,
             production_ready=False,
+            collaboration_provenance=collaboration_provenance or None,
         )
 
     def validate_lease_identity(
@@ -965,6 +1011,19 @@ class WorktreeManager:
             or lease.lease_id != expected_lease_id
         ):
             raise RuntimeError("contract and lease identity mismatch")
+        expected_collaboration = CollaborationRealmVerifier.verify_submission(contract)
+        if expected_collaboration:
+            actual = lease.collaboration_provenance or {}
+            immutable_fields = (
+                "binding_hash", "repository_id", "canonical_remote", "base_branch",
+                "base_sha", "collaboration_root", "execution_root",
+            )
+            if any(actual.get(field) != expected_collaboration.get(field) for field in immutable_fields):
+                raise RuntimeError("contract and collaboration lease identity mismatch")
+            if actual.get("sanitized_ancestry_verified") is not True:
+                raise RuntimeError("collaboration lease lacks sanitized ancestry proof")
+        elif lease.collaboration_provenance is not None:
+            raise RuntimeError("local lease unexpectedly contains collaboration provenance")
 
     def verify_controller_unchanged(
         self,
@@ -1126,6 +1185,9 @@ class WorktreeManager:
             "target_path": target_path.as_posix(),
             "target_branch": target_branch,
         }
+        collaboration_realm = getattr(contract, "collaboration_realm", None)
+        if collaboration_realm is not None:
+            payload["collaboration_binding_hash"] = collaboration_realm.binding_hash
         canonical = json.dumps(
             payload,
             sort_keys=True,
@@ -1209,6 +1271,7 @@ class WorktreeManager:
         status_bytes: bytes,
         tracked_diff_sha256: str,
         untracked_content_hashes: Dict[str, str],
+        collaboration_binding_hash: str = "",
     ) -> str:
         digest = sha256()
         components = [
@@ -1221,6 +1284,8 @@ class WorktreeManager:
                 separators=(",", ":"),
             ).encode("utf-8"),
         ]
+        if collaboration_binding_hash:
+            components.append(collaboration_binding_hash.encode("ascii"))
         for component in components:
             digest.update(len(component).to_bytes(8, "big"))
             digest.update(component)

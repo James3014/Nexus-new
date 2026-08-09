@@ -173,11 +173,13 @@ Load the smallest authoritative surface that matches the task:
 
 ## Authority invariants
 
-- `CapabilityPlanner` and `HybridRouteDecision` remain route authority;
-  overlays and policy files cannot create a second router.
-- Workforce admission constrains eligible workers and escalation. Exact model
+- `CapabilityPlanner` is the sole route and capability-selection authority.
+  `HybridRouteDecision` is a Planner-derived decision contract/projection, not
+  a second selector, router, or planner; overlays and policy files cannot
+  create another one.
+- Workforce admission only constrains worker eligibility. Exact model
   identity, adapter preflight, parser, verifier, and receipt gates remain
-  fail-closed.
+  fail-closed; admission does not select a route or capability.
 - Optional telemetry may be zero for structural gates, but model calls require
   real execution metrics. Missing verifier artifact/status or source hash
   fails claim gates closed.

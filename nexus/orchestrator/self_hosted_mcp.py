@@ -23,6 +23,56 @@ class NexusSelfHostedMCPServer:
 
     @staticmethod
     def _tool_specs() -> list[dict[str, Any]]:
+        collaboration_realm_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["schema", "control_plane", "collaboration", "runtime_activation", "execution_root", "binding_hash"],
+            "properties": {
+                "schema": {"const": "nexus.collaboration_execution_realm.v1"},
+                "control_plane": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["repo_root", "revision"],
+                    "properties": {
+                        "repo_root": {"type": "string"},
+                        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                    },
+                },
+                "collaboration": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["repository", "base", "repo_root", "remote_name"],
+                    "properties": {
+                        "repository": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["repository_id", "canonical_remote"],
+                            "properties": {
+                                "repository_id": {"type": "string"},
+                                "canonical_remote": {"type": "string"},
+                            },
+                        },
+                        "base": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["branch", "head_sha"],
+                            "properties": {
+                                "branch": {"type": "string"},
+                                "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                            },
+                        },
+                        "repo_root": {"type": "string"},
+                        "remote_name": {"type": "string"},
+                    },
+                },
+                "runtime_activation": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["realm_id", "activation_authorized"],
+                    "properties": {
+                        "realm_id": {"type": "string"},
+                        "activation_authorized": {"const": False},
+                    },
+                },
+                "execution_root": {"type": "string"},
+                "binding_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            },
+        }
         task_properties = {
             "task_id": {"type": "string"},
             "what": {"type": "string"},
@@ -41,6 +91,7 @@ class NexusSelfHostedMCPServer:
             "worker": {"type": "string", "enum": ["auto", *WORKER_ENUM]},
             "worker_order": {"type": "array", "items": {"type": "string", "enum": WORKER_ENUM}, "uniqueItems": True},
             "fallback_worker": {"type": "string", "enum": WORKER_ENUM},
+            "collaboration_realm": collaboration_realm_schema,
         }
         return [
             {
