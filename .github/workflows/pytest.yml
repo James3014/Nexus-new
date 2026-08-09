@@ -6,16 +6,31 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: Run Pytest
+  impact-gate:
+    name: Exact-base impact gate
+    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Initialize evidence directory
+        run: |
+          mkdir -p .ci-impact
+          printf '%s\n' '{"status":"CI_BOOTSTRAP_DEFECT","reason":"impact gate did not reach classification"}' > .ci-impact/classification.json
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -31,26 +46,158 @@ jobs:
         env:
           UV_SYSTEM_PYTHON: 0
 
-      - name: Run Pytest (Fail Fast)
-        id: run-pytest
+      - name: Resolve exact comparison base
+        id: base
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          uv run pytest tests/ -x -v --timeout=300 --junitxml=pytest-report.xml > pytest-stdout.log 2>&1
+          set -euo pipefail
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            echo "Exact base/head SHA is empty" >&2
+            exit 1
+          fi
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "$BASE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Build tiered exact-base impact plan
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/ops/pr_impact_gate.py plan \
+            --base-sha "$BASE_SHA" \
+            --head-sha "${{ steps.base.outputs.head_sha }}" \
+            --output .ci-impact/plan.json
+
+      - name: Validate workflow syntax when required
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import yaml
+
+          plan = json.loads(Path('.ci-impact/plan.json').read_text(encoding='utf-8'))
+          if plan['workflow_validation_required']:
+              for path in sorted(Path('.github/workflows').glob('*.yml')):
+                  yaml.safe_load(path.read_text(encoding='utf-8'))
+                  print(f'YAML_OK {path}')
+          PY
+
+      - name: Materialize exact base worktree
+        id: base-worktree
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          BASE_WORKTREE=$(mktemp -d /tmp/nexus-ci-base.XXXXXX)
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+          echo "path=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+
+      - name: Install exact-base dependencies
+        env:
+          BASE_WORKTREE: ${{ steps.base-worktree.outputs.path }}
+        run: |
+          set -euo pipefail
+          UV_PROJECT_ENVIRONMENT="$BASE_WORKTREE/.venv" uv sync \
+            --directory "$BASE_WORKTREE" \
+            --frozen --all-groups --all-extras
+
+      - name: Run mapped tests on exact base
+        run: |
+          set -euo pipefail
+          "${{ steps.base-worktree.outputs.path }}/.venv/bin/python" "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
+            --plan .ci-impact/plan.json \
+            --cwd "${{ steps.base-worktree.outputs.path }}" \
+            --revision "${{ steps.base.outputs.sha }}" \
+            --result .ci-impact/base-result.json \
+            --junit "$GITHUB_WORKSPACE/.ci-impact/base-junit.xml" \
+            --stdout "$GITHUB_WORKSPACE/.ci-impact/base-stdout.log"
+
+      - name: Run mapped tests on exact head
+        run: |
+          set -euo pipefail
+          .venv/bin/python "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
+            --plan .ci-impact/plan.json \
+            --cwd "$GITHUB_WORKSPACE" \
+            --revision "${{ steps.base.outputs.head_sha }}" \
+            --result .ci-impact/head-result.json \
+            --junit "$GITHUB_WORKSPACE/.ci-impact/head-junit.xml" \
+            --stdout "$GITHUB_WORKSPACE/.ci-impact/head-stdout.log"
+
+      - name: Classify exact-base regression
+        run: |
+          set -uo pipefail
+          .venv/bin/python scripts/ops/pr_impact_gate.py classify \
+            --base-result .ci-impact/base-result.json \
+            --head-result .ci-impact/head-result.json \
+            --output .ci-impact/classification.json
+          CLASSIFIER_STATUS=$?
+          {
+            echo "## Exact-base impact classification"
+            echo '```json'
+            cat .ci-impact/classification.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$CLASSIFIER_STATUS"
         env:
           NEXUS_TEST_MODE: CI
           PYTHONPATH: .
 
-      - name: Capture Failure Tail
+      - name: Capture failure tails
         if: failure()
         run: |
-          echo "## ❌ Pytest Failure Tail" >> $GITHUB_STEP_SUMMARY
-          tail -n 100 pytest-stdout.log >> $GITHUB_STEP_SUMMARY
+          echo "## Exact-base pytest tails" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 80 .ci-impact/base-stdout.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          tail -n 80 .ci-impact/head-stdout.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
-      - name: Archive Test Results 📦
+      - name: Remove exact base worktree
+        if: always() && steps.base-worktree.outputs.path != ''
+        run: git worktree remove --force "${{ steps.base-worktree.outputs.path }}"
+
+      - name: Archive impact evidence 📦
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-results-${{ github.sha }}
-          path: |
-            pytest-report.xml
-            pytest-stdout.log
+          name: exact-base-impact-${{ github.sha }}
+          path: .ci-impact/
+          if-no-files-found: error
           retention-days: 7
+
+  full-regression:
+    name: Tier 3 full regression
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups --all-extras
+      - name: Run full repository regression
+        run: uv run pytest tests/ -v --timeout=300 --junitxml=full-regression.xml
+        env:
+          NEXUS_TEST_MODE: CI
+          PYTHONPATH: .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-regression-${{ github.sha }}
+          path: full-regression.xml
+          if-no-files-found: error
+          retention-days: 14

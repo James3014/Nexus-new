@@ -1,4 +1,4 @@
-name: Nexus Scoped Typecheck (nexus/core blocking)
+name: Nexus Exact-Base Pyright CI
 
 on:
   push:
@@ -6,40 +6,112 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   typecheck:
-    name: Pyright Scan (nexus/core blocking)
+    name: Exact-base Pyright regression gate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
     steps:
-      - name: Checkout repository
+      - name: Checkout exact head
         uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Initialize evidence
+        run: |
+          mkdir -p .ci-pyright
+          printf '%s\n' '{"classification":"CI_BOOTSTRAP_DEFECT","blocking":true,"reason":"Pyright gate did not reach classification"}' > .ci-pyright/classification.json
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Install dependencies
+      - name: Install uv and dependencies
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           uv sync --frozen --all-groups --all-extras
+      - name: Resolve exact revisions and worktree
+        id: revisions
         env:
-          UV_SYSTEM_PYTHON: 0
-
-      - name: Run Pyright (nexus/core only)
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "$BASE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          BASE_WORKTREE=$(mktemp -d /tmp/nexus-pyright-base.XXXXXX)
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml pyrightconfig.json uv.lock; then
+            git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' > .ci-pyright/changed.nul
+          else
+            { git ls-tree -r -z --name-only "$BASE_SHA" -- nexus/core; git ls-tree -r -z --name-only "$HEAD_SHA" -- nexus/core; } \
+              | .venv/bin/python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
+              > .ci-pyright/changed.nul
+          fi
+          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+      - name: Run Pyright on exact base and head
         id: pyright
+        env:
+          BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
         run: |
-          uv run pyright nexus/core; echo "exit_code=$?" >> $GITHUB_OUTPUT
-
-      - name: Report Result
+          set -euo pipefail
+          mapfile -d '' CHANGED < .ci-pyright/changed.nul || true
+          run_pyright() {
+            local root="$1" output="$2" prefix="$3"
+            local files=()
+            for path in "${CHANGED[@]}"; do
+              if [ -f "$root/$path" ]; then files+=("$path"); fi
+            done
+            if [ "${#files[@]}" -eq 0 ]; then
+              printf '{"generalDiagnostics":[]}\n' > "$output"
+              echo "${prefix}_exit=0" >> "$GITHUB_OUTPUT"
+              return
+            fi
+            set +e
+            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/pyright" --outputjson "${files[@]}") > "$output"
+            local status=$?
+            set -e
+            echo "${prefix}_exit=$status" >> "$GITHUB_OUTPUT"
+          }
+          run_pyright "$BASE_WORKTREE" .ci-pyright/base.json base
+          run_pyright "$GITHUB_WORKSPACE" .ci-pyright/head.json head
+      - name: Classify Pyright regression
+        run: |
+          set +e
+          .venv/bin/python scripts/ops/exact_base_tool_gate.py \
+            --tool pyright \
+            --base .ci-pyright/base.json \
+            --head .ci-pyright/head.json \
+            --base-root "${{ steps.revisions.outputs.base_worktree }}" \
+            --head-root "$GITHUB_WORKSPACE" \
+            --base-exit-code "${{ steps.pyright.outputs.base_exit }}" \
+            --head-exit-code "${{ steps.pyright.outputs.head_exit }}" \
+            --output .ci-pyright/classification.json
+          STATUS=$?
+          echo '## Exact-base Pyright classification' >> "$GITHUB_STEP_SUMMARY"
+          cat .ci-pyright/classification.json >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"
+      - name: Remove exact base worktree
+        if: always() && steps.revisions.outputs.base_worktree != ''
+        run: git worktree remove --force "${{ steps.revisions.outputs.base_worktree }}"
+      - name: Upload Pyright evidence
         if: always()
-        run: |
-          echo "## Pyright Scan (nexus/core blocking)" >> $GITHUB_STEP_SUMMARY
-          echo "Exit code: ${{ steps.pyright.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
-          echo "This scan blocks CI if type errors are detected in nexus/core." >> $GITHUB_STEP_SUMMARY
-          echo "Note: pyrightconfig.json excludes optional integration adapters (eternal_memory.py, web_action_executor.py)." >> $GITHUB_STEP_SUMMARY
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-base-pyright-${{ github.sha }}
+          path: .ci-pyright/
+          retention-days: 14
