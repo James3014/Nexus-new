@@ -278,17 +278,15 @@ def test_current_proof_report_surfaces_top_verification_failed_subclasses():
 
     subclass_counts = {}
     for row in simulated_results:
-        subclass = classify_verification_failure(
-            **{
-                k: row[k]
-                for k in [
-                    "verifier_failure_kind",
-                    "verifier_stdout_excerpt",
-                    "verifier_stderr_excerpt",
-                    "failure_class",
-                ]
-            }
-        )
+        subclass = classify_verification_failure(**{
+            k: row[k]
+            for k in [
+                "verifier_failure_kind",
+                "verifier_stdout_excerpt",
+                "verifier_stderr_excerpt",
+                "failure_class",
+            ]
+        })
         subclass_counts.setdefault(subclass, []).append(row["combo"])
 
     # Must have at least 2 subclasses

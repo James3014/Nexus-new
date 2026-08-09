@@ -85,14 +85,18 @@ class ReproductionPhase(IPhase):
             command = runner_command if command_bound else expected_command
             cwd = str(input_data.repo_dir.resolve())
             identity_fn = getattr(self.repro_runner, "workspace_identity", None)
-            identity = identity_fn() if callable(identity_fn) else ("", False)
-            identity_bound = (
-                isinstance(identity, tuple)
-                and len(identity) == 2
-                and isinstance(identity[0], str)
-                and identity[1] is True
+            identity_value: object = identity_fn() if callable(identity_fn) else ("", False)
+            identity: tuple[str, bool] = ("", False)
+            if (
+                isinstance(identity_value, tuple)
+                and len(identity_value) == 2
+                and isinstance(identity_value[0], str)
+                and identity_value[1] is True
+            ):
+                identity = (identity_value[0], True)
+            identity_bound = bool(
+                identity[1]
                 and re.fullmatch(r"HEAD=[0-9a-f]{40,64};WORKSPACE_SHA256=[0-9a-f]{64}", identity[0])
-                is not None
             )
             if identity_bound:
                 source_identity = identity[0]

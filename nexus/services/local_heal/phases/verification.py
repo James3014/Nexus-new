@@ -130,13 +130,10 @@ def _hold_materials(
     material: OracleMaterialPaths,
 ) -> Iterator[tuple[_HeldFile, _HeldFile, _HeldFile]]:
     with ExitStack() as stack:
-        held = tuple(
-            stack.enter_context(_hold_regular_file(path))
-            for path in (
-                material.oracle_path,
-                material.source_path,
-                material.suite_path,
-            )
+        held = (
+            stack.enter_context(_hold_regular_file(material.oracle_path)),
+            stack.enter_context(_hold_regular_file(material.source_path)),
+            stack.enter_context(_hold_regular_file(material.suite_path)),
         )
         if len({item.file_id for item in held}) != 3:
             raise _OracleMaterialError("MATERIAL_NOT_DISTINCT")
@@ -180,8 +177,12 @@ def _make_identity(
     reason = _command_error(command, held[0])
     if reason:
         raise _OracleMaterialError(reason)
-    paths = tuple(str(item.path) for item in held)
-    hashes = tuple(_sha256(item.snapshot) for item in held)
+    paths = (str(held[0].path), str(held[1].path), str(held[2].path))
+    hashes = (
+        _sha256(held[0].snapshot),
+        _sha256(held[1].snapshot),
+        _sha256(held[2].snapshot),
+    )
     return FrozenOracleIdentity(
         command=command,
         oracle_path=paths[0],
@@ -377,7 +378,7 @@ def _receipt_error(
 
 def _sealed_error(sealed: _HeldFile, frozen: FrozenOracleIdentity, prefix: str) -> str:
     content, reason = _refresh(sealed)
-    if reason:
+    if reason or content is None:
         return f"{prefix}_SEALED_ORACLE_INVALID"
     if content != frozen.oracle_bytes or _sha256(content) != frozen.material_sha256[0]:
         return f"{prefix}_SEALED_ORACLE_TAMPERED"

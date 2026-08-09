@@ -79,9 +79,10 @@ def _stage_output_evidence(op: Any, stage: str) -> tuple[bool, str]:
         for item in getattr(op, "localized_files", []) or []:
             path = str(getattr(item, "path", "") or "")
             content = str(getattr(item, "content", "") or "")
-            files.append(
-                {"path": path, "content_hash": hashlib.sha256(content.encode()).hexdigest()}
-            )
+            files.append({
+                "path": path,
+                "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            })
         payload = {"localized_files": files}
         present = bool(files and all(item["path"] for item in files))
     elif stage == "patch_synthesis":
@@ -165,21 +166,19 @@ def build_world_c_receipt(ctx: Any) -> dict[str, Any]:
             and stage_attempts[-1].get("success") is True
             and stage_attempts[-1].get("output_evidence_present") is True
         )
-        stages.append(
-            {
-                "name": stage_name,
-                "invoked": bool(stage_attempts),
-                "completed": completed,
-                "final_success": final_success,
-                "attempt_count": len(stage_attempts),
-                "attempts": stage_attempts,
-                "evidence_refs": [
-                    str(item.get("evidence_hash"))
-                    for item in stage_attempts
-                    if item.get("evidence_hash")
-                ],
-            }
-        )
+        stages.append({
+            "name": stage_name,
+            "invoked": bool(stage_attempts),
+            "completed": completed,
+            "final_success": final_success,
+            "attempt_count": len(stage_attempts),
+            "attempts": stage_attempts,
+            "evidence_refs": [
+                str(item.get("evidence_hash"))
+                for item in stage_attempts
+                if item.get("evidence_hash")
+            ],
+        })
 
     all_completed = all(stage["completed"] for stage in stages)
     verifier_stage = stages[-1]
@@ -364,13 +363,14 @@ def _g2_receipt_valid(receipt: Mapping[str, Any]) -> bool:
 
 def _g3_receipt_valid(receipt: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
     suite_hash = str(receipt.get("suite_hash") or "")
+    test_count = receipt.get("test_count")
     return bool(
         receipt.get("eligible") is True
         and receipt.get("reason_code") == "AFFECTED_SUITE_PASS"
         and _is_hex_sha256(suite_hash)
         and receipt.get("suite_identity") == f"affected-suite-v1:{suite_hash}"
-        and type(receipt.get("test_count")) is int
-        and receipt.get("test_count") > 0
+        and type(test_count) is int
+        and test_count > 0
         and receipt.get("base_sha") == payload.get("base_sha")
         and receipt.get("candidate_sha") == payload.get("candidate_sha")
         and not receipt.get("failure_evidence")

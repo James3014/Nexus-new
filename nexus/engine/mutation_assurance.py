@@ -66,20 +66,18 @@ _MAX_MUTATION_RECORDS = 1_000
 _ISSUE16_TARGET = next(
     mutant for mutant in DETERMINISTIC_MUTANTS if mutant.mutant_id == "public_safe_forced_true"
 )
-_MUTATION_RECORD_FIELDS = frozenset(
-    {
-        "schema_version",
-        "concern",
-        "mutant_id",
-        "mutant_diff",
-        "original_passed",
-        "mutant_failed",
-        "equivalent_suspected",
-        "killed",
-        "assurance_status",
-        "evidence_refs",
-    }
-)
+_MUTATION_RECORD_FIELDS = frozenset({
+    "schema_version",
+    "concern",
+    "mutant_id",
+    "mutant_diff",
+    "original_passed",
+    "mutant_failed",
+    "equivalent_suspected",
+    "killed",
+    "assurance_status",
+    "evidence_refs",
+})
 _MUTATION_RECORD_BASE_FIELDS = _MUTATION_RECORD_FIELDS - {"evidence_refs"}
 
 

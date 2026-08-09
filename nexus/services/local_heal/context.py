@@ -28,6 +28,7 @@ class OperationalContext:
     instance_id: str
     repo_dir: Path
     problem_statement: str
+    task_id: str = ""
 
     # Memory control (BMF5: memory_enabled flag)
     memory_enabled: bool = True  # Set to False for nexus_memory_off arm
@@ -63,6 +64,8 @@ class OperationalContext:
     evaluation_report: str = ""
     hidden_verifier_passed: bool = False
     solve_eligible: bool = False
+    verifier_command_present: bool = False
+    verifier_command_source: str = ""
 
     # Common
     failure_reason: str = ""

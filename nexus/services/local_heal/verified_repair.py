@@ -155,6 +155,17 @@ def _validated_receipt_refs(data: Mapping[str, Any]) -> tuple[tuple[str, ...], l
         if ref != canonical_hash:
             reasons.append(f"{kind}_receipt_ref_hash_mismatch")
         reasons.extend(_receipt_payload_reasons(kind, payload))
+        if kind == "mutation":
+            mutation_passed = _bool(data, "mutation_assurance_passed")
+            mutation_not_required = _bool(data, "mutation_assurance_not_required")
+            if payload.get("decision") == "REQUIRED" and (
+                not mutation_passed or mutation_not_required
+            ):
+                reasons.append("mutation_receipt_evidence_mismatch")
+            if payload.get("decision") == "NOT_REQUIRED" and (
+                mutation_passed or not mutation_not_required
+            ):
+                reasons.append("mutation_receipt_evidence_mismatch")
     if refs != tuple(bound_refs):
         reasons.append("upstream_receipt_refs_binding_mismatch")
     return refs, reasons
@@ -168,6 +179,7 @@ def _case_reasons(case: str, data: Mapping[str, Any]) -> list[str]:
     regression_passed = _bool(data, "regression_passed", "affected_suite_passed")
     behavioral_passed = _bool(data, "behavioral_verifier_passed", "semantic_verifier_passed")
     mutation_passed = _bool(data, "mutation_assurance_passed")
+    mutation_not_required = _bool(data, "mutation_assurance_not_required")
     if case == "correct":
         if not patch_applied:
             reasons.append("patch_not_applied")
@@ -179,8 +191,10 @@ def _case_reasons(case: str, data: Mapping[str, Any]) -> list[str]:
             reasons.append("behavioral_verifier_not_passed")
         if not regression_passed:
             reasons.append("regression_not_passed")
-        if not mutation_passed:
+        if not mutation_passed and not mutation_not_required:
             reasons.append("mutation_assurance_not_passed")
+        if mutation_passed and mutation_not_required:
+            reasons.append("mutation_assurance_evidence_conflict")
         if not _text(data, "patch_sha", "candidate_patch_sha"):
             reasons.append("patch_evidence_missing")
         if not _text(data, "base_sha") or not _text(data, "candidate_sha"):
@@ -256,15 +270,13 @@ def run_fixed_calibration(
         actual_accept = bool(outcome["accepted"])
         if not expected_accept and actual_accept:
             false_green_cases.append(case)
-        outcomes.append(
-            {
-                "case": case,
-                "expected_accept": expected_accept,
-                "accepted": actual_accept,
-                "status": outcome["status"],
-                "reasons": outcome["reasons"],
-            }
-        )
+        outcomes.append({
+            "case": case,
+            "expected_accept": expected_accept,
+            "accepted": actual_accept,
+            "status": outcome["status"],
+            "reasons": outcome["reasons"],
+        })
     wrong_count = len(KNOWN_WRONG_CASES)
     return {
         "schema": CALIBRATION_SCHEMA,

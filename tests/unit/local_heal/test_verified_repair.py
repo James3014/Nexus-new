@@ -125,14 +125,12 @@ def test_fixed_calibration_rejects_all_five_known_wrong_cases() -> None:
 
 
 def test_compile_only_wrong_cannot_pass_from_compile_evidence() -> None:
-    result = reduce_verified_repair(
-        {
-            "calibration_case": "compile_only_wrong",
-            "upstream_receipt_refs": ["g1:receipt", "g2:receipt"],
-            "compile_passed": True,
-            "hidden_verifier_passed": True,
-        }
-    )
+    result = reduce_verified_repair({
+        "calibration_case": "compile_only_wrong",
+        "upstream_receipt_refs": ["g1:receipt", "g2:receipt"],
+        "compile_passed": True,
+        "hidden_verifier_passed": True,
+    })
 
     assert result["accepted"] is False
     assert result["status"] == "PARTIALLY_VERIFIED"
@@ -140,22 +138,22 @@ def test_compile_only_wrong_cannot_pass_from_compile_evidence() -> None:
 
 
 def test_manifest_hash_tampering_fails_closed() -> None:
-    result = reduce_verified_repair(
-        {**_correct(), "calibration_case": "correct", "calibration_manifest_hash": "0" * 64}
-    )
+    result = reduce_verified_repair({
+        **_correct(),
+        "calibration_case": "correct",
+        "calibration_manifest_hash": "0" * 64,
+    })
 
     assert result["accepted"] is False
     assert "calibration_manifest_hash_mismatch" in result["reasons"]
 
 
 def test_mapping_receipt_refs_fail_closed_instead_of_using_values() -> None:
-    result = reduce_verified_repair(
-        {
-            **_correct(),
-            "calibration_case": "correct",
-            "upstream_receipt_refs": {"g1": "g1:receipt", "g2": "g2:receipt"},
-        }
-    )
+    result = reduce_verified_repair({
+        **_correct(),
+        "calibration_case": "correct",
+        "upstream_receipt_refs": {"g1": "g1:receipt", "g2": "g2:receipt"},
+    })
 
     assert result["accepted"] is False
     assert result["status"] == "PARTIALLY_VERIFIED"
@@ -164,13 +162,11 @@ def test_mapping_receipt_refs_fail_closed_instead_of_using_values() -> None:
 
 
 def test_duplicate_receipt_refs_fail_closed() -> None:
-    result = reduce_verified_repair(
-        {
-            **_correct(),
-            "calibration_case": "correct",
-            "upstream_receipt_refs": ["g1:receipt", "g1:receipt"],
-        }
-    )
+    result = reduce_verified_repair({
+        **_correct(),
+        "calibration_case": "correct",
+        "upstream_receipt_refs": ["g1:receipt", "g1:receipt"],
+    })
 
     assert result["accepted"] is False
     assert "upstream_receipt_refs_duplicate" in result["reasons"]
@@ -178,22 +174,22 @@ def test_duplicate_receipt_refs_fail_closed() -> None:
 
 @pytest.mark.parametrize("invalid_ref", ["", "  ", None, 7, True])
 def test_empty_or_non_string_receipt_ref_fails_closed(invalid_ref: object) -> None:
-    result = reduce_verified_repair(
-        {
-            **_correct(),
-            "calibration_case": "correct",
-            "upstream_receipt_refs": ["g1:receipt", invalid_ref],
-        }
-    )
+    result = reduce_verified_repair({
+        **_correct(),
+        "calibration_case": "correct",
+        "upstream_receipt_refs": ["g1:receipt", invalid_ref],
+    })
 
     assert result["accepted"] is False
     assert "upstream_receipt_ref_invalid" in result["reasons"]
 
 
 def test_input_public_claim_allowed_true_is_tamper_and_fails_closed() -> None:
-    result = reduce_verified_repair(
-        {**_correct(), "calibration_case": "correct", "public_claim_allowed": True}
-    )
+    result = reduce_verified_repair({
+        **_correct(),
+        "calibration_case": "correct",
+        "public_claim_allowed": True,
+    })
 
     assert result["accepted"] is False
     assert result["status"] == "PARTIALLY_VERIFIED"
@@ -202,14 +198,12 @@ def test_input_public_claim_allowed_true_is_tamper_and_fails_closed() -> None:
 
 
 def test_forged_nonempty_receipt_ref_without_content_fails_closed() -> None:
-    result = reduce_verified_repair(
-        {
-            **_correct(),
-            "calibration_case": "correct",
-            "upstream_receipt_refs": ["forged-ref"],
-            "upstream_receipts": {},
-        }
-    )
+    result = reduce_verified_repair({
+        **_correct(),
+        "calibration_case": "correct",
+        "upstream_receipt_refs": ["forged-ref"],
+        "upstream_receipts": {},
+    })
 
     assert result["accepted"] is False
     assert "upstream_receipt_kinds_mismatch" in result["reasons"]
@@ -223,9 +217,11 @@ def test_tampered_receipt_payload_hash_fails_closed() -> None:
     adequacy["payload"] = {**adequacy["payload"], "task_id": "tampered"}
     receipts["adequacy"] = adequacy
 
-    result = reduce_verified_repair(
-        {**evidence, "calibration_case": "correct", "upstream_receipts": receipts}
-    )
+    result = reduce_verified_repair({
+        **evidence,
+        "calibration_case": "correct",
+        "upstream_receipts": receipts,
+    })
 
     assert result["accepted"] is False
     assert "adequacy_receipt_content_hash_mismatch" in result["reasons"]
@@ -244,14 +240,72 @@ def test_failed_mutation_receipt_cannot_become_verified_repair() -> None:
     }
     refs = [receipts[kind]["ref"] for kind in ("adequacy", "mutation")]
 
-    result = reduce_verified_repair(
-        {
-            **evidence,
-            "calibration_case": "correct",
-            "upstream_receipt_refs": refs,
-            "upstream_receipts": receipts,
-        }
-    )
+    result = reduce_verified_repair({
+        **evidence,
+        "calibration_case": "correct",
+        "upstream_receipt_refs": refs,
+        "upstream_receipts": receipts,
+    })
 
     assert result["accepted"] is False
     assert "mutation_receipt_semantics_invalid" in result["reasons"]
+
+
+def test_not_required_receipt_cannot_claim_mutation_passed() -> None:
+    evidence = _correct()
+    receipts = dict(evidence["upstream_receipts"])
+    not_required = {
+        **_mutation_payload(),
+        "decision": "NOT_REQUIRED",
+        "required": False,
+        "status": "NOT_REQUIRED",
+        "passed": False,
+    }
+    mutation_ref = _sha256_ref(not_required)
+    receipts["mutation"] = {
+        "ref": mutation_ref,
+        "content_hash": mutation_ref,
+        "payload": not_required,
+    }
+    refs = [receipts[kind]["ref"] for kind in ("adequacy", "mutation")]
+
+    result = reduce_verified_repair({
+        **evidence,
+        "calibration_case": "correct",
+        "upstream_receipt_refs": refs,
+        "upstream_receipts": receipts,
+    })
+
+    assert result["accepted"] is False
+    assert "mutation_receipt_evidence_mismatch" in result["reasons"]
+
+
+def test_explicit_not_required_receipt_is_eligible_without_claiming_mutation_pass() -> None:
+    evidence = _correct()
+    receipts = dict(evidence["upstream_receipts"])
+    not_required = {
+        **_mutation_payload(),
+        "decision": "NOT_REQUIRED",
+        "required": False,
+        "status": "NOT_REQUIRED",
+        "passed": False,
+    }
+    mutation_ref = _sha256_ref(not_required)
+    receipts["mutation"] = {
+        "ref": mutation_ref,
+        "content_hash": mutation_ref,
+        "payload": not_required,
+    }
+    refs = [receipts[kind]["ref"] for kind in ("adequacy", "mutation")]
+
+    result = reduce_verified_repair({
+        **evidence,
+        "calibration_case": "correct",
+        "upstream_receipt_refs": refs,
+        "upstream_receipts": receipts,
+        "mutation_assurance_passed": False,
+        "mutation_assurance_not_required": True,
+    })
+
+    assert result["accepted"] is True
+    assert result["status"] == "VERIFIED_REPAIR"

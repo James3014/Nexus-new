@@ -129,7 +129,7 @@ class ReproductionRunner:
         try:
             sig = inspect.signature(self.generate_fn)
             if "model" in sig.parameters:
-                kwargs = {"model": self.model_name}
+                kwargs: dict[str, Any] = {"model": self.model_name}
                 if "timeout" in sig.parameters and self.timeout_seconds is not None:
                     kwargs["timeout"] = self.timeout_seconds
                 return self.generate_fn(system_prompt, user_prompt, **kwargs)

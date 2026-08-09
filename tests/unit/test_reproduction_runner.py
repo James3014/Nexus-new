@@ -93,12 +93,14 @@ def test_syntax_validator_detects_invalid_syntax():
     invalid_code = "import os\nif True\n    print('hello')\n"
     ok, err = SyntaxValidator.validate_syntax(invalid_code)
     assert ok is False
+    assert err is not None
     assert "SyntaxError" in err
 
     # 錯誤語法 2 (IndentationError)
     indent_error = "def foo():\n  print(1)\n    print(2)"
     ok, err = SyntaxValidator.validate_syntax(indent_error)
     assert ok is False
+    assert err is not None
     assert "IndentationError" in err
 
 
