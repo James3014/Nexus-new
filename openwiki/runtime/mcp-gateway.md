@@ -6,11 +6,11 @@ tags: [runtime, mcp, gateway, ingress, transport]
 openwiki:
   roles: [architecture, domain]
   change_kinds: [public-api, integration]
-  source_paths: [nexus/orchestrator/unified_mcp_gateway.py, nexus/orchestrator/self_hosted_mcp_http.py, nexus/orchestrator/canonical_mcp_ingress.py]
+  source_paths: [nexus/orchestrator/unified_mcp_gateway.py, nexus/orchestrator/self_hosted_mcp.py, nexus/orchestrator/self_hosted_mcp_http.py, nexus/orchestrator/canonical_mcp_ingress.py]
   symbols: [UnifiedMCPGateway, NexusSelfHostedMCPServer, build_mcp_execution_context]
-  test_paths: [tests/test_battlesuit_gateway.py]
+  test_paths: [tests/nexus/orchestrator/test_unified_mcp_gateway.py, tests/nexus/orchestrator/test_mcp_canonical_ingress.py, tests/nexus/orchestrator/test_unified_mcp_gateway_http.py, tests/nexus/orchestrator/test_self_hosted_mcp.py]
   invariants: [MCP Gateway must delegate capability route decisions to CapabilityPlanner.]
-  validation_commands: [pytest tests/test_battlesuit_gateway.py -q]
+  validation_commands: [pytest tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/nexus/orchestrator/test_mcp_canonical_ingress.py tests/nexus/orchestrator/test_unified_mcp_gateway_http.py tests/nexus/orchestrator/test_self_hosted_mcp.py -q]
 ---
 
 # MCP Gateway & Ingress Protocols
@@ -23,7 +23,7 @@ The **Model Context Protocol (MCP) Gateway** exposes Nexus capabilities to exter
 
 The MCP subsystem consists of three primary components:
 1. **`UnifiedMCPGateway`** (`nexus/orchestrator/unified_mcp_gateway.py`): Core gateway orchestrator managing MCP tool registration, health checking, and execution contexts (`schema: nexus.mcp_canonical_runtime.v1`).
-2. **`NexusSelfHostedMCPServer`** (`nexus/orchestrator/self_hosted_mcp_http.py`): HTTP/JSON-RPC server handling `/mcp` endpoints and rejecting non-MCP paths.
+2. **`NexusSelfHostedMCPServer`** (`nexus/orchestrator/self_hosted_mcp.py`): MCP server handling tool requests; the HTTP adapter in `nexus/orchestrator/self_hosted_mcp_http.py` exposes the `/mcp` endpoint and rejects non-MCP paths.
 3. **`canonical_mcp_ingress`** (`nexus/orchestrator/canonical_mcp_ingress.py`): Constructs `CanonicalTaskContext` payloads with `transport_ingress="mcp"`.
 
 ---
@@ -68,6 +68,7 @@ authority_roles:
   - EXECUTION_AUTHORITY
 evidence_basis:
   - nexus/orchestrator/unified_mcp_gateway.py:UnifiedMCPGateway
+  - scripts/ops/nexus_mcp_gateway.py:main
 claim_ceiling: Core MCP execution gateway; handles MCP tool requests and binds execution contexts to CapabilityPlanner routing.
 ```
 
@@ -80,7 +81,8 @@ runtime_surfaces:
 authority_roles:
   - EXECUTION_AUTHORITY
 evidence_basis:
-  - nexus/orchestrator/self_hosted_mcp_http.py:NexusSelfHostedMCPServer
+  - nexus/orchestrator/self_hosted_mcp.py:NexusSelfHostedMCPServer
+  - nexus/orchestrator/self_hosted_mcp_http.py:create_http_server
 claim_ceiling: Self-hosted HTTP server providing JSON-RPC transport over /mcp endpoints.
 ```
 
@@ -94,6 +96,7 @@ authority_roles:
   - NONE
 evidence_basis:
   - nexus/orchestrator/canonical_mcp_ingress.py:build_mcp_execution_context
+  - nexus/orchestrator/unified_mcp_gateway.py:build_mcp_execution_context
 claim_ceiling: Ingress context builder standardizing incoming MCP requests into CanonicalTaskContext.
 ```
 
@@ -103,11 +106,11 @@ claim_ceiling: Ingress context builder standardizing incoming MCP requests into 
 
 To expose a new tool through the MCP Gateway:
 
-1. **Define Tool Schema**: Add the JSON Schema declaration in `nexus/orchestrator/unified_mcp_gateway.py`.
-2. **Register Handler**: Map the tool name in `UnifiedMCPGateway._register_default_tools()`.
-3. **Route Wire**: Ensure execution invokes `[CapabilityPlanner](../routing/capability-planner.md)` for route authorization before executing tool logic.
-4. **Validation Test**: Add a test case in `tests/test_battlesuit_gateway.py` verifying tool invocation and error handling.
-5. **Execute Validation**: Run `pytest tests/test_battlesuit_gateway.py -q`.
+1. **Define Tool Schema**: Add the JSON Schema declaration returned by `UnifiedMCPGateway.tool_specs()` in `nexus/orchestrator/unified_mcp_gateway.py`.
+2. **Implement Dispatch**: Add the bounded handler path used by `UnifiedMCPGateway._task_run()` or the relevant existing tool dispatch method.
+3. **Preserve Authority Boundaries**: Route/task-dispatch tools must use `[CapabilityPlanner](../routing/capability-planner.md)` where current source delegates route authority. Direct status, inspection, and explicitly handled MCP tools remain governed by their own permission/handler contracts and must not invent a Planner route.
+4. **Validation Test**: Add focused coverage under `tests/nexus/orchestrator/` for tool invocation, ingress, or HTTP transport behavior.
+5. **Execute Validation**: Run the focused MCP tests listed below.
 
 ---
 
@@ -122,15 +125,19 @@ Consult this page when extending MCP tool APIs, debugging HTTP/stdio transport e
 
 ### Exact Source Files & Symbols
 - `nexus/orchestrator/unified_mcp_gateway.py` -> `UnifiedMCPGateway`
-- `nexus/orchestrator/self_hosted_mcp_http.py` -> `NexusSelfHostedMCPServer`
+- `nexus/orchestrator/self_hosted_mcp.py` -> `NexusSelfHostedMCPServer`
+- `nexus/orchestrator/self_hosted_mcp_http.py` -> `build_handler`, `create_http_server`
 - `nexus/orchestrator/canonical_mcp_ingress.py` -> `build_mcp_execution_context`
 
 ### Focused Tests
-- `tests/test_battlesuit_gateway.py`
+- `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
+- `tests/nexus/orchestrator/test_mcp_canonical_ingress.py`
+- `tests/nexus/orchestrator/test_unified_mcp_gateway_http.py`
+- `tests/nexus/orchestrator/test_self_hosted_mcp.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/test_battlesuit_gateway.py -q
+pytest tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/nexus/orchestrator/test_mcp_canonical_ingress.py tests/nexus/orchestrator/test_unified_mcp_gateway_http.py tests/nexus/orchestrator/test_self_hosted_mcp.py -q
 ```
 
 ## 🧭 Diagnostic Boundary: `HOST_ACTION_BINDING_GAP`

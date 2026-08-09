@@ -97,20 +97,6 @@ evidence_basis:
 claim_ceiling: Registry mapping CapabilityPlanner node names to UnifiedRuntime invokers; holds zero route authority.
 ```
 
-```yaml
-component: MainchainEntry
-implementation_status: CURRENT
-wiring_status: WIRED
-runtime_surfaces:
-  - MAIN_CLI
-  - LOCAL_RUNTIME
-authority_roles:
-  - NONE
-evidence_basis:
-  - nexus/services/mainchain_entry.py:MainchainEntry
-claim_ceiling: Entry point delegating capability resolution strictly to CapabilityPlanner.
-```
-
 ---
 
 ## 🛠️ Extension Recipe: Adding a Capability Node
