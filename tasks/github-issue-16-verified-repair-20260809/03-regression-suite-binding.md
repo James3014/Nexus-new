@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: issue16-g3-regression-binding
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
@@ -49,3 +49,11 @@ evidence. Maximum claim: affected-suite regression evidence PASS.
 ## Block classification
 
 `RECOVERABLE_BLOCK` for bounded suite defects; `HARD_BLOCK` for verifier authority conflict.
+
+## Completion receipt
+
+- Implementation commit: `902d19a3762a35aaa73c6e5e7bc60223b8097c7e`
+- Exact-commit independent review: ACCEPT; no P0/P1 findings
+- G3 and adjacent G2 suites: 37 passed each
+- Mandatory base/Candidate suite-hash, rejection, union-evidence, Ruff
+  differential, diff, scope, and deletion gates passed
