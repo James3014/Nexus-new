@@ -71,8 +71,11 @@ Maximum changed files: 6.
 ## Verification
 
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/tmp/nexus-issue22-pycache uv run pytest -q tests/nexus/orchestrator/test_self_hosted_task_service.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/services/test_runtime_workforce_admission.py`
-- `uv run ruff check nexus/orchestrator/self_hosted_task_service.py nexus/orchestrator/unified_mcp_gateway.py tests/nexus/orchestrator/test_self_hosted_task_service.py tests/nexus/orchestrator/test_unified_mcp_gateway.py`
-- `uv run ruff format --check nexus/orchestrator/self_hosted_task_service.py nexus/orchestrator/unified_mcp_gateway.py tests/nexus/orchestrator/test_self_hosted_task_service.py tests/nexus/orchestrator/test_unified_mcp_gateway.py`
+- Run Ruff check on the four allowed runtime/test files at exact base and
+  Candidate; require zero new diagnostics. The frozen base has eight findings.
+- Run Ruff format check on the same four files at exact base and Candidate;
+  require zero newly unformatted files. All four are already unformatted at
+  exact base, so broad formatting cleanup is out of scope.
 - `git diff --check`
 - allowed-file, deletion, complete staged-diff, and card-hash audit
 
@@ -86,7 +89,8 @@ Maximum changed files: 6.
 - Public list and gateway count consume the same classification and do not
   duplicate Assisted tasks.
 - Retry/evidence preservation is asserted separately from current action.
-- Focused tests, Ruff gates, diff gate, and independent review pass.
+- Focused tests, exact-base Ruff differential gates, diff gate, and independent
+  review pass.
 
 Maximum claim: covered self-hosted and Assisted projections distinguish
 unresolved required action from settled historical retryable records. This does
