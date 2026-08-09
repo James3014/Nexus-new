@@ -42,7 +42,7 @@ component: <name or symbol>
 implementation_status: <CURRENT | TEST_ONLY | HISTORICAL_OR_LEGACY | UNKNOWN>
 wiring_status: <WIRED | UNWIRED | UNKNOWN>
 runtime_surfaces:
-  - <MAIN_CLI | MCP_GATEWAY | LOCAL_RUNTIME | BENCHMARK | STANDALONE_OPS | TEST>
+  - <MAIN_CLI | MCP_GATEWAY | LOCAL_RUNTIME | CI | BENCHMARK | STANDALONE_OPS | TEST>
 authority_roles:
   - <ROUTE_AUTHORITY | EXECUTION_AUTHORITY | GOVERNANCE_AUTHORITY | DERIVED_ONLY | NONE>
 evidence_basis:
@@ -70,7 +70,12 @@ Code existence alone does not prove current wiring.
 
 Use `WIRED` only when current physical evidence establishes a caller, entrypoint, service registration, dispatch path, or equivalent connection to a named runtime surface.
 
-Use `UNWIRED` only when available evidence is sufficient to support absence within the explicitly examined scope.
+Use `UNWIRED` only after establishing a closed and complete wiring contract for
+the examined scope and positively excluding every plausible dynamic, external,
+configuration-driven, plugin, and runtime-discovery path. The `evidence_basis`
+must name that closed scope and each negative registration/dispatch/discovery
+check; a missing page link, missing test, or ordinary negative repository
+search is not sufficient.
 
 If search or evidence coverage is incomplete, use `UNKNOWN` rather than converting “not found” into “unwired”.
 
@@ -85,6 +90,26 @@ A component may be wired to `MCP_GATEWAY` while not being wired to `MAIN_CLI`.
 Do not collapse surface-specific evidence into a global `WIRED_CURRENT` or `PRESENT_UNWIRED` label.
 
 Use `TEST` only for test execution evidence.
+
+Use `CI` for workflow-runner execution such as GitHub Actions. Never relabel CI
+as `LOCAL_RUNTIME` merely because a narrower taxonomy omitted a CI surface.
+
+For GitHub Actions inventories, copy each workflow's top-level `name:` value
+verbatim from the current YAML. Do not normalize, expand, or paraphrase display
+names. Trigger keys and branch filters must likewise come from the physical
+`on:` mapping.
+
+`CapabilityPlanner` is the sole route and capability-selection authority.
+`HybridRouteDecision` is the Planner-derived decision contract/projection,
+not a second selector, router, or planner. Generated prose must preserve this
+distinction.
+
+Regeneration is a source-correction operation, not a stylistic rewrite. When
+the current pages already satisfy the source contract, leave them unchanged.
+Do not add optional diagrams, inventories, prose rewrites, or relationship-only
+edits merely to make the generated output look more complete. Add or change a
+diagram only when a bounded source defect requires it, and never emit a
+degraded text fence or a `mermaid parse failed` marker.
 
 ### authority_roles
 
@@ -176,7 +201,10 @@ authority_roles:
   - NONE
 ```
 
-Use `UNWIRED` instead of `UNKNOWN` only when an explicitly bounded current-source search provides sufficient negative evidence for the examined scope.
+Use `UNWIRED` instead of `UNKNOWN` only when the closed wiring contract and all
+negative dynamic/external/config/plugin/runtime-discovery results are recorded
+in `evidence_basis`. If the search boundary, caller set, or runtime surface is
+incomplete, use `UNKNOWN`.
 
 Never upgrade a test-only caller into `LOCAL_RUNTIME` or `BENCHMARK` wiring.
 
@@ -217,7 +245,9 @@ authority_roles:
   - NONE
 ```
 
-Set `wiring_status` to `UNWIRED` only if the examined scope genuinely supports that negative claim; otherwise use `UNKNOWN`.
+Set `wiring_status` to `UNWIRED` only if the examined scope genuinely
+supports that negative claim and the page records the examined scope;
+otherwise use `UNKNOWN`.
 
 ## Conflicts and uncertainty
 

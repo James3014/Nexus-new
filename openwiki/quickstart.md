@@ -23,14 +23,14 @@ Welcome to the **Nexus Singularity OS OpenWiki knowledge base**. This documentat
 
 ## 🗺️ System Architecture Map
 
-The Nexus Singularity OS knowledge base is organized into six core concept domains:
+The Nexus Singularity OS knowledge base is organized into seven core concept domains:
 
 1. **[Architecture Overview](architecture/overview.md)**: Explains the P-X-D-R-A-C (Plan, Execute, Diagnose, Research, Audit, Crystallize) engine lifecycle, process isolation via `SanitizedRunner`, and execution streaming via `AsyncProcessExecutor`.
 2. **[Capability Planner & Routing Authority](routing/capability-planner.md)**: Documents `CapabilityPlanner` and `HybridRouteDecision`, the sole route authorities governing capability selection and topology planning across all runtime surfaces.
 3. **[MCP Gateway & Ingress Protocols](runtime/mcp-gateway.md)**: Covers the Model Context Protocol execution gateway, HTTP/stdio transport adapters, and self-hosted MCP servers.
 4. **[CLI Commands & Cueline Operations](runtime/cli-and-cueline.md)**: Details the primary `nexus` CLI surface (`scripts/engine/nexus_cli.py`), command delivery modes (`ask`, `high`), health check levels, and `nexus-cueline-worker` background task execution.
 5. **[Governance Gates & Completion Contracts](governance/gates-and-contracts.md)**: Explains delivery verification gates, completion contract envelopes, and `CompletionEnforcer` fail-closed verification.
-6. **[GitHub Actions & CI/CD Lanes](workflows/github-actions.md)**: Catalogs all 12 GitHub Actions workflows, distinguishing scheduled triggers, manual dispatches, and event hooks.
+6. **[GitHub Actions & CI/CD Lanes](workflows/github-actions.md)**: Catalogs all 9 GitHub Actions workflows, distinguishing scheduled triggers, manual dispatches, and event hooks.
 7. **[Validation Suites & Benchmarks](testing/validation-and-benchmarks.md)**: Categorizes unit, integration, and benchmark test suites with quiet validation commands.
 
 ---
@@ -43,7 +43,7 @@ Use this matrix to navigate directly from user intent to implementation entrypoi
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **System Lifecycle & Core Runtime** | [Architecture Overview](architecture/overview.md) | `nexus/services/unified_runtime.py`<br>`scripts/engine/nexus_cli.py` | `UnifiedRuntime`<br>`SanitizedRunner`<br>`AsyncProcessExecutor` | `tests/test_cli_deadlock_and_injection.py`<br>`tests/test_service_decomposition.py` | `pytest tests/test_cli_deadlock_and_injection.py -q` |
 | **Routing & Capability Selection** | [Routing Authority](routing/capability-planner.md) | `nexus/engine/capability_planner.py`<br>`nexus/contracts/hybrid_route.py` | `CapabilityPlanner`<br>`HybridRouteDecision`<br>`CapabilityPlan` | `tests/test_lite_route_oracle.py`<br>`tests/test_route_optimization.py` | `pytest tests/test_lite_route_oracle.py -q` |
-| **MCP Tools & Ingress Handling** | [MCP Gateway](runtime/mcp-gateway.md) | `nexus/orchestrator/unified_mcp_gateway.py`<br>`nexus/orchestrator/self_hosted_mcp_http.py` | `UnifiedMCPGateway`<br>`NexusSelfHostedMCPServer` | `tests/test_battlesuit_gateway.py` | `pytest tests/test_battlesuit_gateway.py -q` |
+| **MCP Tools & Ingress Handling** | [MCP Gateway](runtime/mcp-gateway.md) | `nexus/orchestrator/unified_mcp_gateway.py`<br>`nexus/orchestrator/self_hosted_mcp.py`<br>`nexus/orchestrator/self_hosted_mcp_http.py` | `UnifiedMCPGateway`<br>`NexusSelfHostedMCPServer` | `tests/nexus/orchestrator/test_unified_mcp_gateway.py`<br>`tests/nexus/orchestrator/test_mcp_canonical_ingress.py` | `pytest tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/nexus/orchestrator/test_mcp_canonical_ingress.py -q` |
 | **CLI Commands & Subcommands** | [CLI & Cueline](runtime/cli-and-cueline.md) | `scripts/engine/nexus_cli.py`<br>`scripts/ops/nexus_cueline_worker.py` | `nexus` (Click group)<br>`NexusCLI`<br>`main` | `tests/test_cli_commands.py`<br>`tests/test_cli_dispatch.py` | `pytest tests/test_cli_commands.py -q` |
 | **Delivery Gates & Completion** | [Governance Gates](governance/gates-and-contracts.md) | `nexus/engine/completion_enforcer.py`<br>`nexus/engine/completion_contract.py` | `CompletionEnforcer`<br>`build_completion_envelope` | `tests/test_task_runner_completion_gate.py`<br>`tests/test_iron_gate_governance.py` | `pytest tests/test_task_runner_completion_gate.py -q` |
 | **CI/CD Workflow Triggers** | [GitHub Actions](workflows/github-actions.md) | `.github/workflows/*.yml` | Workflows (`openwiki-update`, `benchmark-ci`, `pytest`) | `tests/test_script_entrypoints.py` | `pytest tests/test_script_entrypoints.py -q` |
@@ -137,6 +137,7 @@ implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
   - LOCAL_RUNTIME
+  - CI
 authority_roles:
   - DERIVED_ONLY
 evidence_basis:

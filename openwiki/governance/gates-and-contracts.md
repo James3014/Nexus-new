@@ -6,7 +6,7 @@ tags: [governance, gates, completion, contracts, security]
 openwiki:
   roles: [architecture, domain, operations]
   change_kinds: [public-api, governance]
-  source_paths: [nexus/engine/completion_enforcer.py, nexus/engine/completion_contract.py, src/governance/pre_write_gate.py]
+  source_paths: [nexus/engine/completion_enforcer.py, nexus/engine/completion_contract.py, scripts/pre_write_quality_gate.py]
   symbols: [CompletionEnforcer, build_completion_envelope, ensure_verified_completion, CompletionEnforcementError]
   test_paths: [tests/test_task_runner_completion_gate.py, tests/test_iron_gate_governance.py]
   invariants: [CompletionEnforcer fails closed if verified criteria are not met.]
@@ -15,9 +15,9 @@ openwiki:
 
 # Governance Gates & Completion Contracts
 
-Nexus Singularity OS uses fail-closed **Governance Gates** and structured **Completion Envelopes** to ensure that task execution and code modifications meet strict verification criteria before delivery.
+Nexus Singularity OS uses fail-closed **Governance Gates** and structured **Completion Envelopes** to ensure that task execution and code modifications dispatched via `[NexusCLI](../runtime/cli-and-cueline.md)` or `[UnifiedMCPGateway](../runtime/mcp-gateway.md)` meet strict verification criteria before delivery.
 
-> 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository/agent governance authority. `CapabilityPlanner` and `HybridRouteDecision` remain Nexus route authority. OpenWiki is `derived_non_authoritative` and holds zero approval or release authority.
+> 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository/agent governance authority. [`CapabilityPlanner`](../routing/capability-planner.md) is the sole route/capability-selection authority; [`HybridRouteDecision`](../routing/capability-planner.md) is its derived decision contract/projection, not a second selector. OpenWiki is `derived_non_authoritative` and holds zero approval or release authority.
 
 ---
 
