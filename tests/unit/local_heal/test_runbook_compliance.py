@@ -1,18 +1,22 @@
 """Tests for runbook_compliance module (V4-C.2)."""
-import json
-import pytest
+
 from pathlib import Path
 
+from nexus.services.local_heal.evaluation_gate import (
+    AffectedSuiteManifest,
+    bind_affected_regression_suite,
+)
+from nexus.services.local_heal.evaluation_gate import (
+    TestResult as EvaluationTestResult,
+)
 from nexus.services.local_heal.runbook_compliance import (
-    check_compliance,
     check_artifact_presence,
-    check_receipt_schema,
     check_attribution_rules,
     check_governance_rules,
-    check_verifier_rules,
-    check_model_policy,
     check_lane_classification,
-    check_env_sensitive_rules,
+    check_model_policy,
+    check_receipt_schema,
+    check_verifier_rules,
 )
 
 
@@ -165,3 +169,20 @@ def test_missing_artifact():
     with __import__('tempfile').TemporaryDirectory() as tmp:
         missing_required, missing_optional = check_artifact_presence(Path(tmp))
         assert 'real_replay_result.json' in missing_required
+
+
+def test_regression_binding_requires_explicit_affected_scope_and_distinct_revisions():
+    manifest = AffectedSuiteManifest(
+        test_ids=("tests/test_bug.py::test_boundary",),
+        commands=(("python", "-m", "pytest", "tests/test_bug.py::test_boundary"),),
+    )
+    results = [EvaluationTestResult(test_id=manifest.test_ids[0], passed=True, output="1 passed")]
+    unbound = bind_affected_regression_suite(
+        manifest,
+        base_sha="same-sha",
+        candidate_sha="same-sha",
+        base_results=results,
+        candidate_results=results,
+    )
+    assert unbound.eligible is False
+    assert unbound.reason_code == "BASE_CANDIDATE_BINDING_INVALID"
