@@ -372,6 +372,29 @@ def test_serial_target_budget_rejects_second_active_target(sh2_repo):
         manager.create_lease(_contract(sh2_repo, task_id="second"))
 
 
+def test_serial_target_budget_ignores_retained_dirty_target(sh2_repo):
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _path: False)
+    retained = _contract(sh2_repo, task_id="retained")
+    retained_lease = manager.create_lease(retained)
+    Path(retained_lease.target_worktree, "retained.txt").write_text("evidence\n", encoding="utf-8")
+
+    second = _contract(sh2_repo, task_id="second")
+    manager.create_lease(
+        second,
+        task_states={"retained": {"status": "FINAL_BLOCK", "lease": retained_lease.__dict__}},
+    )
+    assert Path(retained_lease.target_worktree, "retained.txt").exists()
+
+
+def test_serial_target_budget_fails_closed_when_process_evidence_unknown(sh2_repo):
+    first = _contract(sh2_repo, task_id="unknown-process")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _path: None)
+    manager.create_lease(first)
+
+    with pytest.raises(RuntimeError, match="serial Target budget"):
+        manager.create_lease(_contract(sh2_repo, task_id="second"))
+
+
 def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     contract, manager, lease, target = _prepare_candidate(sh2_repo)
     (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")

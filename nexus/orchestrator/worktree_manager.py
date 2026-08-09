@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence
+from typing import Callable, Dict, Mapping, Optional, Sequence
 
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
@@ -305,6 +305,8 @@ class WorktreeManager:
     def create_lease(
         self,
         contract: SelfHostedTaskContract,
+        *,
+        task_states: Optional[Mapping[str, dict]] = None,
     ) -> TargetWorktreeLease:
         controller_root, target_path, target_root = self._resolved_paths(contract)
         self._verify_target_boundary(controller_root, target_path, target_root)
@@ -318,13 +320,11 @@ class WorktreeManager:
 
         target_branch = f"nexus/task/{contract.task_id}"
         target_detached = False
-        active_targets = [
-            entry for entry in self._registered_worktrees(controller_root)
-            if "worktree" in entry
-            and Path(entry["worktree"]).resolve() != controller_root
-            and self.root_dir.resolve() in Path(entry["worktree"]).resolve().parents
-            and Path(entry["worktree"]).resolve() != target_path
-        ]
+        active_targets = self._active_target_worktrees(
+            controller_root,
+            target_path,
+            task_states=task_states,
+        )
         if active_targets:
             raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
         if target_path.exists():
@@ -1044,6 +1044,62 @@ class WorktreeManager:
             if "worktree" in entry:
                 entry["worktree"] = str(Path(entry["worktree"]).resolve())
         return entries
+
+    def _active_target_worktrees(
+        self,
+        controller_root: Path,
+        target_path: Path,
+        *,
+        task_states: Optional[Mapping[str, dict]] = None,
+    ) -> list[dict[str, str]]:
+        """Return only Targets that consume the serial execution budget.
+
+        Retained/terminal worktrees are evidence and remain untouched.  A
+        durable task owner (``nexus/task/<id>``) is active unless its supplied
+        lifecycle state is terminal or explicitly retained for review.  Live
+        process/lock evidence always wins; unavailable process evidence fails
+        closed rather than allowing a concurrent lease.
+        """
+        terminal = _DIRECT_TERMINAL_STATUSES
+        review = {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}
+        states = task_states or {}
+        active: list[dict[str, str]] = []
+        root = self.root_dir.resolve()
+        controller = controller_root.resolve()
+        requested = target_path.resolve()
+        for entry in self._registered_worktrees(controller):
+            raw_path = entry.get("worktree")
+            if not raw_path:
+                continue
+            path = Path(raw_path).resolve()
+            if path == controller or path == requested or root not in path.parents:
+                continue
+
+            # Git's ``locked`` marker is an explicit owner protection.
+            if "locked" in entry:
+                active.append(entry)
+                continue
+            try:
+                process_state = self.process_checker(path)
+            except Exception:
+                process_state = None
+            if process_state is None or bool(process_state):
+                active.append(entry)
+                continue
+
+            branch = entry.get("branch", "")
+            task_id: Optional[str] = None
+            if branch.startswith("refs/heads/nexus/task/"):
+                task_id = branch.removeprefix("refs/heads/nexus/task/")
+            elif branch.startswith("nexus/task/"):
+                task_id = branch.removeprefix("nexus/task/")
+            state = states.get(task_id) if task_id else None
+            status = str(state.get("status")) if state else None
+            if task_id and status not in terminal and status not in review:
+                # Missing lifecycle state is intentionally active: durable
+                # ownership exists, but its disposition cannot be proven.
+                active.append(entry)
+        return active
 
     def _worktree_entry(
         self,
