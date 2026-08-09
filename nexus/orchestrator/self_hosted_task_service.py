@@ -34,6 +34,7 @@ from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
 from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
+from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationExecutionError
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
@@ -65,6 +66,7 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.autonomy_goal import AutonomyGoalGrant
+from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.orchestrator.autonomy_policy import (
     AutonomySubmissionBinding,
     project_autonomy_submission,
@@ -1479,6 +1481,16 @@ class SelfHostedTaskService:
         else:
             target_base_revision = str(target_base_revision)
 
+        raw_collaboration_realm = request.get("collaboration_realm")
+        collaboration_realm: Optional[CollaborationExecutionRealm] = None
+        if raw_collaboration_realm is not None:
+            if not isinstance(raw_collaboration_realm, Mapping):
+                raise ValueError("COLLABORATION_REALM_INVALID")
+            try:
+                collaboration_realm = CollaborationExecutionRealm.model_validate(raw_collaboration_realm)
+            except Exception as exc:
+                raise ValueError("COLLABORATION_REALM_INVALID") from exc
+
         return ArchitectTaskContract(
             task_id=task_id,
             objective=what,
@@ -1510,6 +1522,7 @@ class SelfHostedTaskService:
             maximum_replans=0,
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,
+            collaboration_realm=collaboration_realm,
         )
 
     @staticmethod
@@ -3703,7 +3716,9 @@ class SelfHostedTaskService:
         if request.get("worker_candidate_ingress") and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
             semantic_fields = (
                 "what", "why", "allowed_files", "verifier_commands", "worker", "worker_id",
-                "provider", "model", "controller_revision", "authority_change_candidate_confirmation",
+                "provider", "model", "controller_revision", "target_base_revision",
+                "controller_repo_root", "target_repo_root", "target_worktree_root",
+                "collaboration_realm", "authority_change_candidate_confirmation",
                 "protected_contracts",
                 "provider_probe_evidence_hash", "provider_binary_path",
                 "provider_binary_sha256", "provider_cli_version_sha256",
@@ -3749,6 +3764,8 @@ class SelfHostedTaskService:
         requested_lane = str(request.get("execution_lane") or "").strip().upper()
         if requested_lane in {"", "DIRECT_CANONICAL"}:
             if lane["eligible"]:
+                if request.get("collaboration_realm") is not None:
+                    raise ValueError("COLLABORATION_REALM_DIRECT_CANONICAL_UNSUPPORTED")
                 if autonomy_grant is not None:
                     raise ValueError("AUTONOMY_DIRECT_CANONICAL_UNSUPPORTED")
                 return self._submit_direct_canonical(request, task_id)
@@ -3757,6 +3774,7 @@ class SelfHostedTaskService:
         contract = self.build_contract(request)
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
+        collaboration_provenance = CollaborationRealmVerifier.verify_submission(contract)
         if autonomy_grant is not None:
             if autonomy_grant.collaboration_base.head_sha != contract.controller_revision:
                 raise ValueError("AUTONOMY_COLLABORATION_BASE_MISMATCH")
@@ -3769,6 +3787,12 @@ class SelfHostedTaskService:
                 raise ValueError("AUTONOMY_TASK_SCOPE_INVALID") from exc
             if not scope_allowed:
                 raise ValueError("AUTONOMY_TASK_SCOPE_EXCEEDED")
+            if contract.collaboration_realm is not None:
+                collaboration = contract.collaboration_realm.collaboration
+                if autonomy_grant.repository != collaboration.repository:
+                    raise ValueError("AUTONOMY_COLLABORATION_REPOSITORY_MISMATCH")
+                if autonomy_grant.collaboration_base != collaboration.base:
+                    raise ValueError("AUTONOMY_COLLABORATION_BASE_MISMATCH")
         existing_states = list(self._submission_task_states().values())
         for current in existing_states:
             current_key = str(current.get("idempotency_key") or "")
@@ -3892,6 +3916,12 @@ class SelfHostedTaskService:
             "archive_location": None,
             "merge_performed": False,
             "push_performed": False,
+            "collaboration_realm": (
+                contract.collaboration_realm.model_dump(mode="json")
+                if contract.collaboration_realm is not None else None
+            ),
+            "submission_collaboration_provenance": collaboration_provenance or None,
+            "collaboration_provenance": collaboration_provenance or None,
         }
         if autonomy_grant is not None:
             autonomy_binding = AutonomySubmissionBinding.issue(
@@ -3958,6 +3988,9 @@ class SelfHostedTaskService:
                         })
                     if contract_refreshed:
                         previous_contract = current.get("contract") or {}
+                        retry_collaboration_provenance = (
+                            CollaborationRealmVerifier.verify_submission(contract) or None
+                        )
                         current.setdefault("contract_history", []).append({
                             "attempt_id": current.get("attempt_id"),
                             "contract_hash": current.get("contract_hash"),
@@ -3977,6 +4010,12 @@ class SelfHostedTaskService:
                             "target_branch": f"nexus/task/{contract.task_id}",
                             "target_created_at": None,
                             "worker_provider": contract.preferred_provider,
+                            "collaboration_realm": (
+                                contract.collaboration_realm.model_dump(mode="json")
+                                if contract.collaboration_realm is not None else None
+                            ),
+                            "submission_collaboration_provenance": retry_collaboration_provenance,
+                            "collaboration_provenance": retry_collaboration_provenance,
                         })
                     current.update({
                         "request": _jsonable(dict(request)),
@@ -4993,6 +5032,18 @@ class SelfHostedTaskService:
         contract = state.get("contract") or {}
         lease = state.get("lease") or {}
         packet = state.get("promotion_packet") or {}
+        candidate = state.get("candidate") or {}
+        verified_receipt = state.get("verified_receipt") or {}
+        candidate_collaboration_provenance = (
+            candidate.get("collaboration_provenance")
+            or verified_receipt.get("collaboration_provenance")
+            or packet.get("collaboration_provenance")
+            or lease.get("collaboration_provenance")
+        )
+        collaboration_provenance = (
+            candidate_collaboration_provenance
+            or state.get("collaboration_provenance")
+        )
         archived_path, _ = self._latest_archived_state(task_id)
         return {
             "task_id": task_id,
@@ -5041,6 +5092,13 @@ class SelfHostedTaskService:
             "candidate": state.get("candidate"),
             "verified_receipt": state.get("verified_receipt"),
             "runtime_development_mapping": state.get("runtime_development_mapping"),
+            "collaboration_realm": state.get("collaboration_realm") or contract.get("collaboration_realm"),
+            "submission_collaboration_provenance": (
+                state.get("submission_collaboration_provenance")
+                or state.get("collaboration_provenance")
+            ),
+            "collaboration_provenance": collaboration_provenance,
+            "candidate_collaboration_provenance": candidate_collaboration_provenance,
             "error": state.get("error"),
         }
 

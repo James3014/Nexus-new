@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Optional
 
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
@@ -32,6 +33,7 @@ class PromotionApprovalPacket:
     push_performed: bool
     authority_change_required: bool = False
     authority_findings_sha256: str = ""
+    collaboration_provenance: Optional[dict[str, object]] = None
 
 
 class CandidateCommitter:
@@ -105,6 +107,11 @@ class CandidateCommitter:
         current = self.worktree_manager.capture_candidate(contract, lease)
         if current.candidate_state_hash != receipt.candidate_state_hash:
             raise RuntimeError("candidate state changed after verification")
+        if (
+            receipt.collaboration_gate_passed is not True
+            or current.collaboration_provenance != receipt.collaboration_provenance
+        ):
+            raise RuntimeError("verified collaboration provenance is required")
         staged_before = self.worktree_manager._run_git(
             ["diff", "--cached", "--name-only"],
             cwd=target,
@@ -201,4 +208,5 @@ class CandidateCommitter:
             push_performed=False,
             authority_change_required=receipt.authority_change_required,
             authority_findings_sha256=receipt.authority_findings_sha256,
+            collaboration_provenance=current.collaboration_provenance,
         )
