@@ -395,6 +395,25 @@ def test_serial_target_budget_fails_closed_when_process_evidence_unknown(sh2_rep
         manager.create_lease(_contract(sh2_repo, task_id="second"))
 
 
+def test_serial_target_budget_ignores_detached_dirty_non_task_target(sh2_repo):
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _path: False)
+    unmapped = sh2_repo["target_root"] / "unmapped-detached"
+    _git(sh2_repo["controller"], "worktree", "add", "--detach", str(unmapped), sh2_repo["target_base_revision"])
+    (unmapped / "forensic.txt").write_text("evidence\n", encoding="utf-8")
+
+    manager.create_lease(_contract(sh2_repo, task_id="second"))
+    assert (unmapped / "forensic.txt").exists()
+
+
+def test_serial_target_budget_fails_closed_for_unmapped_managed_target(sh2_repo):
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _path: False)
+    unmapped = sh2_repo["target_root"] / "unmapped-managed"
+    _git(sh2_repo["controller"], "worktree", "add", "-b", "nexus/task/unmapped", str(unmapped), sh2_repo["target_base_revision"])
+
+    with pytest.raises(RuntimeError, match="serial Target budget"):
+        manager.create_lease(_contract(sh2_repo, task_id="second"))
+
+
 def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     contract, manager, lease, target = _prepare_candidate(sh2_repo)
     (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")

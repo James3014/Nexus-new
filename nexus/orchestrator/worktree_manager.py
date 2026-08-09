@@ -1095,9 +1095,10 @@ class WorktreeManager:
                 task_id = branch.removeprefix("nexus/task/")
             state = states.get(task_id) if task_id else None
             status = str(state.get("status")) if state else None
-            if task_id and status not in terminal and status not in review:
-                # Missing lifecycle state is intentionally active: durable
-                # ownership exists, but its disposition cannot be proven.
+            if task_id and (status not in terminal and status not in review):
+                # A managed nexus/task branch without durable lifecycle
+                # ownership is intentionally active; its disposition cannot
+                # be proven passive.
                 active.append(entry)
         return active
 
