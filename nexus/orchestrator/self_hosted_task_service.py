@@ -23,37 +23,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
-from nexus.executors.worker_contract import (
-    SUPPORTED_WORKER_PROVIDERS,
-    AttemptResolutionVerdict,
-    WorkerExecutionReceipt,
-    WorkerOutcome,
-    resolve_attempt,
-)
-from nexus.executors.worker_registry import WorkerRegistry
-from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
-from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
-from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
-from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationExecutionError
-from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
-from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
-from nexus.orchestrator.task_contract import (
-    AcceptanceProfile,
-    ArchitectTaskContract,
-    ArchitectureDecision,
-    DevelopmentGoal,
-    HumanApprovalPolicy,
-    MutationMode,
-)
-from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
-from nexus.orchestrator.lifecycle_guards import (
-    pre_action_guard,
-    trusted_runtime_manifest_hash,
-    validate_approval_grant,
-    validate_architecture_approval,
-)
+from nexus.contracts.autonomy_goal import AutonomyGoalGrant
+from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionEnvelope,
@@ -65,14 +36,48 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
-from nexus.contracts.autonomy_goal import AutonomyGoalGrant
-from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
+from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.executors.worker_contract import (
+    SUPPORTED_WORKER_PROVIDERS,
+    AttemptResolutionVerdict,
+    WorkerExecutionReceipt,
+    WorkerOutcome,
+    resolve_attempt,
+)
+from nexus.executors.worker_registry import WorkerRegistry
 from nexus.orchestrator.autonomy_policy import (
     AutonomySubmissionBinding,
     project_autonomy_submission,
 )
+from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
+from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
+from nexus.orchestrator.governed_integration import (
+    ControlledIntegrationManager,
+    IntegrationExecutionError,
+)
+from nexus.orchestrator.lifecycle_guards import (
+    pre_action_guard,
+    trusted_runtime_manifest_hash,
+    validate_approval_grant,
+    validate_architecture_approval,
+)
+from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
+from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
-from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.orchestrator.task_contract import (
+    AcceptanceProfile,
+    ArchitectTaskContract,
+    ArchitectureDecision,
+    DevelopmentGoal,
+    HumanApprovalPolicy,
+    MutationMode,
+)
+from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
@@ -176,6 +181,115 @@ def _utc_now() -> str:
 def _bounded_failure_text(value: Any, *, limit: int = 512) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _workforce_dispatch_inputs(request: Mapping[str, Any]) -> tuple[Any, Any]:
+    """Extract the planner/admission pair without inventing a fallback source."""
+    planner = request.get("planner_output")
+    if not isinstance(planner, Mapping):
+        planner = request.get("planner")
+    snapshot = request.get("signal_snapshot")
+    if not isinstance(snapshot, Mapping) and isinstance(planner, Mapping):
+        snapshot = planner.get("signal_snapshot")
+    demands = request.get("workforce_demands")
+    if demands is None and isinstance(snapshot, Mapping):
+        demands = snapshot.get("workforce_demands")
+    admission = request.get("workforce_admission")
+    if admission is None and isinstance(planner, Mapping):
+        admission = planner.get("workforce_admission")
+    if admission is None:
+        admission = request.get("admission_binding")
+    return demands, admission
+
+
+def validate_workforce_dispatch_binding(request: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Validate the exact Planner -> admission -> registry dispatch binding.
+
+    The runtime admission service remains the policy authority.  This seam only
+    verifies its durable, canonical ALLOW receipt before selecting a registry
+    identity; it never resolves a worker or recomputes policy.
+    """
+    demands, admission = _workforce_dispatch_inputs(request)
+    if demands is None and admission is None:
+        return None
+    if demands is None or admission is None:
+        raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
+    if not isinstance(admission, Mapping) or admission.get("overall_decision") != "ALLOW":
+        raise RuntimeError("WORKFORCE_ADMISSION_BINDING_INVALID:overall decision is not ALLOW")
+    try:
+        raw_items = demands.get("demands") if isinstance(demands, Mapping) else None
+        records = admission.get("records")
+        if not isinstance(raw_items, list) or len(raw_items) != 1:
+            raise ValueError("workforce dispatch requires exactly one demand")
+        if not isinstance(records, list) or len(records) != 1:
+            raise ValueError("workforce dispatch requires exactly one admission record")
+        record = records[0]
+        record_demand = record.get("demand") if isinstance(record, Mapping) else None
+        if not isinstance(record_demand, Mapping) or any(
+            record_demand.get(field) != raw_items[0].get(field)
+            for field in ("demand_id", "execution_channel")
+        ):
+            raise ValueError("workforce admission demand/record mismatch")
+        record_request = record.get("request")
+        if not isinstance(record_request, Mapping):
+            raise ValueError("workforce admission record request missing")
+        channel = str(raw_items[0].get("execution_channel") or "")
+        if channel not in {"local", "online"}:
+            raise ValueError("workforce dispatch execution channel invalid")
+        binding: dict[str, Any] = {
+            "worker_id": record_request.get("requested_worker_id"),
+            "provider": record_request.get("provider"),
+            "model": record_request.get("model"),
+            "controls": record_request.get("provided_controls") or [],
+            "explicit_experiment_authorization": bool(
+                record_request.get("explicit_experiment_authorization", False)
+            ),
+        }
+        if not binding["worker_id"] and not binding["provider"] and not binding["model"]:
+            raise ValueError("workforce admission record identity missing")
+        fresh = evaluate_runtime_workforce_admission(
+            demands,
+            {channel: binding},
+            WorkforcePolicyLoader(),
+        ).to_dict()
+        if fresh != dict(admission):
+            raise ValueError("workforce admission receipt is stale or tampered")
+        fresh_records = fresh.get("records") or []
+        if (
+            fresh.get("overall_decision") != "ALLOW"
+            or len(fresh_records) != 1
+            or (fresh_records[0].get("decision") or {}).get("decision") != "ALLOW"
+        ):
+            raise ValueError("workforce admission is not a single ALLOW record")
+        decision = fresh_records[0].get("decision") or {}
+        binding = {
+            "worker_id": decision.get("resolved_worker_id"),
+            "provider": decision.get("resolved_provider"),
+            "model": decision.get("resolved_model"),
+            "policy_hash": (fresh.get("policy_identity") or {}).get("policy_hash"),
+            "binding_hash": fresh_records[0].get("binding_hash"),
+            "aggregate_binding_hash": fresh.get("aggregate_binding_hash"),
+        }
+        if any(not isinstance(binding[field], str) or not binding[field].strip() for field in (
+            "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"
+        )):
+            raise ValueError("workforce admission resolved identity missing")
+    except (TypeError, ValueError, KeyError) as exc:
+        raise RuntimeError(f"WORKFORCE_ADMISSION_BINDING_INVALID:{exc}") from exc
+    fallback = str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
+    if fallback and fallback != str(binding["provider"]).strip().lower():
+        raise RuntimeError("WORKFORCE_ADMISSION_FALLBACK_UNADMITTED")
+    return {
+        "demands": _jsonable(demands),
+        "admission": _jsonable(admission),
+        "demand_id": str(raw_items[0].get("demand_id") or ""),
+        "worker_id": str(binding["worker_id"]),
+        "provider": str(binding["provider"]),
+        "model": str(binding["model"]),
+        "policy_hash": str(binding["policy_hash"]),
+        "binding_hash": str(binding["binding_hash"]),
+        "aggregate_binding_hash": str(binding["aggregate_binding_hash"]),
+    }
 
 
 def _parse_time(value: Optional[str]) -> Optional[float]:
@@ -823,6 +937,42 @@ class SelfHostedTaskService:
         return cls._terminal_failure_blocker(state)
 
     @classmethod
+    def _settled_candidate_less_final_block(cls, state: Mapping[str, Any]) -> bool:
+        """Identify a terminal failure whose retry is historical, not required."""
+        if (
+            state.get("status") != "FINAL_BLOCK"
+            or state.get("promotion_status") != "NOT_CREATED"
+            or state.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            or state.get("cleanup_blocker")
+            or state.get("reconciliation_required") is True
+            or state.get("reconciliation_status") not in {None, "RECONCILED", "NOT_REQUIRED"}
+            or state.get("reconciliation_decision") not in {None, "NO_MUTATION_OBSERVED"}
+            or state.get("uncertain_mutation") is True
+            or state.get("candidate_created") not in {None, False}
+            or state.get("candidate_status") not in {None, "", "NOT_CREATED", "FINAL_BLOCK"}
+            or state.get("state_retention_status") not in {None, "TERMINAL", "ARCHIVED"}
+            or state.get("approved_binding")
+            or state.get("integration_receipt")
+            or state.get("integration_result_sha")
+            or state.get("merge_performed")
+        ):
+            return False
+
+        candidate = state.get("promotion_packet")
+        candidate_fields = (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+            "candidate_ref",
+        )
+        if any(state.get(field) for field in candidate_fields):
+            return False
+        if isinstance(candidate, Mapping) and any(candidate.get(field) for field in candidate_fields):
+            return False
+        return True
+
+    @classmethod
     def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         status = str(state.get("status") or "UNKNOWN")
         promotion_status = str(state.get("promotion_status") or "")
@@ -898,6 +1048,9 @@ class SelfHostedTaskService:
             else:
                 next_action = "inspect_receipt_and_candidate"
                 recommended_tool = "nexus_self_hosted_get_receipt"
+            if cls._settled_candidate_less_final_block(state):
+                action_state = "TERMINAL"
+                attention_required = False
         elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
             action_state = "ACTION_REQUIRED"
             attention_required = True
@@ -1394,6 +1547,22 @@ class SelfHostedTaskService:
     def build_contract(self, request: Mapping[str, Any]) -> ArchitectTaskContract:
         if "prompt" in request:
             raise ValueError("prompt is not accepted; submit WHAT and WHY")
+        dispatch_binding = validate_workforce_dispatch_binding(request)
+        if dispatch_binding is not None:
+            requested_provider = str(request.get("worker", "auto")).strip().lower()
+            if requested_provider not in {"", "auto", dispatch_binding["provider"]}:
+                raise RuntimeError("WORKFORCE_ADMISSION_PROVIDER_MISMATCH")
+            requested_model = str(request.get("model") or "").strip()
+            if requested_model and requested_model != dispatch_binding["model"]:
+                raise RuntimeError("WORKFORCE_ADMISSION_MODEL_MISMATCH")
+            request = dict(request)
+            request.update({
+                "worker": dispatch_binding["provider"],
+                "provider": dispatch_binding["provider"],
+                "model": dispatch_binding["model"],
+                "worker_id": dispatch_binding["worker_id"],
+                "worker_order": [dispatch_binding["provider"]],
+            })
         worker = str(request.get("worker", "codex")).strip().lower()
         requested_worker = worker
         if worker not in SUPPORTED_WORKER_PROVIDERS:
@@ -1663,6 +1832,35 @@ class SelfHostedTaskService:
         return None
 
     @staticmethod
+    def _assert_persisted_workforce_dispatch(
+        state: Mapping[str, Any],
+        request: Mapping[str, Any],
+        binding: Optional[Mapping[str, Any]],
+        *,
+        active_provider: Optional[str] = None,
+    ) -> None:
+        if binding is None:
+            return
+        persisted = state.get("workforce_dispatch")
+        if not isinstance(persisted, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        original_demands, original_admission = _workforce_dispatch_inputs(request)
+        if persisted.get("demands") != _jsonable(original_demands) or persisted.get("admission") != _jsonable(original_admission):
+            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        expected = {
+            "selected_worker_id": binding["worker_id"],
+            "selected_provider": binding["provider"],
+            "selected_model": binding["model"],
+            "workforce_policy_hash": binding["policy_hash"],
+            "workforce_binding_hash": binding["binding_hash"],
+            "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
+        }
+        if any(str(state.get(field) or "") != str(value or "") for field, value in expected.items()):
+            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        if active_provider is not None and str(active_provider) != str(binding["provider"]):
+            raise RuntimeError("WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT")
+
+    @staticmethod
     def _replace_failed_target(
         manager: WorktreeManager,
         controller: SelfHostedDevelopmentController,
@@ -1697,6 +1895,8 @@ class SelfHostedTaskService:
         controller = SelfHostedDevelopmentController(worktree_manager=manager)
         state = self._read_state(task_id) or {}
         status = str(state.get("status"))
+        dispatch_binding = validate_workforce_dispatch_binding(request)
+        self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
         policy = self._escalation_policy(contract)
         attempts = [
             receipt
@@ -1713,6 +1913,7 @@ class SelfHostedTaskService:
         }
 
         if status == "SUBMITTED":
+            self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
             provider, preflight = self._select_initial_provider(contract)
             worktree_started = time.perf_counter()
             # Snapshot durable ownership immediately before leasing.  The
@@ -1747,6 +1948,9 @@ class SelfHostedTaskService:
             provider = str(state.get("next_provider") or "")
             if not provider:
                 raise RuntimeError("escalation state is missing next_provider")
+            self._assert_persisted_workforce_dispatch(
+                state, request, dispatch_binding, active_provider=provider
+            )
             lease = self._replace_failed_target(
                 manager,
                 controller,
@@ -1792,6 +1996,9 @@ class SelfHostedTaskService:
                     or contract.preferred_provider
                     or "codex"
                 )
+                self._assert_persisted_workforce_dispatch(
+                    state, request, dispatch_binding, active_provider=provider
+                )
                 consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
                 configured_budget = int(fast_lane_values["maximum_provider_calls"])
                 remaining_calls = configured_budget - consumed_calls
@@ -1805,7 +2012,11 @@ class SelfHostedTaskService:
                     invoke_contract,
                     lease,
                     prompt=self._prompt(contract),
-                    model=str(request.get("model") or "").strip() or None,
+                    model=(
+                        str(dispatch_binding["model"])
+                        if dispatch_binding is not None
+                        else str(request.get("model") or "").strip() or None
+                    ),
                     timeout_seconds=float(request.get("timeout_seconds", 900.0)),
                     on_process_group=on_process_group,
                 )
@@ -1857,6 +2068,14 @@ class SelfHostedTaskService:
                     "executions": attempts,
                     "next_provider": next_provider,
                     "escalation_reason": decision.reason,
+                    "fallback_lineage": list(state.get("fallback_lineage") or []) + [{
+                        "from_provider": str(latest.provider),
+                        "to_provider": next_provider,
+                        "reason": decision.reason,
+                        "admission_binding_hash": (
+                            dispatch_binding.get("binding_hash") if dispatch_binding else None
+                        ),
+                    }],
                 },
             )
             lease = self._replace_failed_target(
@@ -3772,6 +3991,16 @@ class SelfHostedTaskService:
             if requested_lane == "DIRECT_CANONICAL" and str(request.get("worker", "primary")).strip().lower() in {"", "primary", "codex"}:
                 raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
         contract = self.build_contract(request)
+        dispatch_binding = validate_workforce_dispatch_binding(request)
+        state_request = dict(request)
+        if dispatch_binding is not None:
+            state_request.update({
+                "worker": dispatch_binding["provider"],
+                "provider": dispatch_binding["provider"],
+                "model": dispatch_binding["model"],
+                "worker_id": dispatch_binding["worker_id"],
+                "worker_order": [dispatch_binding["provider"]],
+            })
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
         collaboration_provenance = CollaborationRealmVerifier.verify_submission(contract)
@@ -3850,7 +4079,7 @@ class SelfHostedTaskService:
             "task_card_path": identity["task_card_path"],
             "task_card_hash": identity["task_card_hash"],
             "status_history": [{"status": "SUBMITTED", "at": now}],
-            "request": _jsonable(dict(request)),
+            "request": _jsonable(state_request),
             "action": _jsonable(dict(action)) if action else None,
             "action_id": action_id or None,
             "attempt_id_hint": attempt_id_hint or None,
@@ -3866,6 +4095,15 @@ class SelfHostedTaskService:
             "target_branch": f"nexus/task/{contract.task_id}",
             "target_created_at": None,
             "worker_provider": contract.preferred_provider,
+            "selected_worker_id": dispatch_binding["worker_id"] if dispatch_binding else request.get("worker_id"),
+            "selected_provider": dispatch_binding["provider"] if dispatch_binding else contract.preferred_provider,
+            "selected_model": dispatch_binding["model"] if dispatch_binding else str(request.get("model") or ""),
+            "provider_order": list(contract.provider_order),
+            "workforce_dispatch": dispatch_binding,
+            "workforce_policy_hash": dispatch_binding["policy_hash"] if dispatch_binding else None,
+            "workforce_binding_hash": dispatch_binding["binding_hash"] if dispatch_binding else None,
+            "workforce_aggregate_binding_hash": dispatch_binding["aggregate_binding_hash"] if dispatch_binding else None,
+            "fallback_lineage": [],
             "execution_lane": lane["execution_lane"],
             "execution_lane_blockers": lane["blockers"],
             "worker_selection_mode": str(

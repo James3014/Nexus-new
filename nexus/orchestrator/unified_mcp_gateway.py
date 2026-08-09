@@ -52,6 +52,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
     resolve_contract_identity,
+    validate_workforce_dispatch_binding,
 )
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.services.unified_runtime import (
@@ -964,7 +965,19 @@ class UnifiedMCPGateway:
         key = str(provider or "").strip().lower()
         return key in ONLINE_CLI_SPEC_REGISTRY and key not in LOCAL_ONLY_PROVIDERS
 
-    def _provider_execution_ready(self, preflight: Mapping[str, Any], *, provider: str) -> tuple[bool, Optional[str]]:
+    def _provider_execution_ready(
+        self,
+        preflight: Mapping[str, Any],
+        *,
+        provider: str,
+        model: Optional[str] = None,
+    ) -> tuple[bool, Optional[str]]:
+        if preflight.get("provider") != provider:
+            return False, "WORKER_PREFLIGHT_PROVIDER_MISMATCH"
+        if model is not None and preflight.get("requested_model") != model:
+            return False, "WORKER_PREFLIGHT_REQUESTED_MODEL_MISMATCH"
+        if model is not None and preflight.get("resolved_model") != model:
+            return False, "WORKER_PREFLIGHT_RESOLVED_MODEL_MISMATCH"
         if str(preflight.get("status") or "") != "VERSION_VERIFIED":
             return False, str(preflight.get("blocker") or "WORKER_PREFLIGHT_FAILED")
         blocker = str(preflight.get("blocker") or "")
@@ -1613,14 +1626,35 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
-    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+    @staticmethod
+    def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:
+        """Project one Assisted job into current action and pending-count state."""
         status = str(job.get("status") or "UNKNOWN")
         terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
-        result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
+        reconciliation_required = status == "UNKNOWN_REQUIRES_RECONCILE" or bool(job.get("reconciliation_required"))
+        cleanup_settled = job.get("process_cleanup") is True and not job.get("cleanup_error")
+        settled_failure = (
+            status in {"FAILED", "CANCELLED"}
+            and not reconciliation_required
+            and cleanup_settled
+            and job.get("durable_exit_marker") is True
+            and not job.get("uncertain_mutation")
+        )
         if status == "UNKNOWN_REQUIRES_RECONCILE":
             next_action = "nexus_task_reconcile"
         else:
+            result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
             next_action = result_tool if not terminal else ("none" if status == "COMPLETED" else "nexus_task_retry")
+        return {
+            "attention_required": status == "UNKNOWN_REQUIRES_RECONCILE" or (status in {"FAILED", "CANCELLED"} and not settled_failure),
+            "next_action": next_action,
+            "recommended_tool": next_action,
+            "pending": not terminal or status == "UNKNOWN_REQUIRES_RECONCILE",
+        }
+
+    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+        status = str(job.get("status") or "UNKNOWN")
+        action = self._assist_action(job)
         return {
             "schema": "nexus.assisted_provider_job.v1",
             "operation": operation,
@@ -1660,6 +1694,7 @@ class UnifiedMCPGateway:
             "authentication_evidence": job.get("authentication_evidence"),
             "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
             "reconciliation_required": bool(job.get("reconciliation_required", False)),
+            "uncertain_mutation": bool(job.get("uncertain_mutation", False)),
             "context_arm": job.get("context_arm"),
             "context_arm_applied": bool(job.get("context_arm_applied", False)),
             "context_arm_semantics": job.get("context_arm_semantics", "record_only_not_applied"),
@@ -1678,9 +1713,9 @@ class UnifiedMCPGateway:
             "connector_disconnected_at": job.get("connector_disconnected_at"),
             "reconnected_at": job.get("reconnected_at"),
             "artifacts": {"stdout": job.get("stdout_artifact"), "stderr": job.get("stderr_artifact")},
-            "attention_required": status in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"},
-            "next_action": next_action,
-            "recommended_tool": next_action,
+            "attention_required": action["attention_required"],
+            "next_action": action["next_action"],
+            "recommended_tool": action["recommended_tool"],
         }
 
     def _assist_submit(self, arguments: Mapping[str, Any], *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
@@ -2451,6 +2486,7 @@ class UnifiedMCPGateway:
         allowed_keys = {
             "task_id", "what", "why", "worker", "allowed_files", "verifier_commands",
             "owner_confirmation", "authority_change_candidate_confirmation",
+            "workforce_demands", "workforce_admission", "planner_output",
         }
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
@@ -2473,9 +2509,24 @@ class UnifiedMCPGateway:
             raise GatewayInputError("verifier_commands must contain 1-4 bounded commands")
         if any(any(token in command for token in (";", "&&", "||", "`", "$(", "|")) for command in verifiers):
             raise GatewayInputError("verifier_commands must be bounded")
-        provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
+        dispatch_binding = validate_workforce_dispatch_binding(arguments)
+        if dispatch_binding is not None:
+            requested_worker = str(arguments.get("worker") or "").strip().lower()
+            if requested_worker not in {
+                "auto", dispatch_binding["worker_id"].lower(), dispatch_binding["provider"].lower(),
+            }:
+                raise GatewayInputError("WORKFORCE_ADMISSION_WORKER_MISMATCH")
+            provider = dispatch_binding["provider"]
+            model = dispatch_binding["model"]
+            worker_id = dispatch_binding["worker_id"]
+        else:
+            provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
         preflight = self._provider_preflight({"provider": provider, "model": model})
-        ready, blocker = self._provider_execution_ready(preflight, provider=provider)
+        ready, blocker = self._provider_execution_ready(
+            preflight,
+            provider=provider,
+            model=model if dispatch_binding is not None else None,
+        )
         if not ready:
             detail = blocker or "WORKER_PREFLIGHT_FAILED"
             if preflight.get("next_action"):
@@ -2536,6 +2587,9 @@ class UnifiedMCPGateway:
                       "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                       "worker_candidate_ingress": True,
                       "protected_contracts": protected_contracts})
+        if dispatch_binding is not None:
+            bound["workforce_demands"] = dispatch_binding["demands"]
+            bound["workforce_admission"] = dispatch_binding["admission"]
         bound.update(readiness_binding)
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
@@ -2574,6 +2628,9 @@ class UnifiedMCPGateway:
         request.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
                         "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                         "worker_candidate_ingress": True})
+        if dispatch_binding is not None:
+            request["workforce_demands"] = dispatch_binding["demands"]
+            request["workforce_admission"] = dispatch_binding["admission"]
         request.update(readiness_binding)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
@@ -2670,6 +2727,9 @@ class UnifiedMCPGateway:
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
                         "owner_confirmation": {"type": "boolean", "const": True},
                         "authority_change_candidate_confirmation": {"type": "boolean", "default": False},
+                        "workforce_demands": {"type": "object"},
+                        "workforce_admission": {"type": "object"},
+                        "planner_output": {"type": "object"},
                     },
                 },
             },
@@ -2995,8 +3055,10 @@ class UnifiedMCPGateway:
                 job = json.loads(job_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if isinstance(job, Mapping) and job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
-                pending_actions += 1
+            if isinstance(job, Mapping):
+                action = self._assist_action(job)
+                if action["pending"] or action["attention_required"]:
+                    pending_actions += 1
         action_sha_current, action_contract_ok, action_contract_reasons = _action_contract_fingerprint()
         permission_sha_current, permission_contract_ok, permission_contract_reasons = _permission_enforcement_fingerprint()
         freshness = _evaluate_freshness(
@@ -3110,9 +3172,11 @@ class UnifiedMCPGateway:
                 job = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if not isinstance(job, Mapping) or job.get("status") not in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"}:
+            if not isinstance(job, Mapping):
                 continue
-            tasks.append(self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list"))
+            response = self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list")
+            if response.get("attention_required") is True:
+                tasks.append(response)
         return {
             "schema": "nexus.task_actionable_list.v1",
             "actionable_count": len(tasks),

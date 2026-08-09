@@ -28,6 +28,11 @@ def test_wiki_coverage_audit_ignores_missing_key_paths(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(audit, "TARGET_DIRS", ["src"])
     monkeypatch.setattr(audit, "KEY_PATHS", ["src/present.py", "src/missing.py"])
+    monkeypatch.setattr(
+        audit,
+        "build_crosswalk_alignment",
+        lambda **_kwargs: {"alignment_status": "PASS"},
+    )
 
     audit.run_audit()
 
@@ -112,13 +117,21 @@ def test_duplicate_authority_label_fails_closed(tmp_path: Path, monkeypatch):
     second.write_text("---\nstatus: active\nowner: test\n---\n[Code: scripts/ops/ci_gate.py]\n")
     monkeypatch.setattr(audit, "REPO_ROOT", repo)
     monkeypatch.setattr(audit, "VAULT_ROOT", vault)
-    monkeypatch.setattr(audit, "CAPABILITY_DOMAINS", {"test": {"required_labels": ["[code: scripts/ops/ci_gate.py]"]}})
+    monkeypatch.setattr(
+        audit,
+        "CAPABILITY_DOMAINS",
+        {"test": {"required_labels": ["[code: scripts/ops/ci_gate.py]"]}},
+    )
 
     result = audit.audit_required_authorities(
-        {"required_authorities": {"test": [
-            _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/First.md"),
-            _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/Second.md"),
-        ]}}
+        {
+            "required_authorities": {
+                "test": [
+                    _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/First.md"),
+                    _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/Second.md"),
+                ]
+            }
+        }
     )
 
     assert result["status"] == "FAIL"
@@ -134,12 +147,20 @@ def test_missing_authority_page_fails_closed(tmp_path: Path, monkeypatch):
     vault.mkdir(parents=True)
     monkeypatch.setattr(audit, "REPO_ROOT", repo)
     monkeypatch.setattr(audit, "VAULT_ROOT", vault)
-    monkeypatch.setattr(audit, "CAPABILITY_DOMAINS", {"test": {"required_labels": ["[code: scripts/ops/ci_gate.py]"]}})
+    monkeypatch.setattr(
+        audit,
+        "CAPABILITY_DOMAINS",
+        {"test": {"required_labels": ["[code: scripts/ops/ci_gate.py]"]}},
+    )
 
     result = audit.audit_required_authorities(
-        {"required_authorities": {"test": [
-            _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/Missing.md"),
-        ]}}
+        {
+            "required_authorities": {
+                "test": [
+                    _authority_row("[code: scripts/ops/ci_gate.py]", "01_System/Missing.md"),
+                ]
+            }
+        }
     )
 
     assert result["status"] == "FAIL"
@@ -155,10 +176,7 @@ def test_formal_mapping_coverage_passes_all_waves():
     assert result["coverage_ratio"] == "100.00%"
     assert result["validation_error_count"] == 0
     assert result["expansion_error_count"] == 0
-    assert {
-        scope: data["status"]
-        for scope, data in result["priority_scope_stats"].items()
-    } == {
+    assert {scope: data["status"] for scope, data in result["priority_scope_stats"].items()} == {
         "core_runtime": "PASS",
         "critical_services": "PASS",
         "operator_flows": "PASS",
@@ -173,12 +191,14 @@ def test_formal_mapping_coverage_passes_all_waves():
 
 def test_exact_mapping_rule_wins_over_broad_prefix():
     audit = importlib.import_module("scripts.ops.wiki_coverage_audit")
-    inventory = [{
-        "code_path": "scripts/ops/ci_gate.py",
-        "symbol": "main",
-        "classification": "must_document",
-        "parse_error": False,
-    }]
+    inventory = [
+        {
+            "code_path": "scripts/ops/ci_gate.py",
+            "symbol": "main",
+            "classification": "must_document",
+            "parse_error": False,
+        }
+    ]
     mappings, errors = audit.expand_formal_mappings(
         inventory,
         {

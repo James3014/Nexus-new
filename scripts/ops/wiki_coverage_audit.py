@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 import ast
-from functools import lru_cache
+import json
 import os
 import re
-import json
+from functools import lru_cache
 from pathlib import Path
+
 import yaml
+
+from scripts.ops.openwiki_authority_crosswalk import (
+    AUTHORITY as CROSSWALK_AUTHORITY,
+)
+from scripts.ops.openwiki_authority_crosswalk import (
+    SCHEMA as CROSSWALK_SCHEMA,
+)
+from scripts.ops.openwiki_authority_crosswalk import (
+    compile_crosswalk,
+    render_crosswalk,
+)
 
 # 🛡️ Nexus Wiki Coverage Audit (Agent G - WS-A Hardened v2.1)
 # Purpose: Quantify true governance coverage for mandatory domains and enforce 100% Key Path.
@@ -15,9 +27,7 @@ VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_coverage_report.json"
 KEYPATH_REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_keypath_coverage_report.json"
 
-TARGET_DIRS = [
-    "nexus/core", "nexus/engine", "nexus/services", "scripts/ops", "scripts/engine"
-]
+TARGET_DIRS = ["nexus/core", "nexus/engine", "nexus/services", "scripts/ops", "scripts/engine"]
 SYMBOL_SCAN_DIRS = [*TARGET_DIRS, "tests"]
 
 KEY_PATHS = [
@@ -32,7 +42,7 @@ KEY_PATHS = [
     "nexus/core/memory/ingest.py",
     "nexus/services/memory.py",
     "nexus/services/memory_indexer.py",
-    "nexus-desk/src-tauri/src/main.rs"
+    "nexus-desk/src-tauri/src/main.rs",
 ]
 
 EXCLUDED_PATTERNS = [
@@ -46,7 +56,7 @@ EXCLUDED_PATTERNS = [
     r".*~",
     r"setup\.py",
     r"__init__\.py",
-    r"\.DS_Store"
+    r"\.DS_Store",
 ]
 
 COVERAGE_THRESHOLD = 0.85
@@ -71,14 +81,17 @@ REQUIRED_MAPPING_FIELDS = (
 GENERATED_PATH_MARKERS = ("generated/", ".nexus/", "__pycache__/")
 LEGACY_PATH_MARKERS = ("90_sources/archive/", "90_sources/legacy_wiki/", "/legacy/")
 DEPRECATED_PATH_MARKERS = ("/deprecated/", ".deprecated")
+CROSSWALK_MAPPED_STATUSES = {"EXACT_PATH_MATCH", "EXACT_PREFIX_MATCH"}
+CROSSWALK_STATUSES = CROSSWALK_MAPPED_STATUSES | {"UNMAPPED", "AMBIGUOUS"}
 
 # Patterns to find code references in Wiki body
 PROVENANCE_PATTERN = re.compile(
-    r"\[source:\s*(.*?)\]|\(source:\s*(.*?)\)|\[code:\s*(.*?)\]|\(code:\s*(.*?)\)|\[Source:\s*(.*?)\]", 
-    re.I
+    r"\[source:\s*(.*?)\]|\(source:\s*(.*?)\)|\[code:\s*(.*?)\]|\(code:\s*(.*?)\)|\[Source:\s*(.*?)\]",
+    re.I,
 )
 # Pattern for Frontmatter
 FM_SOT_PATTERN = re.compile(r"^source_of_truth:\s*(.*?)$", re.M)
+
 
 def is_excluded(path_str):
     for pattern in EXCLUDED_PATTERNS:
@@ -105,6 +118,117 @@ def coverage_policy() -> dict:
             "3": 1.0,
             "4": COVERAGE_THRESHOLD,
         },
+    }
+
+
+def _validate_crosswalk_semantics(report: dict) -> None:
+    """Validate one crosswalk report without selecting authority."""
+    if not isinstance(report, dict):
+        raise ValueError("crosswalk report must be a mapping")
+    if report.get("schema") != CROSSWALK_SCHEMA:
+        raise ValueError(f"crosswalk schema must equal {CROSSWALK_SCHEMA}")
+    if report.get("authority") != CROSSWALK_AUTHORITY:
+        raise ValueError("crosswalk authority must remain derived_non_authoritative")
+    if not isinstance(report.get("authority_ceiling"), str) or (
+        "Current source decides implementation truth" not in report["authority_ceiling"]
+        or "alone declares governed-Wiki authority" not in report["authority_ceiling"]
+    ):
+        raise ValueError("crosswalk authority ceiling is invalid")
+    input_sha256 = report.get("input_sha256")
+    if not isinstance(input_sha256, str) or len(input_sha256) != 64:
+        raise ValueError("crosswalk input identity is invalid")
+    try:
+        int(input_sha256, 16)
+    except ValueError as exc:
+        raise ValueError("crosswalk input identity is invalid") from exc
+
+    records = report.get("records")
+    if not isinstance(records, list):
+        raise ValueError("crosswalk records must be a list")
+    if report.get("record_count") != len(records):
+        raise ValueError("crosswalk record count is inconsistent")
+
+    status_counts: dict[str, int] = {}
+    record_identities: set[tuple[str, str]] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("crosswalk record must be a mapping")
+        status = record.get("mapping_status")
+        if status not in CROSSWALK_STATUSES:
+            raise ValueError(f"unsupported crosswalk mapping status: {status}")
+        openwiki_page = record.get("openwiki_page")
+        implementation_key = record.get("implementation_key")
+        if not isinstance(openwiki_page, str) or not openwiki_page.strip():
+            raise ValueError("crosswalk OpenWiki page is invalid")
+        if not isinstance(implementation_key, str) or not implementation_key.strip():
+            raise ValueError("crosswalk implementation key is invalid")
+        record_identity = (openwiki_page, implementation_key)
+        if record_identity in record_identities:
+            raise ValueError("duplicate crosswalk record identity")
+        record_identities.add(record_identity)
+        status_counts[status] = status_counts.get(status, 0) + 1
+        authority_page = record.get("authority_page")
+        authority_classification = record.get("authority_classification")
+        if status in CROSSWALK_MAPPED_STATUSES:
+            if not isinstance(authority_page, str) or not authority_page:
+                raise ValueError("mapped crosswalk record lacks authority page")
+            if not isinstance(authority_classification, str) or not authority_classification:
+                raise ValueError("mapped crosswalk record lacks authority classification")
+        elif authority_page is not None or authority_classification is not None:
+            raise ValueError("unmapped or ambiguous crosswalk record has authority")
+
+    if report.get("status_counts") != dict(sorted(status_counts.items())):
+        raise ValueError("crosswalk status counts are inconsistent")
+
+
+def validate_crosswalk_report(report: dict) -> None:
+    """Fail unless a report exactly matches independently regenerated current inputs."""
+    _validate_crosswalk_semantics(report)
+    canonical_report = compile_crosswalk(
+        REPO_ROOT / "openwiki",
+        VAULT_ROOT / "99_Schema" / "WIKI_AUTHORITY_MANIFEST.yaml",
+    )
+    _validate_crosswalk_semantics(canonical_report)
+    if render_crosswalk(report) != render_crosswalk(canonical_report):
+        raise ValueError("crosswalk report does not match current canonical inputs")
+
+
+def build_crosswalk_alignment(*, formal_scope: set[str] | None = None) -> dict:
+    """Regenerate and align the current OpenWiki crosswalk inputs."""
+    openwiki_root = REPO_ROOT / "openwiki"
+    manifest_path = VAULT_ROOT / "99_Schema" / "WIKI_AUTHORITY_MANIFEST.yaml"
+    report = compile_crosswalk(openwiki_root, manifest_path)
+    validate_crosswalk_report(report)
+
+    records = report["records"]
+    scope = formal_scope if formal_scope is not None else set(get_code_files())
+    mapped_records = [
+        record for record in records if record["mapping_status"] in CROSSWALK_MAPPED_STATUSES
+    ]
+    unmapped_records = [record for record in records if record["mapping_status"] == "UNMAPPED"]
+    ambiguous_records = [record for record in records if record["mapping_status"] == "AMBIGUOUS"]
+    scoped_unmapped = [
+        record for record in unmapped_records if record["implementation_key"] in scope
+    ]
+    scoped_ambiguous = [
+        record for record in ambiguous_records if record["implementation_key"] in scope
+    ]
+    return {
+        "schema": report["schema"],
+        "authority": report["authority"],
+        "input_sha256": report["input_sha256"],
+        "record_count": report["record_count"],
+        "status_counts": report["status_counts"],
+        "mapped_count": len(mapped_records),
+        "unmapped_count": len(unmapped_records),
+        "ambiguous_count": len(ambiguous_records),
+        "formal_alignment_scope_count": len(scope),
+        "scoped_unmapped_count": len(scoped_unmapped),
+        "scoped_ambiguous_count": len(scoped_ambiguous),
+        "alignment_status": "PASS" if not ambiguous_records and not scoped_unmapped else "FAIL",
+        "mapped_records": mapped_records,
+        "unmapped_records": unmapped_records,
+        "ambiguous_records": ambiguous_records,
     }
 
 
@@ -237,12 +361,7 @@ def validate_mapping(
         errors.append("missing_code_path")
     if symbol and (symbol == Path(code_path).name or symbol.endswith(".py")):
         errors.append("symbol_is_filename_only")
-    if (
-        code_path
-        and symbol
-        and not errors
-        and code_path.lower().endswith(".py")
-    ):
+    if code_path and symbol and not errors and code_path.lower().endswith(".py"):
         symbols, parse_error = _python_symbols(repo_root / code_path)
         if parse_error or symbol not in symbols:
             errors.append("missing_symbol")
@@ -251,17 +370,13 @@ def validate_mapping(
         page_path = vault_root / authority_page
         if authority_pages is None and not page_path.is_file():
             errors.append("missing_authority_page")
-        page_classification = _authority_page_classification(
-            authority_page, authority_pages
-        )
+        page_classification = _authority_page_classification(authority_page, authority_pages)
         if page_classification == "missing":
             errors.append("missing_authority_page")
         elif page_classification not in VALID_AUTHORITY_CLASSIFICATIONS:
             errors.append(f"invalid_authority_classification:{page_classification}")
 
-    authority_classification = str(
-        mapping.get("authority_classification", "")
-    ).strip().lower()
+    authority_classification = str(mapping.get("authority_classification", "")).strip().lower()
     if authority_classification not in VALID_AUTHORITY_CLASSIFICATIONS:
         errors.append("invalid_mapping_authority_classification")
 
@@ -331,9 +446,9 @@ def get_authority_pages(manifest: dict | None = None) -> dict:
     """Return exact vault paths and their live classification."""
     manifest = manifest or load_authority_manifest()
     legacy = {
-        str(entry.get("path", "")).replace("\\", "/"): str(
-            entry.get("classification", "legacy")
-        ).strip().lower()
+        str(entry.get("path", "")).replace("\\", "/"): str(entry.get("classification", "legacy"))
+        .strip()
+        .lower()
         for entry in manifest.get("known_legacy_entries", [])
         if isinstance(entry, dict)
     }
@@ -364,9 +479,7 @@ def get_authority_pages(manifest: dict | None = None) -> dict:
 
 def _mapping_rule_matches(rule: dict, code_path: str) -> bool:
     normalized = code_path.replace("\\", "/")
-    exact_paths = {
-        str(path).replace("\\", "/") for path in rule.get("code_paths", [])
-    }
+    exact_paths = {str(path).replace("\\", "/") for path in rule.get("code_paths", [])}
     if normalized in exact_paths:
         return True
     return any(
@@ -395,10 +508,8 @@ def expand_formal_mappings(
             rule
             for rule in rules
             if isinstance(rule, dict)
-            and item["code_path"] in {
-                str(path).replace("\\", "/")
-                for path in rule.get("code_paths", [])
-            }
+            and item["code_path"]
+            in {str(path).replace("\\", "/") for path in rule.get("code_paths", [])}
         ]
         matches = exact_matches or [
             rule
@@ -446,14 +557,8 @@ def formal_mapping_report(
         VAULT_ROOT,
         authority_pages=authority_pages,
     )
-    valid_keys = {
-        (mapping["code_path"], mapping["symbol"])
-        for mapping in validation["valid"]
-    }
-    mappings_by_key = {
-        (mapping["code_path"], mapping["symbol"]): mapping
-        for mapping in mappings
-    }
+    valid_keys = {(mapping["code_path"], mapping["symbol"]) for mapping in validation["valid"]}
+    mappings_by_key = {(mapping["code_path"], mapping["symbol"]): mapping for mapping in mappings}
 
     wave_stats: dict[str, dict] = {}
     for item in eligible:
@@ -478,15 +583,8 @@ def formal_mapping_report(
     }
     priority_scope_stats: dict[str, dict] = {}
     for scope, prefixes in priority_scopes.items():
-        scope_items = [
-            item
-            for item in eligible
-            if item["code_path"].startswith(prefixes)
-        ]
-        mapped = sum(
-            (item["code_path"], item["symbol"]) in valid_keys
-            for item in scope_items
-        )
+        scope_items = [item for item in eligible if item["code_path"].startswith(prefixes)]
+        mapped = sum((item["code_path"], item["symbol"]) in valid_keys for item in scope_items)
         ratio = mapped / len(scope_items) if scope_items else 0.0
         priority_scope_stats[scope] = {
             "eligible": len(scope_items),
@@ -497,17 +595,17 @@ def formal_mapping_report(
         }
 
     ratio = validation["valid_count"] / len(eligible) if eligible else 0.0
+    crosswalk_alignment = build_crosswalk_alignment(
+        formal_scope={item["code_path"] for item in eligible}
+    )
     return {
         "status": "PASS"
         if (
             not expansion_errors
             and not validation["errors"]
             and ratio >= COVERAGE_THRESHOLD
-            and all(
-                stat["status"] == "PASS"
-                for stat in wave_stats.values()
-                if stat["eligible"]
-            )
+            and crosswalk_alignment["alignment_status"] == "PASS"
+            and all(stat["status"] == "PASS" for stat in wave_stats.values() if stat["eligible"])
             and all(stat["status"] == "PASS" for stat in priority_scope_stats.values())
         )
         else "FAIL",
@@ -525,13 +623,16 @@ def formal_mapping_report(
         "validation_errors": validation["errors"][:20],
         "mapping_rule_count": len(manifest.get("code_symbol_mapping_rules", [])),
         "required_mapping_fields": list(REQUIRED_MAPPING_FIELDS),
+        "crosswalk_alignment": crosswalk_alignment,
     }
+
 
 def get_code_files():
     files = set()
     for d in TARGET_DIRS:
         abs_dir = REPO_ROOT / d
-        if not abs_dir.exists(): continue
+        if not abs_dir.exists():
+            continue
         for p in abs_dir.glob("**/*"):
             if p.is_file():
                 rel_p = str(p.relative_to(REPO_ROOT))
@@ -543,31 +644,36 @@ def get_code_files():
             files.add(kp)
     return sorted(list(files))
 
+
 def get_covered_files_from_wiki():
     covered = set()
     for md in VAULT_ROOT.glob("**/*.md"):
-        if "99_Schema" in str(md): continue
+        if "99_Schema" in str(md):
+            continue
         try:
             content = md.read_text(encoding="utf-8")
-            
+
             # 1. 萃取 Frontmatter 中的 source_of_truth
             fm_match = FM_SOT_PATTERN.search(content)
             if fm_match:
                 sot = fm_match.group(1).strip()
-                if sot: covered.add(sot)
-            
+                if sot:
+                    covered.add(sot)
+
             # 2. 萃取本文中的 [Source: path] 或 [Code: path]
             matches = PROVENANCE_PATTERN.findall(content)
             for match in matches:
                 path_str = next((g for g in match if g), "").strip()
-                path_str = path_str.replace("`", "").replace("'", "").replace("\"", "")
+                path_str = path_str.replace("`", "").replace("'", "").replace('"', "")
                 path_str = re.sub(r"\s+Part\s+.*$", "", path_str, flags=re.I)
                 path_str = re.sub(r"\s+L\d+.*$", "", path_str, flags=re.I)
                 path_str = re.sub(r"#.*$", "", path_str).strip()
-                if path_str: covered.add(path_str.replace("\\ ", " "))
+                if path_str:
+                    covered.add(path_str.replace("\\ ", " "))
         except Exception:
             continue
     return covered
+
 
 def run_audit():
     print("🛡️ WS-A: Executing Hardened Wiki Coverage Audit v2.1...")
@@ -576,7 +682,7 @@ def run_audit():
     authority_manifest = load_authority_manifest()
     formal_mapping = formal_mapping_report(symbol_inventory, authority_manifest)
     wiki_mentions = get_covered_files_from_wiki()
-    
+
     covered_files = []
     uncovered_files = []
 
@@ -588,25 +694,19 @@ def run_audit():
             covered_files.append(f)
         else:
             uncovered_files.append(f)
-            
+
     coverage_ratio = len(covered_files) / len(all_code_files) if all_code_files else 0
     taxonomy_counts = {
-        category: sum(
-            classify_coverage_item(path) == category for path in all_code_files
-        )
+        category: sum(classify_coverage_item(path) == category for path in all_code_files)
         for category in COVERAGE_TAXONOMY
     }
     symbol_taxonomy_counts = {
-        category: sum(
-            item["classification"] == category for item in symbol_inventory
-        )
+        category: sum(item["classification"] == category for item in symbol_inventory)
         for category in COVERAGE_TAXONOMY
     }
     eligible_categories = {"must_document", "should_document"}
-    eligible_symbols = sum(
-        symbol_taxonomy_counts[category] for category in eligible_categories
-    )
-    
+    eligible_symbols = sum(symbol_taxonomy_counts[category] for category in eligible_categories)
+
     # 關鍵路徑查驗
     # Missing optional products are reported separately. They must not make
     # existing key-path coverage fail, otherwise removed/non-runtime products
@@ -616,7 +716,7 @@ def run_audit():
     keypath_covered = [f for f in covered_files if f in existing_key_paths]
     keypath_uncovered = [f for f in existing_key_paths if f not in covered_files]
     keypath_ratio = len(keypath_covered) / len(existing_key_paths) if existing_key_paths else 1.0
-    
+
     # 指標狀態
     global_status = "PASS" if coverage_ratio >= COVERAGE_THRESHOLD else "FAIL"
     keypath_status = "PASS" if keypath_ratio >= 1.0 else "FAIL"
@@ -626,7 +726,9 @@ def run_audit():
     for d in TARGET_DIRS:
         d_all = [f for f in all_code_files if f.startswith(d)]
         d_cov = [f for f in covered_files if f.startswith(d)]
-        domain_stats[d] = f"{len(d_cov)}/{len(d_all)} ({len(d_cov)/len(d_all):.1%})" if d_all else "N/A"
+        domain_stats[d] = (
+            f"{len(d_cov)}/{len(d_all)} ({len(d_cov) / len(d_all):.1%})" if d_all else "N/A"
+        )
 
     report = {
         "summary": {
@@ -644,9 +746,7 @@ def run_audit():
             "domain_stats": domain_stats,
             "taxonomy_counts": taxonomy_counts,
             "eligible_categories": sorted(eligible_categories),
-            "excluded_categories": sorted(
-                set(COVERAGE_TAXONOMY) - eligible_categories
-            ),
+            "excluded_categories": sorted(set(COVERAGE_TAXONOMY) - eligible_categories),
             "symbol_inventory": {
                 "status": "collected_ast_baseline_phase2",
                 "total_symbols": len(symbol_inventory),
@@ -660,11 +760,7 @@ def run_audit():
                 "legacy_symbols": symbol_taxonomy_counts["legacy"],
                 "allowed_exclusion_symbols": symbol_taxonomy_counts["allowed_exclusion"],
                 "parse_error_files": sorted(
-                    {
-                        item["code_path"]
-                        for item in symbol_inventory
-                        if item["parse_error"]
-                    }
+                    {item["code_path"] for item in symbol_inventory if item["parse_error"]}
                 ),
                 "taxonomy_counts": symbol_taxonomy_counts,
             },
@@ -675,40 +771,47 @@ def run_audit():
         "policy": coverage_policy(),
         "top_uncovered_paths": uncovered_files[:30],
     }
-    
+
     keypath_report = {
         "keypath_coverage_ratio": f"{keypath_ratio:.2%}",
         "keypath_status": keypath_status,
         "keypath_uncovered": keypath_uncovered,
         "keypath_covered": keypath_covered,
-        "keypath_missing": missing_key_paths
+        "keypath_missing": missing_key_paths,
     }
-    
+
     os.makedirs(REPORT_PATH.parent, exist_ok=True)
     with open(REPORT_PATH, "w") as f:
         json.dump(report, f, indent=2)
     with open(KEYPATH_REPORT_PATH, "w") as f:
         json.dump(keypath_report, f, indent=2)
-        
-    print(f"📊 Global Formal Result: {formal_mapping['coverage_ratio']} ({formal_mapping['status']})")
+
+    print(
+        f"📊 Global Formal Result: {formal_mapping['coverage_ratio']} ({formal_mapping['status']})"
+    )
     print(f"🗂️ File Baseline Result: {coverage_ratio:.2%} ({global_status})")
     print(f"🎯 Key Path Result: {report['summary']['keypath_coverage_ratio']} ({keypath_status})")
-    print(f"📁 Domain Analysis:")
+    print("📁 Domain Analysis:")
     for d, stat in domain_stats.items():
         print(f"  - {d}: {stat}")
-    
+
     if keypath_ratio < 1.0:
-        print(f"❌ Critical Error: Key Path coverage is NOT 100%. Missing: {', '.join(keypath_uncovered)}")
+        print(
+            f"❌ Critical Error: Key Path coverage is NOT 100%. Missing: {', '.join(keypath_uncovered)}"
+        )
     if missing_key_paths:
         print(f"ℹ️ Key Path products not present in this checkout: {', '.join(missing_key_paths)}")
-    
+
     if coverage_ratio < COVERAGE_THRESHOLD:
-        print(f"ℹ️ File baseline gap: {len(uncovered_files)} files remain outside formal symbol coverage.")
+        print(
+            f"ℹ️ File baseline gap: {len(uncovered_files)} files remain outside formal symbol coverage."
+        )
     if formal_mapping["status"] != "PASS":
         print(
             f"⚠️ Formal mapping gap: {formal_mapping['unmapped_symbols']} eligible symbols remain."
         )
     return 0 if formal_mapping["status"] == "PASS" and keypath_status == "PASS" else 1
+
 
 if __name__ == "__main__":
     raise SystemExit(run_audit())
