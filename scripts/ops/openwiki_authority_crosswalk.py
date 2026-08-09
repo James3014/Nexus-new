@@ -77,10 +77,13 @@ def _normalise_path(value: str) -> str:
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     try:
-        value = yaml.load(
-            path.read_text(encoding="utf-8"),
-            Loader=_UniqueKeySafeLoader,
-        ) or {}
+        value = (
+            yaml.load(
+                path.read_text(encoding="utf-8"),
+                Loader=_UniqueKeySafeLoader,
+            )
+            or {}
+        )
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         raise ValueError(f"unable to load YAML mapping {path}: {exc}") from exc
     if not isinstance(value, dict):
@@ -115,8 +118,7 @@ def load_mapping_rules(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(raw, dict):
             raise ValueError(f"mapping rule {index} must be a mapping")
         identity_fields = {
-            field: raw.get(field)
-            for field in ("id", "authority_page", "authority_classification")
+            field: raw.get(field) for field in ("id", "authority_page", "authority_classification")
         }
         if not all(isinstance(value, str) for value in identity_fields.values()):
             raise ValueError(f"mapping rule {index} identity/authority fields must be strings")
@@ -134,24 +136,20 @@ def load_mapping_rules(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             values = raw.get(field, [])
             if values is None:
                 values = []
-            if not isinstance(values, list) or not all(
-                isinstance(item, str) for item in values
-            ):
+            if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
                 raise ValueError(f"mapping rule {rule_id} {field} must be a string list")
             selectors[field] = sorted({_normalise_path(item) for item in values})
         exact = selectors["code_paths"]
         prefixes = selectors["code_path_prefixes"]
         if not exact and not prefixes:
             raise ValueError(f"mapping rule {rule_id} has no deterministic path selector")
-        rules.append(
-            {
-                "id": rule_id,
-                "authority_page": authority_page,
-                "authority_classification": classification,
-                "code_paths": exact,
-                "code_path_prefixes": prefixes,
-            }
-        )
+        rules.append({
+            "id": rule_id,
+            "authority_page": authority_page,
+            "authority_classification": classification,
+            "code_paths": exact,
+            "code_path_prefixes": prefixes,
+        })
     return sorted(rules, key=lambda row: row["id"])
 
 
@@ -169,11 +167,7 @@ def resolve_implementation_key(
     rules: list[dict[str, Any]],
 ) -> dict[str, Any]:
     key = _normalise_path(implementation_key)
-    exact = [
-        _candidate(rule, key)
-        for rule in rules
-        if key in rule["code_paths"]
-    ]
+    exact = [_candidate(rule, key) for rule in rules if key in rule["code_paths"]]
     status = "EXACT_PATH_MATCH"
     candidates = exact
 
@@ -186,9 +180,7 @@ def resolve_implementation_key(
         ]
         if prefix_candidates:
             longest = max(len(row["matched_value"]) for row in prefix_candidates)
-            candidates = [
-                row for row in prefix_candidates if len(row["matched_value"]) == longest
-            ]
+            candidates = [row for row in prefix_candidates if len(row["matched_value"]) == longest]
             status = "EXACT_PREFIX_MATCH"
 
     if not candidates:
@@ -210,10 +202,7 @@ def resolve_implementation_key(
             row["matched_value"],
         ),
     )
-    targets = {
-        (row["authority_page"], row["authority_classification"])
-        for row in candidates
-    }
+    targets = {(row["authority_page"], row["authority_classification"]) for row in candidates}
     if len(targets) != 1:
         return {
             "implementation_key": key,
@@ -279,13 +268,11 @@ def compile_crosswalk(openwiki_root: Path, manifest_path: Path) -> dict[str, Any
         declared_symbols = sorted({item.strip() for item in symbols if item.strip()})
         for source_path in sorted({_normalise_path(item) for item in source_paths}):
             record = resolve_implementation_key(source_path, rules)
-            record.update(
-                {
-                    "openwiki_page": relative_page,
-                    "declared_symbols": declared_symbols,
-                    "symbol_mapping_status": "UNPAIRED_METADATA_NOT_USED_FOR_AUTHORITY",
-                }
-            )
+            record.update({
+                "openwiki_page": relative_page,
+                "declared_symbols": declared_symbols,
+                "symbol_mapping_status": "UNPAIRED_METADATA_NOT_USED_FOR_AUTHORITY",
+            })
             records.append(record)
 
     records.sort(key=lambda row: (row["openwiki_page"], row["implementation_key"]))
@@ -332,9 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --check requires --output", file=sys.stderr)
         return 2
     try:
-        rendered = render_crosswalk(
-            compile_crosswalk(args.openwiki_root, args.authority_manifest)
-        )
+        rendered = render_crosswalk(compile_crosswalk(args.openwiki_root, args.authority_manifest))
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

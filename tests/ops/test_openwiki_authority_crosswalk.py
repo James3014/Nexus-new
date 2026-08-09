@@ -184,9 +184,9 @@ def test_cli_writes_and_checks_same_artifact(tmp_path: Path):
 
 
 def test_invalid_or_escaping_paths_fail_closed():
-    rules = load_mapping_rules(
-        {"code_symbol_mapping_rules": [_rule("safe", "Safe.md", prefixes=["nexus/"])]}
-    )
+    rules = load_mapping_rules({
+        "code_symbol_mapping_rules": [_rule("safe", "Safe.md", prefixes=["nexus/"])]
+    })
 
     with pytest.raises(ValueError, match="invalid repository-relative path"):
         resolve_implementation_key("../secret", rules)
