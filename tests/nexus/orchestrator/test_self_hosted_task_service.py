@@ -1797,6 +1797,71 @@ def test_wait_task_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
     assert waited["task_action"]["action_state"] == "ACTION_REQUIRED"
 
 
+def test_compact_status_and_wait_project_terminal_worker_failure_read_only(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    error = "  provider\n\tfailed   " + ("x" * 600)
+    service._write_state("worker-failed", {
+        "task_id": "worker-failed",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "worker_provider": "agy",
+        "request": {"model": "qwen2.5-coder:7b"},
+        "exit_code": "17",
+        "execution_outcome": "FAILED",
+        "error": error,
+    })
+    path = service._state_path("worker-failed")
+    before = path.read_bytes()
+
+    compact = service.get_task_snapshot("worker-failed")
+    waited = service.wait_task("worker-failed", timeout_seconds=0)
+
+    for result in (compact, waited):
+        blocker = result["blocker"]
+        assert blocker["code"] == "WORKER_EXECUTION_FAILED"
+        assert blocker["failure_stage"] == "worker_execution"
+        assert blocker["provider"] == "agy"
+        assert blocker["model"] == "qwen2.5-coder:7b"
+        assert blocker["exit_code"] == 17
+        assert blocker["execution_outcome"] == "FAILED"
+        assert blocker["detail"] == "worker execution failed"
+        assert len(blocker["detail"]) <= 512
+        assert "\n" not in blocker["detail"] and "\t" not in blocker["detail"]
+        assert blocker["error_sha256"] == hashlib.sha256(error.encode("utf-8")).hexdigest()
+        assert "provider" not in blocker["detail"]
+        assert "x" * 32 not in blocker["detail"]
+    assert path.read_bytes() == before
+
+
+def test_compact_failure_projection_preserves_explicit_blocker_and_fabricates_nothing(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    explicit = {"code": "EXPLICIT_BLOCK", "detail": "human disposition required"}
+    service._write_state("explicit", {
+        "task_id": "explicit", "status": "FINAL_BLOCK", "blocker": explicit,
+        "error": "worker failed", "request": {"model": "model"},
+    })
+    service._write_state("explicit-falsey", {
+        "task_id": "explicit-falsey", "status": "FINAL_BLOCK", "blocker": {},
+        "error": "worker failed", "request": {"model": "model"},
+    })
+    service._write_state("without-error", {
+        "task_id": "without-error", "status": "FINAL_BLOCK", "request": {"model": "model"},
+    })
+    service._write_state("running-with-error", {
+        "task_id": "running-with-error", "status": "SUBMITTED", "error": "worker failed",
+    })
+
+    assert service.get_task_snapshot("explicit")["blocker"] == explicit
+    assert service.wait_task("explicit", timeout_seconds=0)["blocker"] == explicit
+    assert service.get_task_snapshot("explicit-falsey")["blocker"] == {}
+    assert service.wait_task("explicit-falsey", timeout_seconds=0)["blocker"] == {}
+    assert service.get_task_snapshot("without-error")["blocker"] is None
+    assert service.wait_task("without-error", timeout_seconds=0)["blocker"] is None
+    assert service.get_task_snapshot("running-with-error")["blocker"] is None
+    timed_out = service.wait_task("running-with-error", timeout_seconds=0)
+    assert timed_out["blocker"] is None
+
+
 def test_verify_task_reads_snapshot_without_state_lock(tmp_path, monkeypatch):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
 

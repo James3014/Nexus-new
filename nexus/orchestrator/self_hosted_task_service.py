@@ -103,6 +103,11 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _bounded_failure_text(value: Any, *, limit: int = 512) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
 def _parse_time(value: Optional[str]) -> Optional[float]:
     if not value:
         return None
@@ -710,6 +715,42 @@ class SelfHostedTaskService:
                 "superseded_by must name an existing INTEGRATED self-hosted task "
                 "with promotion_status=INTEGRATED and integration_result_sha"
             )
+
+    @classmethod
+    def _terminal_failure_blocker(cls, state: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        if str(state.get("status") or "") not in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
+            return None
+        raw_error = str(state.get("error") or "")
+        error = raw_error.strip()
+        if not error:
+            return None
+        request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+        evidence: dict[str, Any] = {
+            "code": "WORKER_EXECUTION_FAILED",
+            "detail": _bounded_failure_text("worker execution failed"),
+            "error_sha256": hashlib.sha256(raw_error.encode("utf-8")).hexdigest(),
+            "failure_stage": "worker_execution",
+        }
+        provider = str(state.get("worker_provider") or request.get("provider") or "").strip()
+        model = str(request.get("model") or "").strip()
+        if provider:
+            evidence["provider"] = provider
+        if model:
+            evidence["model"] = model
+        if state.get("exit_code") is not None:
+            try:
+                evidence["exit_code"] = int(state["exit_code"])
+            except (TypeError, ValueError):
+                pass
+        if state.get("execution_outcome"):
+            evidence["execution_outcome"] = str(state["execution_outcome"])
+        return evidence
+
+    @classmethod
+    def _projected_blocker(cls, state: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        if "blocker" in state and state["blocker"] is not None:
+            return state["blocker"]
+        return cls._terminal_failure_blocker(state)
 
     @classmethod
     def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -2537,7 +2578,7 @@ class SelfHostedTaskService:
                         "verification_verdict": state.get("verification_verdict"),
                         "found": state.get("found", True),
                         "state_valid": state.get("state_valid", True),
-                        "blocker": state.get("blocker"),
+                        "blocker": self._projected_blocker(state),
                         "retry_authorized": state.get("retry_authorized"),
                         "task_action": envelope,
                     }),
@@ -2559,7 +2600,7 @@ class SelfHostedTaskService:
                         "verification_verdict": state.get("verification_verdict"),
                         "found": state.get("found", True),
                         "state_valid": state.get("state_valid", True),
-                        "blocker": state.get("blocker"),
+                        "blocker": self._projected_blocker(state),
                         "retry_authorized": state.get("retry_authorized"),
                         "task_action": envelope,
                     }),
@@ -3296,6 +3337,9 @@ class SelfHostedTaskService:
                 "what", "why", "allowed_files", "verifier_commands", "worker", "worker_id",
                 "provider", "model", "controller_revision", "authority_change_candidate_confirmation",
                 "protected_contracts",
+                "provider_probe_evidence_hash", "provider_binary_path",
+                "provider_binary_sha256", "provider_cli_version_sha256",
+                "provider_probe_expires_at", "provider_authentication_evidence",
             )
             for current in states.values():
                 if current.get("task_id") != task_id or not current.get("request"):
@@ -4402,7 +4446,7 @@ class SelfHostedTaskService:
             "verification_verdict": state.get("verification_verdict"),
             "found": state.get("found", True),
             "state_valid": state.get("state_valid", True),
-            "blocker": state.get("blocker"),
+            "blocker": self._projected_blocker(state),
             "retry_authorized": state.get("retry_authorized"),
             "task_action": action,
         }

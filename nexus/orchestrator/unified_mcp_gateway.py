@@ -53,6 +53,7 @@ from nexus.orchestrator.lifecycle_guards import (
 from nexus.orchestrator.self_hosted_task_service import CANONICAL_SOURCE_ROOT, SelfHostedTaskService
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.services.unified_runtime import (
+    LOCAL_ONLY_PROVIDERS,
     ONLINE_CLI_SPEC_REGISTRY,
     resolve_registered_provider_executable,
 )
@@ -871,8 +872,73 @@ class UnifiedMCPGateway:
             raise GatewayInputError("task_id must be a stable bounded slug")
         return self._assist_root() / f"{task_id}.json"
 
+    def _probe_evidence_root(self) -> Path:
+        root = self._assist_root() / "probe_evidence"
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _probe_evidence_read_root(self) -> Path:
+        configured = getattr(self.service, "state_dir", None)
+        base = Path(configured).expanduser().resolve() if configured else Path("/tmp/nexus-mcp-gateway-assist-jobs")
+        return base / "assisted_provider_jobs" / "probe_evidence"
+
+    def _assist_read_root(self) -> Path:
+        """Return the evidence root without creating any filesystem state."""
+        configured = getattr(self.service, "state_dir", None)
+        base = Path(configured).expanduser().resolve() if configured else Path("/tmp/nexus-mcp-gateway-assist-jobs")
+        return base / "assisted_provider_jobs"
+
+    @staticmethod
+    def _canonical_hash(value: Any) -> str:
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _provider_requires_authentication(provider: str) -> bool:
+        key = str(provider or "").strip().lower()
+        return key in ONLINE_CLI_SPEC_REGISTRY and key not in LOCAL_ONLY_PROVIDERS
+
+    def _provider_execution_ready(self, preflight: Mapping[str, Any], *, provider: str) -> tuple[bool, Optional[str]]:
+        if str(preflight.get("status") or "") != "VERSION_VERIFIED":
+            return False, str(preflight.get("blocker") or "WORKER_PREFLIGHT_FAILED")
+        blocker = str(preflight.get("blocker") or "")
+        if blocker in {"MODEL_PROBE_REQUIRED", "MODEL_PROBE_ASYNC_REQUIRED"}:
+            return False, blocker
+        if preflight.get("readiness_status") != "MODEL_VERIFIED" or preflight.get("execution_ready") is not True:
+            return False, "MODEL_PROBE_REQUIRED"
+        if preflight.get("model_reachable") is not True or preflight.get("requested_model_verified") is not True:
+            return False, "MODEL_PROBE_REQUIRED"
+        required_identity = (
+            "probe_evidence_hash",
+            "binary_path",
+            "binary_sha256",
+            "cli_version_sha256",
+            "probe_expires_at",
+        )
+        if any(not preflight.get(field) for field in required_identity):
+            return False, "MODEL_PROBE_REQUIRED"
+        if self._provider_requires_authentication(provider):
+            if (
+                preflight.get("authenticated") is not True
+                or preflight.get("authentication_evidence") != "successful_exact_model_probe"
+            ):
+                return False, "PROVIDER_AUTHENTICATION_REQUIRED"
+        return True, None
+
     def _assist_read(self, task_id: str) -> Optional[dict[str, Any]]:
         path = self._assist_path(task_id)
+        if not path.exists():
+            return None
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _assist_read_snapshot(self, task_id: str) -> Optional[dict[str, Any]]:
+        """Read a persisted job without creating the state root."""
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", str(task_id)):
+            return None
+        path = self._assist_read_root() / f"{task_id}.json"
         if not path.exists():
             return None
         try:
@@ -884,10 +950,228 @@ class UnifiedMCPGateway:
     def _assist_write(self, value: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _text(value.get("task_id"), "task_id")
         path = self._assist_path(task_id)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(dict(value), sort_keys=True, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        serialized = json.dumps(dict(value), sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            temporary = Path(handle.name)
         os.replace(temporary, path)
         return dict(value)
+
+    @classmethod
+    def _probe_evidence_identity(cls, values: Mapping[str, Any]) -> str:
+        identity = {
+            key: values.get(key)
+            for key in (
+                "provider",
+                "requested_model",
+                "resolved_model",
+                "binary_path",
+                "binary_sha256",
+                "cli_version",
+            )
+        }
+        return cls._canonical_hash(identity)
+
+    def _write_probe_evidence(self, job: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        if job.get("job_kind") != "model_probe" or job.get("status") != "COMPLETED":
+            return None
+        required = (
+            "task_id",
+            "job_id",
+            "provider",
+            "requested_model",
+            "resolved_model",
+            "binary_path",
+            "binary_sha256",
+            "cli_version",
+            "cli_version_sha256",
+            "command_hash",
+            "probe_prompt_hash",
+            "probe_semantics_hash",
+            "action_request_hash",
+            "action_id",
+            "attempt_id",
+            "result",
+            "output_schema",
+            "finished_at",
+            "stdout_sha256",
+            "stderr_sha256",
+            "stdout_bytes",
+            "stderr_bytes",
+            "filesystem_delta",
+            "process_cleanup",
+            "durable_exit_marker",
+            "stream_flush_status",
+            "workspace_mode",
+            "model_response_provenance",
+            "submitted_at",
+            "started_at",
+        )
+        if any(job.get(key) in (None, "") for key in required) or job.get("exit_code") != 0:
+            return None
+        if (
+            job.get("model_response_verified") is not True
+            or job.get("durable_exit_marker") is not True
+            or job.get("process_cleanup") is not True
+            or job.get("filesystem_delta") != {"created": [], "removed": [], "changed": []}
+            or job.get("schema_error") not in (None, "")
+            or job.get("stream_flush_status") != "FLUSHED"
+            or job.get("workspace_mode") != "isolated"
+            or not self._probe_command_identity_valid(job)
+        ):
+            return None
+        remote_authentication = self._provider_requires_authentication(str(job.get("provider") or ""))
+        payload = {
+            key: job.get(key)
+            for key in required
+            if key not in {"result", "output_schema"}
+        }
+        payload.update({
+            "schema": "nexus.model_probe_evidence.v1",
+            "status": "SUCCESS",
+            "model_response_verified": True,
+            # Authentication is inferred only from a successful exact remote
+            # model response, never from provider metadata or --version.
+            "authenticated": remote_authentication,
+            "authentication_evidence": (
+                "successful_exact_model_probe"
+                if remote_authentication
+                else "local_provider_no_auth_required"
+            ),
+            "exit_code": 0,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        })
+        payload["output_schema_hash"] = self._canonical_hash(job.get("output_schema"))
+        payload["result_hash"] = self._canonical_hash(job.get("result"))
+        trust = {key: value for key, value in payload.items() if key != "evidence_hash"}
+        payload["evidence_hash"] = self._canonical_hash(trust)
+        identity = self._probe_evidence_identity(payload)
+        path = self._probe_evidence_root() / f"{identity}.json"
+        serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            temporary = Path(handle.name)
+        os.replace(temporary, path)
+        return payload
+
+    def _read_probe_evidence(self, *, provider: str, requested_model: str, resolved_model: str, executable: str, binary_sha256: str, cli_version: str) -> Optional[dict[str, Any]]:
+        root = self._probe_evidence_read_root()
+        if not root.exists():
+            return None
+        identity_values = {
+            "provider": provider,
+            "requested_model": requested_model,
+            "resolved_model": resolved_model,
+            "binary_path": executable,
+            "binary_sha256": binary_sha256,
+            "cli_version": cli_version,
+        }
+        path = root / f"{self._probe_evidence_identity(identity_values)}.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            expires_at = datetime.fromisoformat(str(value.get("expires_at")))
+            finished_at = datetime.fromisoformat(str(value.get("finished_at")))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+        now = datetime.now(timezone.utc)
+        if expires_at.tzinfo is None or finished_at.tzinfo is None:
+            return None
+        if (
+            finished_at > now + timedelta(minutes=1)
+            or expires_at <= now
+            or expires_at <= finished_at
+            or expires_at - finished_at > timedelta(hours=1, minutes=1)
+        ):
+            return None
+        if value.get("status") != "SUCCESS" or value.get("model_response_verified") is not True:
+            return None
+        if any(value.get(key) != expected for key, expected in identity_values.items()):
+            return None
+        if value.get("cli_version_sha256") != hashlib.sha256(cli_version.encode("utf-8")).hexdigest():
+            return None
+        digest = value.get("evidence_hash")
+        trust = {key: item for key, item in value.items() if key != "evidence_hash"}
+        if not digest or self._canonical_hash(trust) != digest:
+            return None
+        job = self._assist_read_snapshot(str(value.get("task_id")))
+        matched_fields = (
+            "job_id",
+            "action_id",
+            "attempt_id",
+            "command_hash",
+            "probe_prompt_hash",
+            "probe_semantics_hash",
+            "action_request_hash",
+            "submitted_at",
+            "started_at",
+            "provider",
+            "requested_model",
+            "resolved_model",
+            "binary_path",
+            "binary_sha256",
+            "cli_version",
+            "cli_version_sha256",
+            "finished_at",
+            "stdout_sha256",
+            "stderr_sha256",
+            "stdout_bytes",
+            "stderr_bytes",
+            "filesystem_delta",
+            "process_cleanup",
+            "durable_exit_marker",
+            "model_response_verified",
+            "model_response_provenance",
+            "stream_flush_status",
+            "workspace_mode",
+        )
+        if job is None or any(job.get(key) != value.get(key) for key in matched_fields):
+            return None
+        if (
+            job.get("status") != "COMPLETED"
+            or job.get("exit_code") != 0
+            or job.get("durable_exit_marker") is not True
+            or job.get("process_cleanup") is not True
+            or job.get("model_response_verified") is not True
+            or not job.get("model_response_provenance")
+            or job.get("filesystem_delta") != {"created": [], "removed": [], "changed": []}
+            or value.get("exit_code") != 0
+            or not self._probe_command_identity_valid(job)
+            or value.get("output_schema_hash") != self._canonical_hash(job.get("output_schema"))
+            or value.get("result_hash") != self._canonical_hash(job.get("result"))
+        ):
+            return None
+        for name in ("stdout", "stderr"):
+            artifact = Path(str(job.get(f"{name}_artifact") or ""))
+            try:
+                if (
+                    not artifact.is_file()
+                    or artifact.resolve().parent != self._assist_read_root().resolve()
+                    or self._hash_file(artifact) != job.get(f"{name}_sha256")
+                    or artifact.stat().st_size != job.get(f"{name}_bytes")
+                ):
+                    return None
+            except OSError:
+                return None
+        if job.get("schema_error") not in (None, "") or job.get("stream_flush_status") != "FLUSHED":
+            return None
+        if self._provider_requires_authentication(provider):
+            if value.get("authenticated") is not True or value.get("authentication_evidence") != "successful_exact_model_probe":
+                return None
+        return value
 
     @staticmethod
     def _assist_command(*, executable: str, provider: str, model: str, prompt: str) -> list[str]:
@@ -897,7 +1181,7 @@ class UnifiedMCPGateway:
                 selected = f"cline-pass/{selected}"
             return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
-            return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--print-timeout", "25s", "--prompt", prompt]
+            return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--model", model, "--print-timeout", "25s", "--prompt", prompt]
         if provider == "gemini":
             return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
         if provider == "opencode":
@@ -909,8 +1193,120 @@ class UnifiedMCPGateway:
         if provider == "grok":
             return [executable, "--model", model, "--single", prompt, "--output-format", "json", "--no-alt-screen"]
         if provider == "codex":
-            return [executable, "exec", "--json", "--full-auto", "-m", model, prompt]
+            return [executable, "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-m", model, prompt]
         raise GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
+
+    @classmethod
+    def _probe_command_identity_valid(cls, job: Mapping[str, Any]) -> bool:
+        command = job.get("command")
+        if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
+            return False
+        if command[0] != job.get("binary_path"):
+            return False
+        command_hash = hashlib.sha256(
+            json.dumps(command, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if command_hash != job.get("command_hash"):
+            return False
+        provider = str(job.get("provider") or "")
+        expected_model = str(job.get("resolved_model") or "")
+        try:
+            if provider in {"cline", "agy", "opencode", "mimo", "grok"}:
+                model_value = command[command.index("--model") + 1]
+            elif provider in {"codex", "gemini"}:
+                model_value = command[command.index("-m") + 1]
+            elif provider == "ollama":
+                model_value = command[2]
+            else:
+                return False
+            if model_value != expected_model:
+                return False
+            if provider == "agy":
+                prompt = command[command.index("--prompt") + 1]
+            elif provider == "gemini":
+                prompt = command[command.index("-p") + 1]
+            else:
+                prompt = command[-1]
+        except (ValueError, IndexError):
+            return False
+        return cls._canonical_hash(prompt) == job.get("probe_prompt_hash")
+
+    @staticmethod
+    def _decode_model_probe_payload(text: str, provider: str, resolved_model: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        """Return only a model-originated JSON payload, never transport metadata."""
+
+        def decode_document(raw: str) -> Optional[dict[str, Any]]:
+            try:
+                value = json.loads(raw.strip())
+            except (json.JSONDecodeError, TypeError):
+                return None
+            return value if isinstance(value, dict) else None
+
+        stripped = text.strip()
+        direct = decode_document(stripped)
+        transport_types = {
+            "run_start",
+            "run_result",
+            "item.started",
+            "item.completed",
+            "agent_message",
+            "thread.started",
+            "turn.started",
+            "turn.completed",
+        }
+        if provider not in {"cline", "codex"} and direct is not None and direct.get("type") not in transport_types:
+            return direct, "direct_json_document"
+
+        events: list[dict[str, Any]] = []
+        for line in text.splitlines():
+            value = decode_document(line)
+            if value is not None:
+                events.append(value)
+        if provider == "codex":
+            event_types = [str(event.get("type") or "") for event in events]
+            try:
+                thread_index = event_types.index("thread.started")
+                turn_index = event_types.index("turn.started", thread_index + 1)
+                completed_index = event_types.index("turn.completed", turn_index + 1)
+            except ValueError:
+                return None, None
+            for event in reversed(events[turn_index + 1 : completed_index]):
+                if event.get("type") != "item.completed":
+                    continue
+                item = event.get("item") if isinstance(event.get("item"), Mapping) else event
+                if item.get("type") != "agent_message" or not isinstance(item.get("text"), str):
+                    continue
+                payload = decode_document(item["text"])
+                if payload is not None:
+                    return payload, "codex_jsonl_sequence"
+            return None, None
+        if provider == "cline":
+            start_indices = [
+                index
+                for index, event in enumerate(events)
+                if (
+                event.get("type") == "run_start"
+                and event.get("providerId") == "cline"
+                and event.get("modelId") == resolved_model
+                )
+            ]
+            if not start_indices:
+                return None, None
+            for event in reversed(events[start_indices[-1] + 1 :]):
+                if event.get("type") != "run_result" or str(event.get("finishReason") or "").lower() == "error":
+                    continue
+                model = event.get("model") if isinstance(event.get("model"), Mapping) else {}
+                if (
+                    str(model.get("provider") or "") != "cline"
+                    or str(model.get("id") or "") != resolved_model
+                    or not isinstance(event.get("text"), str)
+                ):
+                    continue
+                payload = decode_document(event["text"])
+                if payload is not None:
+                    return payload, "cline_run_result"
+            return None, None
+        return None, None
 
     @staticmethod
     def _decode_assist_payload(text: str, provider: str, *, require_patch: bool = False) -> Optional[dict[str, Any]]:
@@ -945,6 +1341,18 @@ class UnifiedMCPGateway:
             if isinstance(value, dict):
                 if "patch" in value:
                     return value
+                # Codex JSONL wraps the model payload in an agent_message
+                # event whose text field is itself JSON.  Decode that inner
+                # value instead of treating the transport envelope as the
+                # probe result.
+                if provider == "codex" and value.get("type") == "agent_message" and isinstance(value.get("text"), str):
+                    nested = UnifiedMCPGateway._decode_assist_payload(value["text"], provider, require_patch=require_patch)
+                    if nested is not None:
+                        return nested
+                if provider == "codex" and isinstance(value.get("item"), Mapping):
+                    nested = visit(value["item"])
+                    if nested is not None:
+                        return nested
                 if not require_patch:
                     return value
                 # These are the documented/observed Cline envelope fields.
@@ -1066,8 +1474,20 @@ class UnifiedMCPGateway:
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
         stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
-        require_patch = str(job.get("job_kind") or "assist") != "model_probe"
-        parsed = self._decode_assist_payload(stdout, str(job.get("provider") or ""), require_patch=require_patch)
+        is_model_probe = str(job.get("job_kind") or "assist") == "model_probe"
+        response_provenance: Optional[str] = None
+        if is_model_probe:
+            parsed, response_provenance = self._decode_model_probe_payload(
+                stdout,
+                str(job.get("provider") or ""),
+                str(job.get("resolved_model") or ""),
+            )
+        else:
+            parsed = self._decode_assist_payload(
+                stdout,
+                str(job.get("provider") or ""),
+                require_patch=True,
+            )
         schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
         started_at = job.get("started_at")
         provider_time_ms = 0
@@ -1076,15 +1496,26 @@ class UnifiedMCPGateway:
                 provider_time_ms = max(0, int((time.time() - datetime.fromisoformat(str(started_at)).timestamp()) * 1000))
             except (TypeError, ValueError):
                 provider_time_ms = 0
+        model_response_verified = bool(
+            is_model_probe
+            and returncode == 0
+            and parsed is not None
+            and schema_valid
+            and response_provenance
+        )
+        provider_error_sha256 = hashlib.sha256(stderr.encode("utf-8")).hexdigest() if returncode != 0 and stderr else None
         job.update({
             "status": "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED",
             "finished_at": self._utc_now(),
             "exit_code": returncode,
             "result": parsed,
+            "model_response_verified": model_response_verified,
+            "model_response_provenance": response_provenance,
             "blocker": ("ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and (parsed is None or not schema_valid) else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)),
             "schema_error": schema_error,
             "schema_validation_level": "bounded_subset",
-            "provider_error": stderr[-1000:] if returncode != 0 else "",
+            "provider_error": "provider process failed" if returncode != 0 else "",
+            "provider_error_sha256": provider_error_sha256,
             "provider_time_ms": provider_time_ms,
         })
         self._assist_record_stream_artifacts(job)
@@ -1106,6 +1537,13 @@ class UnifiedMCPGateway:
                 job["cleanup_error"] = str(exc)
         with self._assist_lock:
             self._assist_processes.pop(task_id, None)
+        evidence = self._write_probe_evidence(job)
+        if evidence is not None:
+            job["probe_evidence_hash"] = evidence["evidence_hash"]
+            job["probe_expires_at"] = evidence["expires_at"]
+            job["authentication_evidence"] = evidence["authentication_evidence"]
+            identity = self._probe_evidence_identity(evidence)
+            job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
     def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
@@ -1148,6 +1586,10 @@ class UnifiedMCPGateway:
             "stderr_sha256": job.get("stderr_sha256"),
             "stdout_bytes": job.get("stdout_bytes"),
             "stderr_bytes": job.get("stderr_bytes"),
+            "model_response_verified": bool(job.get("model_response_verified", False)),
+            "probe_evidence_hash": job.get("probe_evidence_hash"),
+            "probe_expires_at": job.get("probe_expires_at"),
+            "authentication_evidence": job.get("authentication_evidence"),
             "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
             "reconciliation_required": bool(job.get("reconciliation_required", False)),
             "context_arm": job.get("context_arm"),
@@ -1156,6 +1598,7 @@ class UnifiedMCPGateway:
             "result": job.get("result") if status == "COMPLETED" else None,
             "blocker": job.get("blocker"),
             "provider_error": job.get("provider_error", ""),
+            "provider_error_sha256": job.get("provider_error_sha256"),
             "schema_error": job.get("schema_error", ""),
             "schema_validation_level": job.get("schema_validation_level", "bounded_subset"),
             "requested_tools_policy": job.get("requested_tools_policy", []),
@@ -1552,6 +1995,7 @@ class UnifiedMCPGateway:
             return result
         shutil.rmtree(version_root, ignore_errors=True)
         result["cli_version"] = (version.stdout or version.stderr).strip()[:512]
+        result["cli_version_sha256"] = hashlib.sha256(result["cli_version"].encode()).hexdigest()
         result["version_latency_ms"] = max(0, int((time.perf_counter() - version_started) * 1000))
         if version.returncode != 0:
             result["exit_code"] = version.returncode
@@ -1561,7 +2005,23 @@ class UnifiedMCPGateway:
         # caller asking for probe=true receives a bounded handoff to the
         # isolated async model-probe surface, so ChatGPT request lifetimes and
         # the canonical checkout are not part of provider probing.
-        if bool(arguments.get("probe", False)):
+        evidence = self._read_probe_evidence(provider=provider, requested_model=requested_model, resolved_model=resolved_model, executable=executable, binary_sha256=result["binary_sha256"], cli_version=result["cli_version"])
+        evidence_auth_ready = evidence is not None and (not self._provider_requires_authentication(provider) or evidence.get("authenticated") is True)
+        if evidence_auth_ready:
+            result.update({
+                "status": "VERSION_VERIFIED",
+                "blocker": None,
+                "next_action": None,
+                "readiness_status": "MODEL_VERIFIED",
+                "execution_ready": True,
+                "model_reachable": True,
+                "requested_model_verified": True,
+                "authenticated": evidence.get("authenticated") is True,
+                "authentication_evidence": evidence.get("authentication_evidence"),
+                "probe_evidence_hash": evidence.get("evidence_hash"),
+                "probe_expires_at": evidence.get("expires_at"),
+            })
+        elif bool(arguments.get("probe", False)):
             result.update({
                 "status": "VERSION_VERIFIED",
                 "blocker": "MODEL_PROBE_ASYNC_REQUIRED",
@@ -1570,6 +2030,8 @@ class UnifiedMCPGateway:
             })
         else:
             result.update({"status": "VERSION_VERIFIED", "blocker": "MODEL_PROBE_REQUIRED", "next_action": "nexus_model_probe"})
+        result.setdefault("readiness_status", "VERSION_VERIFIED")
+        result.setdefault("execution_ready", False)
         return result
 
     def _task_card_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -1653,6 +2115,8 @@ class UnifiedMCPGateway:
         if not executable:
             raise GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
         model = str(arguments.get("model") or metadata.get("default_model") or "").strip()
+        requested_model = model
+        resolved_model = f"cline-pass/{model}" if provider == "cline" and "/" not in model else model
         prompt = _text(arguments.get("prompt"), "prompt", max_length=16000)
         schema = arguments.get("output_schema") or {"type": "object"}
         if not isinstance(schema, Mapping) or len(json.dumps(schema, ensure_ascii=False)) > 16000:
@@ -1663,7 +2127,31 @@ class UnifiedMCPGateway:
         task_id = self._task_id(arguments, prompt, provider, ["model_probe"])
         existing = self._assist_read(task_id)
         if existing is not None:
+            semantics = self._canonical_hash({"provider": provider, "model": model, "prompt": prompt, "output_schema": schema})
+            if existing.get("probe_semantics_hash") != semantics:
+                raise GatewayInputError("MODEL_PROBE_TASK_ID_CONFLICT")
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        # Resolve and attest the exact executable/version before creating an
+        # isolated workspace or invoking Popen.  A failed preflight leaves no
+        # probe workspace or provider process behind.
+        version_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-preflight-{provider}-", dir="/tmp"))
+        try:
+            binary_sha256 = self._hash_file(Path(executable))
+            version = subprocess.run(
+                [executable, "--version"],
+                cwd=version_root,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            cli_version = (version.stdout or version.stderr).strip()[:512]
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise GatewayInputError("ASSIST_PROVIDER_VERSION_FAILED") from exc
+        finally:
+            shutil.rmtree(version_root, ignore_errors=True)
+        if version.returncode != 0 or not cli_version:
+            raise GatewayInputError("ASSIST_PROVIDER_VERSION_FAILED")
         action = build_action_envelope(
             task_id=task_id,
             action_type=LifecycleActionType.TASK_RUN,
@@ -1695,6 +2183,12 @@ class UnifiedMCPGateway:
             "apply_requested": False,
             "provider": provider,
             "model": model,
+            "requested_model": requested_model,
+            "resolved_model": resolved_model,
+            "binary_path": executable,
+            "binary_sha256": binary_sha256,
+            "cli_version": cli_version,
+            "cli_version_sha256": hashlib.sha256(cli_version.encode("utf-8")).hexdigest(),
             "context_arm": arguments.get("context_arm"),
             "context_arm_applied": False,
             "context_arm_semantics": "record_only_not_applied",
@@ -1705,6 +2199,9 @@ class UnifiedMCPGateway:
             "filesystem_before": self._snapshot_workspace(workspace_root),
             "output_schema": dict(schema),
             "command_hash": hashlib.sha256(json.dumps(command, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "probe_prompt_hash": self._canonical_hash(probe_prompt),
+            "probe_semantics_hash": self._canonical_hash({"provider": provider, "model": model, "prompt": prompt, "output_schema": schema}),
+            "action_request_hash": action["request_hash"],
             "command": command,
             "submitted_at": self._utc_now(),
             "started_at": None,
@@ -1718,6 +2215,54 @@ class UnifiedMCPGateway:
             "reconnected_at": None,
         }
         self._assist_write(job)
+        # Re-resolve and re-attest immediately before launch.  This closes the
+        # avoidable gap between the initial evidence packet and the executable
+        # actually handed to Popen.
+        launch_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-launch-{provider}-", dir="/tmp"))
+        launch_identity_matches = False
+        launch_stat_identity: Optional[tuple[int, int, int, int]] = None
+        try:
+            _, launch_executable = self._provider_executable(provider)
+            if launch_executable:
+                launch_path = Path(launch_executable)
+                launch_stat = launch_path.stat()
+                launch_stat_identity = (
+                    launch_stat.st_dev,
+                    launch_stat.st_ino,
+                    launch_stat.st_size,
+                    launch_stat.st_mtime_ns,
+                )
+                launch_binary_sha256 = self._hash_file(launch_path)
+                launch_version = subprocess.run(
+                    [launch_executable, "--version"],
+                    cwd=launch_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                launch_cli_version = (launch_version.stdout or launch_version.stderr).strip()[:512]
+                launch_identity_matches = bool(
+                    launch_version.returncode == 0
+                    and launch_executable == executable
+                    and launch_binary_sha256 == binary_sha256
+                    and launch_cli_version == cli_version
+                )
+        except (OSError, subprocess.TimeoutExpired):
+            launch_identity_matches = False
+        finally:
+            shutil.rmtree(launch_root, ignore_errors=True)
+        if not launch_identity_matches:
+            shutil.rmtree(workspace_root, ignore_errors=True)
+            job.update({
+                "status": "FAILED",
+                "finished_at": self._utc_now(),
+                "blocker": "ASSIST_PROVIDER_IDENTITY_DRIFT",
+                "provider_error": "provider executable identity changed before launch",
+                "model_response_verified": False,
+                "process_cleanup": True,
+            })
+            return self._assist_response(self._assist_write(job), operation="submit")
         stdout_handle = stdout_path.open("w", encoding="utf-8")
         stderr_handle = stderr_path.open("w", encoding="utf-8")
         try:
@@ -1730,6 +2275,61 @@ class UnifiedMCPGateway:
             return self._assist_response(self._assist_write(job), operation="submit")
         stdout_handle.close()
         stderr_handle.close()
+        post_launch_identity_matches = False
+        try:
+            _, post_launch_executable = self._provider_executable(provider)
+            if post_launch_executable:
+                post_launch_path = Path(post_launch_executable)
+                post_launch_stat = post_launch_path.stat()
+                post_launch_stat_identity = (
+                    post_launch_stat.st_dev,
+                    post_launch_stat.st_ino,
+                    post_launch_stat.st_size,
+                    post_launch_stat.st_mtime_ns,
+                )
+                post_launch_identity_matches = bool(
+                    post_launch_executable == executable
+                    and post_launch_stat_identity == launch_stat_identity
+                    and self._hash_file(post_launch_path) == binary_sha256
+                )
+        except OSError:
+            post_launch_identity_matches = False
+        if not post_launch_identity_matches:
+            terminated = False
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=2)
+                terminated = True
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=2)
+                    terminated = True
+                except subprocess.TimeoutExpired:
+                    terminated = False
+            if terminated:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+            job.update({
+                "status": "FAILED",
+                "finished_at": self._utc_now(),
+                "blocker": (
+                    "ASSIST_PROVIDER_IDENTITY_DRIFT"
+                    if terminated
+                    else "ASSIST_PROVIDER_IDENTITY_DRIFT_CLEANUP_INCOMPLETE"
+                ),
+                "provider_error": "provider executable identity changed during launch",
+                "model_response_verified": False,
+                "process_cleanup": terminated,
+                "pid": process.pid,
+                "pgid": process.pid,
+            })
+            return self._assist_response(self._assist_write(job), operation="submit")
         job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
         with self._assist_lock:
             self._assist_processes[task_id] = process
@@ -1804,8 +2404,42 @@ class UnifiedMCPGateway:
             raise GatewayInputError("verifier_commands must be bounded")
         provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
         preflight = self._provider_preflight({"provider": provider, "model": model})
-        if preflight.get("status") != "VERSION_VERIFIED":
-            raise GatewayInputError(str(preflight.get("blocker") or "WORKER_PREFLIGHT_FAILED"))
+        ready, blocker = self._provider_execution_ready(preflight, provider=provider)
+        if not ready:
+            detail = blocker or "WORKER_PREFLIGHT_FAILED"
+            if preflight.get("next_action"):
+                detail = f"{detail}:{preflight['next_action']}"
+            raise GatewayInputError(detail)
+        readiness_binding = {
+            "provider_probe_evidence_hash": self._exact_hash(
+                preflight.get("probe_evidence_hash"),
+                "provider_probe_evidence_hash",
+                64,
+            ),
+            "provider_binary_path": _text(
+                preflight.get("binary_path"),
+                "provider_binary_path",
+                max_length=1024,
+            ),
+            "provider_binary_sha256": self._exact_hash(
+                preflight.get("binary_sha256"),
+                "provider_binary_sha256",
+                64,
+            ),
+            "provider_cli_version_sha256": self._exact_hash(
+                preflight.get("cli_version_sha256"),
+                "provider_cli_version_sha256",
+                64,
+            ),
+            "provider_probe_expires_at": _text(
+                preflight.get("probe_expires_at"),
+                "provider_probe_expires_at",
+                max_length=128,
+            ),
+            "provider_authentication_evidence": str(
+                preflight.get("authentication_evidence") or "local_provider_no_auth_required"
+            ),
+        }
         head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
         issued = self._utc_now()
         expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -1831,6 +2465,7 @@ class UnifiedMCPGateway:
                       "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                       "worker_candidate_ingress": True,
                       "protected_contracts": protected_contracts})
+        bound.update(readiness_binding)
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
         action = build_action_envelope(
@@ -1868,6 +2503,7 @@ class UnifiedMCPGateway:
         request.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
                         "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                         "worker_candidate_ingress": True})
+        request.update(readiness_binding)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
         request["protected_contracts"] = protected_contracts
@@ -2949,7 +3585,18 @@ class UnifiedMCPGateway:
         elif requested == "opencode":
             command = [executable, "run", "--model", selected_model, prompt]
         elif requested == "codex":
-            command = [executable, "exec", "--json", "--full-auto", "-m", selected_model, prompt]
+            command = [
+                executable,
+                "exec",
+                "--json",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "-m",
+                selected_model,
+                prompt,
+            ]
         elif requested == "mimo":
             command = [executable, "run", "--model", selected_model, prompt]
         elif requested == "ollama":

@@ -96,6 +96,58 @@ class FakeService:
         return {"status": "PENDING_HUMAN_APPROVAL", "task_id": request["task_id"], "target_created": True, "state_created": True}
 
 
+def _ready_preflight(**overrides):
+    """A positive worker mock must model verified execution, not version-only."""
+    payload = {
+        "status": "VERSION_VERIFIED",
+        "readiness_status": "MODEL_VERIFIED",
+        "execution_ready": True,
+        "provider": "agy",
+        "requested_model": "agy/model",
+        "resolved_model": "agy/model",
+        "model_reachable": True,
+        "requested_model_verified": True,
+        "authenticated": True,
+        "authentication_evidence": "successful_exact_model_probe",
+        "probe_evidence_hash": "e" * 64,
+        "binary_path": "/usr/bin/true",
+        "binary_sha256": "b" * 64,
+        "cli_version_sha256": "c" * 64,
+        "probe_expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _patch_probe_version(monkeypatch):
+    """Keep executable preflight shell-free and independent of FakePopen."""
+    def fake_run(command, **kwargs):
+        assert list(command)[-1] == "--version"
+        return SimpleNamespace(returncode=0, stdout="cline 1.2.3\n", stderr="")
+
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+
+    def reject_shell_version_probe(*args, **kwargs):
+        raise AssertionError("model probe preflight must not use os.popen")
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.os.popen",
+        reject_shell_version_probe,
+    )
+
+
+def _cline_probe_events(payload, *, model="cline-pass/glm-5.2", provider="cline"):
+    return "\n".join((
+        json.dumps({"type": "run_start", "providerId": provider, "modelId": model}),
+        json.dumps({
+            "type": "run_result",
+            "finishReason": "stop",
+            "text": json.dumps(payload),
+            "model": {"id": model, "provider": provider},
+        }),
+    )) + "\n"
+
+
 def test_canonical_request_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
@@ -158,6 +210,7 @@ def test_worker_candidate_forwards_owner_inline_task_run_once(monkeypatch):
     }
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     response = gateway.handle({"jsonrpc": "2.0", "id": 44, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "PENDING_HUMAN_APPROVAL"
@@ -171,6 +224,17 @@ def test_worker_candidate_forwards_owner_inline_task_run_once(monkeypatch):
     assert request["model"] == "agy/model"
     assert request["worker"] == "agy"
     assert request["worker_id"] == "worker-a"
+    readiness_fields = {
+        "provider_probe_evidence_hash": "e" * 64,
+        "provider_binary_path": "/usr/bin/true",
+        "provider_binary_sha256": "b" * 64,
+        "provider_cli_version_sha256": "c" * 64,
+        "provider_probe_expires_at": "2099-01-01T00:00:00+00:00",
+        "provider_authentication_evidence": "successful_exact_model_probe",
+    }
+    for field, expected in readiness_fields.items():
+        assert request[field] == expected
+        assert request["bound_action_request"][field] == expected
     assert request["action"]["action_type"] == LifecycleActionType.TASK_RUN.value
     assert request["action"]["contract_kind"] == ContractKind.OWNER_INLINE.value
     assert request["action"]["permission_profile"] == "CANDIDATE"
@@ -252,7 +316,7 @@ def test_worker_candidate_preserves_service_status(monkeypatch):
     gateway = UnifiedMCPGateway(service=service)
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED", "provider": "agy", "resolved_model": "agy/model"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     args = {"what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
     response = gateway.handle({"jsonrpc": "2.0", "id": 49, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
     assert response["result"]["structuredContent"]["status"] == "SUBMITTED"
@@ -276,7 +340,7 @@ def test_worker_candidate_semantic_replay_and_conflict_use_service_gate(monkeypa
     gateway = UnifiedMCPGateway(service=service)
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     args = {"task_id": "semantic-replay", "what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
     gateway.handle({"jsonrpc": "2.0", "id": 60, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
     prior = service.submitted[0]
@@ -308,7 +372,7 @@ def test_worker_candidate_explicit_authority_confirmation_binds_marker(monkeypat
     gateway = UnifiedMCPGateway(service=service)
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     args = {
         "task_id": "authority-candidate", "what": "authority change", "why": "explicit owner review",
         "worker": "worker-a", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
@@ -351,7 +415,7 @@ def test_worker_candidate_authority_confirmation_tamper_breaks_bound_hash(monkey
     gateway = UnifiedMCPGateway(service=service)
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     args = {
         "task_id": "authority-tamper", "what": "authority change", "why": "explicit owner review",
         "worker": "worker-a", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
@@ -373,7 +437,7 @@ def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(mon
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     gateway = UnifiedMCPGateway(service=FakeService())
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     args = {
         "task_id": "authority-identity", "what": "authority change", "why": "explicit owner review",
         "worker": "worker-a", "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
@@ -385,7 +449,7 @@ def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(mon
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     gateway.handle({"jsonrpc": "2.0", "id": 75, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
     original = service.submitted[0]
     for field, value in (
@@ -409,7 +473,7 @@ def test_worker_candidate_ordinary_to_authority_same_task_conflicts_before_submi
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     ordinary = {
         "task_id": "authority-replay", "what": "bounded change", "why": "ordinary request",
         "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"],
@@ -432,7 +496,7 @@ def test_worker_candidate_head_drift_fails_before_submit(monkeypatch):
     gateway = UnifiedMCPGateway(service=service)
     worker = SimpleNamespace(worker_id="worker-a", provider="agy", model="agy/model", state="ADMITTED")
     monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
-    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: {"status": "VERSION_VERIFIED"})
+    monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight())
     from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
     monkeypatch.setattr(sys.modules["nexus.orchestrator.unified_mcp_gateway"], "pre_action_guard", lambda *args, **kwargs: (_ for _ in ()).throw(LifecycleGuardError("HEAD_DRIFT", "head changed")))
     args = {"task_id": "head-drift", "what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
@@ -900,6 +964,82 @@ def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatc
     assert payload["stdout_sha256"] is None
 
 
+def test_version_verified_alone_never_authorizes_worker_execution():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    ready, blocker = gateway._provider_execution_ready(
+        {
+            "status": "VERSION_VERIFIED",
+            "model_reachable": True,
+            "requested_model_verified": True,
+            "authenticated": True,
+        },
+        provider="agy",
+    )
+    assert ready is False
+    assert blocker == "MODEL_PROBE_REQUIRED"
+
+
+def test_initial_exact_preflight_requires_probe_and_submits_nothing(monkeypatch, tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+
+    def fake_run(command, **kwargs):
+        assert command[-1] == "--version"
+        return SimpleNamespace(returncode=0, stdout="cline 1.2.3\n", stderr="")
+
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({"jsonrpc": "2.0", "id": 7040, "method": "tools/call", "params": {"name": "nexus_provider_preflight", "arguments": {"provider": "cline", "model": "glm-5.2"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["blocker"] == "MODEL_PROBE_REQUIRED"
+    assert payload["execution_ready"] is False
+    assert payload["readiness_status"] != "MODEL_VERIFIED"
+    assert service.submitted == []
+
+
+def test_codex_probe_command_is_isolated_and_not_full_auto():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    command = gateway._assist_command(executable="/usr/local/bin/codex", provider="codex", model="gpt-5", prompt="probe")
+    assert command[:4] == ["/usr/local/bin/codex", "exec", "--json", "--ephemeral"]
+    assert "--skip-git-repo-check" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert "--full-auto" not in command
+
+
+def test_codex_jsonl_agent_message_decoder_extracts_payload():
+    raw = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "t-1"}),
+            json.dumps({"type": "turn.started"}),
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps({"probe": "ok"})}}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}),
+        ]
+    )
+    assert UnifiedMCPGateway._decode_model_probe_payload(raw, "codex", "gpt-5") == (
+        {"probe": "ok"},
+        "codex_jsonl_sequence",
+    )
+
+
+def test_model_probe_transport_provenance_rejects_mismatch_and_partial_events():
+    forged_cline = _cline_probe_events({"probe": "ok"}, provider="evil")
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        forged_cline,
+        "cline",
+        "cline-pass/glm-5.2",
+    ) == (None, None)
+    partial_codex = json.dumps({
+        "type": "item.completed",
+        "item": {"type": "agent_message", "text": json.dumps({"probe": "ok"})},
+    })
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        partial_codex,
+        "codex",
+        "gpt-5",
+    ) == (None, None)
+
+
 def test_gateway_provider_executable_uses_shared_registered_resolver(monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
@@ -956,7 +1096,7 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
 
         def __init__(self, command, *, stdout, stderr, **kwargs):
             self._returncode = 0
-            stdout.write(json.dumps({"probe": "ok"}) + "\n")
+            stdout.write(_cline_probe_events({"probe": "ok"}))
             stdout.flush()
 
         def poll(self):
@@ -967,6 +1107,7 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
     monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
     gateway = UnifiedMCPGateway(service=service)
     submitted = gateway.handle({"jsonrpc": "2.0", "id": 706, "method": "tools/call", "params": {"name": "nexus_model_probe", "arguments": {"task_id": "probe-cline-1", "provider": "cline", "model": "glm-5.2", "prompt": "Return probe JSON", "output_schema": {"type": "object", "required": ["probe"]}, "context_arm": "bare"}}})
     first = submitted["result"]["structuredContent"]
@@ -986,6 +1127,310 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
     assert payload["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
     assert payload["schema_validation_level"] == "bounded_subset"
     assert payload["tool_policy_enforcement"] == "cline_plan_auto_approve_false_allowlist_not_enforced"
+
+
+def test_model_probe_feedback_loop_preflight_then_worker_candidate_once(monkeypatch, tmp_path):
+    """Exercise the exact four-step readiness feedback loop without a real provider."""
+    class FakePopen:
+        launches = 0
+        pid = 54123
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            type(self).launches += 1
+            self._returncode = 0
+            stdout.write(_cline_probe_events({"probe": "ok"}))
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+    gateway = UnifiedMCPGateway(service=service)
+    initial = gateway._provider_preflight({"provider": "cline", "model": "glm-5.2"})
+    assert initial["blocker"] == "MODEL_PROBE_REQUIRED"
+    assert initial["execution_ready"] is False
+
+    probe_args = {"task_id": "feedback-loop", "provider": "cline", "model": "glm-5.2", "prompt": "Return probe JSON", "output_schema": {"type": "object", "required": ["probe"]}}
+    submitted = gateway._model_probe_submit(probe_args)
+    assert submitted["status"] == "RUNNING"
+    result = gateway._assist_refresh("feedback-loop")
+    assert result["status"] == "COMPLETED"
+    assert result["probe_evidence_hash"]
+    assert list((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
+
+    verified = gateway._provider_preflight({"provider": "cline", "model": "glm-5.2"})
+    assert verified["readiness_status"] == "MODEL_VERIFIED"
+    assert verified["execution_ready"] is True
+    assert verified["model_reachable"] is True
+    assert verified["requested_model_verified"] is True
+    evidence_path = next((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["authentication_evidence"] == "successful_exact_model_probe"
+    for raw_field in ("prompt", "command", "result", "output_schema"):
+        assert raw_field not in evidence
+
+    worker = SimpleNamespace(worker_id="worker-a", provider="cline", model="glm-5.2", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    args = {"task_id": "feedback-worker", "what": "x", "why": "y", "worker": "worker-a", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"], "owner_confirmation": True}
+    response = gateway._worker_candidate(args)
+    assert response["status"] == "PENDING_HUMAN_APPROVAL"
+    assert len(service.submitted) == 1
+
+    replay = gateway._model_probe_submit(probe_args)
+    assert replay["status"] == "COMPLETED"
+    assert FakePopen.launches == 1
+    conflict = dict(probe_args, prompt="changed semantics")
+    with __import__("pytest").raises(Exception, match="MODEL_PROBE_TASK_ID_CONFLICT"):
+        gateway._model_probe_submit(conflict)
+
+
+def test_probe_receipt_tamper_and_expiry_matrix_fails_closed(monkeypatch, tmp_path):
+    class FakePopen:
+        launches = 0
+        pid = 54124
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            type(self).launches += 1
+            self._returncode = 0
+            stdout.write(_cline_probe_events({"probe": "ok"}))
+            stdout.flush()
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+    gateway = UnifiedMCPGateway(service=service)
+    args = {"task_id": "tamper-probe", "provider": "cline", "model": "glm-5.2", "prompt": "probe", "output_schema": {"type": "object", "required": ["probe"]}}
+    gateway._model_probe_submit(args)
+    gateway._assist_refresh("tamper-probe")
+    evidence_path = next((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
+    original = json.loads(evidence_path.read_text(encoding="utf-8"))
+    worker = SimpleNamespace(worker_id="worker-a", provider="cline", model="glm-5.2", state="ADMITTED")
+    monkeypatch.setattr(gateway._workforce_loader, "load", lambda: SimpleNamespace(workers={"worker-a": worker}))
+    worker_args = {
+        "task_id": "tamper-worker",
+        "what": "bounded",
+        "why": "prove zero submit",
+        "worker": "worker-a",
+        "allowed_files": ["README.md"],
+        "verifier_commands": ["git diff --check"],
+        "owner_confirmation": True,
+    }
+    for field, value in (
+        ("provider", "other"),
+        ("requested_model", "other/model"),
+        ("resolved_model", "other/model"),
+        ("binary_path", "/bin/false"),
+        ("binary_sha256", "0" * 64),
+        ("cli_version", "changed"),
+        ("command_hash", "0" * 64),
+        ("action_id", "action-tampered"),
+        ("attempt_id", "attempt-tampered"),
+        ("result_hash", "0" * 64),
+        ("output_schema_hash", "0" * 64),
+        ("filesystem_delta", {"created": ["x"], "removed": [], "changed": []}),
+        ("process_cleanup", False),
+        ("expires_at", "2000-01-01T00:00:00+00:00"),
+        ("finished_at", "2099-01-01T00:00:00+00:00"),
+        ("evidence_hash", "0" * 64),
+    ):
+        tampered = dict(original)
+        tampered[field] = value
+        evidence_path.write_text(json.dumps(tampered), encoding="utf-8")
+        preflight = gateway._provider_preflight({"provider": "cline", "model": "glm-5.2"})
+        assert preflight["execution_ready"] is False, field
+        assert preflight.get("readiness_status") != "MODEL_VERIFIED", field
+        with __import__("pytest").raises(Exception, match="MODEL_PROBE_REQUIRED"):
+            gateway._worker_candidate(worker_args)
+        assert service.submitted == [], field
+        assert FakePopen.launches == 1, field
+        evidence_path.write_text(json.dumps(original), encoding="utf-8")
+
+    job_path = tmp_path / "assisted_provider_jobs" / "tamper-probe.json"
+    original_job = json.loads(job_path.read_text(encoding="utf-8"))
+    changed_command = list(original_job["command"])
+    changed_command[-1] = "tampered prompt"
+    for field, value in (
+        ("command", changed_command),
+        ("action_id", "action-tampered"),
+        ("attempt_id", "attempt-tampered"),
+        ("result", {"probe": "tampered"}),
+        ("output_schema", {"type": "object", "required": ["other"]}),
+        ("filesystem_delta", {"created": ["x"], "removed": [], "changed": []}),
+        ("process_cleanup", False),
+        ("model_response_provenance", None),
+    ):
+        tampered_job = dict(original_job)
+        tampered_job[field] = value
+        job_path.write_text(json.dumps(tampered_job), encoding="utf-8")
+        preflight = gateway._provider_preflight({"provider": "cline", "model": "glm-5.2"})
+        assert preflight["execution_ready"] is False, field
+        with __import__("pytest").raises(Exception, match="MODEL_PROBE_REQUIRED"):
+            gateway._worker_candidate(worker_args)
+        assert service.submitted == [], field
+        assert FakePopen.launches == 1, field
+        job_path.write_text(json.dumps(original_job), encoding="utf-8")
+
+
+def test_model_probe_transport_metadata_never_establishes_model_or_auth(monkeypatch, tmp_path):
+    class MetadataPopen:
+        pid = 54125
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 0
+            stdout.write(json.dumps({"type": "run_start", "providerId": "cline"}) + "\n")
+            stdout.flush()
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", MetadataPopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+    gateway = UnifiedMCPGateway(service=service)
+    args = {
+        "task_id": "metadata-only-probe",
+        "provider": "cline",
+        "model": "glm-5.2",
+        "prompt": "probe",
+        "output_schema": {"type": "object", "required": ["probe"]},
+    }
+    gateway._model_probe_submit(args)
+    result = gateway._assist_refresh("metadata-only-probe")
+    assert result["status"] == "FAILED"
+    assert result["model_response_verified"] is False
+    assert result.get("probe_evidence_hash") is None
+    assert not list((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
+
+
+def test_noncompleted_probe_states_never_write_readiness_evidence(tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    for status in ("RUNNING", "CANCELLED", "FAILED", "UNKNOWN_REQUIRES_RECONCILE"):
+        assert gateway._write_probe_evidence({"job_kind": "model_probe", "status": status}) is None
+    assert not (tmp_path / "assisted_provider_jobs" / "probe_evidence").exists()
+
+
+def test_model_probe_failure_redacts_stderr_and_exposes_digest(monkeypatch, tmp_path):
+    secret = "Authorization: Bearer SUPERSECRET"
+    class FailedPopen:
+        pid = 54126
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 1
+            stderr.write(secret)
+            stderr.flush()
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FailedPopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._model_probe_submit({
+        "task_id": "stderr-redaction",
+        "provider": "cline",
+        "model": "glm-5.2",
+        "prompt": "probe",
+        "output_schema": {"type": "object", "required": ["probe"]},
+    })
+    result = gateway._assist_response(gateway._assist_refresh("stderr-redaction"))
+    assert result["status"] == "FAILED"
+    assert result["provider_error"] == "provider process failed"
+    assert result["provider_error_sha256"] == __import__("hashlib").sha256(secret.encode()).hexdigest()
+    assert "SUPERSECRET" not in json.dumps(result)
+
+
+def test_model_probe_rechecks_executable_identity_immediately_before_launch(monkeypatch, tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    resolutions = iter([({"default_model": "glm-5.2"}, "/bin/echo"), ({"default_model": "glm-5.2"}, "/bin/false")])
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: next(resolutions))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.subprocess.Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider must not launch")),
+    )
+    result = gateway._model_probe_submit({
+        "task_id": "identity-drift",
+        "provider": "cline",
+        "model": "glm-5.2",
+        "prompt": "probe",
+        "output_schema": {"type": "object", "required": ["probe"]},
+    })
+    assert result["status"] == "FAILED"
+    assert result["blocker"] == "ASSIST_PROVIDER_IDENTITY_DRIFT"
+    assert result["provider_started"] is False
+
+
+def test_model_probe_post_launch_identity_drift_reaps_process(monkeypatch, tmp_path):
+    class StartedPopen:
+        pid = 954127
+        def __init__(self, command, **kwargs):
+            self.returncode = None
+        def wait(self, timeout=None):
+            self.returncode = -15
+            return self.returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    resolutions = iter([
+        ({"default_model": "glm-5.2"}, "/bin/echo"),
+        ({"default_model": "glm-5.2"}, "/bin/echo"),
+        ({"default_model": "glm-5.2"}, "/bin/false"),
+    ])
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: next(resolutions))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", StartedPopen)
+    _patch_probe_version(monkeypatch)
+    result = gateway._model_probe_submit({
+        "task_id": "post-launch-identity-drift",
+        "provider": "cline",
+        "model": "glm-5.2",
+        "prompt": "probe",
+        "output_schema": {"type": "object", "required": ["probe"]},
+    })
+    assert result["status"] == "FAILED"
+    assert result["blocker"] == "ASSIST_PROVIDER_IDENTITY_DRIFT"
+    job = json.loads((tmp_path / "assisted_provider_jobs" / "post-launch-identity-drift.json").read_text())
+    assert job["process_cleanup"] is True
+    assert not Path(job["workspace_root"]).exists()
+
+
+def test_codex_advisor_command_uses_read_only_ephemeral_flags(monkeypatch):
+    captured = {}
+    def fake_run(command, **kwargs):
+        captured["command"] = list(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"patch": "diff --git a/README.md b/README.md"}), stderr="")
+
+    monkeypatch.setenv("NEXUS_CODEX_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    result = UnifiedMCPGateway._run_agy_plan(
+        prompt="Return patch JSON",
+        allowed_files=["README.md"],
+        provider="codex",
+        model="gpt-5.6-luna",
+    )
+    assert result["patch"].startswith("diff --git")
+    assert "--ephemeral" in captured["command"]
+    assert "--skip-git-repo-check" in captured["command"]
+    assert captured["command"][captured["command"].index("--sandbox") + 1] == "read-only"
+    assert "--full-auto" not in captured["command"]
 
 
 def test_cline_real_stdout_fixture_preserves_error_event_and_fails_closed():
@@ -1040,7 +1485,7 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
 
         def __init__(self, command, *, stdout, stderr, **kwargs):
             self._returncode = 0
-            stdout.write(json.dumps({"probe": "wrong"}) + "\n")
+            stdout.write(_cline_probe_events({"probe": "wrong"}))
             stdout.flush()
 
         def poll(self):
@@ -1051,6 +1496,7 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
     monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
     gateway = UnifiedMCPGateway(service=service)
     gateway.handle({"jsonrpc": "2.0", "id": 710, "method": "tools/call", "params": {"name": "nexus_model_probe", "arguments": {"task_id": "probe-wrong-schema", "provider": "cline", "model": "glm-5.2", "prompt": "probe", "output_schema": {"type": "object", "required": ["expected"]}}}})
     result = gateway.handle({"jsonrpc": "2.0", "id": 711, "method": "tools/call", "params": {"name": "nexus_model_probe_result", "arguments": {"task_id": "probe-wrong-schema"}}})
