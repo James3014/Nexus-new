@@ -60,6 +60,9 @@ class PipelineCrystalMixin:
                 source="pipeline.crystallize",
                 bayesian_params=ctx.bayesian_params # 🧪 Pass-through evolved params
             )
+            if learning_finalize.get("learning_episode_write_succeeded") is False:
+                learning_write_succeeded = False
+                learning_write_error = "canonical_episode_append_failed"
         except Exception as exc:
             learning_write_succeeded = False
             learning_write_error = str(exc)
@@ -79,6 +82,9 @@ class PipelineCrystalMixin:
             auto_replay_allowed=False,
         )
         terminal_evidence = {
+            "status": "SUCCESS" if success else "FAILED",
+            "receipt": bool(ctx.state.metadata.get("phase_receipts")),
+            "verifier_status": "pass" if success and ctx.state.metadata.get("verification_exit_codes", []) else "missing",
             "pipeline_outcome": bool(ctx.state.metadata.get("pipeline_outcome")),
             "nexus_outcome_v2": bool(ctx.state.metadata.get("nexus_outcome_v2")),
             "phase_receipt_count": len(ctx.state.metadata.get("phase_receipts") or ()),

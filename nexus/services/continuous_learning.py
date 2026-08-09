@@ -975,6 +975,56 @@ def write_formal_lesson(repo_root: Path, state: Any, audit_result: Optional[Dict
     _append_jsonl(event_path, event)
 
 
+def persist_learning_episode(
+    project_root: Path,
+    *,
+    task_id: str,
+    attempt_id: str = "",
+    action_id: str = "",
+    source: str = "continuous_learning",
+    terminal_outcome: str = "UNVERIFIED",
+    terminal_evidence: Optional[Dict[str, Any]] = None,
+    phase_receipts: Iterable[Dict[str, Any]] = (),
+    retrieved_lesson_ids: Iterable[str] = (),
+    applied_lesson_ids: Iterable[str] = (),
+    qualification: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Project an existing closure into the canonical Nexus episode ledger.
+
+    This is deliberately best-effort for legacy callers, but never reports
+    learning success when normalization or append fails.
+    """
+    try:
+        from nexus.learning.learning_closure_effectiveness import (
+            append_learning_episode,
+            canonical_learning_episode_path,
+            normalize_learning_episode,
+        )
+
+        normalize = normalize_learning_episode
+        append = append_learning_episode
+        episode = normalize(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            action_id=action_id,
+            source=source,
+            terminal_outcome=terminal_outcome,
+            terminal_evidence=dict(terminal_evidence or {}),
+            phase_receipts=tuple(phase_receipts),
+            retrieved_lesson_ids=tuple(retrieved_lesson_ids),
+            applied_lesson_ids=tuple(applied_lesson_ids),
+            qualification=dict(qualification or {}),
+        )
+        if append is not None:
+            path = canonical_learning_episode_path(project_root)
+            result = append(path, episode)
+            # append_learning_episode intentionally returns True for an
+            # existing episode: duplicate is an idempotent success.
+            return {"status": "PASS" if result else "ERROR", "episode": episode, "append": result, "path": str(path)}
+    except Exception as exc:
+        return {"status": "ERROR", "learning_write_succeeded": False, "error": str(exc)}
+
+
 def finalize_learning_loop(
     project_root: Path | str,
     state: Any,
@@ -985,6 +1035,21 @@ def finalize_learning_loop(
 ) -> Dict[str, Any]:
     """🛡️ Finalize Learning (v24.0 Bayesian Hardened Loop)"""
     root = Path(project_root)
+    metadata = getattr(state, "metadata", {}) or {}
+    evidence = metadata.get("terminal_evidence") or metadata.get("verifier_evidence") or {}
+    episode_result = persist_learning_episode(
+        root,
+        task_id=str(getattr(state, "task_id", "unknown")),
+        attempt_id=str(metadata.get("attempt_id", "")),
+        action_id=str(metadata.get("action_id", "")),
+        source=source,
+        terminal_outcome="SUCCEEDED" if success else "FAILED",
+        terminal_evidence=evidence if isinstance(evidence, dict) else {},
+        phase_receipts=metadata.get("phase_receipts", ()) or (),
+        retrieved_lesson_ids=metadata.get("retrieved_lesson_ids", ()) or (),
+        applied_lesson_ids=metadata.get("applied_lesson_ids", ()) or (),
+        qualification=metadata.get("qualification", {}) if isinstance(metadata.get("qualification", {}), dict) else {},
+    )
     steward = MemorySteward(root)
     violations = list(_iter_lesson_candidates(state, success))
     lessons_written = bool(violations) and bool(steward.crystallize(violations))
@@ -1071,6 +1136,8 @@ def finalize_learning_loop(
         metadata["writeback_items"] = items
         metadata["writeback_delta_artifacts"] = {key: str(value) for key, value in delta_paths.items()}
         metadata["delivery_status"] = delivery_status
+        metadata["learning_episode_status"] = episode_result.get("status")
+        metadata["learning_episode_write_succeeded"] = episode_result.get("status") == "PASS"
 
     loop_event = {
         "timestamp_utc": _utc_now(),
@@ -1081,6 +1148,7 @@ def finalize_learning_loop(
         "writeback_required": writeback_required,
         "writeback_todo_path": str(todo_path),
         "delivery_status": delivery_status,
+        "learning_episode_status": episode_result.get("status"),
     }
     _append_jsonl(root / ".nexus" / "events" / "learning_loop.jsonl", loop_event)
     # 🚀 [v0.2/v0.3] Soul-Palace Belief Revision Linkage
@@ -1141,4 +1209,6 @@ def finalize_learning_loop(
         "writeback_todo_path": todo_path,
         "delivery_status": delivery_status,
         "delta_artifacts": delta_paths,
+        "learning_episode_status": episode_result.get("status"),
+        "learning_episode_write_succeeded": episode_result.get("status") == "PASS",
     }

@@ -88,7 +88,30 @@ def _lineage(op: Any) -> dict[str, Any]:
         trace = getattr(op, "_memory_influence_trace", None)
         if isinstance(trace, MemoryTrace):
             retrieved = [str(item) for item in (trace.memory_evidence_ids or []) if str(item)]
-    applied = [str(item) for item in (getattr(op, "applied_lesson_ids", None) or []) if str(item)]
+    # A lesson is only "applied" when the runtime can attribute it to a
+    # verifier or patch decision.  Retrieval alone (and a model claiming it
+    # used a lesson) must remain observational evidence.
+    applied_candidates = [str(item) for item in (getattr(op, "applied_lesson_ids", None) or []) if str(item)]
+    attribution = (
+        getattr(op, "applied_lesson_attribution", None)
+        or getattr(op, "patch_attribution", None)
+        or getattr(op, "verifier_attribution", None)
+    )
+    attributed_ids: set[str] = set()
+    if isinstance(attribution, dict):
+        attributed_ids.update(str(key) for key, value in attribution.items() if value)
+        for key in ("lesson_ids", "applied_lesson_ids", "verifier_lesson_ids", "patch_lesson_ids"):
+            value = attribution.get(key)
+            if isinstance(value, (list, tuple, set)):
+                attributed_ids.update(str(item) for item in value if str(item))
+    elif isinstance(attribution, (list, tuple, set)):
+        for item in attribution:
+            if isinstance(item, dict):
+                if item.get("verifier_attributed") or item.get("patch_attributed") or item.get("attributed"):
+                    attributed_ids.update(str(item.get("lesson_id") or item.get("id") or ""))
+            elif str(item):
+                attributed_ids.add(str(item))
+    applied = [item for item in applied_candidates if item in attributed_ids and item in retrieved]
     explicit_disposition = str(getattr(op, "lesson_disposition", "") or "").lower()
     disposition = explicit_disposition if explicit_disposition in {"reinforce", "contradict", "retire"} else "none"
     if disposition == "none" and applied:
@@ -112,6 +135,57 @@ def _lineage(op: Any) -> dict[str, Any]:
         "applied_lesson_ids": applied,
         "lesson_disposition": disposition,
     }
+
+
+def _capability_receipts(op: Any) -> list[dict[str, Any]]:
+    """Collect real route/capability receipts from the LocalHeal context."""
+    values: list[Any] = []
+    for name in ("capability_receipts", "route_receipts", "formal_route_receipts", "receipts"):
+        value = getattr(op, name, None)
+        if isinstance(value, (list, tuple)):
+            values.extend(value)
+    metadata = getattr(op, "metadata", None)
+    if isinstance(metadata, dict):
+        for name in ("capability_receipts", "route_receipts", "phase_receipts"):
+            value = metadata.get(name)
+            if isinstance(value, (list, tuple)):
+                values.extend(value)
+    state = getattr(op, "state", None)
+    state_metadata = getattr(state, "metadata", None)
+    if isinstance(state_metadata, dict):
+        value = state_metadata.get("phase_receipts")
+        if isinstance(value, (list, tuple)):
+            values.extend(value)
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        if hasattr(value, "to_dict"):
+            value = value.to_dict()
+        elif hasattr(value, "__dict__") and not isinstance(value, dict):
+            value = dict(value.__dict__)
+        if not isinstance(value, dict):
+            continue
+        marker = json.dumps(value, sort_keys=True, default=str)
+        if marker not in seen:
+            seen.add(marker)
+            result.append(value)
+    return result
+
+
+def _terminal_evidence(op: Any) -> dict[str, Any]:
+    evidence = getattr(op, "terminal_evidence", None) or getattr(op, "verifier_evidence", None)
+    if isinstance(evidence, dict) and evidence:
+        return dict(evidence)
+    receipt = str(getattr(op, "receipt_path", "") or "").strip()
+    verifier = str(getattr(op, "verifier_result", "") or "").strip()
+    result: dict[str, Any] = {}
+    if receipt and receipt != "receipt:pending":
+        result["receipt"] = receipt
+    if verifier:
+        result["verifier"] = verifier
+    if getattr(op, "terminal_evidence_present", False) or getattr(op, "evidence_present", False):
+        result["status"] = "present"
+    return result
 
 
 class LearningClosureBridge:
@@ -208,7 +282,53 @@ class LearningClosureBridge:
             classification = "verifier_gap"
         memory_trace = self._extract_memory_trace(ctx)
         lineage = _lineage(op)
+        receipts = _capability_receipts(op)
+        terminal_evidence = _terminal_evidence(op)
+        episode_error = ""
+        episode_write_status = "failed"
+        persisted_episode: dict[str, Any] | None = None
+        try:
+            from nexus.contracts.learning_experience import build_nexus_learning_episode
+
+            episode = build_nexus_learning_episode(
+                task_id=lineage["task_id"],
+                attempt_id=lineage["attempt_id"],
+                action_id=lineage["action_id"],
+                source="local_heal",
+                terminal_outcome=lineage["terminal_outcome"],
+                terminal_evidence=terminal_evidence,
+                phase_receipts=receipts,
+                receipts=receipts,
+                retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
+                applied_lesson_ids=lineage["applied_lesson_ids"],
+                qualification=getattr(op, "qualification", None),
+                lesson_disposition=lineage["lesson_disposition"],
+                learning_write_succeeded=True,
+                idempotency_key=lineage["idempotency_key"],
+            )
+            persisted, persisted_episode, episode_write_status = self._append_canonical_episode(episode)
+            if not persisted:
+                episode_error = episode_write_status
+        except Exception as exc:
+            episode = {}
+            episode_error = exc.__class__.__name__
+        has_identity = bool(
+            lineage["idempotency_key"]
+            or lineage["attempt_id"]
+            or lineage["action_id"]
+            or lineage["task_id"] not in {"", "unknown"}
+        )
+        stable_id = str(episode.get("episode_id") or "") if has_identity else ""
+        idem = str(episode.get("idempotency_key") or lineage["idempotency_key"] or "") if has_identity else ""
+        if stable_id or idem:
+            for row in self._read_existing():
+                if (stable_id and row.get("episode_id") == stable_id) or (idem and row.get("idempotency_key") == idem):
+                    return row
         lesson = {
+            "schema": "nexus.local_heal.learning_closure.v1",
+            "source_schema": "nexus.learning_episode.v1",
+            "episode_id": stable_id,
+            "idempotency_key": idem,
             "lesson_id": f"lh-{uuid.uuid4().hex[:12]}",
             "task_id": str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown"),
             "classification": classification,
@@ -219,13 +339,51 @@ class LearningClosureBridge:
             "internal_only": True,
             "memory_trace_status": memory_trace.get("trace_status", "TRACE_MISSING"),
             "retrieved_memory_ids": list(memory_trace.get("memory_evidence_ids") or []),
+            "terminal_evidence": terminal_evidence,
+            "capability_receipts": receipts,
+            "learning_episode": persisted_episode,
+            "learning_write_succeeded": episode_write_status == "appended_or_deduplicated",
+            "learning_write_status": episode_write_status,
+            "learning_blocker": episode_error,
             **lineage,
         }
+        lesson["applied_lesson_ids"] = list(lineage["applied_lesson_ids"])
+        lesson["stages"] = dict(episode.get("stages") or {})
         lesson.update(self._write_findings_card(lesson, memory_trace))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(lesson, sort_keys=True) + "\n")
         return lesson
+
+    def _read_existing(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        try:
+            for line in self.path.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(item, dict):
+                    rows.append(item)
+        except OSError:
+            return []
+        return rows
+
+    def _append_canonical_episode(self, episode: dict[str, Any]) -> tuple[bool, dict[str, Any] | None, str]:
+        """Use the shared canonical ledger writer; no local ledger authority."""
+        try:
+            from nexus.learning.learning_closure_effectiveness import (
+                append_learning_episode,
+                canonical_learning_episode_path,
+            )
+
+            path = canonical_learning_episode_path(self.project_root)
+            ok = append_learning_episode(path, episode)
+            return bool(ok), episode if ok else None, "appended_or_deduplicated" if ok else "canonical_ledger_write_failed"
+        except Exception as exc:
+            return False, None, exc.__class__.__name__
 
     def write_envelope_lesson(
         self,
@@ -242,6 +400,44 @@ class LearningClosureBridge:
             )
         op = ctx.op if hasattr(ctx, "op") else ctx
         lineage = _lineage(op)
+        receipts = _capability_receipts(op)
+        terminal_evidence = _terminal_evidence(op)
+        episode_error = ""
+        episode_write_status = "failed"
+        persisted_episode: dict[str, Any] | None = None
+        try:
+            from nexus.contracts.learning_experience import build_nexus_learning_episode
+
+            episode = build_nexus_learning_episode(
+                task_id=lineage["task_id"],
+                attempt_id=lineage["attempt_id"],
+                action_id=lineage["action_id"] or envelope.candidate_id,
+                source="local_heal.candidate",
+                terminal_outcome=("SUCCEEDED" if selected and verifier_result == "pass" else "FAILED" if selected else "PARKED"),
+                terminal_evidence=terminal_evidence or ({"verifier": verifier_result} if selected else {}),
+                phase_receipts=receipts,
+                receipts=receipts,
+                retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
+                applied_lesson_ids=lineage["applied_lesson_ids"],
+                lesson_disposition=lineage["lesson_disposition"],
+                idempotency_key=f"{lineage['idempotency_key']}:{envelope.candidate_id}" if lineage["idempotency_key"] else "",
+            )
+            _ok, persisted_episode, episode_write_status = self._append_canonical_episode(episode)
+            if not _ok:
+                episode_error = episode_write_status
+        except Exception as exc:
+            episode = {}
+            persisted_episode = None
+            episode_error = exc.__class__.__name__
+
+        episode_id = str(episode.get("episode_id") or "")
+        idempotency_key = str(episode.get("idempotency_key") or "")
+        if episode_id or idempotency_key:
+            for row in self._read_existing():
+                if (episode_id and row.get("episode_id") == episode_id) or (
+                    idempotency_key and row.get("idempotency_key") == idempotency_key
+                ):
+                    return row
         
         failure_class = "none"
         if not selected:
@@ -251,6 +447,10 @@ class LearningClosureBridge:
             
         lesson = {
             "lesson_id": f"lh-cand-{uuid.uuid4().hex[:12]}",
+            "schema": "nexus.local_heal.learning_closure.v1",
+            "source_schema": "nexus.learning_episode.v1",
+            "episode_id": episode_id,
+            "idempotency_key": idempotency_key,
             "task_id": str(getattr(op, "instance_id", "") or getattr(op, "task_id", "") or "unknown"),
             "candidate_id": envelope.candidate_id,
             "model": envelope.model,
@@ -264,6 +464,13 @@ class LearningClosureBridge:
             "training_export_allowed": False,
             "internal_only": True,
             **lineage,
+            "terminal_evidence": terminal_evidence,
+            "capability_receipts": receipts,
+            "learning_episode": persisted_episode,
+            "learning_write_succeeded": episode_write_status == "appended_or_deduplicated",
+            "learning_write_status": episode_write_status,
+            "learning_blocker": episode_error,
+            "stages": dict(episode.get("stages") or {}),
         }
         
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -309,9 +516,16 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
         return result
     op = ctx.op if hasattr(ctx, "op") else ctx
     lineage = _lineage(op)
+    target_bridge = bridge or LearningClosureBridge()
     try:
-        lesson = (bridge or LearningClosureBridge()).write_lesson(ctx)
-        result = {"schema": "nexus.local_heal.learning_closure.v1", "writeback_status": "ok", "lesson": lesson}
+        lesson = target_bridge.write_lesson(ctx)
+        learning_write_succeeded = bool(lesson.get("learning_write_succeeded", False))
+        result = {
+            "schema": "nexus.local_heal.learning_closure.v1",
+            "writeback_status": "ok" if learning_write_succeeded else "failed_non_blocking",
+            "learning_write_succeeded": learning_write_succeeded,
+            "lesson": lesson,
+        }
     except Exception as exc:
         result = {
             "schema": "nexus.local_heal.learning_closure.v1",
@@ -321,6 +535,13 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
             "internal_only": True,
         }
     
+    # OutcomeMemory is a derived projection of the canonical episode.  If the
+    # canonical append failed, do not create a contradictory policy record.
+    if not result.get("learning_write_succeeded", False):
+        result["outcome_memory_writeback"] = "skipped"
+        setattr(op, "_learning_closure", result)
+        return result
+
     # C6AH: Writeback to OutcomeMemoryManager for dynamic_learning_policy.json
     try:
         from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
@@ -335,7 +556,7 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
                 wall_duration_sec=float(getattr(op, "wall_time_sec", 0.0) or 0.0),
                 total_tokens_used=0,
                 trust_mismatch=False,
-                receipts=[],
+                receipts=_capability_receipts(op),
                 attempt_id=lineage["attempt_id"],
                 action_id=lineage["action_id"],
                 idempotency_key=lineage["idempotency_key"],
@@ -343,6 +564,10 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
                 retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
                 applied_lesson_ids=lineage["applied_lesson_ids"],
                 qualification_evidence_present=lineage["qualification_evidence_present"],
+                terminal_evidence=_terminal_evidence(op),
+                stages=(result.get("lesson") or {}).get("stages") or {},
+                qualification=getattr(op, "qualification", None),
+                lesson_disposition=lineage["lesson_disposition"],
                 lesson_updates=(
                     [
                         {"lesson_id": lesson_id, "disposition": lineage["lesson_disposition"]}
@@ -352,7 +577,7 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
                     else []
                 ),
             ),
-            project_root=Path(__file__).resolve().parents[3],
+            project_root=target_bridge.project_root,
         )
         result["outcome_memory_writeback"] = "ok"
     except Exception:

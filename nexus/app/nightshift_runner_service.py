@@ -782,6 +782,32 @@ class AutoResearchNightShift:
             "lancedb_synced": False,
             "sync_status": "SKIPPED",
         }
+        # Keep the canonical Nexus episode projection independent from the
+        # legacy Findings/MemPalace projections below.  A write failure is
+        # explicit and never upgrades the learning closure to success.
+        try:
+            from nexus.services.continuous_learning import persist_learning_episode
+
+            episode_result = persist_learning_episode(
+                self.project_root,
+                task_id=f"ns-{self.task}",
+                # A closure may be retried after the same terminal round; use
+                # the stable task/target identity so append remains idempotent.
+                attempt_id="nightshift-terminal",
+                action_id=str(getattr(self, "resolved_target_file", "")),
+                source="nightshift",
+                terminal_outcome="SUCCEEDED" if status == "SUCCESS" else "FAILED",
+                terminal_evidence={"verifier": "nightshift_final_score", "verifier_status": status},
+            )
+            closure["learning_episode_status"] = episode_result.get("status")
+            closure["learning_episode_write_succeeded"] = episode_result.get("status") == "PASS"
+            if closure["learning_episode_status"] != "PASS":
+                closure["sync_status"] = "LEARNING_EPISODE_WRITE_FAILED"
+        except Exception as exc:
+            closure["learning_episode_status"] = "ERROR"
+            closure["learning_episode_write_succeeded"] = False
+            closure["learning_episode_error"] = str(exc)
+            closure["sync_status"] = "LEARNING_EPISODE_WRITE_FAILED"
         
         # [NEW: C-1] Check for conflicts with existing Claims before proceeding
         try:

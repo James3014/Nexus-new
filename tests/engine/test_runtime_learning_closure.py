@@ -63,6 +63,20 @@ def test_learning_write_failure_blocks_primary_success_claim():
     validate_runtime_learning_closure(episode)
 
 
+def test_runtime_learning_closure_rejects_unretrieved_applied_lessons():
+    episode = build_runtime_learning_closure(
+        task_id="t-1",
+        attempt_id="a-1",
+        action_id="x-1",
+        phase_receipts=[],
+        outcome="SUCCESS",
+        terminal_evidence={"receipt": "r-1"},
+        retrieved_lesson_ids=["known"],
+        applied_lesson_ids=["known", "forged"],
+    )
+    assert episode["applied_lesson_ids"] == ["known"]
+
+
 def test_memory_lineage_preserves_existing_writer_boundaries():
     lineage = build_memory_learning_lineage(
         task_id="t-1",
@@ -104,3 +118,33 @@ def test_crystallize_stage_persists_runtime_learning_closure(monkeypatch):
     closure = ctx.state.metadata["learning_closure"]
     assert closure["schema"] == "nexus.runtime_learning_closure.v1"
     assert closure["memory_lineage"]["auto_replay_allowed"] is False
+
+
+def test_crystallize_stage_blocks_success_when_canonical_episode_write_fails(monkeypatch):
+    class Pipeline(PipelineCrystalMixin):
+        def __init__(self):
+            self.engine = SimpleNamespace(
+                project_root="/tmp",
+                state_io=MagicMock(),
+                commander=MagicMock(),
+            )
+
+    pipeline = Pipeline()
+    ctx = SimpleNamespace(
+        task_id="t-write-fail",
+        state=NexusState(task_id="t-write-fail"),
+        bayesian_params={},
+    )
+    pipeline._collect_crystal_signals = lambda *_args: {"raw_terminal_state": "SUCCESS"}
+    pipeline._handle_crystallize_success = lambda *_args: None
+    monkeypatch.setattr(
+        "nexus.engine.pipeline_crystal.finalize_learning_loop",
+        lambda *_args, **_kwargs: {"learning_episode_write_succeeded": False},
+    )
+
+    pipeline._stage_crystallize(ctx, True, MagicMock())
+
+    closure = ctx.state.metadata["learning_closure"]
+    assert closure["learning_write_succeeded"] is False
+    assert closure["primary_task_success"] is False
+    assert ctx.state.metadata["learning_closure_failed"] is True

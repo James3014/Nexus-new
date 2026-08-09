@@ -116,6 +116,21 @@ def test_finalize_learning_loop_marks_fully_delivered_when_no_writeback_needed(t
     assert all(item["status"] == "completed" for item in todo["items"])
 
 
+def test_finalize_learning_loop_projects_canonical_episode_once(tmp_path):
+    state = _build_state(task_id="episode-once", task_description="closure")
+    result = finalize_learning_loop(tmp_path, state, success=True, source="pipeline.crystallize")
+    ledger = tmp_path / ".nexus" / "memory" / "learning_episodes.jsonl"
+    assert result["learning_episode_status"] == "PASS"
+    assert ledger.exists()
+    rows = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["auto_replay_allowed"] is False
+    assert rows[0]["producer"] == "pipeline.crystallize"
+    finalize_learning_loop(tmp_path, state, success=True, source="pipeline.crystallize")
+    rows = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+
+
 def test_refresh_writeback_status_promotes_pending_to_fully_delivered(tmp_path):
     state = _build_state(
         task_id="nexus-learn-3",

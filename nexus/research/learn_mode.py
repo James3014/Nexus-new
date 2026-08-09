@@ -17,6 +17,11 @@ import concurrent.futures
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
 from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
+from nexus.learning.learning_closure_effectiveness import (
+    normalize_learning_episode,
+    append_learning_episode,
+    canonical_learning_episode_path,
+)
 from nexus.services.memory import MemoryService
 from .learn.ingest_service import IngestService
 from .learn.claim_service import ClaimService
@@ -477,6 +482,43 @@ class LearnModeService:
         return closure
 
     def _append_closure_log(self, closure: dict[str, Any]) -> None:
+        # Keep the historical LearnMode projection, but make the canonical
+        # episode envelope the only effectiveness authority.
+        task_id = str(closure.get("task_id") or f"learn-{closure.get('action', 'unknown')}-{closure.get('topic_or_source', 'unknown')}")
+        evidence = {
+            "status": str(closure.get("status", "")),
+            "verifier_status": "pass" if closure.get("mempalace_verified") else "missing",
+            "receipt": closure.get("skill_outcome_path", ""),
+        }
+        write_ok = bool(
+            closure.get("mempalace_verified")
+            and closure.get("memory_written")
+            and closure.get("skill_outcome_written")
+        )
+        qualification = dict(closure.get("qualification") or {})
+        episode = normalize_learning_episode(
+            task_id=task_id,
+            attempt_id=str(closure.get("attempt_id") or closure.get("timestamp", "")),
+            action_id=str(closure.get("action", "unknown")),
+            source="learn_mode",
+            terminal_outcome="SUCCEEDED" if str(closure.get("status", "")).upper() == "SUCCESS" else "FAILED",
+            terminal_evidence=evidence,
+            retrieved_lesson_ids=tuple(closure.get("retrieved_lesson_ids") or ()),
+            applied_lesson_ids=tuple(closure.get("applied_lesson_ids") or ()),
+            qualification=qualification,
+            lesson_disposition=str(closure.get("lesson_disposition") or "shadow"),
+            learning_write_succeeded=write_ok,
+        )
+        closure.update({
+            "task_id": task_id,
+            "source_schema": episode["schema"],
+            "episode_id": episode["episode_id"],
+            "idempotency_key": episode["idempotency_key"],
+            "stages": episode["stages"],
+            "learning_write_succeeded": write_ok,
+        })
+        if not append_learning_episode(canonical_learning_episode_path(self.project_root), episode):
+            closure["learning_episode_write_failed"] = True
         self.closure_log.parent.mkdir(parents=True, exist_ok=True)
         with self.closure_log.open("a", encoding="utf-8") as f:
             f.write(json.dumps(closure, ensure_ascii=False) + "\n")

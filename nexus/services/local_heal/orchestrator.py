@@ -936,6 +936,7 @@ class HealOrchestrator:
         ledger.finalize()
         ctx.op._latency_ledger = ledger
         self._attach_memory_influence_trace(ctx)
+        self._record_authoritative_memory_adoption(ctx)
         self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
         from nexus.services.local_heal.world_c_receipt import build_world_c_receipt
@@ -1031,7 +1032,7 @@ class HealOrchestrator:
                 task_id=getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""),
             )
             adapter.last_metadata["evidence_packet_included"] = False
-            adapter.last_metadata["prompt_included"] = True  # C6P: memory lessons now active in retry
+            adapter.last_metadata["prompt_included"] = bool(adapter.last_metadata.get("selected_ids"))
             adapter.last_metadata["verifier_status"] = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
             ctx.op._memory_influence_trace = build_memory_trace_from_adapter(adapter.last_metadata)
         except Exception as exc:
@@ -1051,6 +1052,45 @@ class HealOrchestrator:
                     "internal_only": True,
                 }
             ctx.op._memory_influence_trace_error = exc.__class__.__name__
+
+    def _record_authoritative_memory_adoption(self, ctx: HealContext) -> None:
+        """Bind memory adoption only when patch and verifier receipts agree.
+
+        Retrieval and prompt telemetry are observational.  Adoption requires
+        a selected/applied patch hash match plus an explicit verifier-pass
+        receipt; otherwise the closure remains fail-closed with no applied IDs.
+        """
+        op = ctx.op
+        trace = getattr(op, "_memory_influence_trace", None)
+        ids = []
+        prompt_included = False
+        if trace is not None:
+            ids = list(getattr(trace, "memory_evidence_ids", None) or getattr(trace, "selected_ids", None) or [])
+            prompt_included = bool(getattr(trace, "prompt_included", False))
+        verifier = getattr(op, "verifier_receipt", None)
+        if isinstance(verifier, dict):
+            verifier_status = str(verifier.get("verifier_status") or verifier.get("status") or "").lower()
+            verifier_ref = verifier.get("receipt_id") or verifier.get("evidence_ref") or verifier.get("path") or ""
+        else:
+            verifier_status = str(getattr(verifier, "verifier_status", "") or getattr(verifier, "status", "")).lower()
+            verifier_ref = str(getattr(verifier, "receipt_id", "") or getattr(verifier, "evidence_ref", "") or "")
+        patch_hash = str(getattr(op, "applied_patch_hash", "") or "")
+        hash_match = bool(getattr(op, "selected_candidate_hash_matches_applied", False))
+        patch_ref = str(getattr(op, "patch_receipt_path", "") or getattr(op, "applied_patch_receipt", "") or "")
+        authoritative = bool(ids and prompt_included and patch_hash and hash_match and verifier_status in {"pass", "passed", "success"} and (verifier_ref or verifier is not None))
+        if authoritative:
+            op.applied_lesson_ids = sorted({str(item) for item in ids if str(item)})
+            op.applied_lesson_attribution = {
+                lesson_id: {
+                    "patch_receipt": patch_ref or patch_hash,
+                    "verifier_receipt": verifier_ref or "verifier_receipt",
+                    "verifier_status": verifier_status,
+                }
+                for lesson_id in op.applied_lesson_ids
+            }
+        else:
+            op.applied_lesson_ids = []
+            op.applied_lesson_attribution = {}
 
     def _write_learning_closure(self, ctx: HealContext) -> None:
         try:
