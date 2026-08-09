@@ -132,3 +132,19 @@ Consult this page when extending MCP tool APIs, debugging HTTP/stdio transport e
 ```bash
 pytest tests/test_battlesuit_gateway.py -q
 ```
+
+## 🧭 Diagnostic Boundary: `HOST_ACTION_BINDING_GAP`
+
+When ChatGPT discovers an MCP action or tool but direct invocation fails
+host-side with `The nexus tool has been disabled` or an equivalent action
+binding error, classify the event as `HOST_ACTION_BINDING_GAP` only when the
+same event shows no ingress in DevSpace or Gateway evidence and the Nexus
+server processes remain healthy. The absence of ingress is load-bearing
+evidence: do not patch, restart, reinstall, or rewrite the Nexus Gateway for
+this class of event without separate runtime evidence.
+
+The historical maximum claim for this diagnosis is
+`B1_HOST_BINDING_FAILURE_LOCALIZED`; it does not establish that the ChatGPT
+platform is permanently fixed. Record the event, host-side error, ingress
+observation, process-health observation, and evidence timestamp before any
+independent remediation.

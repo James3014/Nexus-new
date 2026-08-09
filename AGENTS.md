@@ -21,6 +21,16 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   request to `main`.
 - Codex and other coding agents do not push directly to, merge, force-push, or
   delete `main`. Review and final merge authority remain with the Owner.
+- The local runtime repository and this sanitized collaboration repository have
+  intentionally separate histories. Never treat SHA mismatch as missing work,
+  or normal-merge, rebase, or cherry-pick local runtime history into GitHub
+  `main` merely to align SHAs; synchronize by reviewed content or semantic
+  delta and preserve GitHub-only governance without resurrecting secrets,
+  runtime state, or generated artifacts.
+- Final GitHub merge requires independent review, explicit current Owner
+  authorization, and a fresh SHA-bound verification of the PR number, exact
+  head, current base/main, diff, review evidence, CI/check evidence, and
+  unresolved threads or blockers. A moved PR head fails closed.
 - A Ready Issue defines GitHub collaboration scope only. It does not bypass
   Task Card or lifecycle requirements for delegated, isolated,
   lifecycle/security/schema, Candidate, approval, integration, release, or
