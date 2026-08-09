@@ -27,10 +27,16 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   `main` merely to align SHAs; synchronize by reviewed content or semantic
   delta and preserve GitHub-only governance without resurrecting secrets,
   runtime state, or generated artifacts.
-- Final GitHub merge requires independent review, explicit current Owner
-  authorization, and a fresh SHA-bound verification of the PR number, exact
-  head, current base/main, diff, review evidence, CI/check evidence, and
-  unresolved threads or blockers. A moved PR head fails closed.
+- For manual, legacy, and non-autonomy-enabled work, final GitHub merge still
+  requires explicit current Owner authorization. For an autonomy-enabled Goal,
+  one bounded Owner Goal Grant may instead derive an exact action-bound machine
+  authorization only after machine policy evaluation and independent
+  acceptance; this is not unlimited autonomous merge authority and has no
+  retroactive effect on older work.
+- Every autonomous merge still requires fresh SHA-bound verification of the PR
+  number, exact head, current base/main, complete diff, Goal Grant identity,
+  independent acceptance, CI/check evidence, unresolved threads or blockers,
+  and current authorization validity. A moved PR head fails closed.
 - A Ready Issue defines GitHub collaboration scope only. It does not bypass
   Task Card or lifecycle requirements for delegated, isolated,
   lifecycle/security/schema, Candidate, approval, integration, release, or
