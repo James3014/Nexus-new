@@ -1,4 +1,4 @@
-name: Nexus Lint CI
+name: Nexus Exact-Base Ruff CI
 
 on:
   push:
@@ -6,63 +6,192 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   lint:
-    name: Run Ruff Lint
+    name: Exact-base Ruff regression gate
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Initialize evidence
+        run: |
+          mkdir -p "$RUNNER_TEMP/nexus-ci-ruff"
+          printf '%s\n' '{"classification":"CI_BOOTSTRAP_DEFECT","blocking":true,"reason":"Ruff gate did not reach classification"}' > "$RUNNER_TEMP/nexus-ci-ruff/classification.json"
+
+      - name: Checkout exact head
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
-      - name: Fetch origin/main
-        run: git fetch origin main:main || true
+      - name: Remove checkout credentials
+        run: |
+          set -euo pipefail
+          credential_count=0
+          host_credential_count=0
+          while IFS= read -r entry; do
+            credential_count=$((credential_count + 1))
+            key="${entry%% *}"
+            credential_file="${entry#* }"
+            case "$credential_file" in
+              "$RUNNER_TEMP"/git-credentials-*.config)
+                host_credential_count=$((host_credential_count + 1))
+                rm -f -- "$credential_file"
+                ;;
+              /github/runner_temp/git-credentials-*.config) ;;
+              *)
+                echo "unexpected checkout credential path: $credential_file" >&2
+                exit 1
+                ;;
+            esac
+            git config --local --unset-all "$key"
+          done < <(git config --local --get-regexp '^includeif\.gitdir:.*\.path$' || true)
+          if [ "$credential_count" -eq 0 ] || [ "$host_credential_count" -eq 0 ]; then
+            echo "checkout credential includeIf entries are missing" >&2
+            exit 1
+          fi
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          if git config --local --get-regexp '^includeif\.gitdir:.*\.path$' >/dev/null; then
+            echo "checkout credentials remain configured" >&2
+            exit 1
+          fi
+      - name: Link persistent evidence directory
+        run: ln -s "$RUNNER_TEMP/nexus-ci-ruff" .ci-ruff
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Install dependencies
+      - name: Install uv and dependencies
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           uv sync --frozen --all-groups --all-extras
+
+      - name: Resolve exact revisions and worktree
+        id: revisions
         env:
-          UV_SYSTEM_PYTHON: 0
-
-      - name: Detect Changed Files (Commit-safe vs PR-safe)
-        id: files
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "Mode: PR-safe (diff against origin/main)"
-            FILES=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
-          else
-            echo "Mode: Commit-safe (diff against HEAD~1)"
-            # Handle cases where HEAD~1 might not exist (e.g. initial commit)
-            FILES=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' || git ls-files -- '*.py')
+          set -euo pipefail
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
           fi
-          
-          # Clean up whitespace and newlines for GitHub output
-          FILES_CLEAN=$(echo $FILES | tr '\n' ' ')
-          echo "changed_files=$FILES_CLEAN" >> $GITHUB_OUTPUT
-          echo "Detected files: $FILES_CLEAN"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          BASE_WORKTREE=$(mktemp -d /tmp/nexus-ruff-base.XXXXXX)
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml ruff.toml; then
+            git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- '*.py' > .ci-ruff/changed.nul
+          else
+            { git ls-tree -r -z --name-only "$BASE_SHA" -- '*.py'; git ls-tree -r -z --name-only "$HEAD_SHA" -- '*.py'; } \
+              | sort -zu > .ci-ruff/changed.nul
+          fi
+          echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
 
-      - name: Run Ruff Check
-        if: steps.files.outputs.changed_files != ''
+      - name: Run Ruff on exact base and head
+        id: ruff
+        env:
+          BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
         run: |
-          uv run ruff check ${{ steps.files.outputs.changed_files }}
-      
-      - name: Run Ruff Format (Check Only)
-        if: steps.files.outputs.changed_files != ''
-        run: |
-          uv run ruff format --check ${{ steps.files.outputs.changed_files }}
+          set -euo pipefail
+          mapfile -d '' CHANGED < .ci-ruff/changed.nul || true
+          run_ruff() {
+            local root="$1" output="$2" prefix="$3"
+            local files=()
+            for path in "${CHANGED[@]}"; do
+              if [ -f "$root/$path" ]; then files+=("$path"); fi
+            done
+            if [ "${#files[@]}" -eq 0 ]; then
+              printf '[]\n' > "$output"
+              echo "${prefix}_exit=0" >> "$GITHUB_OUTPUT"
+              return
+            fi
+            set +e
+            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/ruff" check --output-format json "${files[@]}") > ".ci-ruff/${prefix}-check.json"
+            local check_status=$?
+            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/ruff" format --check --preview --output-format json "${files[@]}") > ".ci-ruff/${prefix}-format.json"
+            local format_status=$?
+            set -e
+            .venv/bin/python - ".ci-ruff/${prefix}-check.json" ".ci-ruff/${prefix}-format.json" "$output" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          findings = []
+          for source in sys.argv[1:3]:
+              findings.extend(json.loads(Path(source).read_text(encoding='utf-8')))
+          Path(sys.argv[3]).write_text(json.dumps(findings, indent=2) + '\n', encoding='utf-8')
+          PY
+            if [ "$check_status" -gt 1 ] || [ "$format_status" -gt 1 ]; then
+              echo "${prefix}_exit=2" >> "$GITHUB_OUTPUT"
+            elif [ "$check_status" -ne 0 ] || [ "$format_status" -ne 0 ]; then
+              echo "${prefix}_exit=1" >> "$GITHUB_OUTPUT"
+            else
+              echo "${prefix}_exit=0" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          run_ruff "$BASE_WORKTREE" .ci-ruff/base.json base
+          run_ruff "$GITHUB_WORKSPACE" .ci-ruff/head.json head
 
-      - name: No Python Changes
-        if: steps.files.outputs.changed_files == ''
-        run: echo "No changed python files to lint."
+      - name: Classify Ruff regression
+        run: |
+          set +e
+          .venv/bin/python scripts/ops/exact_base_tool_gate.py \
+            --tool ruff \
+            --base .ci-ruff/base.json \
+            --head .ci-ruff/head.json \
+            --base-root "${{ steps.revisions.outputs.base_worktree }}" \
+            --head-root "$GITHUB_WORKSPACE" \
+            --base-exit-code "${{ steps.ruff.outputs.base_exit }}" \
+            --head-exit-code "${{ steps.ruff.outputs.head_exit }}" \
+            --output .ci-ruff/classification.json
+          STATUS=$?
+          echo '## Exact-base Ruff classification' >> "$GITHUB_STEP_SUMMARY"
+          cat .ci-ruff/classification.json >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"
+
+      - name: Remove exact base worktree
+        if: always() && steps.revisions.outputs.base_worktree != ''
+        run: git worktree remove --force "${{ steps.revisions.outputs.base_worktree }}"
+
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+
+      - name: Upload Ruff evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-base-ruff-${{ github.sha }}
+          path: ${{ runner.temp }}/nexus-ci-ruff/
+          if-no-files-found: error
+          retention-days: 14
