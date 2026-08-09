@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: completed
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
 ordered_cards:
@@ -11,14 +11,15 @@ ordered_cards:
   - 04-world-c-adequacy-projection.md
   - 05-risk-triggered-mutation-assurance.md
   - 06-false-green-verified-repair.md
-current_frontier: 06-false-green-verified-repair.md
-frontier_status: READY
+current_frontier: null
+frontier_status: COMPLETED
 completed_cards:
   - 01-physical-reproduction-provenance.md
   - 02-frozen-same-oracle.md
   - 03-regression-suite-binding.md
   - 04-world-c-adequacy-projection.md
   - 05-risk-triggered-mutation-assurance.md
+  - 06-false-green-verified-repair.md
 blocked_cards: []
 AUTO_CHAIN: false
 ---
@@ -56,3 +57,10 @@ review and primary exact-HEAD verification.
 
 Current G6 card SHA-256:
 `170f4c6ba7876676623c7ad5bd66b80d0dc7d80db4bf0dbd4c88cdd30a8e3fcb`.
+
+G6 completed at exact implementation commit
+`e476b307e12931197bc28964ce5a44dae977ca84` after exact-commit independent
+review, 13 focused tests, 175 campaign-union tests, adversarial provenance
+checks, and fixed calibration with all five known-wrong repairs rejected.
+
+Campaign terminal status: `VERIFIED_REPAIR_GATES_IMPLEMENTED`.

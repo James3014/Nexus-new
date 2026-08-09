@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: issue16-g6-false-green-calibration
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
@@ -47,6 +47,22 @@ Stable calibration manifest/hash, per-case outcomes, false-green count/rate, and
 upstream receipt refs. All five known-wrong cases must be rejected (FGR 0/5) and
 the correct repair accepted. Final states are only `VERIFIED_REPAIR` or
 `PARTIALLY_VERIFIED`; `public_claim_allowed=false` always.
+
+## Completion receipt
+
+- implementation_commit: `e476b307e12931197bc28964ce5a44dae977ca84`
+- card_sha256: `170f4c6ba7876676623c7ad5bd66b80d0dc7d80db4bf0dbd4c88cdd30a8e3fcb`
+- independent_review: `ACCEPT`
+- focused_tests: `13 passed`
+- campaign_union_tests: `175 passed`
+- known_wrong_false_green_rate: `0/5`
+- correct_repair: `accepted`
+- calibration_manifest_hash:
+  `f5d1029a305d3c8accc985c22f1220e40e5b49402b8ed3268f0872424ddbbfc5`
+- ruff_check: `passed`
+- ruff_format_check: `passed`
+- diff_check: `passed`
+- scope: `2 allowed files; no deletions; clean tree`
 
 ## Block classification
 
