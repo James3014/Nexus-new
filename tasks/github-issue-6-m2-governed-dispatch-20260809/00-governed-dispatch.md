@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: github-issue-6-m2-governed-dispatch
 campaign_id: github-issue-6-m2-governed-dispatch-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/6
@@ -82,6 +82,21 @@ Maximum changed files: 6.
 - All Issue #6 acceptance criteria are covered by physical tests.
 - No forbidden file or authority surface changes.
 - Required tests and diff gate pass.
+
+## Completion evidence
+
+- Reconciled base: `b6644968e56563095a3ac935f6236040aef6f1cf`.
+- Scoped implementation commit after rebase:
+  `b6c91f7d64cb9f1414b097dce841255aa7459399`.
+- Exact card suite: `295 passed` with six non-blocking pre-existing schema
+  shadow warnings.
+- Preflight provider, requested-model, and resolved-model mismatch controls each
+  fail closed before submission.
+- Four changed runtime/test files pass Ruff import-order verification.
+- `git diff --check`, allowed-file audit, and deletion audit pass.
+- Independent reviewer verdict: `ACCEPT`, no P0/P1 findings.
+- Maximum claim: M2 governed dispatch binding is implemented and verified on
+  this branch. Merge and downstream dependency truth remain separate.
 
 ## Block classification
 
