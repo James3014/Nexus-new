@@ -59,11 +59,12 @@ def collaboration_fixture(tmp_path: Path, monkeypatch) -> dict[str, Path | str]:
     collaboration = tmp_path / "collaboration"
     execution_root = tmp_path / "execution"
     ssh_command = tmp_path / "local-ssh"
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(execution_root))
     remote_path = str(remote)
     ssh_command.write_text(
         "#!/bin/sh\n"
-        "for arg in \"$@\"; do\n"
-        "  case \"$arg\" in\n"
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
         f"    git-upload-pack*) exec git-upload-pack '{remote_path}' ;;\n"
         f"    git-receive-pack*) exec git-receive-pack '{remote_path}' ;;\n"
         "  esac\n"
@@ -250,10 +251,13 @@ def test_m1_05_shared_control_git_common_dir_is_rejected(collaboration_fixture):
     control = Path(collaboration_fixture["control"])
     impostor = Path(collaboration_fixture["execution_root"]).parent / "control-worktree-impostor"
     _git(control, "worktree", "add", "--detach", str(impostor), collaboration_fixture["base_sha"])
-    realm = _realm_model(collaboration_fixture, collaboration={
-        **_realm_model(collaboration_fixture).collaboration.model_dump(mode="python"),
-        "repo_root": str(impostor),
-    })
+    realm = _realm_model(
+        collaboration_fixture,
+        collaboration={
+            **_realm_model(collaboration_fixture).collaboration.model_dump(mode="python"),
+            "repo_root": str(impostor),
+        },
+    )
     contract = _contract(
         collaboration_fixture,
         collaboration_realm=realm.model_dump(mode="json"),
@@ -339,7 +343,9 @@ def test_m1_09_receipt_exposes_typed_realm_and_provenance(collaboration_fixture,
     from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
     from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "receipt-state", auto_reconcile=False, ephemeral=True)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "receipt-state", auto_reconcile=False, ephemeral=True
+    )
     contract = _contract(collaboration_fixture, task_id="m1-receipt")
     provenance = CollaborationRealmVerifier.verify_submission(contract)
     service._write_state(
@@ -358,7 +364,9 @@ def test_m1_09_receipt_exposes_typed_realm_and_provenance(collaboration_fixture,
 
     assert receipt is not None
     assert receipt["collaboration_realm"]["schema"] == "nexus.collaboration_execution_realm.v1"
-    assert receipt["collaboration_realm"]["binding_hash"] == contract.collaboration_realm.binding_hash
+    assert (
+        receipt["collaboration_realm"]["binding_hash"] == contract.collaboration_realm.binding_hash
+    )
     assert receipt["collaboration_provenance"]["remote_base_verified"] is True
     assert receipt["collaboration_provenance"]["base_sha"] == collaboration_fixture["base_sha"]
 
@@ -390,7 +398,8 @@ def test_m1_11_mcp_submit_schema_is_closed_and_exposes_collaboration_realm():
     from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
     submit = next(
-        spec for spec in NexusSelfHostedMCPServer._tool_specs()
+        spec
+        for spec in NexusSelfHostedMCPServer._tool_specs()
         if spec["name"] == "nexus_self_hosted_submit_task"
     )
     realm_schema = submit["inputSchema"]["properties"]["collaboration_realm"]
@@ -405,9 +414,12 @@ def test_m1_11_mcp_submit_schema_is_closed_and_exposes_collaboration_realm():
         "binding_hash",
     }
     assert realm_schema["properties"]["collaboration"]["additionalProperties"] is False
-    assert realm_schema["properties"]["runtime_activation"]["properties"][
-        "activation_authorized"
-    ]["const"] is False
+    assert (
+        realm_schema["properties"]["runtime_activation"]["properties"]["activation_authorized"][
+            "const"
+        ]
+        is False
+    )
 
 
 def test_m1_12_git_global_credentials_remain_available_without_prompt(tmp_path, monkeypatch):
@@ -495,8 +507,20 @@ def test_m1_13_receipt_promotes_target_bound_provenance_through_candidate_commit
     assert receipt["collaboration_provenance"]["sanitized_ancestry_verified"] is True
     assert receipt["candidate_collaboration_provenance"] == packet.collaboration_provenance
     assert receipt["collaboration_provenance"]["target_head"] == candidate.target_head
-    assert receipt["collaboration_provenance"]["binding_hash"] == contract.collaboration_realm.binding_hash
-    assert _git(target, "merge-base", "--is-ancestor", candidate.target_head, packet.candidate_commit_sha) == ""
+    assert (
+        receipt["collaboration_provenance"]["binding_hash"]
+        == contract.collaboration_realm.binding_hash
+    )
+    assert (
+        _git(
+            target,
+            "merge-base",
+            "--is-ancestor",
+            candidate.target_head,
+            packet.candidate_commit_sha,
+        )
+        == ""
+    )
 
 
 def test_m1_14_post_creation_provenance_failure_rolls_back_target_and_branch(
