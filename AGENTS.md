@@ -9,12 +9,33 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   `tasks/<campaign-id>/`.
 - Response/domain overlay: `MUSE_PROTO.md`; it never grants mutation authority.
 
-## Canonical workspace and authority
+## Repository collaboration authority (GitHub)
 
-- Daily source of truth is `/Users/jameschen/Workspace/nexus`.
-- Canonical branch is `nexus/integration/main`; query HEAD at task start.
-- `/Users/jameschen/Workspace/nexus-worktrees` is retired evidence, not an entry
-  point. Do not create checkouts there.
+- The collaboration repository is `James3014/Nexus-new`; its default and
+  collaboration branch is `main`.
+- A GitHub Issue becomes an approved implementation unit only after the Owner
+  marks it Ready with bounded scope, acceptance criteria, and explicit
+  non-goals. Draft, triage, and unready Issues grant no mutation authority.
+- Codex implements a Ready Issue on an issue-specific branch such as
+  `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
+  request to `main`.
+- Codex and other coding agents do not push directly to, merge, force-push, or
+  delete `main`. Review and final merge authority remain with the Owner.
+- A Ready Issue defines GitHub collaboration scope only. It does not bypass
+  Task Card or lifecycle requirements for delegated, isolated,
+  lifecycle/security/schema, Candidate, approval, integration, release, or
+  production work.
+
+## Local Nexus runtime authority
+
+- On the Owner's current machine, the local Nexus runtime entry point remains
+  `/Users/jameschen/Workspace/nexus`. This is a machine-local runtime location,
+  not a universal checkout requirement.
+- Its local runtime/integration branch remains `nexus/integration/main`; query
+  HEAD at task start. This bootstrap does not rename that branch or imply that
+  its commit identity is synchronized with GitHub `main`.
+- `/Users/jameschen/Workspace/nexus-worktrees` is retired local evidence, not an
+  entry point. Do not create checkouts there.
 - Before every task, run:
   `git rev-parse --show-toplevel`, `git branch --show-current`,
   `git status --short --branch`, and `git worktree list --porcelain`.
@@ -26,7 +47,20 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Runtime state, reports, chat, and old worktrees cannot replace the Git-tracked
   Task Card for governed work or silently rewrite it. `AUTO_CHAIN=false` unless
   the index says so.
-- If not anchored at the canonical root, stop mutation and re-anchor first.
+- For local runtime work, stop mutation and re-anchor at the local runtime root
+  first. For GitHub collaboration work, use the current clone root and the
+  Ready Issue's branch; do not require the machine-local absolute path.
+
+## Governance boundary
+
+- Implementation and commit, Candidate creation, verification, approval,
+  integration, push, and release are distinct authorities and evidence stages.
+- An agent may implement, test, commit, push an authorized issue branch, and
+  open a PR. It cannot convert its own implementation or Candidate into
+  approval, integration, merge, release, or production truth.
+- GitHub review/merge does not silently perform Nexus lifecycle approval or
+  runtime integration. Local Nexus runtime actions keep their existing formal
+  authority and evidence requirements until a separate migration changes them.
 
 ## Safety and completion
 
@@ -66,6 +100,9 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Direct work does not commit, push, merge, delete, or continue into a successor
   task unless the Owner grants that exact authority. If eligibility is unclear,
   stop and report the specific escalation condition.
+- A Ready GitHub Issue separately authorizes scoped commits and pushes on its
+  issue-specific branch and opening a PR; it never authorizes direct `main`
+  mutation or self-merge.
 
 ## Governed task-card and artifact governance
 
