@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import copy
 import hashlib
 import json

@@ -307,6 +307,8 @@ def test_worker_candidate_forwards_owner_inline_task_run_once(monkeypatch):
 def test_worker_candidate_uses_planner_admission_identity_and_rejects_override(monkeypatch):
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
+    gateway_module = sys.modules["nexus.orchestrator.unified_mcp_gateway"]
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
     demands, admission = _valid_local_dispatch()
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
         provider="ollama", requested_model="qwen2.5-coder:7b-instruct", resolved_model="qwen2.5-coder:7b-instruct",
@@ -318,7 +320,7 @@ def test_worker_candidate_uses_planner_admission_identity_and_rejects_override(m
         "workforce_demands": demands, "workforce_admission": admission,
     }
     response = gateway.handle({"jsonrpc": "2.0", "id": 801, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
-    assert response["result"]["isError"] is False
+    assert response["result"]["isError"] is False, response["result"].get("structuredContent")
     request = service.submitted[0]
     assert request["worker_id"] == "local_coder_7b"
     assert request["provider"] == "ollama"
@@ -337,6 +339,8 @@ def test_worker_candidate_uses_planner_admission_identity_and_rejects_override(m
 def test_worker_candidate_auto_dispatches_admitted_online_agy_end_to_end(monkeypatch):
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
+    gateway_module = sys.modules["nexus.orchestrator.unified_mcp_gateway"]
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
     demands, admission = _valid_online_agy_dispatch()
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
         provider="agy", requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
@@ -348,7 +352,7 @@ def test_worker_candidate_auto_dispatches_admitted_online_agy_end_to_end(monkeyp
         "workforce_demands": demands, "workforce_admission": admission,
     }
     response = gateway.handle({"jsonrpc": "2.0", "id": 803, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
-    assert response["result"]["isError"] is False
+    assert response["result"]["isError"] is False, response["result"].get("structuredContent")
     request = service.submitted[0]
     assert request["worker"] == "agy"
     assert request["worker_id"] == "agy_flash"
