@@ -212,7 +212,14 @@ CASES: tuple[GoldenCase, ...] = (
         "Nested route or execution-authority overrides fail with a stable contract error.",
         ROUTE,
         (
-            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[route_features-execution_lane]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[pillars-provider]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[codeintel-model]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[phase_trace-target_worktree]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[budget-route_override]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[budget-lifecycle_state]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[budget-world]",
+            "tests/contracts/test_canonical_execution.py::test_context_rejects_nested_route_and_execution_authority_overrides[budget-worker]",
         ),
     ),
     _c(
@@ -405,13 +412,18 @@ CASES: tuple[GoldenCase, ...] = (
     ),
     _c(
         "GB-031",
-        "Approval tamper or expiry fails closed",
+        "Approval tamper fails closed",
         "security",
         "stale_state",
-        "Tampered or expired marked-authority approval is rejected.",
+        "A marked-authority approval with tampered bindings or unknown fields is rejected.",
         LIFECYCLE,
         (
-            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry[bound_task_id-other-ARCHITECTURE_APPROVAL_BINDING_MISMATCH]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry[bound_attempt_id-other-ARCHITECTURE_APPROVAL_BINDING_MISMATCH]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry[candidate_commit_sha-ffffffffffffffffffffffffffffffffffffffff-ARCHITECTURE_APPROVAL_BINDING_MISMATCH]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry[candidate_tree_sha-ffffffffffffffffffffffffffffffffffffffff-ARCHITECTURE_APPROVAL_BINDING_MISMATCH]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry[authority_findings_sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ARCHITECTURE_APPROVAL_BINDING_MISMATCH]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_marked_authority_approval_service_rejects_tamper_and_expiry[unknown-reject-ARCHITECTURE_APPROVAL_UNKNOWN_FIELDS]",
         ),
     ),
     _c(
@@ -598,7 +610,9 @@ CASES: tuple[GoldenCase, ...] = (
         "A cleaned Candidate-less final block may retain an optional retry hint without remaining currently actionable.",
         LIFECYCLE + ("https://github.com/James3014/Nexus-new/issues/22",),
         (
-            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_clean_candidate_less_final_block_preserves_optional_retry_and_evidence",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_clean_candidate_less_final_block_preserves_optional_retry_and_evidence[REMOVED]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_clean_candidate_less_final_block_preserves_optional_retry_and_evidence[ALREADY_REMOVED]",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_clean_candidate_less_final_block_preserves_optional_retry_and_evidence[TARGET_CLEANED]",
         ),
     ),
     _c(
@@ -957,7 +971,7 @@ CASES: tuple[GoldenCase, ...] = (
         "Policy Lane fixtures track authoritative manifest",
         "regression",
         "stale_state",
-        "Policy Lane gate fixtures and count assertions must match the existing authoritative manifest without changing policy semantics.",
+        "Policy Lane hard-lane fixtures and count assertions must track the existing authoritative manifest.",
         (
             "https://github.com/James3014/Nexus-new/issues/42",
             "https://github.com/James3014/Nexus-new/pull/43",

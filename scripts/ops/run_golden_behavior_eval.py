@@ -164,13 +164,22 @@ def main() -> int:
         unknown = sorted(set(args.case_ids) - {case.case_id for case in CASES})
         errors.extend(f"unknown_case:{case_id}" for case_id in unknown)
 
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    source_revision = revision.stdout.strip()
+    if revision.returncode != 0 or not source_revision:
+        errors.append("source_revision_unavailable")
+
     executable = [case for case in selected if case.status == "covered" or args.include_findings]
     nodeids = sorted({nodeid for case in executable for nodeid in case.automated_tests})
     result = {
         "schema": "nexus.golden_behavior_eval.v1",
-        "source_revision": subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
-        ).stdout.strip(),
+        "source_revision": source_revision,
         "case_count": len(CASES),
         "selected_case_count": len(selected),
         "test_bound_case_count": sum(bool(case.automated_tests) for case in selected),
