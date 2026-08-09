@@ -100,6 +100,11 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   solve truth.
 - A local or delegated model produces a candidate only; it cannot approve,
   promote, integrate, push, claim production readiness, or clean up.
+- If the self-hosting/controller identity contract is itself under repair and
+  cannot bind a clean trustworthy execution identity, stop that path and use
+  the bounded external bootstrap procedure in
+  `docs/governance/rollback_runbook.md`; it creates no second authority and
+  never implies approval, integration, push, reload, or activation.
 - Governed workers may commit only their scoped card changes. Approval,
   integration, push, cleanup, and production/public claims remain separate
   authorities.
