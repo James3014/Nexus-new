@@ -26,6 +26,18 @@ def test_openwiki_metadata_paths_are_source_verified() -> None:
     assert missing == []
 
 
+def test_openwiki_has_no_degraded_generated_diagram_markers() -> None:
+    degraded: list[str] = []
+    for page in OPENWIKI_ROOT.rglob("*.md"):
+        if page.name == "INSTRUCTIONS.md":
+            continue
+        text = page.read_text(encoding="utf-8")
+        if "mermaid parse failed" in text or "converted to a text fence" in text:
+            degraded.append(str(page.relative_to(REPO_ROOT)))
+
+    assert degraded == []
+
+
 def test_openwiki_issue10_claims_match_current_inventory() -> None:
     quickstart = (OPENWIKI_ROOT / "quickstart.md").read_text(encoding="utf-8")
     workflows = (OPENWIKI_ROOT / "workflows" / "github-actions.md").read_text(

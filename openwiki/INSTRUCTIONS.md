@@ -104,6 +104,13 @@ names. Trigger keys and branch filters must likewise come from the physical
 not a second selector, router, or planner. Generated prose must preserve this
 distinction.
 
+Regeneration is a source-correction operation, not a stylistic rewrite. When
+the current pages already satisfy the source contract, leave them unchanged.
+Do not add optional diagrams, inventories, prose rewrites, or relationship-only
+edits merely to make the generated output look more complete. Add or change a
+diagram only when a bounded source defect requires it, and never emit a
+degraded text fence or a `mermaid parse failed` marker.
+
 ### authority_roles
 
 Do not infer authority from class names, filenames, package metadata, call frequency, tests, or architectural-looking names.
