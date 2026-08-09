@@ -21,16 +21,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout exact head
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - name: Initialize evidence
         run: |
           mkdir -p .ci-bandit
           printf '%s\n' '{"classification":"CI_BOOTSTRAP_DEFECT","blocking":true,"reason":"Bandit gate did not reach classification"}' > .ci-bandit/classification.json
+      - name: Checkout exact public revisions without credentials
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [[ ! "$BASE_REF" =~ ^[A-Za-z0-9._/-]+$ || ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+              echo "Invalid pull request ref metadata" >&2
+              exit 1
+            fi
+            git fetch --no-tags origin \
+              "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}" \
+              "+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head"
+          else
+            git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          fi
+          git checkout --detach "$HEAD_SHA"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,7 +66,6 @@ jobs:
             echo "Exact revisions must be full 40-character lowercase SHAs" >&2
             exit 1
           fi
-          git fetch --no-tags origin "$BASE_SHA"
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
