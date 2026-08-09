@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: github-issue-25-approval-requirements
 campaign_id: github-issue-25-approval-requirements-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/25
@@ -90,3 +90,14 @@ widening approval authority.
 - `RECOVERABLE_BLOCK`: bounded projection or test defect.
 - `HARD_BLOCK`: acceptance requires approval semantics/schema mutation or files
   outside the frozen scope.
+
+## Completion receipt
+
+- Implementation commit: `e1a834a00f2d327a67ef4125a053a2e9c5eeb3fa`
+- Exact-commit independent review: ACCEPT; no P0/P1 findings
+- Service suite: 235 passed
+- Malicious approval probes: 24 passed
+- Focused Gateway tests: 2 passed
+- Compact/detailed parity, no-mutation, strict type/hash, malformed/empty source,
+  diff, scope, and deletion gates passed
+- Ruff differential: no new findings beyond exact-base debt
