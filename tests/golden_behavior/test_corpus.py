@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 
 from scripts.ops.run_golden_behavior_eval import SCENARIOS, validate_corpus
 from tests.golden_behavior.corpus import CASES, FINDINGS
@@ -52,9 +53,17 @@ def test_resolved_policy_lane_finding_is_now_covered() -> None:
     assert len(case.automated_tests) == 3
 
 
-def test_testable_open_findings_bind_automated_probes() -> None:
-    probes = {case.case_id: case.finding_probe for case in CASES if case.finding_probe}
-    assert probes == {
-        "GB-082": "workforce_wording",
-        "GB-083": "manifest_updater_idempotency",
-    }
+def test_recently_resolved_findings_are_covered() -> None:
+    resolved = [case for case in CASES if case.case_id in {"GB-082", "GB-083"}]
+    assert len(resolved) == 2
+    assert all(case.status == "covered" for case in resolved)
+    assert all(case.automated_tests for case in resolved)
+
+
+def test_workforce_policy_wording_is_post_route_only() -> None:
+    root = Path(__file__).resolve().parents[2]
+    policy = (root / "docs/arch/MODEL_WORKFORCE_POLICY.md").read_text(encoding="utf-8")
+    assert "## 6. Routing policy" not in policy
+    assert "Nexus must route in this order:" not in policy
+    assert "## 6. Post-route worker dispatch guidance" in policy
+    assert "These preferences never choose or revise a route" in policy

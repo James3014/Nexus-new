@@ -7,11 +7,9 @@ import argparse
 import importlib
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
-from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,70 +36,7 @@ SCENARIOS = {
 STATUSES = {"covered", "finding"}
 
 
-def _probe_workforce_wording() -> tuple[bool, str]:
-    text = (ROOT / "docs/arch/MODEL_WORKFORCE_POLICY.md").read_text(encoding="utf-8")
-    forbidden = [
-        phrase
-        for phrase in ("## 6. Routing policy", "Nexus must route in this order:")
-        if phrase in text
-    ]
-    return not forbidden, "forbidden_phrases=" + ",".join(forbidden)
-
-
-def _probe_manifest_updater_idempotency() -> tuple[bool, str]:
-    source_manifest = ROOT / "docs/reports/policy-manifest.v2.json"
-    updater = ROOT / "scripts/ops/update_manifest_drills.py"
-    with tempfile.TemporaryDirectory(prefix="nexus-golden-manifest-") as temp:
-        temp_root = Path(temp)
-        target = temp_root / "docs/reports/policy-manifest.v2.json"
-        target.parent.mkdir(parents=True)
-        shutil.copy2(source_manifest, target)
-        first_run = subprocess.run(
-            [sys.executable, str(updater)],
-            cwd=temp_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        first_bytes = target.read_bytes()
-        second_run = subprocess.run(
-            [sys.executable, str(updater)],
-            cwd=temp_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        second_bytes = target.read_bytes()
-        data = json.loads(second_bytes)
-    policies = data.get("policies", [])
-    policy_ids = [policy.get("policy_id") for policy in policies]
-    lane_members = {
-        lane: sorted(policy["policy_id"] for policy in policies if policy.get("lane") == lane)
-        for lane in ("hard", "soft", "shadow")
-    }
-    summary = data.get("summary", {})
-    distribution = summary.get("lane_distribution", {})
-    projection_ok = all(
-        distribution.get(lane, {}).get("count") == len(ids)
-        and sorted(distribution.get(lane, {}).get("policies", [])) == ids
-        for lane, ids in lane_members.items()
-    )
-    checks = {
-        "first_exit_zero": first_run.returncode == 0,
-        "second_exit_zero": second_run.returncode == 0,
-        "byte_identical_after_first": first_bytes == second_bytes,
-        "unique_policy_ids": len(policy_ids) == len(set(policy_ids)),
-        "single_no_drill_fixture": Counter(policy_ids)["P-TEST-NODRILL-01"] == 1,
-        "total_projection": summary.get("total_policies") == len(policies),
-        "lane_projection": projection_ok,
-    }
-    return all(checks.values()), json.dumps(checks, sort_keys=True)
-
-
-PROBES = {
-    "workforce_wording": _probe_workforce_wording,
-    "manifest_updater_idempotency": _probe_manifest_updater_idempotency,
-}
+PROBES: dict[str, Callable[[], tuple[bool, str]]] = {}
 
 
 def validate_corpus() -> list[str]:
@@ -199,7 +134,14 @@ def main() -> int:
     if args.include_findings and not errors:
         probe_results = {}
         for case in selected:
+            if case.status != "finding":
+                continue
             if not case.finding_probe:
+                probe_results[case.case_id] = {
+                    "passed": False,
+                    "detail": "finding_has_no_automated_probe",
+                }
+                exit_code = 1
                 continue
             passed, detail = PROBES[case.finding_probe]()
             probe_results[case.case_id] = {"passed": passed, "detail": detail}

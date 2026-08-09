@@ -962,7 +962,10 @@ CASES: tuple[GoldenCase, ...] = (
         "security",
         "authority_conflict",
         "Final natural-language verification and absence claims must be bound to evidence or downgraded to not verified.",
-        ("https://github.com/James3014/Nexus-new/issues/40",),
+        (
+            "https://github.com/James3014/Nexus-new/issues/40",
+            "https://github.com/James3014/Nexus-new/issues/49",
+        ),
         status="finding",
         finding_id="GBF-005",
     ),
@@ -992,12 +995,11 @@ CASES: tuple[GoldenCase, ...] = (
         "Worker/model preference guidance must remain downstream of CapabilityPlanner and fresh Workforce Admission; model ordering cannot choose routes, capabilities, topology, governance depth, or claim authority.",
         (
             "https://github.com/James3014/Nexus-new/issues/44",
+            "https://github.com/James3014/Nexus-new/pull/47",
             "AGENTS.md#Authority invariants",
             "docs/arch/MODEL_WORKFORCE_POLICY.md",
         ),
-        finding_probe="workforce_wording",
-        status="finding",
-        finding_id="GBF-007",
+        ("tests/golden_behavior/test_corpus.py::test_workforce_policy_wording_is_post_route_only",),
     ),
     _c(
         "GB-083",
@@ -1007,22 +1009,23 @@ CASES: tuple[GoldenCase, ...] = (
         "Running the drill-manifest updater twice must be byte-identical after the first run, preserve unique policy IDs, and recompute every lane projection from the final policy list.",
         (
             "https://github.com/James3014/Nexus-new/issues/45",
+            "https://github.com/James3014/Nexus-new/pull/48",
             "scripts/ops/update_manifest_drills.py",
             "docs/reports/policy-manifest.v2.json",
         ),
-        finding_probe="manifest_updater_idempotency",
-        status="finding",
-        finding_id="GBF-008",
+        (
+            "tests/ops/test_update_manifest_drills.py::test_updater_is_idempotent_and_keeps_one_test_fixture",
+            "tests/ops/test_update_manifest_drills.py::test_summary_and_lane_distribution_are_exact_policy_projections",
+            "tests/ops/test_update_manifest_drills.py::test_second_file_update_is_byte_identical",
+        ),
     ),
 )
 
 
 FINDINGS = {
-    "GBF-001": "Issue #16 is READY and PR #41 is open; the behavior is not merged into main 7d49e161dcd2e6ceebba9934f3318716853c3728.",
+    "GBF-001": "Issue #16 is READY and PR #41 remains open; the Verified Repair behavior is not merged into the audited current main.",
     "GBF-002": "Issue #12 remains open verification-first; current live Gateway/source identity is not proven by the source snapshot alone.",
     "GBF-003": "Issue #29 states same-task Online consumption of exact Local evidence remains unproven.",
     "GBF-004": "Issue #31 is blocked on #7 and records missing canonical retained-state compaction/resume behavior.",
-    "GBF-005": "Issue #40 is validation-first and has not yet proven a World A final-response enforcement seam.",
-    "GBF-007": "Issue #44 records residual model-order routing wording in Workforce policy; current runtime is not thereby proven to have a second router.",
-    "GBF-008": "Issue #45 records non-idempotent drill-manifest updates and stale lane-distribution projections; policy semantics must not be changed to close it.",
+    "GBF-005": "Issue #40 proved the World A final-response enforcement gap; READY Issue #49 remains blocked on #29 before bounded implementation.",
 }
