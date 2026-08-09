@@ -16,9 +16,12 @@ from nexus.learning.learning_closure_effectiveness import (
 )
 
 
-def test_real_learning_closure_loaded():
-    entries = load_learning_closures(Path(".nexus/reports/learn/learning_closure.jsonl"))
-    assert len(entries) > 0
+def test_learning_closure_loader_reads_jsonl(tmp_path: Path):
+    episode = normalize_learning_episode(task_id="loader-task", attempt_id="loader-attempt")
+    closure_path = tmp_path / "learning_closure.jsonl"
+    closure_path.write_text(json.dumps(episode) + "\n", encoding="utf-8")
+
+    assert load_learning_closures(closure_path) == [episode]
 
 
 def test_real_learning_closure_12_task_evaluation():
