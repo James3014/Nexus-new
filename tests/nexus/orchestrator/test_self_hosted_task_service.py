@@ -442,15 +442,22 @@ def test_production_bound_ephemeral_receipt_cannot_be_approved(tmp_path):
 
 
 def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypatch):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     task_id = "snapshot-only"
-    service._write_state(task_id, {
-        "task_id": task_id,
-        "status": "FINAL_BLOCK",
-        "promotion_status": "NOT_CREATED",
-        "attempts": [{"attempt_id": "a"}],
-    })
-    monkeypatch.setattr(service, "reconcile_task", lambda *_: (_ for _ in ()).throw(AssertionError("reconciled")))
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "status": "FINAL_BLOCK",
+            "promotion_status": "NOT_CREATED",
+            "attempts": [{"attempt_id": "a"}],
+        },
+    )
+    monkeypatch.setattr(
+        service, "reconcile_task", lambda *_: (_ for _ in ()).throw(AssertionError("reconciled"))
+    )
 
     compact = service.get_task_snapshot(task_id)
     detailed = service.get_task_snapshot(task_id, include_details=True)
@@ -459,6 +466,302 @@ def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypa
     assert compact["task_action"]["next_action"] == "inspect_receipt_and_candidate"
     assert "attempts" not in compact
     assert detailed["attempts"] == [{"attempt_id": "a"}]
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["status"] == "NOT_REQUIRED"
+    assert compact["approval_requirements"]["reasons"] == []
+
+
+def _approval_requirement_state(*, required=True):
+    return {
+        "task_id": "approval-projection",
+        "attempt_id": "attempt-1",
+        "status": "CANDIDATE_COMMITTED",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "promotion_packet": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "authority_change_required": required,
+            "authority_findings_sha256": "a" * 64,
+        },
+        "candidate": {
+            "commit_sha": "c" * 40,
+            "tree_sha": "d" * 40,
+        },
+        "verified_receipt": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "authority_change_required": required,
+            "authority_findings_sha256": "a" * 64,
+        },
+    }
+
+
+def test_snapshot_projects_complete_architecture_approval_requirements(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    service._write_state("approval-projection", _approval_requirement_state())
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["status"] == "APPROVABLE"
+    assert requirements["completeness"] == "COMPLETE"
+    assert requirements["approvability"] == "APPROVABLE"
+    assert requirements["reasons"] == []
+    assert requirements["binding"] == {
+        "bound_task_id": "approval-projection",
+        "bound_attempt_id": "attempt-1",
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "authority_findings_sha256": "a" * 64,
+    }
+    assert "approval_id" not in requirements
+
+
+def test_compact_and_detailed_snapshots_share_pure_approval_projection(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    state["attempts"] = [{"attempt_id": "attempt-1"}]
+    service._write_state("approval-projection", state)
+    state_path = service._state_path("approval-projection")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert "attempts" not in compact
+    assert detailed["attempts"] == [{"attempt_id": "attempt-1"}]
+    assert state_path.read_bytes() == durable_before
+    assert "approval_requirements" not in json.loads(durable_before)
+
+
+def test_malformed_approval_source_containers_fail_closed_without_mutation(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state["promotion_packet"] = []
+    state["verified_receipt"] = []
+    expected_reasons = [
+        "malformed_source:promotion_packet:expected_mapping",
+        "malformed_source:verified_receipt:expected_mapping",
+    ]
+    direct = service._approval_requirements(state)
+    service.state_dir.mkdir(parents=True)
+    state_path = service._state_path("approval-projection")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert direct["status"] == "NOT_APPROVABLE"
+    assert direct["reasons"] == expected_reasons
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["required"] is False
+    assert compact["approval_requirements"]["status"] == "NOT_APPROVABLE"
+    assert compact["approval_requirements"]["reasons"] == expected_reasons
+    assert state_path.read_bytes() == durable_before
+
+
+@pytest.mark.parametrize(
+    "empty_sources",
+    [
+        ("promotion_packet",),
+        ("verified_receipt",),
+        ("promotion_packet", "verified_receipt"),
+    ],
+)
+def test_empty_approval_sources_fail_closed_without_mutation(tmp_path, empty_sources):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    for source_name in empty_sources:
+        state[source_name] = {}
+    expected_reasons = sorted(
+        f"malformed_source:{name}:empty_or_missing_contract_fields" for name in empty_sources
+    )
+    direct = service._approval_requirements(state)
+    service.state_dir.mkdir(parents=True)
+    state_path = service._state_path("approval-projection")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert direct["status"] == "NOT_APPROVABLE"
+    assert direct["reasons"] == expected_reasons
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["required"] is False
+    assert compact["approval_requirements"]["status"] == "NOT_APPROVABLE"
+    assert compact["approval_requirements"]["reasons"] == expected_reasons
+    assert state_path.read_bytes() == durable_before
+
+
+def test_none_approval_sources_remain_non_required_without_mutation(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state["promotion_packet"] = None
+    state["verified_receipt"] = None
+    service.state_dir.mkdir(parents=True)
+    state_path = service._state_path("approval-projection")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["status"] == "NOT_REQUIRED"
+    assert compact["approval_requirements"]["reasons"] == []
+    assert state_path.read_bytes() == durable_before
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_reason"),
+    [
+        (None, "missing:bound_attempt_id"),
+        (
+            lambda state: state["promotion_packet"].update(candidate_commit_sha="bad"),
+            "invalid_format:promotion_packet.candidate_commit_sha",
+        ),
+        (
+            lambda state: state["verified_receipt"].update(authority_findings_sha256="bad"),
+            "invalid_format:verified_receipt.authority_findings_sha256",
+        ),
+    ],
+)
+def test_snapshot_missing_or_malformed_approval_inputs_fail_closed(
+    tmp_path, change, expected_reason
+):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    if change is None:
+        state.pop("attempt_id")
+    else:
+        change(state)
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["status"] == "NOT_APPROVABLE"
+    assert requirements["approvability"] == "NOT_APPROVABLE"
+    assert expected_reason in requirements["reasons"]
+
+
+@pytest.mark.parametrize("invalid_value", ["false", 1, [], {}])
+@pytest.mark.parametrize("source_name", ["promotion_packet", "verified_receipt"])
+def test_snapshot_rejects_non_bool_authority_requirement(tmp_path, invalid_value, source_name):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state[source_name]["authority_change_required"] = invalid_value
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["required"] is False
+    assert requirements["status"] == "NOT_APPROVABLE"
+    assert requirements["reasons"] == [f"invalid_type:{source_name}.authority_change_required"]
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_reason"),
+    [
+        (
+            lambda state: state.update(attempt_id=7),
+            "invalid_type:task.attempt_id",
+        ),
+        (
+            lambda state: state["promotion_packet"].update(candidate_commit_sha=7),
+            "invalid_type:promotion_packet.candidate_commit_sha",
+        ),
+        (
+            lambda state: state["candidate"].update(tree_sha=[]),
+            "invalid_type:candidate.tree_sha",
+        ),
+        (
+            lambda state: state["verified_receipt"].update(authority_findings_sha256={}),
+            "invalid_type:verified_receipt.authority_findings_sha256",
+        ),
+    ],
+)
+def test_snapshot_rejects_non_string_binding_fields(tmp_path, change, expected_reason):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    change(state)
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["status"] == "NOT_APPROVABLE"
+    assert expected_reason in requirements["reasons"]
+
+
+def test_snapshot_rejects_non_string_durable_task_id_without_coercion(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    state["task_id"] = {"not": "a string"}
+    service._write_state("approval-projection", state)
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["status"] == "NOT_APPROVABLE"
+    assert compact["approval_requirements"]["reasons"] == ["invalid_state:STATE_FIELD_INVALID"]
+
+
+def test_snapshot_mismatch_and_stale_approval_inputs_fail_closed(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    mismatch = _approval_requirement_state()
+    mismatch["candidate"]["tree_sha"] = "e" * 40
+    service._write_state("approval-projection", mismatch)
+    result = service.get_task_snapshot("approval-projection")["approval_requirements"]
+    assert result["status"] == "NOT_APPROVABLE"
+    assert "candidate_tree_sha" in result["mismatches"]
+    assert "mismatch:candidate_tree_sha" in result["reasons"]
+
+    stale = _approval_requirement_state()
+    stale["promotion_status"] = "APPROVED"
+    service._write_state("approval-projection", stale)
+    result = service.get_task_snapshot("approval-projection")["approval_requirements"]
+    assert result["stale"] is True
+    assert result["status"] == "NOT_APPROVABLE"
+    assert "stale:approval_requirements" in result["reasons"]
+
+
+def test_snapshot_non_required_approval_is_deterministic(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state["approved_binding"] = {"architecture_approval": {"schema": "stale"}}
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["required"] is False
+    assert requirements["status"] == "NOT_REQUIRED"
+    assert requirements["completeness"] == "NOT_REQUIRED"
+    assert requirements["approvability"] == "NOT_REQUIRED"
+    assert requirements["stale"] is True
 
 
 @pytest.mark.parametrize(

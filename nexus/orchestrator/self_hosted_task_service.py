@@ -1109,6 +1109,200 @@ class SelfHostedTaskService:
         state["task_action"] = cls._task_action_envelope(state)
         return state
 
+    @staticmethod
+    def _approval_requirements(state: Mapping[str, Any]) -> dict[str, Any]:
+        """Project durable Architecture Approval inputs without granting approval."""
+        input_reasons: list[str] = []
+
+        def approval_source(name: str) -> Mapping[str, Any]:
+            if name not in state:
+                return {}
+            source = state[name]
+            if source is None:
+                return {}
+            if isinstance(source, Mapping):
+                if not source:
+                    input_reasons.append(
+                        f"malformed_source:{name}:empty_or_missing_contract_fields"
+                    )
+                return source
+            input_reasons.append(f"malformed_source:{name}:expected_mapping")
+            return {}
+
+        packet = approval_source("promotion_packet")
+        candidate = state.get("candidate") if isinstance(state.get("candidate"), Mapping) else {}
+        receipt = approval_source("verified_receipt")
+
+        def values(
+            field: str,
+            *sources: tuple[str, Mapping[str, Any]],
+            pattern: str,
+        ) -> list[tuple[str, str]]:
+            resolved = []
+            for name, source in sources:
+                raw = source.get(field)
+                if raw is None or raw == "":
+                    continue
+                if type(raw) is not str:
+                    input_reasons.append(f"invalid_type:{name}.{field}")
+                    continue
+                value = raw.strip()
+                if not value:
+                    continue
+                if not re.fullmatch(pattern, value):
+                    input_reasons.append(f"invalid_format:{name}.{field}")
+                    continue
+                resolved.append((name, value))
+            return resolved
+
+        required_values = []
+        for name, source in (
+            ("promotion_packet", packet),
+            ("verified_receipt", receipt),
+        ):
+            raw = source.get("authority_change_required", False)
+            if type(raw) is not bool:
+                input_reasons.append(f"invalid_type:{name}.authority_change_required")
+                raw = False
+            required_values.append((name, raw))
+        required = any(value for _, value in required_values)
+
+        approval_shaped = any(
+            isinstance(value, Mapping) and value.get("architecture_approval") is not None
+            for value in (state.get("approved_binding"), packet, receipt)
+        )
+        binding = {
+            "bound_task_id": "",
+            "bound_attempt_id": "",
+            "candidate_commit_sha": "",
+            "candidate_tree_sha": "",
+            "authority_findings_sha256": "",
+        }
+        for state_field, binding_field in (
+            ("task_id", "bound_task_id"),
+            ("attempt_id", "bound_attempt_id"),
+        ):
+            raw = state.get(state_field)
+            if raw is None or raw == "":
+                continue
+            if type(raw) is not str:
+                input_reasons.append(f"invalid_type:task.{state_field}")
+                continue
+            binding[binding_field] = raw.strip()
+        if state.get("state_valid") is False:
+            blocker = state.get("blocker") if isinstance(state.get("blocker"), Mapping) else {}
+            source_reasons = blocker.get("approval_requirements_reasons")
+            if isinstance(source_reasons, list) and all(
+                type(reason) is str and reason for reason in source_reasons
+            ):
+                input_reasons.extend(source_reasons)
+            else:
+                code = blocker.get("code") if type(blocker.get("code")) is str else "UNKNOWN"
+                input_reasons.append(f"invalid_state:{code}")
+
+        field_sources = {
+            "candidate_commit_sha": values(
+                "candidate_commit_sha",
+                ("task", state),
+                ("promotion_packet", packet),
+                ("candidate", candidate),
+                ("verified_receipt", receipt),
+                pattern=r"[0-9a-f]{40}",
+            )
+            + values(
+                "commit_sha",
+                ("candidate", candidate),
+                pattern=r"[0-9a-f]{40}",
+            ),
+            "candidate_tree_sha": values(
+                "candidate_tree_sha",
+                ("task", state),
+                ("promotion_packet", packet),
+                ("candidate", candidate),
+                ("verified_receipt", receipt),
+                pattern=r"[0-9a-f]{40}",
+            )
+            + values(
+                "tree_sha",
+                ("candidate", candidate),
+                pattern=r"[0-9a-f]{40}",
+            ),
+            "authority_findings_sha256": values(
+                "authority_findings_sha256",
+                ("promotion_packet", packet),
+                ("verified_receipt", receipt),
+                pattern=r"[0-9a-f]{64}",
+            ),
+        }
+        missing: list[str] = []
+        mismatches: list[str] = []
+        for field, source_values in field_sources.items():
+            unique_values = {value for _, value in source_values}
+            if not source_values:
+                missing.append(field)
+            elif len(unique_values) > 1:
+                mismatches.append(field)
+            else:
+                binding[field] = source_values[0][1]
+
+        if not binding["bound_task_id"]:
+            missing.append("bound_task_id")
+        if not binding["bound_attempt_id"]:
+            missing.append("bound_attempt_id")
+        if required_values[0][1] != required_values[1][1] and any(
+            value for _, value in required_values
+        ):
+            mismatches.append("authority_change_required")
+        missing = sorted(set(missing))
+        mismatches = sorted(set(mismatches))
+
+        stale = approval_shaped or (
+            required
+            and state.get("promotion_status") in {"APPROVED", "INTEGRATED", "APPROVAL_INVALIDATED"}
+        )
+        if not required and input_reasons:
+            status = "NOT_APPROVABLE"
+            completeness = "INCOMPLETE"
+            approvability = "NOT_APPROVABLE"
+        elif not required:
+            status = "NOT_REQUIRED"
+            completeness = "NOT_REQUIRED"
+            approvability = "NOT_REQUIRED"
+        elif stale:
+            status = "NOT_APPROVABLE"
+            completeness = "INCOMPLETE"
+            approvability = "NOT_APPROVABLE"
+            missing.append("stale_approval_requirements")
+        elif input_reasons or missing or mismatches:
+            status = "NOT_APPROVABLE"
+            completeness = "INCOMPLETE"
+            approvability = "NOT_APPROVABLE"
+        else:
+            status = "APPROVABLE"
+            completeness = "COMPLETE"
+            approvability = "APPROVABLE"
+
+        reasons = list(input_reasons)
+        if required:
+            reasons.extend(f"missing:{field}" for field in missing)
+            reasons.extend(f"mismatch:{field}" for field in mismatches)
+        if stale:
+            reasons.append("stale:approval_requirements")
+        return {
+            "schema": "nexus.architecture_approval_requirements.v1",
+            "required": required,
+            "status": status,
+            "completeness": completeness,
+            "approvability": approvability,
+            "task_id": binding["bound_task_id"],
+            "attempt_id": binding["bound_attempt_id"],
+            "binding": binding,
+            "missing": sorted(set(missing)),
+            "mismatches": mismatches,
+            "reasons": sorted(set(reasons)),
+            "stale": stale,
+        }
+
     @classmethod
     def _invalid_state_status(
         cls,
@@ -1117,20 +1311,26 @@ class SelfHostedTaskService:
         code: str,
         detail: str,
         source_path: Path,
+        approval_requirements_reasons: Sequence[str] = (),
     ) -> dict[str, Any]:
-        return cls._with_task_action({
-            "schema": "nexus.self_hosted_task_status.v1",
-            "task_id": task_id,
-            "status": "BLOCKED_INVALID_STATE",
-            "found": True,
-            "state_valid": False,
-            "retry_authorized": False,
-            "blocker": {
-                "code": code,
-                "detail": detail,
-                "source_path": str(source_path),
-            },
-        })
+        blocker: dict[str, Any] = {
+            "code": code,
+            "detail": detail,
+            "source_path": str(source_path),
+        }
+        if approval_requirements_reasons:
+            blocker["approval_requirements_reasons"] = sorted(set(approval_requirements_reasons))
+        return cls._with_task_action(
+            {
+                "schema": "nexus.self_hosted_task_status.v1",
+                "task_id": task_id,
+                "status": "BLOCKED_INVALID_STATE",
+                "found": True,
+                "state_valid": False,
+                "retry_authorized": False,
+                "blocker": blocker,
+            }
+        )
 
     @classmethod
     def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
@@ -1182,8 +1382,7 @@ class SelfHostedTaskService:
         for field in ("attempts", "executions"):
             value = state.get(field)
             if field in state and (
-                not isinstance(value, list)
-                or any(not isinstance(item, Mapping) for item in value)
+                not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value)
             ):
                 return cls._invalid_state_status(
                     task_id,
@@ -1191,7 +1390,7 @@ class SelfHostedTaskService:
                     detail=f"state {field} must be a list of objects",
                     source_path=path,
                 )
-        for field in (
+        object_fields = (
             "action",
             "attempt_resolution",
             "contract",
@@ -1199,14 +1398,26 @@ class SelfHostedTaskService:
             "promotion_packet",
             "request",
             "verified_receipt",
-        ):
-            if field in state and state[field] is not None and not isinstance(state[field], Mapping):
-                return cls._invalid_state_status(
-                    task_id,
-                    code="STATE_FIELD_INVALID",
-                    detail=f"state {field} must be an object",
-                    source_path=path,
-                )
+        )
+        invalid_object_fields = [
+            field
+            for field in object_fields
+            if field in state and state[field] is not None and not isinstance(state[field], Mapping)
+        ]
+        if invalid_object_fields:
+            field = invalid_object_fields[0]
+            approval_reasons = [
+                f"malformed_source:{name}:expected_mapping"
+                for name in invalid_object_fields
+                if name in {"promotion_packet", "verified_receipt"}
+            ]
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_FIELD_INVALID",
+                detail=f"state {field} must be an object",
+                source_path=path,
+                approval_requirements_reasons=approval_reasons,
+            )
         return cls._with_task_action(state)
 
     def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
@@ -5241,13 +5452,16 @@ class SelfHostedTaskService:
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.get_task_snapshot(task_id, include_details=True)
 
-    def get_task_snapshot(self, task_id: str, *, include_details: bool = False) -> Optional[dict[str, Any]]:
+    def get_task_snapshot(
+        self, task_id: str, *, include_details: bool = False
+    ) -> Optional[dict[str, Any]]:
         """Read status without reconciliation or state-lock acquisition."""
         state = self._read_state_snapshot(task_id)
         if state is None:
             return None
+        approval_requirements = self._approval_requirements(state)
         if include_details:
-            return state
+            return {**state, "approval_requirements": approval_requirements}
         action = state.get("task_action") or self._task_action_envelope(state)
         return {
             "schema": "nexus.self_hosted_task_status.v1",
@@ -5261,6 +5475,7 @@ class SelfHostedTaskService:
             "retry_authorized": state.get("retry_authorized"),
             "task_action": action,
             "autonomy": project_autonomy_submission(state),
+            "approval_requirements": approval_requirements,
         }
 
     def get_receipt(self, task_id: str) -> Optional[dict[str, Any]]:
