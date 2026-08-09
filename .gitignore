@@ -92,6 +92,10 @@ nexus-swarm-v22-prod/certs/*.srl
 # Agent workspace / temp files
 .tmp/
 .mimocode/
+/.tmp_build/
+/scratch/astropy_debug/
+/scratch/tmp_astropy_14096/
+/scratch/tmp_astropy_14182/
 
 # Nested experimental Research Ledger lab repository
 /research-ledger/
@@ -111,3 +115,12 @@ last_patch_response.txt
 # Nexus Evaluation Artifacts (Exclude from code commits)
 artifacts/runtime/
 artifacts/external_sources/
+
+# Intentionally tracked benchmark source and deterministic test fixtures.
+# These exceptions keep tracked-vs-ignored audits meaningful.
+!scripts/benchmarks/
+!scripts/benchmarks/*.py
+!scripts/benchmarks/*.c
+!nexus/benchmarks/
+!nexus/benchmarks/replay_dashboard.py
+!tests/fixtures/s2t_memory_sidecar/**/*.log
