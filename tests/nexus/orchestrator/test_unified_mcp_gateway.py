@@ -20,7 +20,9 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     PUBLIC_TOOL_NAMES,
     SERVER_INSTANCE_ID,
     TOOL_MANIFEST_REVISION,
+    GatewayInputError,
     UnifiedMCPGateway,
+    _compile_agy_command,
 )
 
 
@@ -1649,3 +1651,82 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
     assert payload["status"] == "FAILED"
     assert payload["blocker"] == "ASSIST_PROVIDER_MALFORMED_OUTPUT"
     assert payload["schema_error"].startswith("output_schema_missing:")
+
+
+def test_agy_high_model_assist_command_omits_contradictory_effort_low():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    command = gateway._assist_command(executable="/usr/local/bin/agy", provider="agy", model="gemini-3.6-flash-high", prompt="probe")
+    assert command[0] == "/usr/local/bin/agy"
+    assert "--mode" in command and command[command.index("--mode") + 1] == "plan"
+    assert command[command.index("--model") + 1] == "gemini-3.6-flash-high"
+    assert "--effort" not in command
+    assert "--print-timeout" in command
+
+
+def test_agy_medium_model_not_overridden_by_hardcoded_low():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    command = gateway._assist_command(executable="/usr/local/bin/agy", provider="agy", model="gemini-3.6-flash-medium", prompt="probe")
+    assert "--effort" not in command
+    assert "--print-timeout" in command
+
+
+def test_agy_compiler_flash_low_consistent_effort_is_canonical():
+    command = _compile_agy_command(executable="/usr/local/bin/agy", model="gemini-3.6-flash-low", prompt="p", explicit_effort="low")
+    assert command[command.index("--effort") + 1] == "low"
+    assert "--model" in command
+
+
+def test_agy_compiler_conflicting_effort_fails_closed():
+    with pytest.raises(GatewayInputError):
+        _compile_agy_command(executable="/usr/local/bin/agy", model="gemini-3.6-flash-high", prompt="p", explicit_effort="low")
+
+
+def test_agy_assist_command_uses_shared_compiler_contract():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    assist = gateway._assist_command(executable="/usr/local/bin/agy", provider="agy", model="gemini-3.6-flash-high", prompt="probe")
+    compiled = _compile_agy_command(executable="/usr/local/bin/agy", model="gemini-3.6-flash-high", prompt="probe")
+    assert assist == compiled
+
+
+def test_agy_plan_path_uses_shared_compiler_with_json_schema(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = list(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"patch": "diff --git a/a b/a"}), stderr="")
+
+    monkeypatch.setenv("NEXUS_AGY_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
+    result = UnifiedMCPGateway._run_agy_plan(
+        prompt="Return a patch",
+        allowed_files=["a"],
+        provider="agy",
+        model="gemini-3.6-flash-high",
+    )
+    assert result["patch"].startswith("diff --git")
+    assert "--effort" not in captured["command"]
+    assert captured["command"][captured["command"].index("--model") + 1] == "gemini-3.6-flash-high"
+    assert "--json-schema" in captured["command"]
+
+
+def test_agy_plan_path_effort_conflict_returns_blocker(monkeypatch):
+    monkeypatch.setenv("NEXUS_AGY_BIN", "/bin/echo")
+    result = UnifiedMCPGateway._run_agy_plan(
+        prompt="Return a patch",
+        allowed_files=["a"],
+        provider="agy",
+        model="gemini-3.6-flash-high",
+        explicit_effort="low",
+    )
+    assert result["blocker"] == "AGY_ARGUMENT_COMPILATION_CONFLICT"
+    assert result["error"]
+
+
+def test_unrelated_providers_keep_existing_command_contracts(monkeypatch):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    codex = gateway._assist_command(executable="/usr/local/bin/codex", provider="codex", model="gpt-5", prompt="probe")
+    assert codex[:4] == ["/usr/local/bin/codex", "exec", "--json", "--ephemeral"]
+    cline = gateway._assist_command(executable="/usr/local/bin/cline", provider="cline", model="glm-5.2", prompt="probe")
+    assert cline[cline.index("--model") + 1] == "cline-pass/glm-5.2"
+    with pytest.raises(GatewayInputError):
+        gateway._assist_command(executable="/usr/local/bin/unknown", provider="unknown", model="any", prompt="probe")

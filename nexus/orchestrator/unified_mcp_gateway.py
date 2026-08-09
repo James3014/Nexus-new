@@ -106,6 +106,66 @@ ACTION_CONTRACT_SHA256_AT_START: str
 PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 
 
+# Agy 1.1.11 encodes the reasoning tier in the model identity suffix
+# (-high/-medium/-low) and rejects an ``--effort`` flag that contradicts the
+# tier.  Both assisted-provider paths must normalize effort through this single
+# compiler so a hard-coded default can never override the model identity.
+AGY_EFFORT_TIERS: tuple[str, ...] = ("high", "medium", "low")
+AGY_PRINT_TIMEOUT = "25s"
+
+
+def _agy_effort_tier(model: str) -> str:
+    """Return the effort tier embedded in an Agy model name, or ``""``."""
+    name = (model or "").strip()
+    for tier in AGY_EFFORT_TIERS:
+        if name.endswith(f"-{tier}"):
+            return tier
+    return ""
+
+
+def _compile_agy_command(
+    *,
+    executable: str,
+    model: str,
+    prompt: str,
+    json_schema: str = "",
+    explicit_effort: str = "",
+) -> list[str]:
+    """Single source of truth for Agy CLI argument compilation.
+
+    Rules:
+    - ``--effort`` is emitted only when the caller explicitly supplies it.
+    - An explicit effort that contradicts a tier suffix in the model identity
+      fails closed deterministically instead of silently overriding.
+    - A model carrying no tier suffix still requires an explicit effort for
+      Agy 1.1.11; the compiler never invents a default tier on its own.
+    - Suffixed models accept the canonical ``--model <name>`` form with the
+      tier omitted from the flag surface.
+    """
+    name = (model or "").strip()
+    tier = _agy_effort_tier(name)
+    explicit = (explicit_effort or "").strip().lower()
+    if explicit and explicit not in AGY_EFFORT_TIERS:
+        raise GatewayInputError(f"agy effort must be one of {', '.join(AGY_EFFORT_TIERS)}")
+    if explicit and tier and explicit != tier:
+        raise GatewayInputError(
+            f"agy model {name!r} embeds {(tier + ' effort')!r}; explicit --effort {explicit!r} conflicts"
+        )
+    command = [executable, "--mode", "plan", "--sandbox", "--output-format", "json"]
+    if json_schema:
+        command.extend(["--json-schema", json_schema])
+    if explicit:
+        command.extend(["--effort", explicit])
+    elif not tier and not name:
+        # Neither the model nor the caller pinned an effort.  The adapter must
+        # not choose one on behalf of the caller.
+        raise GatewayInputError("agy model requires an explicit effort or an embedded tier suffix")
+    if name:
+        command.extend(["--model", name])
+    command.extend(["--print-timeout", AGY_PRINT_TIMEOUT, "--prompt", prompt])
+    return command
+
+
 class GatewayInputError(ValueError):
     """Raised when a public gateway request is outside its bounded contract."""
 
@@ -1181,14 +1241,14 @@ class UnifiedMCPGateway:
         return value
 
     @staticmethod
-    def _assist_command(*, executable: str, provider: str, model: str, prompt: str) -> list[str]:
+    def _assist_command(*, executable: str, provider: str, model: str, prompt: str, explicit_effort: str = "") -> list[str]:
         if provider == "cline":
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
             return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
-            return [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--effort", "low", "--model", model, "--print-timeout", "25s", "--prompt", prompt]
+            return _compile_agy_command(executable=executable, model=model, prompt=prompt, explicit_effort=explicit_effort)
         if provider == "gemini":
             return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
         if provider == "opencode":
@@ -3566,7 +3626,7 @@ class UnifiedMCPGateway:
         )
 
     @staticmethod
-    def _run_agy_plan(*, prompt: str, allowed_files: list[str], provider: str, model: str = "") -> dict[str, Any]:
+    def _run_agy_plan(*, prompt: str, allowed_files: list[str], provider: str, model: str = "", explicit_effort: str = "") -> dict[str, Any]:
         """Run any registered assisted provider with one bounded JSON contract.
 
         The historical name is retained for compatibility, but the provider
@@ -3588,10 +3648,21 @@ class UnifiedMCPGateway:
         schema = json.dumps({"type": "object", "required": ["patch"], "properties": {"patch": {"type": "string"}, "summary": {"type": "string"}, "tests": {"type": "array", "items": {"type": "string"}}}}, separators=(",", ":"))
         selected_model = str(model or os.environ.get("NEXUS_ASSIST_MODEL", "") or metadata.get("default_model", "")).strip()
         if requested == "agy":
-            command = [executable, "--mode", "plan", "--sandbox", "--output-format", "json", "--json-schema", schema, "--effort", "low"]
-            if selected_model:
-                command.extend(["--model", selected_model])
-            command.extend(["--print-timeout", "25s", "--prompt", prompt])
+            try:
+                command = _compile_agy_command(
+                    executable=executable,
+                    model=selected_model,
+                    prompt=prompt,
+                    json_schema=schema,
+                    explicit_effort=explicit_effort,
+                )
+            except GatewayInputError as exc:
+                return {
+                    "provider": requested,
+                    "model": selected_model,
+                    "blocker": "AGY_ARGUMENT_COMPILATION_CONFLICT",
+                    "error": str(exc),
+                }
         elif requested == "cline":
             # Cline's JSON mode is non-interactive; yolo is restricted to the
             # bounded canonical apply path or an isolated Target by the caller.
