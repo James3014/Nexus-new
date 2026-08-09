@@ -38,9 +38,25 @@ def test_openwiki_issue10_claims_match_current_inventory() -> None:
 
     workflow_files = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
     listed_files = re.findall(r"\| `([^`]+\.yml)` \|", workflows)
+    expected_workflow_names = {
+        path.name: re.search(
+            r"^name:\s*[\"']?(.*?)[\"']?\s*$",
+            path.read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        ).group(1)
+        for path in workflow_files
+    }
+    listed_workflow_names = {
+        filename: display_name.strip().strip("`")
+        for filename, display_name in re.findall(
+            r"\| `([^`]+\.yml)` \| ([^|]+) \|",
+            workflows,
+        )
+    }
 
     assert len(workflow_files) == 9
     assert sorted(listed_files) == sorted(path.name for path in workflow_files)
+    assert listed_workflow_names == expected_workflow_names
     assert "all 9 GitHub Actions workflows" in workflows
     assert "all 12 GitHub Actions workflows" not in workflows
 
@@ -53,6 +69,10 @@ def test_openwiki_issue10_claims_match_current_inventory() -> None:
     assert "must not invent a Planner route" in mcp
     assert "component: MainchainEntry" not in routing
     assert "mainchain_entry.py:MainchainEntry" not in routing
+    assert "```mermaid\nflowchart TD" in routing
+    assert "mermaid parse failed" not in routing
+    assert re.search(r"sole route and\s+capability-selection authority", routing)
+    assert re.search(r"not a second selector, router, or planner", routing)
 
     evidence_blocks = re.findall(r"```yaml\n(.*?)```", mcp, flags=re.DOTALL)
     assert evidence_blocks

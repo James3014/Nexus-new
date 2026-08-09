@@ -24,14 +24,14 @@ The repository contains 9 GitHub Actions workflow definitions under `.github/wor
 | Workflow File | Display Name | Trigger Keys (`on:`) | Operational Mode | Target Job / Commands |
 | :--- | :--- | :--- | :--- | :--- |
 | `benchmark-ci.yml` | 📊 Nexus Benchmark CI | `schedule` (`0 18 * * *`), `workflow_dispatch` | Scheduled & Manual | Runs SWE-bench subset benchmarks |
-| `lint.yml` | Linting & Formatting | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Runs `ruff check` on Python files |
-| `nexus-smoke.yml` | Nexus Smoke Tests | `push` (`main`, `master`), `schedule` (`0 2 * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Smoke execution on protected-branch pushes and nightly schedule |
+| `lint.yml` | Nexus Exact-Base Ruff CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Runs `ruff check` on Python files |
+| `nexus-smoke.yml` | Nexus Smoke Benchmark | `push` (`main`, `master`), `schedule` (`0 2 * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Smoke execution on protected-branch pushes and nightly schedule |
 | `openwiki-update.yml` | OpenWiki Manual Update | `workflow_dispatch` | Manual-Only | Executes OpenWiki update workflow |
-| `policy-lane-gate.yml` | Policy Lane Gate | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Validates policy gate contracts |
-| `pytest.yml` | Pytest Collection Gate | `push`, `pull_request`, `workflow_dispatch`, `schedule` (`17 3 * * *`) | Scheduled, Event-driven & Manual | Executes `pytest -q` collection gate |
-| `security.yml` | Security Audit | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Runs Bandit security scanning |
-| `typecheck.yml` | Pyright Typecheck | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Runs Pyright static type checker |
-| `wiki-governance.yml` | Wiki Governance Gate | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Enforces wiki structure boundaries |
+| `policy-lane-gate.yml` | Policy Lane Gate CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Validates policy gate contracts |
+| `pytest.yml` | Nexus Pytest CI | `push`, `pull_request`, `workflow_dispatch`, `schedule` (`17 3 * * *`) | Scheduled, Event-driven & Manual | Executes `pytest -q` collection gate |
+| `security.yml` | Nexus Exact-Base Bandit CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Runs Bandit security scanning |
+| `typecheck.yml` | Nexus Exact-Base Pyright CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Runs Pyright static type checker |
+| `wiki-governance.yml` | Wiki Exact-Base Governance CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Enforces wiki structure boundaries |
 
 ---
 

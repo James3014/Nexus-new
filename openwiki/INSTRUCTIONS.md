@@ -94,6 +94,16 @@ Use `TEST` only for test execution evidence.
 Use `CI` for workflow-runner execution such as GitHub Actions. Never relabel CI
 as `LOCAL_RUNTIME` merely because a narrower taxonomy omitted a CI surface.
 
+For GitHub Actions inventories, copy each workflow's top-level `name:` value
+verbatim from the current YAML. Do not normalize, expand, or paraphrase display
+names. Trigger keys and branch filters must likewise come from the physical
+`on:` mapping.
+
+`CapabilityPlanner` is the sole route and capability-selection authority.
+`HybridRouteDecision` is the Planner-derived decision contract/projection,
+not a second selector, router, or planner. Generated prose must preserve this
+distinction.
+
 ### authority_roles
 
 Do not infer authority from class names, filenames, package metadata, call frequency, tests, or architectural-looking names.

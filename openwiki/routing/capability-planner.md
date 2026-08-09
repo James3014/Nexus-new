@@ -15,9 +15,15 @@ openwiki:
 
 # Capability Planner & Routing Authority
 
-In Nexus Singularity OS, **`CapabilityPlanner`** and **`HybridRouteDecision`** represent the canonical **Route Authority**. All execution requests originating from `[NexusCLI](../runtime/cli-and-cueline.md)`, `[UnifiedMCPGateway](../runtime/mcp-gateway.md)`, or autonomous workers must obtain routing authorization through `CapabilityPlanner`.
+In Nexus Singularity OS, **`CapabilityPlanner`** is the sole route and
+capability-selection authority. **`HybridRouteDecision`** is the
+Planner-derived decision contract/projection that carries the settled route;
+it is not a second selector, router, or planner. All execution requests
+originating from `[NexusCLI](../runtime/cli-and-cueline.md)`,
+`[UnifiedMCPGateway](../runtime/mcp-gateway.md)`, or autonomous workers must
+obtain routing authorization through `CapabilityPlanner`.
 
-> 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository governance authority. `CapabilityPlanner` and `HybridRouteDecision` remain Nexus route authority. OpenWiki documentation must never create, infer, promote, or duplicate route authority.
+> 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository governance authority. `CapabilityPlanner` is the sole route/capability-selection authority; `HybridRouteDecision` is its derived contract/projection. OpenWiki documentation must never create, infer, promote, or duplicate route authority.
 
 ---
 
@@ -25,12 +31,11 @@ In Nexus Singularity OS, **`CapabilityPlanner`** and **`HybridRouteDecision`** r
 
 `CapabilityPlanner` evaluates task descriptions, risk scores, code intelligence signals, and budget constraints to compute an optimal execution depth (`LIGHT`, `STANDARD`, or `DEEP`) and activate appropriate governance and tool nodes.
 
-<!-- openwiki: mermaid parse failed and this diagram was converted to a text fence so it does not break rendering. Fix the diagram source and restore the mermaid fence. Parser error: Heuristic: an unescaped angle bracket inside a label breaks rendering; rephrase the label. -->
-```text
+```mermaid
 flowchart TD
     A["Task Description & Route Inputs"] --> B["build_capability_signals()"]
     B --> C["_decide_routing_tier(signals)"]
-    C --> D{"base_depth == LIGHT & Safety Blockers > 0?"}
+    C --> D{"base_depth == LIGHT and Safety Blockers present?"}
     D -- "Yes" --> E["Escalate to STANDARD depth"]
     D -- "No" --> F["Preserve Base Depth"]
     E --> G["Enforce Required Gates: mempalace, artifact, claim"]
