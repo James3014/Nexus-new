@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import ast
 import difflib
-import fcntl
 import hashlib
 import json
 import os
 import re
 import select
-import shlex
 import shutil
 import signal
 import stat
@@ -854,8 +852,13 @@ class UnifiedMCPGateway:
 
     def __init__(self, service: Optional[SelfHostedTaskService] = None, *, model_runner: Any = None, apply_runner: Any = None):
         self.service = service or SelfHostedTaskService()
-        self._model_runner = model_runner or self._run_agy_plan
-        self._apply_runner = apply_runner or self._apply_assisted_patch
+        # These kwargs remain accepted for compatibility with older callers,
+        # but neither runner is a gateway authority.  Assisted jobs are
+        # provider probes/advice only; governed implementation enters through
+        # nexus_worker_candidate.
+        self._model_runner = self._run_agy_plan
+        self._ignored_model_runner = model_runner
+        self._ignored_apply_runner = apply_runner
         self._workforce_loader = WorkforcePolicyLoader()
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
@@ -1570,6 +1573,7 @@ class UnifiedMCPGateway:
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
             "apply_requested": bool(job.get("apply_requested")),
+            "apply_ignored": bool(job.get("apply_ignored", False)),
             "provider": job.get("provider"),
             "model": job.get("model"),
             "command_hash": job.get("command_hash"),
@@ -1679,7 +1683,10 @@ class UnifiedMCPGateway:
             "status": "SUBMITTED",
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
-            "apply_requested": bool(arguments.get("apply", False)),
+            # ``apply`` is a legacy compatibility input.  It is deliberately
+            # not carried into execution or authority receipts.
+            "apply_requested": False,
+            "apply_ignored": bool(arguments.get("apply", False)),
             "workspace_mode": "isolated",
             "workspace_root": str(workspace_root),
             "filesystem_before": self._snapshot_workspace(workspace_root),
@@ -3681,72 +3688,6 @@ class UnifiedMCPGateway:
         if requested == "cline":
             payload["tool_policy_enforcement"] = "cline_plan_auto_approve_false_allowlist_not_enforced"
         return payload
-
-    @staticmethod
-    def _validate_assisted_patch(patch: str, allowed: list[str]) -> list[str]:
-        if not patch.startswith("diff --git "):
-            raise GatewayInputError("assist output must begin with diff --git")
-        changed: list[str] = []
-        for line in patch.splitlines():
-            if line.startswith("+++ b/"):
-                path = line[6:]
-                _safe_relative_path(path, "assist patch")
-                changed.append(path)
-            if line.startswith("+++ /dev/null"):
-                raise GatewayInputError("assist deletions are forbidden")
-        changed = sorted(set(changed))
-        if not changed:
-            raise GatewayInputError("assist patch has no changed files")
-        for path in changed:
-            if not any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed):
-                raise GatewayInputError(f"assist patch changed file outside allowed_files: {path}")
-        check = subprocess.run(["git", "apply", "--check", "--binary", "--whitespace=nowarn", "-"], cwd=CANONICAL_SOURCE_ROOT, input=patch, capture_output=True, text=True, timeout=5, check=False)
-        if check.returncode != 0:
-            raise GatewayInputError(check.stderr.strip() or "assist patch does not apply cleanly")
-        return changed
-
-    def _apply_assisted_patch(self, *, patch: str, request: Mapping[str, Any], provider: str, provider_time_ms: int) -> dict[str, Any]:
-        apply_started = time.perf_counter()
-        lock_path = Path("/tmp/nexus-mcp-gateway-canonical.lock")
-        with lock_path.open("w", encoding="utf-8") as lock_handle:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            if _git("status", "--porcelain=v1").strip():
-                raise RuntimeError("canonical checkout must be clean")
-            base = _git("rev-parse", "HEAD").strip()
-            if base != request["controller_revision"]:
-                raise RuntimeError("canonical revision drift")
-            changed = self._validate_assisted_patch(patch, list(request["allowed_files"]))
-            applied = False
-            try:
-                apply_result = subprocess.run(["git", "apply", "--binary", "--whitespace=nowarn", "-"], cwd=CANONICAL_SOURCE_ROOT, input=patch, capture_output=True, text=True, timeout=10, check=False)
-                if apply_result.returncode != 0:
-                    raise RuntimeError(apply_result.stderr.strip() or "assist patch apply failed")
-                applied = True
-                changed_after = _git("diff", "--name-only").splitlines()
-                if sorted(changed_after) != changed or _git("diff", "--diff-filter=D", "--name-only").strip():
-                    raise RuntimeError("assist patch scope or deletion gate failed")
-                for command in request.get("verifier_commands") or ["git diff --check"]:
-                    tokens = shlex.split(str(command))
-                    if not tokens or any(token in {";", "&&", "||", "|", ">", "`"} for token in tokens):
-                        raise RuntimeError("verifier command is not bounded")
-                    if tokens[:2] in (["git", "commit"], ["git", "push"], ["git", "merge"], ["git", "reset"], ["git", "clean"]):
-                        raise RuntimeError("verifier command may not mutate lifecycle state")
-                    result = subprocess.run(tokens, cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, timeout=30, check=False)
-                    if result.returncode != 0:
-                        raise RuntimeError(f"verifier failed: {command}: {result.stderr.strip()}")
-                commit_started = time.perf_counter()
-                subprocess.run(["git", "add", "--", *changed], cwd=CANONICAL_SOURCE_ROOT, check=True, capture_output=True, text=True)
-                commit = subprocess.run(["git", "commit", "-m", f"feat(assist): apply bounded model patch {request['task_id']}"], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, check=False)
-                if commit.returncode != 0:
-                    raise RuntimeError(commit.stderr.strip() or "assist commit failed")
-                receipt = self.service.complete_direct_canonical({**dict(request), "execution_lane": "DIRECT_CANONICAL", "primary_agent": True, "worker": "primary"}, expected_commit_sha=_git("rev-parse", "HEAD").strip())
-                receipt.setdefault("telemetry", {}).update({"provider_time_ms": provider_time_ms, "worktree_time_ms": 0, "commit_time_ms": max(0, int((time.perf_counter() - commit_started) * 1000)), "cleanup_time_ms": 0, "total_wall_time_ms": max(0, int((time.perf_counter() - apply_started) * 1000))})
-                return receipt
-            except Exception:
-                if applied:
-                    subprocess.run(["git", "reset", "--", *changed], cwd=CANONICAL_SOURCE_ROOT, capture_output=True, text=True, check=False)
-                    subprocess.run(["git", "apply", "-R", "--binary", "--whitespace=nowarn", "-"], cwd=CANONICAL_SOURCE_ROOT, input=patch, capture_output=True, text=True, check=False)
-                raise
 
     def _finish(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         lane = _text(arguments.get("execution_lane"), "execution_lane").upper()

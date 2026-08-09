@@ -995,11 +995,13 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
     gateway = UnifiedMCPGateway(service=service)
-    submitted = gateway.handle({"jsonrpc": "2.0", "id": 700, "method": "tools/call", "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "async-cline-1", "what": "Suggest a README patch", "why": "Async provider smoke", "allowed_files": ["README.md"], "model": "glm-5.2"}}})
+    submitted = gateway.handle({"jsonrpc": "2.0", "id": 700, "method": "tools/call", "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "async-cline-1", "what": "Suggest a README patch", "why": "Async provider smoke", "allowed_files": ["README.md"], "model": "glm-5.2", "apply": True}}})
     first = submitted["result"]["structuredContent"]
     assert first["status"] == "RUNNING"
     assert first["execution_lane"] == "ASSISTED_CANONICAL"
     assert first["candidate_only"] is True
+    assert first["apply_requested"] is False
+    assert first["apply_ignored"] is True
     assert first["next_action"] == "nexus_assist_result"
     job_state = json.loads((tmp_path / "assisted_provider_jobs" / "async-cline-1.json").read_text(encoding="utf-8"))
     assert job_state["action"]["mutation"] is False
@@ -1012,6 +1014,37 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     assert result["exit_code"] == 0
     assert result["stdout_sha256"]
     assert result["artifacts"]["stdout"]
+
+
+def test_assist_apply_is_ignored_and_cannot_install_mutation_runners():
+    import inspect
+
+    injected_model = object()
+    injected_apply = object()
+    gateway = UnifiedMCPGateway(
+        service=FakeService(),
+        model_runner=injected_model,
+        apply_runner=injected_apply,
+    )
+
+    assert gateway._model_runner is UnifiedMCPGateway._run_agy_plan
+    assert gateway._ignored_model_runner is injected_model
+    assert gateway._ignored_apply_runner is injected_apply
+    assert not hasattr(gateway, "_apply_assisted_patch")
+    assert not hasattr(gateway, "_validate_assisted_patch")
+
+    assist_source = "\n".join(
+        inspect.getsource(getattr(UnifiedMCPGateway, name))
+        for name in ("_assist_submit", "_assist_response")
+    )
+    for forbidden in ("git apply", "git commit", "complete_direct_canonical", "approve_promotion", "integrate_approved", "push"):
+        assert forbidden not in assist_source
+
+
+def test_assist_manifest_preserves_worker_candidate_and_typed_approval_tools():
+    names = set(PUBLIC_TOOL_NAMES)
+    assert "nexus_worker_candidate" in names
+    assert {"nexus_candidate_approve", "nexus_candidate_bind_integration", "nexus_candidate_integrate"} <= names
 
 
 def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspace(monkeypatch, tmp_path):
