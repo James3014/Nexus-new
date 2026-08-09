@@ -29,9 +29,54 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
           submodules: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Remove checkout credentials and install gitlink cleanup metadata
+        run: |
+          set -euo pipefail
+          credential_count=0
+          host_credential_count=0
+          while IFS= read -r entry; do
+            credential_count=$((credential_count + 1))
+            key="${entry%% *}"
+            credential_file="${entry#* }"
+            case "$credential_file" in
+              "$RUNNER_TEMP"/git-credentials-*.config)
+                host_credential_count=$((host_credential_count + 1))
+                rm -f -- "$credential_file"
+                ;;
+              /github/runner_temp/git-credentials-*.config) ;;
+              *)
+                echo "unexpected checkout credential path: $credential_file" >&2
+                exit 1
+                ;;
+            esac
+            git config --local --unset-all "$key"
+          done < <(git config --local --get-regexp '^includeif\.gitdir:.*\.path$' || true)
+          if [ "$credential_count" -eq 0 ] || [ "$host_credential_count" -eq 0 ]; then
+            echo "checkout credential includeIf entries are missing" >&2
+            exit 1
+          fi
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          if git config --local --get-regexp '^includeif\.gitdir:.*\.path$' >/dev/null; then
+            echo "checkout credentials remain configured" >&2
+            exit 1
+          fi
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-pyright" .ci-pyright
       - uses: actions/setup-python@v5
