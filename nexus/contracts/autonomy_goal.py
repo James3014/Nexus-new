@@ -29,9 +29,7 @@ _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
-_REPOSITORY_ID = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
-)
+_REPOSITORY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def canonical_autonomy_hash(value: Mapping[str, Any]) -> str:
@@ -288,6 +286,4 @@ class AutonomyGoalGrant(AutonomyGoalGrantSpec):
         values.setdefault("schema", "nexus.autonomy_goal_grant.v1")
         spec = AutonomyGoalGrantSpec.model_validate(values)
         payload = spec.model_dump(mode="json")
-        return cls.model_validate(
-            {**payload, "grant_hash": canonical_autonomy_hash(payload)}
-        )
+        return cls.model_validate({**payload, "grant_hash": canonical_autonomy_hash(payload)})

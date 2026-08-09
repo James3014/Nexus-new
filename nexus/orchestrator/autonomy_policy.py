@@ -2,11 +2,16 @@
 
 The evaluator is deliberately incapable of mutation.  Its positive result is
 evidence about a hypothetical continuation only; it is not an approval grant.
+M0 inputs remain caller-bound until later milestones wire authoritative Nexus
+state, receipts, ledgers, clocks, and repository/runtime identity.  Consumers
+must not use a decision with ``authority_inputs_verified=False`` as machine
+authorization.
 """
 
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any, Literal, Mapping, Optional
@@ -107,12 +112,16 @@ class AutonomyReasonCode(str, Enum):
     EVALUATOR_INPUT_INVALID = "EVALUATOR_INPUT_INVALID"
     GRANT_NOT_YET_VALID = "GRANT_NOT_YET_VALID"
     GRANT_EXPIRED = "GRANT_EXPIRED"
+    EVALUATION_TIME_UNTRUSTED = "EVALUATION_TIME_UNTRUSTED"
     LEGACY_TASK_MANUAL = "LEGACY_TASK_MANUAL"
     POST_SUBMISSION_GRANT_INJECTION = "POST_SUBMISSION_GRANT_INJECTION"
     GOAL_BINDING_MISMATCH = "GOAL_BINDING_MISMATCH"
     SUBMISSION_GRANT_MISMATCH = "SUBMISSION_GRANT_MISMATCH"
     CONTRACT_HASH_MISMATCH = "CONTRACT_HASH_MISMATCH"
+    ATTEMPT_BINDING_MISMATCH = "ATTEMPT_BINDING_MISMATCH"
     TASK_SCOPE_EXCEEDED = "TASK_SCOPE_EXCEEDED"
+    SUBMISSION_REPOSITORY_IDENTITY_MISMATCH = "SUBMISSION_REPOSITORY_IDENTITY_MISMATCH"
+    SUBMISSION_BASE_IDENTITY_MISMATCH = "SUBMISSION_BASE_IDENTITY_MISMATCH"
     REPOSITORY_IDENTITY_MISMATCH = "REPOSITORY_IDENTITY_MISMATCH"
     BASE_IDENTITY_MISMATCH = "BASE_IDENTITY_MISMATCH"
     ACTION_NOT_ALLOWED = "ACTION_NOT_ALLOWED"
@@ -139,6 +148,7 @@ class AutonomyReasonCode(str, Enum):
     INDEPENDENT_ACCEPTANCE_REQUIRED = "INDEPENDENT_ACCEPTANCE_REQUIRED"
     IMPLEMENTER_ACCEPTANCE_FORBIDDEN = "IMPLEMENTER_ACCEPTANCE_FORBIDDEN"
     ACCEPTANCE_CANDIDATE_MISMATCH = "ACCEPTANCE_CANDIDATE_MISMATCH"
+    ACCEPTANCE_RECEIPT_CANDIDATE_MISMATCH = "ACCEPTANCE_RECEIPT_CANDIDATE_MISMATCH"
     RUNTIME_IDENTITY_REQUIRED = "RUNTIME_IDENTITY_REQUIRED"
     RUNTIME_IDENTITY_DRIFT = "RUNTIME_IDENTITY_DRIFT"
 
@@ -174,14 +184,15 @@ class AutonomyCandidateIdentity(_FrozenModel):
 
 class AcceptanceIdentity(_FrozenModel):
     receipt_hash: StrictStr
+    candidate_receipt_hash: StrictStr
     accepted_by: StrictStr
     authority_kind: AcceptanceAuthorityKind
     candidate: AutonomyCandidateIdentity
 
-    @field_validator("receipt_hash")
+    @field_validator("receipt_hash", "candidate_receipt_hash")
     @classmethod
-    def validate_receipt_hash(cls, value: str) -> str:
-        return _sha(value, "receipt_hash")
+    def validate_receipt_hash(cls, value: str, info) -> str:
+        return _sha(value, info.field_name)
 
     @field_validator("accepted_by")
     @classmethod
@@ -196,9 +207,7 @@ class AutonomyRuntimeIdentity(_FrozenModel):
     lifecycle_revision: StrictStr
     server_instance_id: StrictStr
 
-    @field_validator(
-        "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash"
-    )
+    @field_validator("tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash")
     @classmethod
     def validate_hashes(cls, value: str, info) -> str:
         return _sha(value, info.field_name)
@@ -262,6 +271,8 @@ class AutonomySubmissionBindingSpec(_FrozenModel):
     action_request_hash: StrictStr
     contract_hash: StrictStr
     controller_revision: StrictStr
+    repository: RepositoryIdentity
+    collaboration_base: CollaborationBaseIdentity
     allowed_paths: tuple[StrictStr, ...]
     goal_id: StrictStr
     grant_hash: StrictStr
@@ -310,9 +321,7 @@ class AutonomySubmissionBinding(AutonomySubmissionBindingSpec):
         values.setdefault("schema", "nexus.autonomy_submission_binding.v1")
         spec = AutonomySubmissionBindingSpec.model_validate(values)
         payload = spec.model_dump(mode="json")
-        return cls.model_validate(
-            {**payload, "binding_hash": canonical_autonomy_hash(payload)}
-        )
+        return cls.model_validate({**payload, "binding_hash": canonical_autonomy_hash(payload)})
 
 
 class AutonomyEvaluationInput(_FrozenModel):
@@ -374,6 +383,10 @@ class AutonomyDecision(_FrozenModel):
     decision_hash: StrictStr
     shadow_only: Literal[True] = True
     mutation_authorized: Literal[False] = False
+    authority_inputs_verified: Literal[False] = False
+    claim_ceiling: Literal["SHADOW_CALLER_BOUND_EVIDENCE_ONLY"] = (
+        "SHADOW_CALLER_BOUND_EVIDENCE_ONLY"
+    )
 
     @field_validator("input_hash", "decision_hash")
     @classmethod
@@ -411,6 +424,8 @@ def _decision(*, reasons: list[str], input_hash: str) -> AutonomyDecision:
         "input_hash": input_hash,
         "shadow_only": True,
         "mutation_authorized": False,
+        "authority_inputs_verified": False,
+        "claim_ceiling": "SHADOW_CALLER_BOUND_EVIDENCE_ONLY",
     }
     return AutonomyDecision.model_validate(
         {**payload, "decision_hash": canonical_autonomy_hash(payload)}
@@ -439,16 +454,10 @@ def evaluate_autonomy_policy(
     input_hash = _safe_input_hash(grant, evaluation)
     try:
         validated_grant = AutonomyGoalGrant.model_validate(
-            grant.model_dump(mode="json")
-            if isinstance(grant, AutonomyGoalGrant)
-            else grant
+            grant.model_dump(mode="json") if isinstance(grant, AutonomyGoalGrant) else grant
         )
     except ValidationError as exc:
-        reason = (
-            "GRANT_HASH_INVALID"
-            if "GRANT_HASH_INVALID" in str(exc)
-            else "GRANT_INVALID"
-        )
+        reason = "GRANT_HASH_INVALID" if "GRANT_HASH_INVALID" in str(exc) else "GRANT_INVALID"
         return _decision(reasons=[reason], input_hash=input_hash)
     try:
         value = AutonomyEvaluationInput.model_validate(
@@ -460,10 +469,19 @@ def evaluate_autonomy_policy(
         return _decision(reasons=["EVALUATOR_INPUT_INVALID"], input_hash=input_hash)
 
     reasons: list[str] = []
+    observed_now = datetime.now(timezone.utc)
     if value.evaluated_at < validated_grant.issued_at:
         reasons.append("GRANT_NOT_YET_VALID")
     if value.evaluated_at >= validated_grant.expires_at:
         reasons.append("GRANT_EXPIRED")
+    if observed_now < validated_grant.issued_at:
+        reasons.append("GRANT_NOT_YET_VALID")
+    if observed_now >= validated_grant.expires_at:
+        reasons.append("GRANT_EXPIRED")
+    if value.evaluated_at > observed_now + timedelta(
+        seconds=30
+    ) or observed_now - value.evaluated_at > timedelta(minutes=5):
+        reasons.append("EVALUATION_TIME_UNTRUSTED")
 
     binding = value.submission_binding
     if binding is None:
@@ -479,6 +497,18 @@ def evaluate_autonomy_policy(
             reasons.append("SUBMISSION_GRANT_MISMATCH")
         if binding.contract_hash != value.contract_hash:
             reasons.append("CONTRACT_HASH_MISMATCH")
+        if binding.initial_attempt_id != value.attempt_id:
+            reasons.append("ATTEMPT_BINDING_MISMATCH")
+        if (
+            binding.repository != validated_grant.repository
+            or binding.repository != value.repository
+        ):
+            reasons.append("SUBMISSION_REPOSITORY_IDENTITY_MISMATCH")
+        if (
+            binding.collaboration_base != validated_grant.collaboration_base
+            or binding.collaboration_base != value.collaboration_base
+        ):
+            reasons.append("SUBMISSION_BASE_IDENTITY_MISMATCH")
         if any(
             not any(_path_is_within(path, allowed) for allowed in binding.allowed_paths)
             for path in value.requested_paths
@@ -495,8 +525,13 @@ def evaluate_autonomy_policy(
         reasons.append("ACTION_FORBIDDEN")
 
     if any(
-        not any(_path_is_within(path, allowed) for allowed in validated_grant.path_policy.allowed_paths)
-        or any(_paths_overlap(path, forbidden) for forbidden in validated_grant.path_policy.forbidden_paths)
+        not any(
+            _path_is_within(path, allowed) for allowed in validated_grant.path_policy.allowed_paths
+        )
+        or any(
+            _paths_overlap(path, forbidden)
+            for forbidden in validated_grant.path_policy.forbidden_paths
+        )
         for path in value.requested_paths
     ):
         reasons.append("PATH_SCOPE_EXCEEDED")
@@ -505,7 +540,10 @@ def evaluate_autonomy_policy(
     child_widened = (
         not set(child.allowed_actions).issubset(validated_grant.allowed_actions)
         or any(
-            not any(_path_is_within(path, allowed) for allowed in validated_grant.path_policy.allowed_paths)
+            not any(
+                _path_is_within(path, allowed)
+                for allowed in validated_grant.path_policy.allowed_paths
+            )
             for path in child.allowed_paths
         )
         or _RISK_RANK[child.risk_ceiling] > _RISK_RANK[validated_grant.risk_ceiling]
@@ -513,15 +551,11 @@ def evaluate_autonomy_policy(
         or child.maximum_provider_calls > validated_grant.maximum_provider_calls
         or child.maximum_wall_time_seconds > validated_grant.maximum_wall_time_seconds
         or child.maximum_changed_files > validated_grant.maximum_changed_files
-        or child.maximum_concurrent_targets
-        > validated_grant.maximum_concurrent_targets
+        or child.maximum_concurrent_targets > validated_grant.maximum_concurrent_targets
         or (
             binding is not None
             and any(
-                not any(
-                    _path_is_within(path, allowed)
-                    for allowed in binding.allowed_paths
-                )
+                not any(_path_is_within(path, allowed) for allowed in binding.allowed_paths)
                 for path in child.allowed_paths
             )
         )
@@ -544,21 +578,24 @@ def evaluate_autonomy_policy(
     budget_checks = (
         (usage.tasks >= validated_grant.maximum_tasks, "TASK_BUDGET_EXHAUSTED"),
         (
-            usage.attempts_for_task >= min(
+            usage.attempts_for_task
+            >= min(
                 validated_grant.maximum_attempts_per_task,
                 child.maximum_attempts_per_task,
             ),
             "ATTEMPT_BUDGET_EXHAUSTED",
         ),
         (
-            usage.provider_calls >= min(
+            usage.provider_calls
+            >= min(
                 validated_grant.maximum_provider_calls,
                 child.maximum_provider_calls,
             ),
             "PROVIDER_CALL_BUDGET_EXHAUSTED",
         ),
         (
-            usage.wall_time_seconds >= min(
+            usage.wall_time_seconds
+            >= min(
                 validated_grant.maximum_wall_time_seconds,
                 child.maximum_wall_time_seconds,
             ),
@@ -583,9 +620,7 @@ def evaluate_autonomy_policy(
     )
     reasons.extend(reason for exhausted, reason in budget_checks if exhausted)
 
-    if not set(value.sensitive_scopes).issubset(
-        validated_grant.admitted_sensitive_scopes
-    ):
+    if not set(value.sensitive_scopes).issubset(validated_grant.admitted_sensitive_scopes):
         reasons.append("SENSITIVE_SCOPE_NOT_ADMITTED")
     if (
         value.action is AutonomyActionClass.PRODUCTION_RELEASE
@@ -615,22 +650,19 @@ def evaluate_autonomy_policy(
             reasons.append("INDEPENDENT_ACCEPTANCE_REQUIRED")
         else:
             if (
-                value.acceptance.authority_kind
-                is not AcceptanceAuthorityKind.INDEPENDENT_REVIEWER
+                value.acceptance.authority_kind is not AcceptanceAuthorityKind.INDEPENDENT_REVIEWER
                 or value.acceptance.accepted_by == value.implementer_id
             ):
                 reasons.append("IMPLEMENTER_ACCEPTANCE_FORBIDDEN")
-            if (
-                verified_candidate is None
-                or value.acceptance.candidate != verified_candidate
-            ):
+            if verified_candidate is None or value.acceptance.candidate != verified_candidate:
                 reasons.append("ACCEPTANCE_CANDIDATE_MISMATCH")
+            elif (
+                value.acceptance.candidate_receipt_hash != verified_candidate.verified_receipt_hash
+            ):
+                reasons.append("ACCEPTANCE_RECEIPT_CANDIDATE_MISMATCH")
 
     if value.action in _RUNTIME_BOUND_ACTIONS:
-        if (
-            value.expected_runtime_identity is None
-            or value.current_runtime_identity is None
-        ):
+        if value.expected_runtime_identity is None or value.current_runtime_identity is None:
             reasons.append("RUNTIME_IDENTITY_REQUIRED")
         elif value.expected_runtime_identity != value.current_runtime_identity:
             reasons.append("RUNTIME_IDENTITY_DRIFT")

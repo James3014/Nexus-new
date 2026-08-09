@@ -3749,6 +3749,8 @@ class SelfHostedTaskService:
         requested_lane = str(request.get("execution_lane") or "").strip().upper()
         if requested_lane in {"", "DIRECT_CANONICAL"}:
             if lane["eligible"]:
+                if autonomy_grant is not None:
+                    raise ValueError("AUTONOMY_DIRECT_CANONICAL_UNSUPPORTED")
                 return self._submit_direct_canonical(request, task_id)
             if requested_lane == "DIRECT_CANONICAL" and str(request.get("worker", "primary")).strip().lower() in {"", "primary", "codex"}:
                 raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
@@ -3898,6 +3900,8 @@ class SelfHostedTaskService:
                 action_request_hash=action_request_hash,
                 contract_hash=contract.contract_hash,
                 controller_revision=contract.controller_revision,
+                repository=autonomy_grant.repository,
+                collaboration_base=autonomy_grant.collaboration_base,
                 allowed_paths=tuple(
                     str(path).rstrip("/") for path in contract.allowed_files
                 ),

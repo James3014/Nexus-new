@@ -32,7 +32,7 @@ from nexus.orchestrator.autonomy_policy import (
 )
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
-NOW = datetime(2026, 8, 9, 5, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 
 
 def _grant(**overrides) -> AutonomyGoalGrant:
@@ -119,6 +119,8 @@ def _evaluation(grant: AutonomyGoalGrant, **overrides) -> AutonomyEvaluationInpu
         contract_hash="2" * 64,
         controller_revision="a" * 40,
         allowed_paths=("nexus/contracts", "tests/nexus/orchestrator"),
+        repository=grant.repository,
+        collaboration_base=grant.collaboration_base,
         goal_id=grant.goal_id,
         grant_hash=grant.grant_hash,
     )
@@ -155,6 +157,7 @@ def _evaluation(grant: AutonomyGoalGrant, **overrides) -> AutonomyEvaluationInpu
             accepted_by="independent-reviewer",
             authority_kind=AcceptanceAuthorityKind.INDEPENDENT_REVIEWER,
             candidate=candidate,
+            candidate_receipt_hash=candidate.verified_receipt_hash,
         ),
         "expected_runtime_identity": AutonomyRuntimeIdentity(
             tool_manifest_hash="4" * 64,
@@ -253,8 +256,18 @@ def test_valid_exact_shadow_evaluation_is_deterministic():
 @pytest.mark.parametrize(
     ("override", "reason"),
     [
-        ({"repository": RepositoryIdentity(repository_id="other/repo", canonical_remote="https://example.test/other.git")}, "REPOSITORY_IDENTITY_MISMATCH"),
-        ({"collaboration_base": CollaborationBaseIdentity(branch="main", head_sha="b" * 40)}, "BASE_IDENTITY_MISMATCH"),
+        (
+            {
+                "repository": RepositoryIdentity(
+                    repository_id="other/repo", canonical_remote="https://example.test/other.git"
+                )
+            },
+            "REPOSITORY_IDENTITY_MISMATCH",
+        ),
+        (
+            {"collaboration_base": CollaborationBaseIdentity(branch="main", head_sha="b" * 40)},
+            "BASE_IDENTITY_MISMATCH",
+        ),
         ({"action": AutonomyActionClass.TASK_RETRY}, "ACTION_NOT_ALLOWED"),
         ({"risk": AutonomyRiskLevel.HIGH}, "RISK_CEILING_EXCEEDED"),
     ],
@@ -357,6 +370,7 @@ def test_independent_acceptance_and_exact_candidate_binding_are_required():
         accepted_by="worker-codex",
         authority_kind=AcceptanceAuthorityKind.WORKER_OUTPUT,
         candidate=candidate,
+        candidate_receipt_hash=candidate.verified_receipt_hash,
     )
     same_worker = _decision(grant, acceptance=worker_acceptance)
     assert "IMPLEMENTER_ACCEPTANCE_FORBIDDEN" in same_worker.reason_codes
@@ -368,9 +382,22 @@ def test_independent_acceptance_and_exact_candidate_binding_are_required():
             accepted_by="independent-reviewer",
             authority_kind=AcceptanceAuthorityKind.INDEPENDENT_REVIEWER,
             candidate=_candidate("b"),
+            candidate_receipt_hash=_candidate("b").verified_receipt_hash,
         ),
     )
     assert "ACCEPTANCE_CANDIDATE_MISMATCH" in mismatch.reason_codes
+
+    receipt_mismatch = _decision(
+        grant,
+        acceptance=AcceptanceIdentity(
+            receipt_hash="3" * 64,
+            accepted_by="independent-reviewer",
+            authority_kind=AcceptanceAuthorityKind.INDEPENDENT_REVIEWER,
+            candidate=candidate,
+            candidate_receipt_hash="0" * 64,
+        ),
+    )
+    assert "ACCEPTANCE_RECEIPT_CANDIDATE_MISMATCH" in receipt_mismatch.reason_codes
 
     drift = _decision(grant, current_candidate=_candidate("b"))
     assert "CANDIDATE_IDENTITY_DRIFT" in drift.reason_codes
@@ -396,6 +423,24 @@ def test_sensitive_and_runtime_identity_drift_block():
     assert "RUNTIME_IDENTITY_DRIFT" in runtime.reason_codes
 
 
+def test_submission_binding_attempt_must_match_evaluation_attempt():
+    decision = _decision(_grant(), attempt_id="attempt-other")
+    assert "ATTEMPT_BINDING_MISMATCH" in decision.reason_codes
+
+
+def test_wall_clock_expiry_blocks_timestamp_backdating():
+    now = datetime.now(timezone.utc)
+    grant = _grant(
+        issued_at=now - timedelta(hours=2),
+        expires_at=now - timedelta(seconds=1),
+    )
+    decision = _decision(
+        grant,
+        evaluated_at=grant.expires_at - timedelta(seconds=1),
+    )
+    assert decision.reason_codes == ("GRANT_EXPIRED",)
+
+
 def test_legacy_task_stays_manual_and_post_submission_injection_is_rejected():
     grant = _grant()
     legacy = _decision(grant, submission_binding=None)
@@ -418,6 +463,8 @@ def test_submission_goal_and_contract_binding_mismatch_blocks():
         contract_hash=baseline.contract_hash,
         controller_revision="a" * 40,
         allowed_paths=("nexus/contracts",),
+        repository=grant.repository,
+        collaboration_base=grant.collaboration_base,
         goal_id="other-goal",
         grant_hash=grant.grant_hash,
     )
@@ -432,6 +479,48 @@ def test_submission_goal_and_contract_binding_mismatch_blocks():
 
     contract = _decision(grant, contract_hash="9" * 64)
     assert "CONTRACT_HASH_MISMATCH" in contract.reason_codes
+
+    repository_drift = AutonomySubmissionBinding.issue(
+        task_id=baseline.task_id,
+        initial_attempt_id=baseline.attempt_id,
+        action_request_hash="1" * 64,
+        contract_hash=baseline.contract_hash,
+        controller_revision="a" * 40,
+        allowed_paths=("nexus/contracts",),
+        repository=RepositoryIdentity(
+            repository_id="other/repository",
+            canonical_remote="https://github.com/other/repository.git",
+        ),
+        collaboration_base=grant.collaboration_base,
+        goal_id=grant.goal_id,
+        grant_hash=grant.grant_hash,
+    )
+    repository_decision = evaluate_autonomy_policy(
+        grant,
+        baseline.model_copy(update={"submission_binding": repository_drift}),
+    )
+    assert "SUBMISSION_REPOSITORY_IDENTITY_MISMATCH" in repository_decision.reason_codes
+
+    base_drift = AutonomySubmissionBinding.issue(
+        task_id=baseline.task_id,
+        initial_attempt_id=baseline.attempt_id,
+        action_request_hash="1" * 64,
+        contract_hash=baseline.contract_hash,
+        controller_revision="a" * 40,
+        allowed_paths=("nexus/contracts",),
+        repository=grant.repository,
+        collaboration_base=CollaborationBaseIdentity(
+            branch="main",
+            head_sha="b" * 40,
+        ),
+        goal_id=grant.goal_id,
+        grant_hash=grant.grant_hash,
+    )
+    base_decision = evaluate_autonomy_policy(
+        grant,
+        baseline.model_copy(update={"submission_binding": base_drift}),
+    )
+    assert "SUBMISSION_BASE_IDENTITY_MISMATCH" in base_decision.reason_codes
 
 
 def test_unknown_evaluator_field_and_candidate_attempt_mismatch_fail_closed():
@@ -456,12 +545,19 @@ def test_unknown_evaluator_field_and_candidate_attempt_mismatch_fail_closed():
             accepted_by="independent-reviewer",
             authority_kind=AcceptanceAuthorityKind.INDEPENDENT_REVIEWER,
             candidate=candidate,
+            candidate_receipt_hash=candidate.verified_receipt_hash,
         ),
     )
     assert "CANDIDATE_TASK_ATTEMPT_MISMATCH" in mismatch.reason_codes
 
 
-def _service_request(tmp_path, task_id: str, grant: AutonomyGoalGrant | None = None):
+def _service_request(
+    tmp_path,
+    task_id: str,
+    grant: AutonomyGoalGrant | None = None,
+    *,
+    execution_lane: str = "ISOLATED_TARGET",
+):
     request = {
         "task_id": task_id,
         "what": "exercise the shadow autonomy lineage",
@@ -476,7 +572,7 @@ def _service_request(tmp_path, task_id: str, grant: AutonomyGoalGrant | None = N
         "verifier_commands": ["python3 -c 'print(1)'"],
         "protected_contracts": [],
         "worker": "codex",
-        "execution_lane": "ISOLATED_TARGET",
+        "execution_lane": execution_lane,
     }
     if grant is not None:
         request["autonomy_goal_grant"] = grant.model_dump(mode="json")
@@ -519,14 +615,17 @@ def test_submit_binds_goal_grant_once_and_shadow_still_stops_for_human(tmp_path)
     assert state.get("integration_result_sha") is None
     assert state.get("merge_performed") is False
     assert state.get("push_performed") is False
+    decision = _decision(grant)
+    assert decision.authority_inputs_verified is False
+    assert decision.claim_ceiling == "SHADOW_CALLER_BOUND_EVIDENCE_ONLY"
     assert state["autonomy_goal_id"] == grant.goal_id
     assert state["autonomy_goal_grant_hash"] == grant.grant_hash
     assert state["autonomy_mode"] == "SHADOW"
-    binding = AutonomySubmissionBinding.model_validate(
-        state["autonomy_submission_binding"]
-    )
+    binding = AutonomySubmissionBinding.model_validate(state["autonomy_submission_binding"])
     assert binding.task_id == task_id
     assert binding.grant_hash == grant.grant_hash
+    assert binding.repository == grant.repository
+    assert binding.collaboration_base == grant.collaboration_base
 
     compact = service.get_task_snapshot(task_id)
     assert compact["autonomy"] == {
@@ -594,20 +693,25 @@ def test_tampered_persisted_submission_binding_projects_fail_closed(tmp_path):
         action_request_hash="1" * 64,
         contract_hash="2" * 64,
         controller_revision="a" * 40,
+        repository=grant.repository,
+        collaboration_base=grant.collaboration_base,
         allowed_paths=("nexus/contracts",),
         goal_id=grant.goal_id,
         grant_hash=grant.grant_hash,
     ).model_dump(mode="json")
     binding["contract_hash"] = "9" * 64
-    service._write_state("binding-tamper", {
-        "task_id": "binding-tamper",
-        "status": "PENDING_HUMAN_APPROVAL",
-        "promotion_status": "PENDING_HUMAN_APPROVAL",
-        "autonomy_goal_id": grant.goal_id,
-        "autonomy_goal_grant_hash": grant.grant_hash,
-        "autonomy_mode": "SHADOW",
-        "autonomy_submission_binding": binding,
-    })
+    service._write_state(
+        "binding-tamper",
+        {
+            "task_id": "binding-tamper",
+            "status": "PENDING_HUMAN_APPROVAL",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "autonomy_goal_id": grant.goal_id,
+            "autonomy_goal_grant_hash": grant.grant_hash,
+            "autonomy_mode": "SHADOW",
+            "autonomy_submission_binding": binding,
+        },
+    )
     before = service._state_path("binding-tamper").read_bytes()
     projected = service.get_task_snapshot("binding-tamper")["autonomy"]
     assert projected["eligible"] is False
@@ -628,6 +732,8 @@ def test_validly_hashed_binding_drift_projects_and_resubmits_fail_closed(tmp_pat
         action_request_hash="1" * 64,
         contract_hash="9" * 64,
         controller_revision="a" * 40,
+        repository=grant.repository,
+        collaboration_base=grant.collaboration_base,
         allowed_paths=("nexus/contracts/autonomy_goal.py",),
         goal_id=grant.goal_id,
         grant_hash=grant.grant_hash,
@@ -639,10 +745,12 @@ def test_validly_hashed_binding_drift_projects_and_resubmits_fail_closed(tmp_pat
         "contract_hash": "2" * 64,
         "controller_revision": "a" * 40,
         "contract": {"allowed_files": ["nexus/contracts/autonomy_goal.py"]},
-        "attempts": [{
-            "attempt_id": "attempt-1",
-            "action_request_hash": "1" * 64,
-        }],
+        "attempts": [
+            {
+                "attempt_id": "attempt-1",
+                "action_request_hash": "1" * 64,
+            }
+        ],
         "autonomy_goal_id": grant.goal_id,
         "autonomy_goal_grant_hash": grant.grant_hash,
         "autonomy_mode": "SHADOW",
@@ -674,9 +782,7 @@ def test_submission_rejects_expired_base_drift_and_out_of_scope_grants(tmp_path)
         service.submit_task(_service_request(tmp_path, "expired-submit", expired))
 
     base_drift = _fresh_service_grant(
-        collaboration_base=CollaborationBaseIdentity(
-            branch="main", head_sha="b" * 40
-        )
+        collaboration_base=CollaborationBaseIdentity(branch="main", head_sha="b" * 40)
     )
     with pytest.raises(ValueError, match="AUTONOMY_COLLABORATION_BASE_MISMATCH"):
         service.submit_task(_service_request(tmp_path, "base-drift", base_drift))
@@ -688,6 +794,31 @@ def test_submission_rejects_expired_base_drift_and_out_of_scope_grants(tmp_path)
         )
     )
     with pytest.raises(ValueError, match="AUTONOMY_TASK_SCOPE_EXCEEDED"):
+        service.submit_task(_service_request(tmp_path, "scope-drift", out_of_scope))
+
+
+def test_goal_grant_rejects_direct_canonical_submission(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.resolve_execution_lane",
+        lambda request, active_mutation_tasks=0: {
+            "execution_lane": "DIRECT_CANONICAL",
+            "eligible": True,
+            "blockers": [],
+            "next_action": "edit_canonical_checkout",
+        },
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    with pytest.raises(ValueError, match="AUTONOMY_DIRECT_CANONICAL_UNSUPPORTED"):
         service.submit_task(
-            _service_request(tmp_path, "scope-drift", out_of_scope)
+            _service_request(
+                tmp_path,
+                "direct-autonomy-task",
+                _fresh_service_grant(),
+                execution_lane="DIRECT_CANONICAL",
+            )
         )
+    assert service.get_task("direct-autonomy-task") is None
