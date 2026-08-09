@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Mapping, Optional
 
 from nexus.executors.codex_executor import CodexCliExecutor
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
@@ -19,11 +19,13 @@ class SelfHostedDevelopmentController:
     def prepare_task(
         self,
         contract: SelfHostedTaskContract,
+        *,
+        task_states: Optional[Mapping[str, dict]] = None,
     ) -> TargetWorktreeLease:
         if not isinstance(contract, SelfHostedTaskContract):
             raise TypeError("contract must be a SelfHostedTaskContract")
         self.worktree_manager.verify_controller_unchanged(contract)
-        return self.worktree_manager.create_lease(contract)
+        return self.worktree_manager.create_lease(contract, task_states=task_states)
 
     def collect_candidate(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -1614,7 +1615,17 @@ class SelfHostedTaskService:
         if status == "SUBMITTED":
             provider, preflight = self._select_initial_provider(contract)
             worktree_started = time.perf_counter()
-            lease = controller.prepare_task(contract)
+            # Snapshot durable ownership immediately before leasing.  The
+            # manager uses this to distinguish passive retained evidence from
+            # a live mutation Target; missing/unknown ownership fails closed.
+            task_states = self._workspace_task_states()
+            prepare_task = controller.prepare_task
+            if "task_states" in inspect.signature(prepare_task).parameters:
+                lease = prepare_task(contract, task_states=task_states)
+            else:
+                # Keep narrow test/double compatibility; the production
+                # controller always accepts and forwards the snapshot.
+                lease = prepare_task(contract)
             worktree_time_ms = max(0, int((time.perf_counter() - worktree_started) * 1000))
             update(
                 "TARGET_LEASED",
