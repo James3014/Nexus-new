@@ -753,7 +753,8 @@ def _approved_closure_service(tmp_path: Path):
     service._write_state("closure-bind", {
         "task_id": "closure-bind", "attempt_id": "attempt-1", "status": "APPROVED", "promotion_status": "APPROVED",
         "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
-        "contract_kind": "TRACKED_TASK_CARD", "task_card_hash": "c" * 64, "candidate_ref": "refs/nexus-candidate/closure-bind",
+        "contract_kind": "TRACKED_TASK_CARD", "task_card_hash": "c" * 64,
+        "candidate_ref": f"refs/nexus-candidates/closure-bind/{candidate}",
         "controller_revision": base, "promotion_packet": packet,
         "verified_receipt": verified_receipt,
         "approved_binding": {**packet, "approval_grant": {"approval_scope": "ALLOW_ACTION_ONCE", "consumed_at": "2026-08-08T00:00:00+00:00"}},
@@ -1080,6 +1081,123 @@ def test_failed_pre_apply_closure_rejects_failed_approval_reuse_zero_write(
     assert json.dumps(
         service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")
     ) == before
+
+
+def test_confirmed_pre_apply_candidate_can_be_rejected_once_and_replayed_idempotently(
+    tmp_path: Path,
+):
+    service, _, base, _, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path)
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", external_acceptance=acceptance, approval=approval,
+        runtime_identity=runtime, expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    _mark_closure_projected_pre_apply_failed(service, base)
+    failed = service.reconcile_task("closure-bind") or {}
+    failed.update({"cleanup_decision": "ALREADY_REMOVED", "cleanup_performed": True})
+    service._write_state("closure-bind", failed)
+
+    rejected = service.dispose_candidate("closure-bind", disposition="REJECTED")
+    assert rejected["status"] == "REJECTED"
+    assert rejected["promotion_status"] == "REJECTED"
+    assert rejected["candidate_history"][-1]["final_disposition"] == "REJECTED"
+    assert rejected["candidate_history"][-1]["pre_apply_disposition_basis"]["merge_performed"] is False
+
+    replay = service.dispose_candidate("closure-bind", disposition="REJECTED")
+    assert replay["duplicate"] is True
+    assert len((service._read_state("closure-bind") or {}).get("candidate_history") or []) == 1
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda state: state.update({"merge_performed": True}),
+        lambda state: state.update({"integration_receipt": {"post_apply_verified": True}}),
+        lambda state: state.update({"cleanup_performed": False}),
+        lambda state: state["promotion_packet"].update({"candidate_state_hash": "f" * 64}),
+        lambda state: state.update({"integration_approval_grant": None, "approved_binding": {**state["approved_binding"], "approval_grant": None}}),
+        lambda state: state["integration_closure_binding"].update({"candidate_commit_sha": "f" * 40}),
+        lambda state: state["external_acceptance"].update({"candidate_commit": "f" * 40}),
+        lambda state: state["integration_reconciliation_history"][-1].update({"projection_sha256": "f" * 64}),
+    ],
+)
+def test_pre_apply_candidate_rejection_requires_exact_no_apply_evidence(
+    tmp_path: Path, tamper,
+):
+    service, _, base, _, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path)
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", external_acceptance=acceptance, approval=approval,
+        runtime_identity=runtime, expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    failed = _mark_closure_projected_pre_apply_failed(service, base)
+    failed = service.reconcile_task("closure-bind") or failed
+    failed.update({"cleanup_decision": "REMOVED", "cleanup_performed": True})
+    tamper(failed)
+    service._write_state("closure-bind", failed)
+    with pytest.raises(RuntimeError, match="PRE_APPLY_REJECTION_EVIDENCE_REQUIRED"):
+        service.dispose_candidate("closure-bind", disposition="REJECTED")
+
+
+def test_pre_apply_candidate_cannot_be_superseded_by_new_disposition(
+    tmp_path: Path,
+):
+    service, _, base, _, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path)
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind", external_acceptance=acceptance, approval=approval,
+        runtime_identity=runtime, expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    failed = _mark_closure_pre_apply_failed(service, base)
+    failed.update({"cleanup_decision": "REMOVED", "cleanup_performed": True})
+    service._write_state("closure-bind", failed)
+    with pytest.raises(RuntimeError, match="candidate is not pending disposition"):
+        service.dispose_candidate(
+            "closure-bind", disposition="SUPERSEDED", superseded_by="next-task"
+        )
+
+
+def test_forged_minimal_pre_apply_state_cannot_be_rejected(tmp_path: Path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    service._write_state("forged", {
+        "task_id": "forged", "attempt_id": "attempt-1",
+        "status": "INTEGRATION_FAILED_PRE_APPLY",
+        "promotion_status": "INTEGRATION_FAILED_PRE_APPLY",
+        "terminal_status": "INTEGRATION_FAILED_PRE_APPLY",
+        "final_disposition": "INTEGRATION_FAILED_PRE_APPLY",
+        "integration_status": "NOT_APPLIED", "merge_performed": False,
+        "integration_result_sha": None, "integration_receipt": None,
+        "cleanup_decision": "REMOVED", "cleanup_performed": True,
+        "integration_execution": {
+            "stage": "PRE_APPLY", "merge_performed": False,
+            "post_apply_verified": False, "branch_head_before": "a",
+            "branch_head_after": "a",
+        },
+        "promotion_packet": {
+            "candidate_commit_sha": "a" * 40,
+            "candidate_tree_sha": "b" * 40,
+            "candidate_state_hash": "c" * 64,
+            "verified_receipt_hash": "d" * 64,
+        },
+        "candidate_ref": "refs/nexus-candidates/forged/" + "a" * 40,
+        "approved_binding": {
+            "candidate_commit_sha": "a" * 40,
+            "candidate_tree_sha": "b" * 40,
+            "candidate_state_hash": "c" * 64,
+            "verified_receipt_hash": "d" * 64,
+            "approval_grant": {"consumed_at": "now"},
+        },
+    })
+    with pytest.raises(RuntimeError, match="PRE_APPLY_REJECTION_EVIDENCE_REQUIRED"):
+        service.dispose_candidate("forged", disposition="REJECTED")
 
 
 @pytest.mark.parametrize(

@@ -4000,6 +4000,122 @@ class SelfHostedTaskService:
         result["retry"] = retry_meta
         return result
 
+    @staticmethod
+    def _pre_apply_rejection_evidence(
+        state: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Return exact evidence permitting rejection of a stale pre-apply Candidate.
+
+        A failed pre-apply integration is not a normal pending Candidate.  It
+        may be rejected only after the durable record proves that no apply,
+        result, or integration receipt exists, the owned Target was removed,
+        and every Candidate identity remains bound across the packet and the
+        consumed approval.  This helper is deliberately narrow: it never
+        authorizes SUPERSEDED or any post-apply disposition.
+        """
+        if (
+            state.get("status") != "INTEGRATION_FAILED_PRE_APPLY"
+            or state.get("promotion_status") != "INTEGRATION_FAILED_PRE_APPLY"
+            or state.get("terminal_status") != "INTEGRATION_FAILED_PRE_APPLY"
+            or state.get("final_disposition") != "INTEGRATION_FAILED_PRE_APPLY"
+            or state.get("integration_status") != "NOT_APPLIED"
+            or state.get("merge_performed") is not False
+            or state.get("integration_result_sha")
+            or state.get("integration_receipt")
+            or state.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            or state.get("cleanup_performed") is not True
+            or state.get("reconciliation_status") != "RECONCILED"
+            or state.get("reconciliation_decision") != "RESTORE_NATIVE_PRE_APPLY_STATUS"
+        ):
+            return None
+        reconciliation_history = state.get("integration_reconciliation_history")
+        status_history = state.get("status_history")
+        if (
+            not isinstance(reconciliation_history, list)
+            or not reconciliation_history
+            or not isinstance(reconciliation_history[-1], Mapping)
+            or not isinstance(status_history, list)
+            or not status_history
+            or not isinstance(status_history[-1], Mapping)
+            or status_history[-1].get("status") != "INTEGRATION_FAILED_PRE_APPLY"
+            or status_history[-1].get("reason") != "projected_pre_apply_reconciled"
+            or not str(state.get("integration_error") or "").strip()
+        ):
+            return None
+        # Reuse the strict legacy projection validator as the evidence oracle:
+        # a reconciled native state must still prove the exact projection that
+        # was restored, including closure, acceptance, preview, authorization,
+        # consumed grant, history, and execution bindings.
+        projected = dict(state)
+        projected_history = list(status_history)
+        projected_history.pop()
+        projected.update({
+            "status": "FINAL_BLOCK",
+            "promotion_status": "NOT_CREATED",
+            "status_history": projected_history,
+        })
+        projection = SelfHostedTaskService._projected_pre_apply_recovery_evidence(projected)
+        if projection is None:
+            return None
+        recorded = reconciliation_history[-1]
+        if (
+            recorded.get("decision") != "RESTORE_NATIVE_PRE_APPLY_STATUS"
+            or recorded.get("projection_sha256") != projection.get("projection_sha256")
+            or any(recorded.get(key) != value for key, value in projection.items())
+        ):
+            return None
+        execution = state.get("integration_execution")
+        packet = state.get("promotion_packet")
+        approved = state.get("approved_binding")
+        if not all(isinstance(value, Mapping) and value for value in (execution, packet, approved)):
+            return None
+        if (
+            execution.get("stage") != "PRE_APPLY"
+            or execution.get("merge_performed") is not False
+            or execution.get("post_apply_verified") is not False
+            or execution.get("branch_head_before") != execution.get("branch_head_after")
+        ):
+            return None
+        identity = {
+            "task_id": str(state.get("task_id") or ""),
+            "attempt_id": str(state.get("attempt_id") or ""),
+            "candidate_commit_sha": str(packet.get("candidate_commit_sha") or ""),
+            "candidate_tree_sha": str(packet.get("candidate_tree_sha") or ""),
+            "candidate_state_hash": str(packet.get("candidate_state_hash") or ""),
+            "verified_receipt_hash": str(packet.get("verified_receipt_hash") or ""),
+        }
+        candidate_ref = str(state.get("candidate_ref") or "")
+        if (
+            not all(identity.values())
+            or not re.fullmatch(
+                rf"refs/nexus-candidates/{re.escape(identity['task_id'])}/{re.escape(identity['candidate_commit_sha'])}",
+                candidate_ref,
+            )
+        ):
+            return None
+        for key in (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+        ):
+            if str(approved.get(key) or "") != identity[key]:
+                return None
+        if (
+            str(approved.get("bound_task_id") or identity["task_id"]) != identity["task_id"]
+            or str(approved.get("bound_attempt_id") or identity["attempt_id"]) != identity["attempt_id"]
+        ):
+            return None
+        return {
+            **identity,
+            "candidate_ref": candidate_ref,
+            "cleanup_decision": str(state["cleanup_decision"]),
+            "cleanup_performed": True,
+            "stage": "PRE_APPLY",
+            "merge_performed": False,
+            "integration_status": "NOT_APPLIED",
+        }
+
     def dispose_candidate(
         self,
         task_id: str,
@@ -4015,8 +4131,18 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         if str(state.get("task_id") or "") != task_id:
             raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
+        if disposition == "REJECTED" and state.get("status") == "REJECTED":
+            history = state.get("candidate_history") or []
+            if history and isinstance(history[-1], Mapping) and history[-1].get("pre_apply_disposition_basis"):
+                return {**state, "duplicate": True}
+        pre_apply_basis = None
+        if disposition == "REJECTED" and state.get("status") == "INTEGRATION_FAILED_PRE_APPLY":
+            pre_apply_basis = self._pre_apply_rejection_evidence(state)
+            if pre_apply_basis is None:
+                raise RuntimeError("PRE_APPLY_REJECTION_EVIDENCE_REQUIRED")
         if state.get("promotion_status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
-            raise RuntimeError("candidate is not pending disposition")
+            if pre_apply_basis is None:
+                raise RuntimeError("candidate is not pending disposition")
         candidate_record = {
             "candidate_commit": (state.get("promotion_packet") or {}).get("candidate_commit_sha"),
             "candidate_ref": state.get("candidate_ref"),
@@ -4027,6 +4153,8 @@ class SelfHostedTaskService:
             "supersedes": state.get("supersedes"),
             "superseded_by": superseded_by if disposition == "SUPERSEDED" else None,
         }
+        if pre_apply_basis is not None:
+            candidate_record["pre_apply_disposition_basis"] = pre_apply_basis
         return self._checkpoint(task_id, disposition, {
             "promotion_status": disposition,
             "candidate_status": disposition,
