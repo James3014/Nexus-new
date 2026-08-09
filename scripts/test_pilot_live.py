@@ -1,22 +1,28 @@
-import requests
-import json
-import time
 import os
+import time
+from pathlib import Path
+
+import requests
 
 BASE_URL = "http://127.0.0.1:5001"
-PILOT_KEY = "<REDACTED_GCP_API_KEY>"
+PILOT_KEY_ENV = "NEXUS_PILOT_API_KEY"
+
 
 def test_pilot_live():
-    print(f"// Nexus-Pilot Test: Initiating Live Test for [Tenant_Friend]...")
+    pilot_key = os.environ.get(PILOT_KEY_ENV, "").strip()
+    if not pilot_key:
+        raise RuntimeError(f"{PILOT_KEY_ENV} is required for the live pilot test")
+
+    print("// Nexus-Pilot Test: Initiating Live Test for [Tenant_Friend]...")
     
     # 1. Enqueue a governance task with the live key
     headers = {"X-Tenant-ID": "Tenant_Friend"}
     payload = {
-        "api_key": PILOT_KEY,
+        "api_key": pilot_key,
         "repo": "https://github.com/nexus-friend/pilot-repo",
         "action": {
             "type": "create_file",
-            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/Tenant_Friend/pilot_proof.txt"),
+            "path": str(Path(__file__).resolve().parents[1] / "workspaces/Tenant_Friend/pilot_proof.txt"),
             "content": "Nexus OS v17: Live key injection confirmed."
         }
     }
@@ -31,7 +37,7 @@ def test_pilot_live():
         
         # 2. Verify Output & Sensing
         time.sleep(5)
-        proof_path = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/Tenant_Friend/pilot_proof.txt")
+        proof_path = str(Path(__file__).resolve().parents[1] / "workspaces/Tenant_Friend/pilot_proof.txt")
         if os.path.exists(proof_path):
             with open(proof_path, "r") as f:
                 content = f.read()

@@ -66,8 +66,28 @@ str(REPO_ROOT)/
 
 # Fine-tuned 3B student adapter and weight artifacts
 training/adapters/
+training/**/*.safetensors
 scratch/qwen3b_s2t_adapter.tar.gz
 .nexus/training/adapters/
+
+# Machine-local credentials and generated TLS material
+vault/tenants/*/*.key
+nexus_swarm/certs/*.crt
+nexus_swarm/certs/*.csr
+nexus_swarm/certs/*.key
+nexus_swarm/certs/*.srl
+nexus-swarm-v22-prod/certs/*.crt
+nexus-swarm-v22-prod/certs/*.csr
+nexus-swarm-v22-prod/certs/*.key
+nexus-swarm-v22-prod/certs/*.srl
+
+# Local executables, build outputs, and historical evidence packs
+/codebase-memory-mcp
+/nexus_swarm/manager_exec
+/nexus_swarm/swarm-manager
+/packages/swarm/nexus-swarm
+/packages/swarm/smoke-client
+/nexus_evidence_pack_*/
 
 # Agent workspace / temp files
 .tmp/
