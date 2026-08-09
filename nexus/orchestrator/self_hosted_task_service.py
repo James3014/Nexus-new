@@ -2276,6 +2276,211 @@ class SelfHostedTaskService:
             attempt_id=state.get("attempt_id"),
         )
 
+    @staticmethod
+    def _projected_pre_apply_recovery_evidence(
+        state: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Return bounded evidence for an exact lost pre-apply projection.
+
+        Older reconciliation projected a non-applied integration failure to
+        FINAL_BLOCK/NOT_CREATED while retaining the original PRE_APPLY packet.
+        Only that exact, fully bound projection may be restored to the native
+        pre-apply status for a fresh closure rebind.
+        """
+        if (
+            state.get("status") != "FINAL_BLOCK"
+            or state.get("promotion_status") != "NOT_CREATED"
+            or state.get("terminal_status") != "INTEGRATION_FAILED_PRE_APPLY"
+            or state.get("final_disposition") != "INTEGRATION_FAILED_PRE_APPLY"
+            or state.get("integration_status") != "NOT_APPLIED"
+            or state.get("merge_performed")
+            or state.get("integration_result_sha")
+            or state.get("integration_receipt")
+        ):
+            return None
+        execution = state.get("integration_execution")
+        closure = state.get("integration_closure_binding")
+        grant = state.get("integration_approval_grant")
+        acceptance = state.get("external_acceptance")
+        preview = state.get("integration_preview")
+        authorization = state.get("integration_authorization")
+        packet = state.get("promotion_packet")
+        approved = state.get("approved_binding")
+        if not all(
+            isinstance(value, Mapping) and bool(value)
+            for value in (
+                execution,
+                closure,
+                grant,
+                acceptance,
+                preview,
+                authorization,
+                packet,
+                approved,
+            )
+        ):
+            return None
+        if (
+            execution.get("stage") != "PRE_APPLY"
+            or execution.get("merge_performed") is not False
+            or execution.get("post_apply_verified") is not False
+            or execution.get("branch_head_before")
+            != execution.get("branch_head_after")
+            or not closure.get("binding_hash")
+            or not grant.get("approval_id")
+            or not grant.get("consumed_at")
+        ):
+            return None
+        identity = {
+            "task_id": str(state.get("task_id") or ""),
+            "attempt_id": str(state.get("attempt_id") or ""),
+            "candidate_commit_sha": str(packet.get("candidate_commit_sha") or ""),
+            "candidate_tree_sha": str(packet.get("candidate_tree_sha") or ""),
+            "candidate_state_hash": str(packet.get("candidate_state_hash") or ""),
+            "verified_receipt_hash": str(packet.get("verified_receipt_hash") or ""),
+        }
+        if not identity["task_id"] or not identity["attempt_id"] or any(
+            not identity[key]
+            for key in (
+                "candidate_commit_sha",
+                "candidate_tree_sha",
+                "candidate_state_hash",
+                "verified_receipt_hash",
+            )
+        ):
+            return None
+        status_history = state.get("status_history")
+        if (
+            not isinstance(status_history, list)
+            or len(status_history) < 2
+            or not all(isinstance(item, Mapping) for item in status_history[-2:])
+            or [item.get("status") for item in status_history[-2:]]
+            != ["INTEGRATION_FAILED_PRE_APPLY", "FINAL_BLOCK"]
+            or not str(state.get("integration_error") or "").strip()
+        ):
+            return None
+        for key, expected in identity.items():
+            if key in closure and str(closure.get(key) or "") != expected:
+                return None
+            if key.startswith("candidate_") or key == "verified_receipt_hash":
+                if str(approved.get(key) or "") != expected:
+                    return None
+        if str(execution.get("candidate_commit_sha") or identity["candidate_commit_sha"]) != identity["candidate_commit_sha"]:
+            return None
+        acceptance_hash = str(closure.get("acceptance_receipt_hash") or "")
+        authorization_hash = str(closure.get("authorization_hash") or "")
+        if (
+            str(grant.get("bound_task_id") or "") != identity["task_id"]
+            or str(grant.get("bound_attempt_id") or "") != identity["attempt_id"]
+            or str(grant.get("bound_action_type") or "")
+            != LifecycleActionType.CANDIDATE_INTEGRATE.value
+            or str(acceptance.get("task_id") or "") != identity["task_id"]
+            or str(acceptance.get("attempt_id") or "") != identity["attempt_id"]
+            or str(acceptance.get("candidate_commit") or "")
+            != identity["candidate_commit_sha"]
+            or acceptance.get("passed") is not True
+            or str(acceptance.get("receipt_hash") or "") != acceptance_hash
+            or str(preview.get("task_id") or "") != identity["task_id"]
+            or str(preview.get("candidate_commit") or "")
+            != identity["candidate_commit_sha"]
+            or str(preview.get("acceptance_receipt_hash") or "") != acceptance_hash
+            or str(authorization.get("task_id") or "") != identity["task_id"]
+            or str(authorization.get("attempt_id") or "") != identity["attempt_id"]
+            or str(authorization.get("candidate_commit") or "")
+            != identity["candidate_commit_sha"]
+            or str(authorization.get("candidate_tree_sha") or "")
+            != identity["candidate_tree_sha"]
+            or str(authorization.get("candidate_state_hash") or "")
+            != identity["candidate_state_hash"]
+            or str(authorization.get("candidate_receipt_hash") or "")
+            != identity["verified_receipt_hash"]
+            or str(authorization.get("acceptance_receipt_hash") or "")
+            != acceptance_hash
+            or str(authorization.get("authorization_hash") or "")
+            != authorization_hash
+        ):
+            return None
+        for key, expected in {
+            "candidate_commit_sha": identity["candidate_commit_sha"],
+            "candidate_tree_sha": identity["candidate_tree_sha"],
+            "candidate_state_hash": identity["candidate_state_hash"],
+            "verified_receipt_hash": identity["verified_receipt_hash"],
+            "acceptance_receipt_hash": acceptance_hash,
+        }.items():
+            if str(grant.get(key) or "") != expected:
+                return None
+        projection = {
+            **identity,
+            "closure_binding_hash": str(closure.get("binding_hash")),
+            "integration_approval_id": str(grant.get("approval_id")),
+            "integration_execution_sha256": hashlib.sha256(
+                json.dumps(
+                    _jsonable(dict(execution)),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode()
+            ).hexdigest(),
+        }
+        projection["projection_sha256"] = hashlib.sha256(
+            json.dumps(
+                projection,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode()
+        ).hexdigest()
+        return projection
+
+    def _reconcile_projected_pre_apply_failure(
+        self,
+        task_id: str,
+        evidence: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        now = _utc_now()
+
+        def mutate(current: dict[str, Any]) -> None:
+            current_evidence = self._projected_pre_apply_recovery_evidence(current)
+            if current_evidence is None or dict(current_evidence) != dict(evidence):
+                raise RuntimeError("PRE_APPLY_RECONCILIATION_CONCURRENCY_DRIFT")
+            history = current.get("integration_reconciliation_history")
+            if "integration_reconciliation_history" in current and not isinstance(history, list):
+                raise RuntimeError("PRE_APPLY_RECONCILIATION_HISTORY_MALFORMED")
+            if history is None:
+                history = []
+                current["integration_reconciliation_history"] = history
+            if history and history[-1].get("projection_sha256") == evidence.get("projection_sha256"):
+                return
+            history.append({
+                "schema": "nexus.pre_apply_reconciliation.v1",
+                **_jsonable(dict(evidence)),
+                "reconciled_at": now,
+                "decision": "RESTORE_NATIVE_PRE_APPLY_STATUS",
+            })
+            current["status"] = "INTEGRATION_FAILED_PRE_APPLY"
+            current["promotion_status"] = "INTEGRATION_FAILED_PRE_APPLY"
+            current["terminal_status"] = "INTEGRATION_FAILED_PRE_APPLY"
+            current["final_disposition"] = "INTEGRATION_FAILED_PRE_APPLY"
+            current["reconciliation_status"] = "RECONCILED"
+            current["reconciliation_decision"] = "RESTORE_NATIVE_PRE_APPLY_STATUS"
+            current["state_retention_status"] = "ACTIVE"
+            current["archive_eligible"] = False
+            current["cleanup_eligible"] = False
+            status_history = current.get("status_history")
+            if not isinstance(status_history, list):
+                raise RuntimeError("PRE_APPLY_RECONCILIATION_STATUS_HISTORY_MALFORMED")
+            status_history.append({
+                "at": now,
+                "status": "INTEGRATION_FAILED_PRE_APPLY",
+                "reason": "projected_pre_apply_reconciled",
+            })
+            current["updated_at"] = now
+
+        persisted = self._mutate_state(task_id, mutate)
+        if persisted is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        return persisted
+
     def reconcile_task(self, task_id: str) -> Optional[dict[str, Any]]:
         state = self._read_state(task_id)
         if state is None:
@@ -2286,6 +2491,18 @@ class SelfHostedTaskService:
             return self._reconcile_direct_failure(task_id)
         if state.get("status") in {"DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
             return self._reconcile_direct_action(task_id)
+        projected_pre_apply = self._projected_pre_apply_recovery_evidence(state)
+        if projected_pre_apply is not None:
+            return self._reconcile_projected_pre_apply_failure(
+                task_id,
+                projected_pre_apply,
+            )
+        if (
+            state.get("status") == "INTEGRATION_FAILED_PRE_APPLY"
+            and state.get("promotion_status") == "INTEGRATION_FAILED_PRE_APPLY"
+            and state.get("terminal_status") == "INTEGRATION_FAILED_PRE_APPLY"
+        ):
+            return state
         if state.get("status") in TERMINAL_STATUSES:
             return state
         if state.get("status") in PENDING_CANDIDATE_STATUSES:
@@ -5340,6 +5557,7 @@ class SelfHostedTaskService:
             if (
                 state.get("merge_performed")
                 or state.get("integration_result_sha")
+                or state.get("integration_receipt")
                 or not isinstance(failed_execution, Mapping)
                 or failed_execution.get("stage") != "PRE_APPLY"
                 or failed_execution.get("merge_performed") is not False

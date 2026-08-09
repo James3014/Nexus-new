@@ -894,6 +894,25 @@ def _mark_closure_pre_apply_failed(
     return state
 
 
+def _mark_closure_projected_pre_apply_failed(
+    service: SelfHostedTaskService,
+    base: str,
+) -> dict[str, object]:
+    state = _mark_closure_pre_apply_failed(service, base)
+    state.update({
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "terminal_status": "INTEGRATION_FAILED_PRE_APPLY",
+        "final_disposition": "INTEGRATION_FAILED_PRE_APPLY",
+        "status_history": [
+            *list(state.get("status_history") or []),
+            {"status": "FINAL_BLOCK", "reason": "lost_worker_projection"},
+        ],
+    })
+    service._write_state("closure-bind", state)
+    return state
+
+
 def test_failed_pre_apply_closure_rebind_preserves_append_only_evidence(
     tmp_path: Path,
 ):
@@ -951,6 +970,84 @@ def test_failed_pre_apply_closure_rebind_preserves_append_only_evidence(
     assert stored["integration_closure_binding"]["verifier_manifest_sha256"] == manifest_hash
 
 
+def test_projected_pre_apply_failure_rebind_restores_ready_and_preserves_evidence(
+    tmp_path: Path,
+):
+    service, _, base, _, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path)
+    )
+    first = service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    first_hash = first["closure_binding"]["binding_hash"]
+    _mark_closure_projected_pre_apply_failed(service, base)
+    fresh = {
+        **approval,
+        "approval_id": "integrate-after-projected-pre-apply-failure",
+        "issued_at": "2026-08-08T00:07:00+00:00",
+    }
+
+    with pytest.raises(RuntimeError, match="CLOSURE_APPROVED_CANDIDATE_REQUIRED"):
+        service.bind_candidate_integration_closure(
+            "closure-bind",
+            external_acceptance=acceptance,
+            approval=fresh,
+            runtime_identity=runtime,
+            expected_canonical_head=base,
+            integration_branch="nexus/integration/canary",
+        )
+    reconciled = service.reconcile_task("closure-bind") or {}
+    assert reconciled["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+    assert reconciled["promotion_status"] == "INTEGRATION_FAILED_PRE_APPLY"
+    assert reconciled["integration_reconciliation_history"][-1]["decision"] == (
+        "RESTORE_NATIVE_PRE_APPLY_STATUS"
+    )
+    before_replay = json.dumps(
+        service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")
+    )
+    replay = service.reconcile_task("closure-bind") or {}
+    assert replay["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+    assert json.dumps(
+        service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")
+    ) == before_replay
+
+    rebound = service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=fresh,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    stored = service._read_state("closure-bind") or {}
+
+    assert rebound["integration_performed"] is False
+    assert stored["status"] == "APPROVED"
+    assert stored["promotion_status"] == "APPROVED"
+    assert stored["terminal_status"] == "APPROVED"
+    assert stored["integration_status"] == "REBIND_READY"
+    assert stored["integration_execution"] is None
+    assert stored["merge_performed"] is False
+    assert stored["integration_result_sha"] is None
+    assert stored["integration_closure_history"][-1]["binding_hash"] == first_hash
+    failure = stored["integration_failure_history"][-1]
+    assert failure["status"] == "INTEGRATION_FAILED_PRE_APPLY"
+    assert failure["closure_binding_hash"] == first_hash
+    assert failure["approval_id"] == approval["approval_id"]
+    assert failure["integration_execution"]["stage"] == "PRE_APPLY"
+    assert stored["integration_approval_grant"]["approval_id"] == fresh["approval_id"]
+    assert stored["status_history"][-1] == {
+        "at": stored["status_history"][-1]["at"],
+        "status": "APPROVED",
+        "reason": "pre_apply_closure_rebind",
+    }
+
+
 def test_failed_pre_apply_closure_rejects_failed_approval_reuse_zero_write(
     tmp_path: Path,
 ):
@@ -990,6 +1087,7 @@ def test_failed_pre_apply_closure_rejects_failed_approval_reuse_zero_write(
     [
         lambda state: state.update(merge_performed=True),
         lambda state: state.update(integration_result_sha="f" * 40),
+        lambda state: state.update(integration_receipt={"status": "applied"}),
         lambda state: state["integration_execution"].update(
             stage="POST_APPLY_VERIFICATION"
         ),
@@ -1038,6 +1136,58 @@ def test_closure_recovery_rejects_non_pre_apply_state_zero_write(
             expected_canonical_head=base,
             integration_branch="nexus/integration/canary",
         )
+
+    assert json.dumps(
+        service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")
+    ) == before
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda state: state.update(terminal_status="FINAL_BLOCK"),
+        lambda state: state.update(final_disposition="FINAL_BLOCK"),
+        lambda state: state.update(integration_status="APPLIED"),
+        lambda state: state.update(merge_performed=True),
+        lambda state: state.update(integration_result_sha="f" * 40),
+        lambda state: state.update(integration_receipt={"status": "applied"}),
+        lambda state: state["integration_execution"].update(post_apply_verified=True),
+        lambda state: state["integration_execution"].update(stage="POST_APPLY_VERIFICATION"),
+        lambda state: state["integration_execution"].update(branch_head_after="f" * 40),
+        lambda state: state.update(status_history=state["status_history"][:-1]),
+        lambda state: state["external_acceptance"].update(task_id="other-task"),
+        lambda state: state["integration_approval_grant"].update(
+            bound_attempt_id="other-attempt"
+        ),
+        lambda state: state["integration_authorization"].update(
+            candidate_commit="f" * 40
+        ),
+    ],
+)
+def test_projected_pre_apply_recovery_rejects_drift_zero_write(
+    tmp_path: Path,
+    tamper,
+):
+    service, _, base, _, acceptance, approval, runtime = (
+        _approved_closure_service(tmp_path)
+    )
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = _mark_closure_projected_pre_apply_failed(service, base)
+    tamper(state)
+    service._write_state("closure-bind", state)
+    before = json.dumps(
+        service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")
+    )
+    reconciled = service.reconcile_task("closure-bind") or {}
+    assert reconciled["status"] == state["status"]
+    assert "integration_reconciliation_history" not in reconciled
 
     assert json.dumps(
         service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")
