@@ -12,6 +12,7 @@ from nexus.contracts.root_receipt import (
     build_world_c_verifier_projection,
     validate_root_receipt,
 )
+from nexus.services.local_heal import pipeline_isolation
 from nexus.services.local_heal.context import GovernanceContext, HealContext, OperationalContext
 from nexus.services.local_heal.interface import LocalizedFile, PhaseResult, RepairPlan
 from nexus.services.local_heal.pipeline_isolation import prepare_world_c_workspace
@@ -139,6 +140,7 @@ def test_world_c_workspace_rejects_ephemeral_root_without_allowance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", raising=False)
+    monkeypatch.setattr(pipeline_isolation, "is_ephemeral_path", lambda _path: True)
 
     with pytest.raises(ValueError, match="must not be ephemeral OS temp"):
         prepare_world_c_workspace(tmp_path, "ephemeral-denied", target_file="target.py")

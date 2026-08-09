@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: completed
+status: active
 campaign_id: github-issue-16-verified-repair-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/16
 ordered_cards:
@@ -11,8 +11,9 @@ ordered_cards:
   - 04-world-c-adequacy-projection.md
   - 05-risk-triggered-mutation-assurance.md
   - 06-false-green-verified-repair.md
-current_frontier: null
-frontier_status: COMPLETED
+  - 07-ephemeral-source-root-remediation.md
+current_frontier: 07-ephemeral-source-root-remediation.md
+frontier_status: ACTIVE
 completed_cards:
   - 01-physical-reproduction-provenance.md
   - 02-frozen-same-oracle.md
