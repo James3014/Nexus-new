@@ -13,6 +13,7 @@ from typing import Any, Tuple
 
 class SyntaxValidator:
     """🔍 SyntaxValidator: 靜態 Python 語法驗證器，實踐 Fail-Fast 原則"""
+
     @staticmethod
     def validate_syntax(code: str) -> Tuple[bool, str | None]:
         try:
@@ -25,7 +26,9 @@ class SyntaxValidator:
 
 class ReproductionRunner:
     """🧪 ReproductionRunner: 負責建立物理失敗證據 (Nexus v2.9 Hardened)"""
+
     _FAILURE_RECORD_ENV = "NEXUS_REPRO_FAILURE_RECORD_PATH"
+
     def __init__(
         self,
         repo_dir: Path,
@@ -47,10 +50,14 @@ class ReproductionRunner:
     def workspace_identity(self) -> tuple[str, bool]:
         """Bind source identity to Git HEAD and tamper-sensitive workspace state."""
         try:
+
             def git(*args: str) -> str:
                 result = subprocess.run(
-                    ["git", *args], cwd=str(self.repo_dir), capture_output=True,
-                    text=True, check=True,
+                    ["git", *args],
+                    cwd=str(self.repo_dir),
+                    capture_output=True,
+                    text=True,
+                    check=True,
                 )
                 return result.stdout
 
@@ -72,7 +79,9 @@ class ReproductionRunner:
     @staticmethod
     def clean_repro_script(script: str) -> str:
         script = script.strip()
-        fenced = re.search(r"```(?:python|py)?\s*\n(.*?)\n\s*```", script, re.DOTALL | re.IGNORECASE)
+        fenced = re.search(
+            r"```(?:python|py)?\s*\n(.*?)\n\s*```", script, re.DOTALL | re.IGNORECASE
+        )
         if fenced:
             script = fenced.group(1)
         script = re.sub(r"^\s*```(?:python|py)?\s*\n?", "", script, flags=re.IGNORECASE)
@@ -84,7 +93,9 @@ class ReproductionRunner:
         lowered = script.lower()
         if "<<<<<<<" in script or "search:" in lowered or "replace:" in lowered:
             return False
-        if not bool(re.search(r"\b(import|from|assert|raise|def|class|pytest|unittest|test_)\b", script)):
+        if not bool(
+            re.search(r"\b(import|from|assert|raise|def|class|pytest|unittest|test_)\b", script)
+        ):
             return False
         failure_markers = (
             "assert",
@@ -99,7 +110,9 @@ class ReproductionRunner:
 
     def _extract_fenced_script(self, problem: str) -> str:
         candidates = []
-        for match in re.finditer(r"```(?P<lang>[A-Za-z0-9_-]*)\s*\n(?P<body>.*?)\n\s*```", problem, re.DOTALL):
+        for match in re.finditer(
+            r"```(?P<lang>[A-Za-z0-9_-]*)\s*\n(?P<body>.*?)\n\s*```", problem, re.DOTALL
+        ):
             lang = match.group("lang").lower()
             body = match.group("body").strip()
             if lang not in {"", "python", "py"}:
@@ -153,7 +166,7 @@ class ReproductionRunner:
 
         # 如果是本地併發題，我們直接讀取檔案並調用其測試函數
         # 這裡未來應由模型生成，目前針對本地模式優化
-        match = re.search(r'([a-zA-Z0-9_./-]+\.py)', problem)
+        match = re.search(r"([a-zA-Z0-9_./-]+\.py)", problem)
         if match:
             target_file = match.group(1)
             return (
@@ -306,7 +319,9 @@ class ReproductionRunner:
             repro_path.write_text(executed_script, encoding="utf-8")
             self.last_script_sha256 = hashlib.sha256(executed_script.encode("utf-8")).hexdigest()
 
-            record_fd, raw_record_path = tempfile.mkstemp(prefix="nexus-repro-failure-", suffix=".json")
+            record_fd, raw_record_path = tempfile.mkstemp(
+                prefix="nexus-repro-failure-", suffix=".json"
+            )
             os.close(record_fd)
             os.unlink(raw_record_path)
             record_path = Path(raw_record_path)
@@ -323,7 +338,7 @@ class ReproductionRunner:
                 capture_output=True,
                 text=True,
                 timeout=repro_run_timeout,
-                env=execution_env
+                env=execution_env,
             )
             self.last_exit_status = res.returncode
 
@@ -332,25 +347,39 @@ class ReproductionRunner:
             if res.returncode != 0:
                 if self.is_environment_failure(output):
                     self.last_reason_code = "environment_failure"
-                    return False, output if output.strip() else f"Process exited with code {res.returncode}"
+                    return (
+                        False,
+                        output if output.strip() else f"Process exited with code {res.returncode}",
+                    )
                 if self._has_explicit_reproduction_contract(
                     script_code, output, res.returncode, failure_record
                 ):
                     self.last_reason_code = "physical_fail"
-                    return True, output if output.strip() else f"Process exited with code {res.returncode}"
+                    return (
+                        True,
+                        output if output.strip() else f"Process exited with code {res.returncode}",
+                    )
                 self.last_reason_code = "unclassified_nonzero_exit"
-                return False, output if output.strip() else f"Process exited with code {res.returncode}"
+                return (
+                    False,
+                    output if output.strip() else f"Process exited with code {res.returncode}",
+                )
             # Exit code 0: script ran successfully
             self.last_reason_code = "physical_not_reproduced"
             # If there's no error output, the bug might already be fixed
             if not output.strip():
-                return False, "ALREADY_FIXED: reproduce script exited cleanly (exit code 0), bug may already be resolved"
+                return (
+                    False,
+                    "ALREADY_FIXED: reproduce script exited cleanly (exit code 0), bug may already be resolved",
+                )
             return False, output
         except subprocess.TimeoutExpired as e:
             self.last_reason_code = "execution_timeout"
             return False, str(e)
         except Exception as e:
-            self.last_reason_code = "execution_exception" if subprocess_started else "pre_subprocess_failure"
+            self.last_reason_code = (
+                "execution_exception" if subprocess_started else "pre_subprocess_failure"
+            )
             return False, str(e)
         finally:
             if record_path is not None:

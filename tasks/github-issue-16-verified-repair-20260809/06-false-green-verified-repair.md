@@ -51,7 +51,8 @@ the correct repair accepted. Final states are only `VERIFIED_REPAIR` or
 ## Completion receipt
 
 - implementation_commit: `e476b307e12931197bc28964ce5a44dae977ca84`
-- card_sha256: `170f4c6ba7876676623c7ad5bd66b80d0dc7d80db4bf0dbd4c88cdd30a8e3fcb`
+- authorized_card_sha256_before_completion_receipt:
+  `170f4c6ba7876676623c7ad5bd66b80d0dc7d80db4bf0dbd4c88cdd30a8e3fcb`
 - independent_review: `ACCEPT`
 - focused_tests: `13 passed`
 - campaign_union_tests: `175 passed`

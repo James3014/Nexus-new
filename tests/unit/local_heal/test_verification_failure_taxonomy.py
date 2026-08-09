@@ -92,7 +92,11 @@ def classify_verification_failure(
     # Rule 3: no_effect_or_noop
     if failure_class == "NO_EFFECTIVE_CHANGE":
         return "no_effect_or_noop"
-    if applied_patch_hash and selected_candidate_hash and applied_patch_hash == selected_candidate_hash:
+    if (
+        applied_patch_hash
+        and selected_candidate_hash
+        and applied_patch_hash == selected_candidate_hash
+    ):
         if "EVIDENCE:" not in stdout:
             return "no_effect_or_noop"
 
@@ -112,18 +116,39 @@ def classify_verification_failure(
 
 # --- Tests ---
 
+
 def test_verification_failed_rows_split_into_actionable_subclasses():
     """All verification_failed rows must be classifiable into a subclass."""
     # Simulated rows from C4C runs
     test_cases = [
         # A3: assertion_or_behavior_mismatch
-        {"verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: normalize_score does not clamp\nEXPECTED: normalize_score should clamp", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
+        {
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: normalize_score does not clamp\nEXPECTED: normalize_score should clamp",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
         # A4: assertion_or_behavior_mismatch
-        {"verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: normalize_score does not clamp\nEVIDENCE: normalize_score does not handle max_val == min_val\nEXPECTED: normalize_score should clamp", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
+        {
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: normalize_score does not clamp\nEVIDENCE: normalize_score does not handle max_val == min_val\nEXPECTED: normalize_score should clamp",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
         # B2: wrong_location_or_target_miss
-        {"verifier_failure_kind": "nonzero_exit", "verifier_stdout_excerpt": "FAIL: normalize_score function not found", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
+        {
+            "verifier_failure_kind": "nonzero_exit",
+            "verifier_stdout_excerpt": "FAIL: normalize_score function not found",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
         # B2-4model: regression_introduced
-        {"verifier_failure_kind": "nonzero_exit", "verifier_stdout_excerpt": "FAIL: normalize_score function not found", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
+        {
+            "verifier_failure_kind": "nonzero_exit",
+            "verifier_stdout_excerpt": "FAIL: normalize_score function not found",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
     ]
 
     for tc in test_cases:
@@ -179,21 +204,91 @@ def test_current_proof_report_surfaces_top_verification_failed_subclasses():
     """Report must surface top verification_failed subclasses with counts."""
     # Simulate classification of all 10 verification_failed combinations
     simulated_results = [
-        {"combo": "A1", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "A3", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "A4", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "A5", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "A6", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "B1", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "B2", "verifier_failure_kind": "nonzero_exit", "verifier_stdout_excerpt": "FAIL: normalize_score function not found", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "B3", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "B4", "verifier_failure_kind": "exception", "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
-        {"combo": "four-model", "verifier_failure_kind": "nonzero_exit", "verifier_stdout_excerpt": "FAIL: normalize_score function not found", "verifier_stderr_excerpt": "", "failure_class": "verification_failed"},
+        {
+            "combo": "A1",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "A3",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "A4",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "A5",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "A6",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "B1",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "B2",
+            "verifier_failure_kind": "nonzero_exit",
+            "verifier_stdout_excerpt": "FAIL: normalize_score function not found",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "B3",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "B4",
+            "verifier_failure_kind": "exception",
+            "verifier_stdout_excerpt": "EVIDENCE: ... EXPECTED: ...",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
+        {
+            "combo": "four-model",
+            "verifier_failure_kind": "nonzero_exit",
+            "verifier_stdout_excerpt": "FAIL: normalize_score function not found",
+            "verifier_stderr_excerpt": "",
+            "failure_class": "verification_failed",
+        },
     ]
 
     subclass_counts = {}
     for row in simulated_results:
-        subclass = classify_verification_failure(**{k: row[k] for k in ["verifier_failure_kind", "verifier_stdout_excerpt", "verifier_stderr_excerpt", "failure_class"]})
+        subclass = classify_verification_failure(
+            **{
+                k: row[k]
+                for k in [
+                    "verifier_failure_kind",
+                    "verifier_stdout_excerpt",
+                    "verifier_stderr_excerpt",
+                    "failure_class",
+                ]
+            }
+        )
         subclass_counts.setdefault(subclass, []).append(row["combo"])
 
     # Must have at least 2 subclasses

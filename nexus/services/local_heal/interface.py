@@ -11,6 +11,7 @@ class PhaseResult:
     error_details: Optional[Dict[str, Any]] = None
     error_metadata: Optional[Dict[str, Any]] = None
 
+
 @dataclass(frozen=True)
 class ReproductionInput:
     instance_id: str
@@ -18,6 +19,7 @@ class ReproductionInput:
     problem_statement: str
     repro_script: str
     python_executable: str
+
 
 @dataclass(frozen=True)
 class ReproductionProvenance:
@@ -40,6 +42,7 @@ class ReproductionProvenance:
     def evidence_hash(self) -> str:
         return self.evidence_sha256
 
+
 @dataclass(frozen=True)
 class ReproductionOutput:
     success: bool
@@ -54,6 +57,7 @@ class ReproductionOutput:
     def failure_reason(self) -> str:
         return self.error_reason
 
+
 @dataclass(frozen=True)
 class PlanningInput:
     problem_statement: str
@@ -61,12 +65,15 @@ class PlanningInput:
     repo_dir: Path
     reasoning_mode: str = "INTUITIVE"
 
+
 @dataclass(frozen=True)
 class RepairPlan:
     """🛡️ Structured Repair Plan"""
+
     search_symbols: List[str]
     repair_strategy: str
     violated_invariants: List[str] = field(default_factory=list)
+
 
 @dataclass(frozen=True)
 class PlanningOutput:
@@ -79,6 +86,7 @@ class PlanningOutput:
     def failure_reason(self) -> str:
         return self.error_reason
 
+
 @dataclass(frozen=True)
 class LocalizationInput:
     problem_statement: str
@@ -86,12 +94,15 @@ class LocalizationInput:
     repo_dir: Path
     plan: Optional[RepairPlan]
 
+
 @dataclass(frozen=True)
 class LocalizedFile:
     """🛡️ Structured Localized File Snippet"""
+
     path: str
     content: str
     relevance_score: float = 1.0
+
 
 @dataclass(frozen=True)
 class LocalizationOutput:
@@ -103,6 +114,7 @@ class LocalizationOutput:
     @property
     def failure_reason(self) -> str:
         return self.error_reason
+
 
 @dataclass(frozen=True)
 class PatchSynthesisInput:
@@ -123,6 +135,7 @@ class PatchSynthesisInput:
     last_replacement_texts: List[str] = field(default_factory=list)
     committee_model_override: str = ""
 
+
 @dataclass(frozen=True)
 class PatchSynthesisOutput:
     success: bool
@@ -141,6 +154,7 @@ class PatchSynthesisOutput:
     def failure_reason(self) -> str:
         return self.error_reason
 
+
 @dataclass(frozen=True)
 class VerificationInput:
     instance_id: str
@@ -150,6 +164,7 @@ class VerificationInput:
     repro_script: str
     python_executable: str
     verifier_command: Tuple[str, ...] = field(default_factory=tuple)
+
 
 @dataclass(frozen=True)
 class VerificationOutput:
@@ -163,7 +178,9 @@ class VerificationOutput:
     def failure_reason(self) -> str:
         return self.error_reason
 
+
 class IPhase:
     """Interface for a pipeline phase (Reproduction, Planning, etc.)"""
+
     def execute(self, ctx: Any) -> PhaseResult:
         raise NotImplementedError

@@ -48,7 +48,8 @@ Required missing/survived fails closed; `NOT_REQUIRED` is not mutation PASS.
 ## Completion receipt
 
 - implementation_commit: `a5d2039fddcef45c792d2ce5b02c80a9373b3745`
-- card_sha256: `615a6f6ff87782ac1867d670c5ac08485fdd36e3115bfe9ff9f8839009430943`
+- authorized_card_sha256_before_completion_receipt:
+  `615a6f6ff87782ac1867d670c5ac08485fdd36e3115bfe9ff9f8839009430943`
 - independent_review: `ACCEPT`
 - primary_exact_head_verification: `25 passed`
 - reviewer_adversarial_probes: `31 passed`

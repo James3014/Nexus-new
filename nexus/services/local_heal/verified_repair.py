@@ -11,6 +11,11 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from nexus.services.local_heal.world_c_receipt import (
+    WORLD_C_ADEQUACY_SCHEMA,
+    validate_world_c_adequacy_projection,
+)
+
 VERIFIED_REPAIR_SCHEMA = "nexus.local_heal.verified_repair.v1"
 CALIBRATION_SCHEMA = "nexus.local_heal.verified_repair_calibration.v1"
 FINAL_STATES = ("VERIFIED_REPAIR", "PARTIALLY_VERIFIED")
@@ -21,6 +26,7 @@ KNOWN_WRONG_CASES = (
     "boundary_wrong",
     "regression_inducing",
 )
+_REQUIRED_RECEIPT_KINDS = ("adequacy", "mutation")
 
 _CALIBRATION_CASES = (
     ("correct", True),
@@ -58,7 +64,7 @@ def _text(data: Mapping[str, Any], *names: str) -> str:
     return ""
 
 
-def _refs(data: Mapping[str, Any]) -> tuple[tuple[str, ...], list[str]]:
+def _declared_refs(data: Mapping[str, Any]) -> tuple[tuple[str, ...], list[str]]:
     raw = data.get("upstream_receipt_refs", data.get("evidence_refs", ()))
     if not isinstance(raw, (list, tuple)):
         return (), ["upstream_receipt_refs_invalid_type"]
@@ -73,6 +79,85 @@ def _refs(data: Mapping[str, Any]) -> tuple[tuple[str, ...], list[str]]:
     if len(refs) != len(set(refs)):
         reasons.append("upstream_receipt_refs_duplicate")
     return tuple(refs), reasons
+
+
+def _sha256_ref(payload: Mapping[str, Any]) -> str:
+    return "sha256:" + hashlib.sha256(_canonical_json(dict(payload))).hexdigest()
+
+
+def _mutation_receipt_reasons(payload: Mapping[str, Any]) -> list[str]:
+    if payload.get("schema_version") != "nexus_issue16_mutation_assurance.v1":
+        return ["mutation_receipt_schema_invalid"]
+    decision = payload.get("decision")
+    failures = payload.get("failures")
+    if not isinstance(failures, list) or failures:
+        return ["mutation_receipt_failures_present"]
+    if decision == "REQUIRED":
+        valid = (
+            payload.get("required") is True
+            and payload.get("status") == "PASS"
+            and payload.get("passed") is True
+        )
+    elif decision == "NOT_REQUIRED":
+        valid = (
+            payload.get("required") is False
+            and payload.get("status") == "NOT_REQUIRED"
+            and payload.get("passed") is False
+        )
+    else:
+        return ["mutation_receipt_decision_invalid"]
+    return [] if valid else ["mutation_receipt_semantics_invalid"]
+
+
+def _receipt_payload_reasons(kind: str, payload: Mapping[str, Any]) -> list[str]:
+    if kind == "adequacy":
+        valid, reasons = validate_world_c_adequacy_projection(payload)
+        if not valid:
+            return ["adequacy_receipt_invalid", *[f"adequacy:{reason}" for reason in reasons]]
+        if (
+            payload.get("schema") != WORLD_C_ADEQUACY_SCHEMA
+            or payload.get("status") != "VERIFIED_REPAIR"
+        ):
+            return ["adequacy_receipt_not_verified"]
+        return []
+    if kind == "mutation":
+        return _mutation_receipt_reasons(payload)
+    return ["upstream_receipt_kind_unknown"]
+
+
+def _validated_receipt_refs(data: Mapping[str, Any]) -> tuple[tuple[str, ...], list[str]]:
+    refs, reasons = _declared_refs(data)
+    raw_receipts = data.get("upstream_receipts")
+    if not isinstance(raw_receipts, Mapping):
+        return refs, [*reasons, "upstream_receipts_invalid_type"]
+
+    bound_refs: list[str] = []
+    if set(raw_receipts) != set(_REQUIRED_RECEIPT_KINDS):
+        reasons.append("upstream_receipt_kinds_mismatch")
+    for kind in _REQUIRED_RECEIPT_KINDS:
+        item = raw_receipts.get(kind)
+        if not isinstance(item, Mapping):
+            reasons.append(f"{kind}_receipt_missing")
+            continue
+        ref = item.get("ref")
+        content_hash = item.get("content_hash")
+        payload = item.get("payload")
+        if not isinstance(ref, str) or not ref.startswith("sha256:"):
+            reasons.append(f"{kind}_receipt_ref_invalid")
+            continue
+        bound_refs.append(ref)
+        if not isinstance(payload, Mapping):
+            reasons.append(f"{kind}_receipt_payload_missing")
+            continue
+        canonical_hash = _sha256_ref(payload)
+        if content_hash != canonical_hash:
+            reasons.append(f"{kind}_receipt_content_hash_mismatch")
+        if ref != canonical_hash:
+            reasons.append(f"{kind}_receipt_ref_hash_mismatch")
+        reasons.extend(_receipt_payload_reasons(kind, payload))
+    if refs != tuple(bound_refs):
+        reasons.append("upstream_receipt_refs_binding_mismatch")
+    return refs, reasons
 
 
 def _case_reasons(case: str, data: Mapping[str, Any]) -> list[str]:
@@ -134,7 +219,7 @@ def reduce_verified_repair(evidence: Mapping[str, Any] | None) -> dict[str, Any]
     """
     data = dict(evidence) if isinstance(evidence, Mapping) else {}
     case = _text(data, "calibration_case", "case")
-    refs, ref_reasons = _refs(data)
+    refs, ref_reasons = _validated_receipt_refs(data)
     reasons = [*_case_reasons(case, data), *ref_reasons]
     if not refs:
         reasons.append("upstream_receipt_refs_missing")

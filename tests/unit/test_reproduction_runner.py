@@ -68,7 +68,6 @@ def test_generate_repro_script_ignores_doc_example_without_failure_or_assertion(
     assert calls
 
 
-
 def test_run_repro_rejects_astropy_source_checkout_import_failure(tmp_path):
     runner = ReproductionRunner(tmp_path)
     script = (
@@ -105,23 +104,26 @@ def test_syntax_validator_detects_invalid_syntax():
 
 def test_run_repro_rejects_syntax_errors_immediately(tmp_path, monkeypatch):
     runner = ReproductionRunner(tmp_path)
-    
+
     # 語法錯誤的腳本
     bad_script = "class Foo\n  pass"
-    
+
     # Mock subprocess.run 確保絕對不會被執行
     called_subprocess = False
+
     def mock_run(*args, **kwargs):
         nonlocal called_subprocess
         called_subprocess = True
         import subprocess
+
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-    
+
     import subprocess
+
     monkeypatch.setattr(subprocess, "run", mock_run)
-    
+
     reproduced, evidence = runner.run_repro(bad_script)
-    
+
     assert reproduced is False
     assert "SyntaxError" in evidence
     assert called_subprocess is False
@@ -137,9 +139,10 @@ def test_run_repro_preserves_actual_nonzero_exit_status(tmp_path):
     assert runner.last_exit_status == 1
     assert runner.last_reason_code == "physical_fail"
     assert runner.last_command == ("python3", "reproduce_bug.py")
-    assert runner.last_script_sha256 == hashlib.sha256(
-        (tmp_path / "reproduce_bug.py").read_bytes()
-    ).hexdigest()
+    assert (
+        runner.last_script_sha256
+        == hashlib.sha256((tmp_path / "reproduce_bug.py").read_bytes()).hexdigest()
+    )
 
 
 def test_run_repro_rejects_arbitrary_nonzero_crash(tmp_path, monkeypatch):

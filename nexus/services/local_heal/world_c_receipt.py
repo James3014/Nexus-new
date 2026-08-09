@@ -68,9 +68,7 @@ def _stage_output_evidence(op: Any, stage: str) -> tuple[bool, str]:
             "skip_reproduction": bool(getattr(op, "skip_reproduction", False)),
         }
         present = bool(
-            payload["repro_evidence"]
-            or payload["reproduced"]
-            or payload["skip_reproduction"]
+            payload["repro_evidence"] or payload["reproduced"] or payload["skip_reproduction"]
         )
     elif stage == "planning":
         plan = getattr(op, "plan", None)
@@ -81,14 +79,14 @@ def _stage_output_evidence(op: Any, stage: str) -> tuple[bool, str]:
         for item in getattr(op, "localized_files", []) or []:
             path = str(getattr(item, "path", "") or "")
             content = str(getattr(item, "content", "") or "")
-            files.append({"path": path, "content_hash": hashlib.sha256(content.encode()).hexdigest()})
+            files.append(
+                {"path": path, "content_hash": hashlib.sha256(content.encode()).hexdigest()}
+            )
         payload = {"localized_files": files}
         present = bool(files and all(item["path"] for item in files))
     elif stage == "patch_synthesis":
         patch = str(
-            getattr(op, "final_patch", "")
-            or getattr(op, "pre_verification_final_patch", "")
-            or ""
+            getattr(op, "final_patch", "") or getattr(op, "pre_verification_final_patch", "") or ""
         )
         payload = {"patch_hash": hashlib.sha256(patch.encode()).hexdigest() if patch else ""}
         present = bool(patch)
@@ -138,9 +136,7 @@ def build_world_c_receipt(ctx: Any) -> dict[str, Any]:
     signal_snapshot = route_context.get("signal_snapshot")
     signal_snapshot = signal_snapshot if isinstance(signal_snapshot, Mapping) else {}
     canonical_execution = signal_snapshot.get("canonical_execution")
-    canonical_execution = (
-        canonical_execution if isinstance(canonical_execution, Mapping) else {}
-    )
+    canonical_execution = canonical_execution if isinstance(canonical_execution, Mapping) else {}
     evidence_bundle = signal_snapshot.get("capability_evidence_bundle")
     evidence_bundle = evidence_bundle if isinstance(evidence_bundle, Mapping) else {}
     task_id = str(getattr(op, "task_id", "") or getattr(op, "instance_id", ""))
@@ -151,8 +147,7 @@ def build_world_c_receipt(ctx: Any) -> dict[str, Any]:
     workspace_isolated = bool(
         source_root
         and workspace_path
-        and Path(source_root).expanduser().resolve()
-        != Path(workspace_path).expanduser().resolve()
+        and Path(source_root).expanduser().resolve() != Path(workspace_path).expanduser().resolve()
     )
     workspace_exists = bool(workspace_path and Path(workspace_path).is_dir())
     raw_attempts = getattr(op, "_world_c_phase_attempts", [])
@@ -193,16 +188,12 @@ def build_world_c_receipt(ctx: Any) -> dict[str, Any]:
         "task_id": task_id,
         "world": "C",
         "pipeline": "HealOrchestrator",
-        "execution_topology": str(
-            signal_snapshot.get("executor_topology") or "localheal_pipeline"
-        ),
+        "execution_topology": str(signal_snapshot.get("executor_topology") or "localheal_pipeline"),
         "execution_world": str(signal_snapshot.get("execution_world") or ""),
         "canonical_execution_topology": str(
             signal_snapshot.get("canonical_execution_topology") or ""
         ),
-        "canonical_execution_hash": str(
-            canonical_execution.get("context_hash") or ""
-        ),
+        "canonical_execution_hash": str(canonical_execution.get("context_hash") or ""),
         "source_hash": str(evidence_bundle.get("source_hash") or ""),
         "planner_decision_id": str(
             signal_snapshot.get("planner_decision_id")

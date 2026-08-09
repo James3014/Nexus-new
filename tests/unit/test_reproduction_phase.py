@@ -12,29 +12,29 @@ from nexus.services.local_heal.reproduction import ReproductionRunner
 
 def test_reproduction_phase_success():
     op = OperationalContext(
-        instance_id="test", 
-        repo_dir=Path("/tmp"), 
+        instance_id="test",
+        repo_dir=Path("/tmp"),
         problem_statement="bug",
-        repro_script="print('bug')"
+        repro_script="print('bug')",
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
-    
+
     runner = MagicMock()
     runner.run_repro.return_value = (True, "physical evidence found")
     runner.last_exit_status = 7
     runner.last_reason_code = "physical_fail"
     runner.last_command = ("python3", "reproduce_bug.py")
     runner.last_script_sha256 = "a" * 64
-    runner.workspace_identity.return_value = (
-        f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True
-    )
-    
+    runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
+
     denoiser = MagicMock()
-    
-    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock())
+
+    phase = ReproductionPhase(
+        repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock()
+    )
     result = phase.execute(ctx)
-    
+
     assert result.success is True
     assert ctx.op.reproduced is True
     assert ctx.op.repro_evidence == "physical evidence found"
@@ -48,73 +48,73 @@ def test_reproduction_phase_success():
     assert ctx.op.reproduction_provenance.source_sha256
     assert ctx.op.reproduction_provenance.evidence_sha256
 
-def test_reproduction_phase_env_failure():
-    op = OperationalContext(
-        instance_id="test", 
-        repo_dir=Path("/tmp"), 
-        problem_statement="bug",
-        repro_script="print('bug')"
-    )
-    gov = GovernanceContext()
-    ctx = HealContext(op=op, gov=gov)
-    
-    runner = MagicMock()
-    runner.run_repro.return_value = (False, "ModuleNotFoundError: numpy")
-    runner.is_environment_failure.return_value = True
-    
-    denoiser = MagicMock()
-    
-    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock())
-    result = phase.execute(ctx)
-    
-    assert result.success is False
-    assert result.exit_layer == "repro_runner"
-    assert result.failure_reason == "REPRO_ENVIRONMENT_FAILURE"
 
-def test_reproduction_phase_provider_error():
+def test_reproduction_phase_env_failure():
     op = OperationalContext(
         instance_id="test",
         repo_dir=Path("/tmp"),
         problem_statement="bug",
-        repro_script=""
+        repro_script="print('bug')",
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
-    
+
+    runner = MagicMock()
+    runner.run_repro.return_value = (False, "ModuleNotFoundError: numpy")
+    runner.is_environment_failure.return_value = True
+
+    denoiser = MagicMock()
+
+    phase = ReproductionPhase(
+        repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock()
+    )
+    result = phase.execute(ctx)
+
+    assert result.success is False
+    assert result.exit_layer == "repro_runner"
+    assert result.failure_reason == "REPRO_ENVIRONMENT_FAILURE"
+
+
+def test_reproduction_phase_provider_error():
+    op = OperationalContext(
+        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug", repro_script=""
+    )
+    gov = GovernanceContext()
+    ctx = HealContext(op=op, gov=gov)
+
     runner = MagicMock()
     denoiser = MagicMock()
     llm_client = MagicMock()
     # Mock timeout exception which map to MODEL_TIMEOUT, or other exceptions mapping to MODEL_PROVIDER_ERROR
     llm_client.generate.side_effect = Exception("connection error")
-    
+
     phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, llm_client=llm_client)
     result = phase.execute(ctx)
-    
+
     assert result.success is False
     assert result.failure_reason == "MODEL_PROVIDER_ERROR"
     assert "MODEL_PROVIDER_ERROR" in ctx.op.model_decisions[-1]["status"]
 
+
 def test_reproduction_phase_empty_response():
     op = OperationalContext(
-        instance_id="test",
-        repo_dir=Path("/tmp"),
-        problem_statement="bug",
-        repro_script=""
+        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug", repro_script=""
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
-    
+
     runner = MagicMock()
     denoiser = MagicMock()
     llm_client = MagicMock()
     llm_client.generate.return_value = ""
-    
+
     phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, llm_client=llm_client)
     result = phase.execute(ctx)
-    
+
     assert result.success is False
     assert result.failure_reason == "NO_REPRO_SCRIPT"
     assert ctx.op.model_decisions[-1]["status"] == "NO_REPRO_SCRIPT"
+
 
 def test_reproduction_phase_env_denoise_failed():
     op = OperationalContext(
@@ -122,15 +122,15 @@ def test_reproduction_phase_env_denoise_failed():
         repo_dir=Path("/tmp"),
         problem_statement="bug",
         repro_script="print('bug')",
-        auto_heal_enabled=True
+        auto_heal_enabled=True,
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
-    
+
     runner = MagicMock()
     runner.run_repro.return_value = (False, "ModuleNotFoundError: numpy")
     runner.is_environment_failure.return_value = True
-    
+
     denoiser = MagicMock()
     denoise_result = MagicMock()
     del denoise_result.to_receipt
@@ -138,14 +138,17 @@ def test_reproduction_phase_env_denoise_failed():
     denoise_result.succeeded = False
     denoise_result.reason = "could not install"
     denoiser.prepare_from_evidence.return_value = denoise_result
-    
-    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock())
+
+    phase = ReproductionPhase(
+        repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock()
+    )
     result = phase.execute(ctx)
-    
+
     assert result.success is False
     assert result.failure_reason == "REPRO_ENVIRONMENT_FAILURE"
     assert ctx.op.env_denoise.get("attempted") is True
     assert ctx.op.env_denoise.get("succeeded") is False
+
 
 def test_reproduction_phase_skip_reproduction():
     op = OperationalContext(
@@ -153,17 +156,19 @@ def test_reproduction_phase_skip_reproduction():
         repo_dir=Path("/tmp"),
         problem_statement="long bug description",
         repro_script="",
-        skip_reproduction=True
+        skip_reproduction=True,
     )
     gov = GovernanceContext()
     ctx = HealContext(op=op, gov=gov)
-    
+
     runner = MagicMock()
     denoiser = MagicMock()
-    
-    phase = ReproductionPhase(repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock())
+
+    phase = ReproductionPhase(
+        repro_runner=runner, env_denoiser=denoiser, ollama_generate_fn=MagicMock()
+    )
     result = phase.execute(ctx)
-    
+
     assert result.success is True
     assert ctx.op.reproduced is True
     assert ctx.op.repro_evidence == "long bug description"
@@ -174,7 +179,9 @@ def test_reproduction_phase_skip_reproduction():
 
 def test_reproduction_phase_pre_supplied_evidence_is_not_physical():
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug",
+        instance_id="test",
+        repo_dir=Path("/tmp"),
+        problem_statement="bug",
         repro_evidence="copied evidence",
     )
     ctx = HealContext(op=op, gov=GovernanceContext())
@@ -202,7 +209,9 @@ def test_reproduction_phase_unbound_source_cannot_be_physical():
     runner.last_script_sha256 = "a" * 64
     runner.workspace_identity.return_value = ("", False)
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug",
+        instance_id="test",
+        repo_dir=Path("/tmp"),
+        problem_statement="bug",
         repro_script="raise AssertionError('bug')",
     )
     ctx = HealContext(op=op, gov=GovernanceContext())
@@ -219,11 +228,11 @@ def test_reproduction_phase_missing_exit_status_cannot_be_physical():
     runner.last_reason_code = "execution_timeout"
     runner.last_command = ("python3", "reproduce_bug.py")
     runner.last_script_sha256 = "a" * 64
-    runner.workspace_identity.return_value = (
-        f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True
-    )
+    runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug",
+        instance_id="test",
+        repo_dir=Path("/tmp"),
+        problem_statement="bug",
         repro_script="assert False",
     )
     ctx = HealContext(op=op, gov=GovernanceContext())
@@ -239,11 +248,11 @@ def test_reproduction_phase_bool_exit_status_cannot_be_physical():
     runner.last_reason_code = "physical_fail"
     runner.last_command = ("python3", "reproduce_bug.py")
     runner.last_script_sha256 = "a" * 64
-    runner.workspace_identity.return_value = (
-        f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True
-    )
+    runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug",
+        instance_id="test",
+        repo_dir=Path("/tmp"),
+        problem_statement="bug",
         repro_script="assert False",
     )
     ctx = HealContext(op=op, gov=GovernanceContext())
@@ -259,11 +268,11 @@ def test_reproduction_phase_arbitrary_crash_cannot_be_physical():
     runner.last_reason_code = "unclassified_nonzero_exit"
     runner.last_command = ("python3", "reproduce_bug.py")
     runner.last_script_sha256 = "a" * 64
-    runner.workspace_identity.return_value = (
-        f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True
-    )
+    runner.workspace_identity.return_value = (f"HEAD={'b' * 40};WORKSPACE_SHA256={'d' * 64}", True)
     op = OperationalContext(
-        instance_id="test", repo_dir=Path("/tmp"), problem_statement="bug",
+        instance_id="test",
+        repo_dir=Path("/tmp"),
+        problem_statement="bug",
         repro_script="raise RuntimeError('unrelated crash')",
     )
     ctx = HealContext(op=op, gov=GovernanceContext())
@@ -355,6 +364,7 @@ def test_reproduction_phase_binds_actual_executed_script_and_command(tmp_path):
     assert provenance.command == (sys.executable, "reproduce_bug.py")
     assert provenance.exit_status == 1
     assert provenance.source_identity.startswith("HEAD=")
-    assert provenance.script_sha256 == hashlib.sha256(
-        (tmp_path / "reproduce_bug.py").read_bytes()
-    ).hexdigest()
+    assert (
+        provenance.script_sha256
+        == hashlib.sha256((tmp_path / "reproduce_bug.py").read_bytes()).hexdigest()
+    )

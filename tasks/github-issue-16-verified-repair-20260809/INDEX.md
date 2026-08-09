@@ -35,28 +35,32 @@ G2 completed at exact implementation commit
 review and verification.
 
 Current G3 card SHA-256:
-`03cfc6485ce6a0488dd9f1748332ab50be7f55ad17f1e2546ed551bf90a3a17c`.
+`e350308995b7dbd6999b2d67ed0f8286f25c7a22d9d6ef5bd942be0816807c8d`.
 
 G3 completed at exact implementation commit
 `902d19a3762a35aaa73c6e5e7bc60223b8097c7e` after exact-commit independent
 review and verification.
 
 Current G4 card SHA-256:
-`f6f88cab2e1bae1018890e3ea3f35c9fdba7d08c7e8e12572f5bfe66b5a27b73`.
+`7d543475f550dd71e730954bf2136ca78e37ba9627b7c7172a8396db2d9dae48`.
 
 G4 completed at exact implementation commit
 `d3690597a2f827dda2365c9576fd3abd606689b4` after exact-commit independent
 review and verification.
 
 Current G5 card SHA-256:
-`615a6f6ff87782ac1867d670c5ac08485fdd36e3115bfe9ff9f8839009430943`.
+`e36e439019f90e024eaee74bf9cd4424e58a172ff8e5c4551afb72d7bf4da0c2`.
+The G5 card's completion receipt separately preserves the authorization-time
+hash from before that receipt was appended.
 
 G5 completed at exact implementation commit
 `a5d2039fddcef45c792d2ce5b02c80a9373b3745` after exact-commit independent
 review and primary exact-HEAD verification.
 
 Current G6 card SHA-256:
-`170f4c6ba7876676623c7ad5bd66b80d0dc7d80db4bf0dbd4c88cdd30a8e3fcb`.
+`226efbb744b8b355f0d86f174757b7258fbf16e58424b108c2932c06684d8e46`.
+The G6 card's completion receipt separately preserves the authorization-time
+hash from before that receipt was appended.
 
 G6 completed at exact implementation commit
 `e476b307e12931197bc28964ce5a44dae977ca84` after exact-commit independent
