@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: READY
+status: COMPLETED
 task_id: github-issue-34-crosswalk-consumption-ci-fixture
 campaign_id: github-issue-34-crosswalk-consumption-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/34
@@ -63,6 +63,18 @@ Maximum changed files: 3.
 - Existing 44 crosswalk tests remain green.
 - No production or authority input changes.
 - Independent review confirms no production fail-open path.
+
+## Completion receipt
+
+- Authority card SHA-256 before mutation:
+  `a208ed4d93a5ddadd579ff40e9a75c76ed1d875675bbb9d510fa70bf8c81d4a7`.
+- Repair commit: `ad2300861`.
+- Exact repair selection: 45 passed.
+- Ruff check and format check: passed.
+- `git diff --check`: passed.
+- Independent review: ACCEPT; no P0/P1, production missing-input path still
+  fails closed, and formatting-only changes are AST-equivalent.
+- Scope: one permitted test file plus this campaign receipt; no deletions.
 
 ## Block classification
 
