@@ -749,6 +749,11 @@ class RepositoryContractGate:
             "target_base_revision": contract.target_base_revision,
             "target_head": current.target_head,
             "candidate_state_hash": current.candidate_state_hash,
+            "collaboration_binding_hash": (
+                contract.collaboration_realm.binding_hash
+                if getattr(contract, "collaboration_realm", None) is not None
+                else None
+            ),
         }
         actual = {
             "task_id": candidate.task_id,
@@ -758,6 +763,9 @@ class RepositoryContractGate:
             "target_base_revision": candidate.target_base_revision,
             "target_head": candidate.target_head,
             "candidate_state_hash": candidate.candidate_state_hash,
+            "collaboration_binding_hash": (
+                (candidate.collaboration_provenance or {}).get("binding_hash")
+            ),
         }
         return tuple(
             RepositoryContractFinding(
