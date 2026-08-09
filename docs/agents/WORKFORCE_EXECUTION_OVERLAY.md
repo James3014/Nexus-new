@@ -2,13 +2,14 @@
 artifact_authority: current
 owner: James Chen
 status: active
-purpose: Conditional workforce admission and model-selection overlay.
+purpose: Conditional workforce eligibility and admission overlay.
 ---
 
 # Workforce Execution Overlay
 
-This L2 overlay is loaded for model/provider selection, delegation, routing,
-onboarding, calibration, promotion, demotion, or admission review.
+This L2 overlay is loaded to evaluate workforce eligibility and admission
+after route and capability selection, including delegation, onboarding,
+calibration, promotion, demotion, or admission review.
 
 ## Admission first
 
@@ -25,13 +26,15 @@ override stale cached lists.
 
 ## Boundaries
 
-- `CapabilityPlanner` and `HybridRouteDecision` remain the only route
-  authorities; this overlay does not select topology or create a router.
-- Registered providers may be selectable only with explicit model identity,
-  adapter preflight, parser, verifier, and receipt gates. Unknown providers or
-  models fail closed.
+- `CapabilityPlanner` is the sole route and capability-selection authority.
+  `HybridRouteDecision` is a Planner-derived decision contract/projection, not
+  a second selector, router, or planner. This overlay does not select a route,
+  capability, topology, or create a router.
+- Registered providers may be eligible for admission only with explicit model
+  identity, adapter preflight, parser, verifier, and receipt gates. Unknown
+  providers or models fail closed.
 - Local output and delegated output are candidates. They cannot independently
   establish correctness, promotion, production readiness, public claims,
   merge/integration authority, push authority, or cleanup authority.
-- Workforce policy constrains eligible workers and escalation; it does not
-  authorize a worker to approve its own work.
+- Workforce admission only constrains worker eligibility; it does not select a
+  route or capability, or authorize a worker to approve its own work.

@@ -11,9 +11,13 @@
 **Benchmark matrix:** `nexus/config/model_three_arm_matrix.yaml`
 **Last verified:** 2026-07-29
 
-This file defines which model workers Nexus may assign, the context each worker may receive, its autonomy ceiling, and the conditions that require escalation. It does not replace CapabilityPlanner, HybridRouteDecision, execution authorization, Verifier, Receipt, Learning, Git safety, or account-pool policy.
+This file defines workforce eligibility: which model workers Nexus may admit,
+the context each worker may receive, its autonomy ceiling, and the conditions
+that require escalation. It does not select routes or capabilities, and it does
+not replace `CapabilityPlanner`, `HybridRouteDecision`, execution
+authorization, Verifier, Receipt, Learning, Git safety, or account-pool policy.
 
-Provider selection is open across the registered adapter surface. `auto` and
+Provider eligibility is open across the registered adapter surface. `auto` and
 `agy` are defaults, not an allowlist. An explicit provider still requires a
 registered adapter, exact model identity, executable/authorization preflight,
 bounded scope, parser/verifier evidence, and a receipt. Unknown providers fail
@@ -38,7 +42,10 @@ Every candidate has two independent dimensions:
 
 Provider/client failure is not scored as model reasoning failure. Conversely, a semantic answer passing the Full arm is not lifecycle closure: the 2026-07-29 matrix did not establish `receipt_complete=true` or `capability_closure_complete=true` for any model.
 
-CapabilityPlanner and HybridRouteDecision remain the only route authority. This policy is a workforce constraint consumed after route authorization, not another router.
+`CapabilityPlanner` is the sole route and capability-selection authority.
+`HybridRouteDecision` is a Planner-derived decision contract/projection, not a
+second selector, router, or planner. This policy is a workforce eligibility
+constraint consumed after route authorization, not another router or selector.
 
 ## 2. Uniform three-arm benchmark status
 
