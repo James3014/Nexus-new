@@ -1573,6 +1573,8 @@ class SelfHostedTaskService:
         controller: SelfHostedDevelopmentController,
         contract: ArchitectTaskContract,
         lease: TargetWorktreeLease,
+        *,
+        task_states: Optional[Mapping[str, dict]] = None,
     ) -> TargetWorktreeLease:
         manager.verify_controller_unchanged(
             contract,
@@ -1582,7 +1584,10 @@ class SelfHostedTaskService:
         if target_head != lease.initial_head:
             raise RuntimeError("failed worker changed Target HEAD; escalation is blocked")
         manager.cleanup(contract.task_id, force=True)
-        return controller.prepare_task(contract)
+        prepare_task = controller.prepare_task
+        if "task_states" in inspect.signature(prepare_task).parameters:
+            return prepare_task(contract, task_states=task_states)
+        return prepare_task(contract)
 
     def _run_default_resumable(
         self,
@@ -1647,7 +1652,13 @@ class SelfHostedTaskService:
             provider = str(state.get("next_provider") or "")
             if not provider:
                 raise RuntimeError("escalation state is missing next_provider")
-            lease = self._replace_failed_target(manager, controller, contract, lease)
+            lease = self._replace_failed_target(
+                manager,
+                controller,
+                contract,
+                lease,
+                task_states=self._workspace_task_states(),
+            )
             preflight = self.worker_registry.preflight(provider)
             if not preflight.ready:
                 raise RuntimeError(f"worker preflight failed: {preflight.reason}")
@@ -1730,7 +1741,13 @@ class SelfHostedTaskService:
                     "escalation_reason": decision.reason,
                 },
             )
-            lease = self._replace_failed_target(manager, controller, contract, lease)
+            lease = self._replace_failed_target(
+                manager,
+                controller,
+                contract,
+                lease,
+                task_states=self._workspace_task_states(),
+            )
             preflight = self.worker_registry.preflight(next_provider)
             if not preflight.ready:
                 raise RuntimeError(f"worker preflight failed: {preflight.reason}")

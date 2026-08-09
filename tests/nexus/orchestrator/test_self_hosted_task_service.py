@@ -1572,6 +1572,35 @@ def test_lifecycle_receipt_exposes_required_fields(tmp_path):
     assert required <= receipt.keys()
 
 
+def test_replace_failed_target_forwards_fresh_task_states():
+    captured = {}
+
+    class FakeManager:
+        def verify_controller_unchanged(self, contract, expected_status_sha256=None):
+            return expected_status_sha256
+
+        def _run_git(self, args, cwd=None):
+            return "h" * 40
+
+        def cleanup(self, task_id, force=False):
+            assert force is True
+
+    class FakeController:
+        def prepare_task(self, contract, *, task_states=None):
+            captured["task_states"] = task_states
+            return "replacement-lease"
+
+    lease = SimpleNamespace(target_worktree="/tmp/target", initial_head="h" * 40, controller_status_sha256="s" * 64)
+    states = {"retained": {"status": "FINAL_BLOCK"}}
+    result = SelfHostedTaskService._replace_failed_target(
+        FakeManager(), FakeController(), SimpleNamespace(task_id="task"), lease,
+        task_states=states,
+    )
+
+    assert result == "replacement-lease"
+    assert captured["task_states"] is states
+
+
 def test_orphan_clean_target_is_reconciled_and_removed(tmp_path):
     request = _real_request(tmp_path)
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
