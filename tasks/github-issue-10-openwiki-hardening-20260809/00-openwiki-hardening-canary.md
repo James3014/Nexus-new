@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: IMPLEMENTED_PENDING_CANARY
+status: COMPLETE
 task_id: github-issue-10-openwiki-hardening-canary
 campaign_id: github-issue-10-openwiki-hardening-20260809
 source_issue: https://github.com/James3014/Nexus-new/issues/10
@@ -76,3 +76,15 @@ Maximum changed files: 11.
 
 - `RECOVERABLE_BLOCK`: generator output requires bounded correction.
 - `HARD_BLOCK`: generator requires forbidden authority/runtime mutation.
+
+## Completion evidence
+
+- Exact pushed head: `e66abf7b8acff2a4c555304b99f62f9c5b509b0e`.
+- Two fresh isolated `openwiki@0.3.1 code --update --print` runs completed
+  successfully from that exact head.
+- After restoring controlled `AGENTS.md`, `CLAUDE.md`, and workflow files,
+  both runs had a clean worktree and zero `openwiki/` diff.
+- Both artifacts passed the protected stale-symbol, route-authority, workflow
+  name, count/taxonomy, and degraded-diagram scans.
+- Focused source-contract/Gateway suite: 78 passed; Ruff and `git diff --check`
+  passed.
