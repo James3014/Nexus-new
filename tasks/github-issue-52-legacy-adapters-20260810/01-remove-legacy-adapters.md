@@ -77,9 +77,9 @@ behavior. Terminal marker `LEGACY_ADAPTER_REMOVAL_PROVEN`.
 
 ## Completion receipt
 
-- Task Card authorization commit: `AUTH_COMMIT` (card SHA-256
+- Task Card authorization commit: `f1e9139b0` (card SHA-256
   `a6d2b569edeca38c2e099b4b574896e6b5b3bc198234b592afcab23101eef021`)
-- implementation head: `IMPLEMENTATION_COMMIT`
+- implementation head: `4b456a642`
 - PR: https://github.com/James3014/Nexus-new/pull/PENDING
 - deleted the six archived `scripts/legacy` adapters (all carry the
   `LEGACY / ARCHIVED SCRIPT` marker; zero callers/dynamic-imports/CLI
