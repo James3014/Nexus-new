@@ -922,9 +922,17 @@ CASES: tuple[GoldenCase, ...] = (
         (
             "https://github.com/James3014/Nexus-new/issues/16",
             "https://github.com/James3014/Nexus-new/pull/41",
+            "nexus/services/local_heal/verified_repair.py",
+            "tasks/github-issue-16-verified-repair-20260809/INDEX.md",
         ),
-        status="finding",
-        finding_id="GBF-001",
+        (
+            "tests/unit/test_reproduction_phase.py::test_reproduction_phase_pre_supplied_evidence_is_not_physical",
+            "tests/unit/local_heal/test_isolated_verifier.py::test_structured_oracle_uses_one_sealed_copy_for_fail_then_pass",
+            "tests/unit/local_heal/test_runbook_compliance.py::test_regression_binding_requires_explicit_affected_scope_and_distinct_revisions",
+            "tests/engine/test_mutation_assurance.py::test_issue16_risk_trigger_passes_only_when_targeted_mutant_is_killed",
+            "tests/unit/local_heal/test_verified_repair.py::test_correct_repair_is_accepted_but_not_public",
+            "tests/unit/local_heal/test_verified_repair.py::test_fixed_calibration_rejects_all_five_known_wrong_cases",
+        ),
     ),
     _c(
         "GB-077",
@@ -1023,7 +1031,6 @@ CASES: tuple[GoldenCase, ...] = (
 
 
 FINDINGS = {
-    "GBF-001": "Issue #16 is READY and PR #41 remains open; the Verified Repair behavior is not merged into the audited current main.",
     "GBF-002": "Issue #12 remains open verification-first; current live Gateway/source identity is not proven by the source snapshot alone.",
     "GBF-003": "Issue #29 states same-task Online consumption of exact Local evidence remains unproven.",
     "GBF-004": "Issue #31 is blocked on #7 and records missing canonical retained-state compaction/resume behavior.",

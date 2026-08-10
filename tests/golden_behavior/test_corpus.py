@@ -39,12 +39,11 @@ def test_automated_coverage_is_the_majority() -> None:
     assert counts["finding"] >= 1
 
 
-def test_finding_and_resolved_regression_statuses_are_distinct() -> None:
-    case = next(case for case in CASES if case.case_id == "GB-076")
-    assert case.status == "finding"
-    policy_lane = next(case for case in CASES if case.case_id == "GB-081")
-    assert policy_lane.status == "covered"
-    assert len(policy_lane.automated_tests) == 3
+def test_resolved_regressions_are_covered() -> None:
+    resolved = [case for case in CASES if case.case_id in {"GB-076", "GB-081"}]
+    assert len(resolved) == 2
+    assert all(case.status == "covered" for case in resolved)
+    assert all(case.automated_tests for case in resolved)
 
 
 def test_resolved_policy_lane_finding_is_now_covered() -> None:
