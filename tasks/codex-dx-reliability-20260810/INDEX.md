@@ -8,8 +8,8 @@
 - **Source basis snapshot:** canonical code baseline b6601270edd95a756c4eab8c7a623006ee1b32d1; clean isolated Target /private/tmp/nexus-codex-dx-019fe8e1; owner decisions DEC-003 and DEC-004
 - **Auto-chain:** `true`
 - **Parallel execution:** `false`
-- **Current frontier:** `TASK-CODEX-DX-007-DOCS`
-- **Maximum campaign claim:** accepted deterministic fixture-smoke evidence and active developer-documentation convergence; no benchmark lift, integration, release, or production claim
+- **Current frontier:** `TASK-CODEX-DX-008-FEEDBACK`
+- **Maximum campaign claim:** accepted developer-documentation convergence and active bounded failure-prevention mapping; no benchmark lift, integration, release, or production claim
 
 ## 1. Source handoff import
 
@@ -49,15 +49,15 @@
 | TASK-CODEX-DX-004-BOOTSTRAP | COMPLETED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm setup receipt | clean-cache secrets-free setup canary | clean-cache canary | core setup canary pass | medium | not applicable | AVAILABLE |
 | TASK-CODEX-DX-005-TESTS | COMPLETED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-004-BOOTSTRAP | CONTRACT | accepted core setup and doctor command contract | isolated canonical command canary | isolated command canary | command truth | medium | not applicable | AVAILABLE |
 | TASK-CODEX-DX-006-FIXTURES | COMPLETED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-005-TESTS | CONTRACT | accepted canonical test command contract | five deterministic smoke cases with negative control | fixture negative control | fixture smoke 5/5 | medium | not applicable | AVAILABLE |
-| TASK-CODEX-DX-007-DOCS | ACTIVE | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP; TASK-CODEX-DX-005-TESTS; TASK-CODEX-DX-006-FIXTURES | CONTRACT; CONTRACT; CONTRACT; CONTRACT | accepted context index identity; accepted setup command identity; accepted test command identity; accepted smoke benchmark identity | current developer docs resolve only canonical commands and authority | documentation command/path audit | static convergence | wide-mechanical | not applicable | AVAILABLE |
-| TASK-CODEX-DX-008-FEEDBACK | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-002-HISTORY; TASK-CODEX-DX-006-FIXTURES | EVIDENCE; EVIDENCE | accepted failure taxonomy receipt; accepted fixture smoke receipt | recurring failures map to one prevention seam | prevention-registry validator | prevention mapping | small | not applicable | NOT_APPLICABLE |
+| TASK-CODEX-DX-007-DOCS | COMPLETED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP; TASK-CODEX-DX-005-TESTS; TASK-CODEX-DX-006-FIXTURES | CONTRACT; CONTRACT; CONTRACT; CONTRACT | accepted context index identity; accepted setup command identity; accepted test command identity; accepted smoke benchmark identity | current developer docs resolve only canonical commands and authority | documentation command/path audit | static convergence | wide-mechanical | not applicable | AVAILABLE |
+| TASK-CODEX-DX-008-FEEDBACK | ACTIVE | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-002-HISTORY; TASK-CODEX-DX-006-FIXTURES | EVIDENCE; EVIDENCE | accepted failure taxonomy receipt; accepted fixture smoke receipt | recurring failures map to one prevention seam | prevention-registry validator | prevention mapping | small | not applicable | AVAILABLE |
 | TASK-CODEX-DX-009-AFTER | PLANNED | INTEGRATION_VERIFY | TRACER_BULLET | TASK-CODEX-DX-002-HISTORY; TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP; TASK-CODEX-DX-005-TESTS; TASK-CODEX-DX-006-FIXTURES; TASK-CODEX-DX-007-DOCS; TASK-CODEX-DX-008-FEEDBACK | EVIDENCE; CONTRACT; CONTRACT; CONTRACT; EVIDENCE; CONTRACT; EVIDENCE | accepted history coverage receipt; accepted context index receipt; accepted setup canary receipt; accepted test command receipt; accepted fixture smoke receipt; accepted docs audit receipt; accepted prevention mapping receipt | immutable after arm and paired comparison receipt | 30 fresh-session trials and independent aggregation | paired benchmark evidence only | medium | not applicable | NOT_APPLICABLE |
 
 ## 4. Ready candidates and frontier selection
 
-- **Dependency-ready candidates:** TASK-CODEX-DX-007-DOCS; TASK-CODEX-DX-008-FEEDBACK
-- **Selected frontier:** TASK-CODEX-DX-007-DOCS
-- **Selection rationale:** Fixture-smoke Candidate `0102c644e` passed exact C1-C3, Ruff, five-of-five real patch/verifier cases, negative controls, and fresh Luna `REVIEW_PASS`; sequential ordering advances to current developer-documentation convergence before feedback mapping.
+- **Dependency-ready candidates:** TASK-CODEX-DX-008-FEEDBACK
+- **Selected frontier:** TASK-CODEX-DX-008-FEEDBACK
+- **Selection rationale:** Documentation Candidate `3dcbcd8e8` passed exact C1-C3, command/path/stale-token audits, local-link checks, and fresh Luna `REVIEW_PASS`; standing sequential authorization advances to bounded failure-prevention mapping.
 - **Exact unblock condition:** none
 
 ## 5. Campaign authority and non-goals
