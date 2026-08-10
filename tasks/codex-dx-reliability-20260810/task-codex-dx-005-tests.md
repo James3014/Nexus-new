@@ -1,7 +1,7 @@
 # TASK-CODEX-DX-005-TESTS — Converge canonical repository test commands
 
 - **Campaign:** `CAMPAIGN-CODEX-DX-RELIABILITY-20260810`
-- **Status:** `ACTIVE`
+- **Status:** `COMPLETED`
 - **Source spec:** `SPEC-CODEX-DX-RELIABILITY-20260810`
 - **Source spec SHA-256:** `ed2b76c259ca028cc13e136d58ed7129a970aeb19c7c1901d7a662918054f870`
 - **Source groups:** test-contract
