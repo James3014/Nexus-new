@@ -57,6 +57,23 @@ and must not be widened.
 Exact commit, exact two-file scope, map-governance checks pass, issue-specific
 branch pushed, and a PR opened to `main` on `James3014/Nexus-new`.
 
+## Completion evidence
+
+- pre-mutation card hash:
+  `3fb0756d08e04568cd446eae36d77c9227ffcb290822ae38643647301d8e2c23`
+- implementation commit: `713273bb3`
+- Task Card authorization commit: `03ce9d453`
+- PR: https://github.com/James3014/Nexus-new/pull/83
+- `tests/ops/test_select_tests.py`: 14 passed
+- `tests/ops/test_pr_impact_gate.py` + `tests/ops/test_build_test_impact_index.py`: 20 passed
+- `tests/nexus/codeintel/test_impact_service.py` + `tests/ops/test_ci_gate_wiki_sync_block.py`: 6 passed
+- ops map-governance sweep: 61 passed
+- production selector for `nexus/learning/learning_effectiveness_measurement.py`:
+  targets `tests/learning` + `tests/services/test_policy_gate.py`, risk `high`,
+  reason `learning_contract`, no unmatched path
+- unknown path outside `nexus/learning` remains fallback/unmatched
+- `git diff --check`: clean
+
 ## Forbidden scope
 
 No selector algorithm, impact classifier, workflow, production, learning
