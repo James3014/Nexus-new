@@ -8,8 +8,8 @@
 - **Source basis snapshot:** canonical code baseline b6601270edd95a756c4eab8c7a623006ee1b32d1; clean isolated Target /private/tmp/nexus-codex-dx-019fe8e1; owner decisions DEC-003 and DEC-004
 - **Auto-chain:** `true`
 - **Parallel execution:** `false`
-- **Current frontier:** `TASK-CODEX-DX-003-CONTEXT`
-- **Maximum campaign claim:** owner-accepted before/history evidence and active context-contract implementation; no benchmark lift, integration, release, or production claim
+- **Current frontier:** `TASK-CODEX-DX-004-BOOTSTRAP`
+- **Maximum campaign claim:** accepted bounded context-contract evidence and active core-bootstrap implementation; no benchmark lift, integration, release, or production claim
 
 ## 1. Source handoff import
 
@@ -45,8 +45,8 @@
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | TASK-CODEX-DX-001-BEFORE | COMPLETED | IMPLEMENTATION | TRACER_BULLET | none | none | none | immutable before-arm receipt bound to b6601270e | benchmark schema tests and 15 fresh-session trial receipts | paired benchmark evidence only | medium | not applicable | NOT_APPLICABLE |
 | TASK-CODEX-DX-002-HISTORY | COMPLETED | IMPLEMENTATION | TRACER_BULLET | none | none | none | versioned history coverage receipt with honest transport gaps | schema tests and unavailable-transport negative control | coverage-bounded taxonomy | small | not applicable | AVAILABLE |
-| TASK-CODEX-DX-003-CONTEXT | ACTIVE | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm context-cost receipt | one validated task-to-context index | static validator | bounded retrieval correctness | medium | not applicable | AVAILABLE |
-| TASK-CODEX-DX-004-BOOTSTRAP | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm setup receipt | clean-cache secrets-free setup canary | clean-cache canary | core setup canary pass | medium | not applicable | NOT_APPLICABLE |
+| TASK-CODEX-DX-003-CONTEXT | COMPLETED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm context-cost receipt | one validated task-to-context index | static validator | bounded retrieval correctness | medium | not applicable | AVAILABLE |
+| TASK-CODEX-DX-004-BOOTSTRAP | ACTIVE | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm setup receipt | clean-cache secrets-free setup canary | clean-cache canary | core setup canary pass | medium | not applicable | AVAILABLE |
 | TASK-CODEX-DX-005-TESTS | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-004-BOOTSTRAP | CONTRACT | accepted core setup and doctor command contract | isolated canonical command canary | isolated command canary | command truth | medium | not applicable | NOT_APPLICABLE |
 | TASK-CODEX-DX-006-FIXTURES | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-005-TESTS | CONTRACT | accepted canonical test command contract | five deterministic smoke cases with negative control | fixture negative control | fixture smoke 5/5 | medium | not applicable | NOT_APPLICABLE |
 | TASK-CODEX-DX-007-DOCS | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP; TASK-CODEX-DX-005-TESTS; TASK-CODEX-DX-006-FIXTURES | CONTRACT; CONTRACT; CONTRACT; CONTRACT | accepted context index identity; accepted setup command identity; accepted test command identity; accepted smoke benchmark identity | current developer docs resolve only canonical commands and authority | documentation command/path audit | static convergence | wide-mechanical | not applicable | NOT_APPLICABLE |
@@ -55,9 +55,9 @@
 
 ## 4. Ready candidates and frontier selection
 
-- **Dependency-ready candidates:** TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP
-- **Selected frontier:** TASK-CODEX-DX-003-CONTEXT
-- **Selection rationale:** The Owner accepted Candidate `25735cce15d9f3c3180ce8cef855def0f7617236`, rejected repeated per-card blocking, and authorized direct sequential execution through the existing campaign cards without creating or splitting more cards. Each transition still requires exact gates and fresh independent `REVIEW_PASS` evidence.
+- **Dependency-ready candidates:** TASK-CODEX-DX-004-BOOTSTRAP
+- **Selected frontier:** TASK-CODEX-DX-004-BOOTSTRAP
+- **Selection rationale:** Context Candidate `bfd61529d` passed exact C1-C3, Ruff, byte ceilings, adversarial probes, and fresh Luna `REVIEW_PASS`; standing sequential authorization advances to portable core bootstrap.
 - **Exact unblock condition:** none
 
 ## 5. Campaign authority and non-goals

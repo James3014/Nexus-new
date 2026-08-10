@@ -1,7 +1,7 @@
 # TASK-CODEX-DX-004-BOOTSTRAP — Make core setup portable and secrets-free
 
 - **Campaign:** `CAMPAIGN-CODEX-DX-RELIABILITY-20260810`
-- **Status:** `PLANNED`
+- **Status:** `ACTIVE`
 - **Source spec:** `SPEC-CODEX-DX-RELIABILITY-20260810`
 - **Source spec SHA-256:** `ed2b76c259ca028cc13e136d58ed7129a970aeb19c7c1901d7a662918054f870`
 - **Source groups:** core-bootstrap
