@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: github-issue-53-delete-unreachable-blocks
 campaign_id: github-issue-53-unreachable-blocks-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/53
@@ -58,6 +58,21 @@ artifacts and must not be edited by the worker.
 
 Exact commit, independent exact-commit review, no new regression, and proof the
 diff contains deletions only in the two authorized blocks.
+
+## Completion evidence
+
+- pre-mutation card hash:
+  `91645e745ad13bd5b909c123e482eaa1b95b7d23d6aa1ee01b7c9fb7094377e0`
+- implementation commit:
+  `f439f2982a88fe3d66e2b433d911d61500ad5f32`
+- exact diff: 66 deletions, 0 additions, limited to the two allowed files
+- independent exact-commit review: `ACCEPT`
+- reviewer focused gate: 69 passed
+- `git diff --check`: passed
+- Ruff/Pyright diagnostics were independently compared and remained existing
+  baseline debt; no diagnostic was introduced by the deletion-only change
+- broader 42-test differential: 31 passed and the same 11 failures occurred on
+  both the implementation and exact baseline, so no new regression was found
 
 ## Forbidden scope
 
