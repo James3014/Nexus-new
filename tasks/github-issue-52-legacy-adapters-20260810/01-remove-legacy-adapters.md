@@ -77,4 +77,28 @@ behavior. Terminal marker `LEGACY_ADAPTER_REMOVAL_PROVEN`.
 
 ## Completion receipt
 
-- pending Candidate PR
+- Task Card authorization commit: `AUTH_COMMIT` (card SHA-256
+  `a6d2b569edeca38c2e099b4b574896e6b5b3bc198234b592afcab23101eef021`)
+- implementation head: `IMPLEMENTATION_COMMIT`
+- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- deleted the six archived `scripts/legacy` adapters (all carry the
+  `LEGACY / ARCHIVED SCRIPT` marker; zero callers/dynamic-imports/CLI
+  entrypoints/module refs outside historical scanner output and generated
+  packaging inventory)
+- removed exactly the six stale `muse_nexus.egg-info/SOURCES.txt` rows
+  (previously lines 425-430); no other SOURCES.txt change
+- replacement surfaces verified present: `nexus.services.git.GitManager`,
+  `nexus.services.linter.Linter`, `nexus.services.gateway.BattlesuitGateway`,
+  `nexus.services.local_heal.patcher.Patcher`,
+  `nexus.services.reporter.Reporter`,
+  `nexus.services.workspace.WorkspaceManager`
+- post-deletion searches rerun: zero references to the deleted paths in
+  source, tests, CLI, pyproject, or dynamic imports (only the Issue card and
+  historical `full_workspace_xray.md`, both exempt)
+- build/install via `uv build`: wheel + sdist contain zero `scripts/legacy`
+  entries; produced `SOURCES.txt` has zero legacy rows
+- focused Git/Linter/Patcher/Workspace/Gateway/Reporter/LocalHeal/CLI tests:
+  84 passed (candidate), base identical (0 fails) — zero regression
+- Ruff affected current surfaces: identical pre-existing findings on base
+  (zero net-new); `git diff --check` clean
+- reached `CANDIDATE_PR_READY` (PR opened to `main`; no self-approve/merge)

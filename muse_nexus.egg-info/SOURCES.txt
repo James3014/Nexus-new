@@ -422,12 +422,6 @@ scripts/engine/commands/config.py
 scripts/engine/commands/stress_test.py
 scripts/engine/commands/swarm.py
 scripts/housekeeping/archive_repair_yamls.py
-scripts/legacy/git_manager.py
-scripts/legacy/linter.py
-scripts/legacy/llm_client.py
-scripts/legacy/patcher.py
-scripts/legacy/reporter.py
-scripts/legacy/workspace_manager.py
 scripts/ops/calc_learning_velocity.py
 scripts/ops/ci_gate.py
 scripts/ops/ci_smoke_test.py
