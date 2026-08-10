@@ -238,7 +238,10 @@ def resolve_external_fixture(
 
 
 def materialize_local_fixture(repo_root: Path, *, task_id: str, source: LocalFixtureSource) -> FixtureMaterializationResult:
-    case_dir = (repo_root / ".nexus" / "bench_cases" / task_id).resolve()
+    root = (repo_root / ".nexus" / "bench_cases").resolve()
+    case_dir = (root / task_id).resolve()
+    if not case_dir.is_relative_to(root):
+        raise ValueError(f"fixture task_id escapes case root: {task_id}")
     case_dir.mkdir(parents=True, exist_ok=True)
     target_path = case_dir / "target.py"
     visible_test_path = case_dir / source.visible_test_name
@@ -260,6 +263,75 @@ def materialize_local_fixture(repo_root: Path, *, task_id: str, source: LocalFix
         visible_test_file=str(visible_test_path),
         hidden_test_file=str(hidden_test_path) if source.hidden_test_code is not None else "",
     )
+
+
+def deterministic_fixture_source(fixture_kind: str) -> tuple[str, str, str]:
+    """Return a broken target plus distinct visible and hidden verifiers."""
+    fixtures = {
+        "codex_dx_parser": (
+            "def solve(value):\n    return value.strip()\n",
+            "from target import solve\n\ndef test_visible():\n    assert solve(' Hello World ') == 'hello-world'\n",
+            "from target import solve\n\ndef test_hidden():\n    assert solve('  MANY   Spaces ') == 'many-spaces'\n",
+        ),
+        "codex_dx_dedupe": (
+            "def solve(items):\n    return sorted(set(items))\n",
+            "from target import solve\n\ndef test_visible():\n    assert solve(['b', 'a', 'b']) == ['b', 'a']\n",
+            "from target import solve\n\ndef test_hidden():\n    assert solve([3, 1, 3, 2]) == [3, 1, 2]\n",
+        ),
+        "codex_dx_redact": (
+            "def solve(record):\n    return dict(record)\n",
+            "from target import solve\n\ndef test_visible():\n    assert solve({'token': 'x'}) == {'token': '[REDACTED]'}\n",
+            "from target import solve\n\ndef test_hidden():\n    assert solve({'password': 'x', 'ok': 1}) == {'password': '[REDACTED]', 'ok': 1}\n",
+        ),
+        "codex_dx_budget": (
+            "def solve(defaults, override):\n    out = dict(defaults)\n    out.update(override or {})\n    return out\n",
+            "from target import solve\n\ndef test_visible():\n    assert solve({'a': 1}, {'a': None}) == {'a': 1}\n",
+            "from target import solve\n\ndef test_hidden():\n    assert solve({'a': 1}, {'a': None, 'b': 2}) == {'a': 1, 'b': 2}\n",
+        ),
+        "codex_dx_gate": (
+            "def solve(status, artifact):\n    return status == 'pass'\n",
+            "from target import solve\n\ndef test_visible():\n    assert solve('pass', '') is False\n",
+            "from target import solve\n\ndef test_hidden():\n    assert solve('pass', 'report.json') is True\n    assert solve('fail', 'report.json') is False\n",
+        ),
+    }
+    try:
+        target, visible, hidden = fixtures[fixture_kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown deterministic fixture: {fixture_kind}") from exc
+    return (
+        target,
+        portable_fixture_test_import(visible),
+        portable_fixture_test_import(hidden),
+    )
+
+
+def deterministic_fixture_patch(fixture_kind: str) -> str:
+    """Return the checked-in corrected target source for a fixture."""
+    patches = {
+        "codex_dx_parser": "def solve(value):\n    return '-'.join(value.strip().lower().split())\n",
+        "codex_dx_dedupe": "def solve(items):\n    return list(dict.fromkeys(items))\n",
+        "codex_dx_redact": (
+            "def solve(record):\n"
+            "    sensitive = {'token', 'password'}\n"
+            "    return {key: ('[REDACTED]' if key in sensitive else value) "
+            "for key, value in record.items()}\n"
+        ),
+        "codex_dx_budget": (
+            "def solve(defaults, override):\n"
+            "    out = dict(defaults)\n"
+            "    out.update({key: value for key, value in (override or {}).items() "
+            "if value is not None})\n"
+            "    return out\n"
+        ),
+        "codex_dx_gate": (
+            "def solve(status, artifact):\n"
+            "    return status == 'pass' and bool(artifact)\n"
+        ),
+    }
+    try:
+        return patches[fixture_kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown deterministic fixture: {fixture_kind}") from exc
 
 
 def _safe_extra_file_path(case_dir: Path, rel_name: str) -> Path:
