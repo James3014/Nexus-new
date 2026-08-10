@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: IN_PROGRESS
+status: COMPLETED
 task_id: github-issue-77-workforce-decision-validation
 campaign_id: github-issue-77-workforce-decision-validation-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/77
@@ -91,7 +91,28 @@ raw-mapping boundaries. No route/policy/workforce authority change.
 
 ## Completion receipt
 
-- pending Candidate PR
+- Task Card authorization commit: `24bc0cc6c`
+- implementation head: `95f2b0d56`
+- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- constructor boundary: `WorkforceAdmissionDecision.__post_init__` rejects
+  non-`AdmissionDecision` values (arbitrary strings, wrong enum families,
+  null, malformed objects) with a deterministic `ValueError`
+- raw-mapping boundary: `_decision_dict` rejects non-canonical decision values
+  so malformed mapping decisions cannot bypass the dataclass or serialize as
+  valid admission decisions
+- valid ALLOW/BLOCK/ESCALATE construction and serialization unchanged;
+  existing callers all pass `AdmissionDecision` members
+- verification: 35 focused contract/service tests; 84 contract + Golden
+  GB-021/GB-025 + model policy loader + unified runtime admission tests;
+  36 #7 admission/dispatch focused orchestrator tests; 151 combined targeted
+  tests passed
+- contracts/services sweep: identical 117 pre-existing environment failures
+  on base and Candidate (zero regression); 476 passed
+- Ruff exact-base differential: zero new findings (same 4 pre-existing)
+- Pyright exact-base differential: prod/runtime 0 = base 0; contract test 0;
+  runtime test 1 = base 1 (pre-existing line 243)
+- `git diff --check`: clean
+- reached `CANDIDATE_PR_READY` (PR opened to `main`; no self-approve/merge)
 
 ## Block classification
 
