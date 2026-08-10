@@ -1,0 +1,94 @@
+---
+artifact_authority: current
+owner: James Chen
+status: IN_PROGRESS
+task_id: github-issue-54-duplicate-modules
+campaign_id: github-issue-54-duplicate-modules-20260810
+source_issue: https://github.com/James3014/Nexus-new/issues/54
+AUTO_CHAIN: false
+worker_may_commit: false
+worker_may_approve: false
+worker_may_integrate: false
+worker_may_push: false
+---
+
+# Task Card: Remove Three Duplicate Orphan Modules
+
+## Objective
+
+Remove three duplicate module paths whose canonical counterparts have current
+callers and whose duplicate paths have none. Add no forwarding import or
+compatibility shim.
+
+## Inputs and dependencies
+
+- Issue #54 is READY and Owner-authorized (DeepSeek auto-claim queue 5/5A).
+- Evidence baseline: main `84eaa6886e0388a4e15f5b837c89e37768b14307` (fresh
+  rebind per Owner directive).
+- Owner directive comment (2026-08-10T03:51:48Z): self-claim authorized after
+  preceding queue item reaches CANDIDATE_PR_READY or #68 is skipped on its
+  serialization gate; fresh rebind + rerun caller/path/entrypoint checks before
+  deletion.
+- The old `tasks/github-cleanup-issue-54/00-duplicate-modules.md` card
+  (governance commit `a86f564f`) is unrecoverable in current history; this new
+  card is the durable rebind.
+- #52 must never run concurrently: both #54 and #52 mutate
+  `muse_nexus.egg-info/SOURCES.txt`.
+
+## Allowed files
+
+- `scripts/brain_de_entropy.py`
+- `scripts/core/migration_validator.py`
+- `scripts/core/drclaw_diagnosis.py`
+- `muse_nexus.egg-info/SOURCES.txt` (rows referencing the deleted duplicate
+  paths only)
+- `tasks/github-issue-54-duplicate-modules-20260810/INDEX.md`
+- `tasks/github-issue-54-duplicate-modules-20260810/01-remove-duplicate-modules.md`
+
+Maximum changed files: 6.
+
+## Forbidden scope
+
+- canonical implementation changes (`nexus/core/*`, `scripts/drclaw_diagnosis.py`)
+- compatibility imports/shim modules
+- consolidation/refactor
+- deletion of historical reports or `nexus/services/nexus_probe.py`
+- deletion of unrelated SOURCES.txt stale rows
+- any file outside the allowed scope above
+
+## Required behavior
+
+- Delete only the three authorized duplicate module paths.
+- Delete only the SOURCES.txt rows referencing those deleted duplicate paths.
+- Retain canonical counterparts and their current callers intact.
+
+## Verification
+
+- Focused ContextHub, migration-validator, operational probe, DrClaw/benchmark,
+  Wiki source-integrity, and packaging tests.
+- Invoke retained canonical standalone scripts with non-mutating help/dry-run
+  surfaces where available.
+- Full exact-base versus post-deletion regression comparison.
+- Ruff on retained canonical modules and `git diff --check`.
+
+## Required evidence and exit criteria
+
+- Post-deletion search shows zero references to the three deleted paths.
+- Canonical callers (ContextHub, migrationsafetyvalidator, DrClaw benchmark)
+  still resolve.
+- Focused tests and exact-base/post-deletion regression pass (identical or
+  strictly fewer failures).
+- Ruff and diff gate pass.
+
+Maximum claim: three uncalled duplicate module paths removed while canonical
+implementations and callers remain intact.
+
+## Completion receipt
+
+- pending Candidate PR
+
+## Block classification
+
+- `RECOVERABLE_BLOCK`: bounded regression or discovery of an active launcher
+  for a duplicate path.
+- `HARD_BLOCK`: canonical changes required, shim required, or scope widening.
