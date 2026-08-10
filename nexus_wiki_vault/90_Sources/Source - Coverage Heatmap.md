@@ -69,7 +69,6 @@ version_scope:
 - `nexus/core/mem_palace.py` [Code: nexus/core/mem_palace.py]
 - `nexus/core/memory/schema.py` [Code: nexus/core/memory/schema.py]
 - `nexus/core/memory_manager.py` [Code: nexus/core/memory_manager.py]
-- `nexus/core/nexus_transaction.py` [Code: nexus/core/nexus_transaction.py]
 - `nexus/core/onebit_core.py` [Code: nexus/core/onebit_core.py]
 - `nexus/core/optimize/loop.py` [Code: nexus/core/optimize/loop.py]
 - `nexus/core/p_loop_manager.py` [Code: nexus/core/p_loop_manager.py]
