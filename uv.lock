@@ -1825,7 +1825,6 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
     { name = "tqdm" },
-    { name = "typer" },
     { name = "urllib3" },
     { name = "websockets" },
 ]
@@ -1895,7 +1894,6 @@ requires-dist = [
     { name = "torch", marker = "extra == 'ml'", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.65.0,<5.0.0" },
     { name = "transformers", marker = "extra == 'ml'", specifier = ">=4.30.0" },
-    { name = "typer", specifier = ">=0.9.0,<1.0.0" },
     { name = "urllib3", specifier = "<2.6" },
     { name = "web3", marker = "extra == 'web3'", specifier = ">=6.0.0" },
     { name = "websockets", specifier = ">=11.0" },
