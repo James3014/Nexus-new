@@ -69,6 +69,46 @@ def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
     ]
 
 
+def test_default_impact_map_covers_new_learning_modules_without_shadowing_specific_rules(tmp_path):
+    rules = load_impact_rules()
+
+    new_details = select_target_details(
+        ["nexus/learning/new_contract.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+    specific_details = select_target_details(
+        ["nexus/learning/skill_registry.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+    unknown_details = select_target_details(
+        ["nexus/unknown_subsystem/new.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert "tests/learning" in new_details.targets
+    assert new_details.high_risk_escalated is True
+    assert "learning_contract" in new_details.risk_reasons
+    assert new_details.unmatched_paths == []
+
+    assert "tests/learning" not in specific_details.targets
+    assert (
+        "nexus/learning/skill_registry.py: matched nexus/learning/skill_registry.py"
+        in specific_details.reasons
+    )
+
+    assert unknown_details.fallback_used is True
+    assert "tests/learning" not in unknown_details.targets
+
+
 def test_select_targets_uses_fallback_when_no_paths_match():
     targets, reasons = select_targets(
         ["nexus/app/flow.py"],
