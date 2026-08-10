@@ -78,6 +78,16 @@ def _decision_dict(decision: Any) -> dict[str, Any]:
         raise TypeError("policy_loader.admit returned a non-serializable decision")
     if not isinstance(result, dict):
         raise TypeError("policy_loader.admit returned a non-object decision")
+    decision_value = result.get("decision")
+    if not isinstance(decision_value, str) or decision_value not in {
+        AdmissionDecision.ALLOW.value,
+        AdmissionDecision.BLOCK.value,
+        AdmissionDecision.ESCALATE.value,
+    }:
+        raise ValueError(
+            "policy_loader.admit returned an invalid decision value: "
+            f"{decision_value!r}"
+        )
     return result
 
 
