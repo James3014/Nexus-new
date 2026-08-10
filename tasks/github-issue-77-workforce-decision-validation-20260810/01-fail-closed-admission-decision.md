@@ -93,7 +93,7 @@ raw-mapping boundaries. No route/policy/workforce authority change.
 
 - Task Card authorization commit: `24bc0cc6c`
 - implementation head: `95f2b0d56`
-- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- PR: https://github.com/James3014/Nexus-new/pull/85
 - constructor boundary: `WorkforceAdmissionDecision.__post_init__` rejects
   non-`AdmissionDecision` values (arbitrary strings, wrong enum families,
   null, malformed objects) with a deterministic `ValueError`

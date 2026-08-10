@@ -32,7 +32,7 @@ Completion receipt:
 
 - Task Card authorization commit: `24bc0cc6c`
 - implementation head: `95f2b0d56`
-- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- PR: https://github.com/James3014/Nexus-new/pull/85
 - constructor boundary fails closed on forged `decision` values
 - raw-mapping `_decision_dict` boundary fails closed on malformed mappings
 - valid ALLOW/BLOCK/ESCALATE behavior unchanged
