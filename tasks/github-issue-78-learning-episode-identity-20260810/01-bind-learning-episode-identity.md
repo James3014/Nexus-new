@@ -89,7 +89,7 @@ immutable envelope or signature.
 
 - Task Card authorization commit: `14e88e53d`
 - implementation head: `e200cccd6`
-- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- PR: https://github.com/James3014/Nexus-new/pull/84
 - shared `canonical_episode_identity` helper used by builder and validator;
   validator recomputes `episode_id` from stored `idempotency_key` and fails
   closed on empty keys, malformed ids, and mismatches
