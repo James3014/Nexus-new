@@ -87,7 +87,7 @@ implementations and callers remain intact.
 
 - Task Card authorization commit: `baf2ef096`
 - implementation head: `95d72a7af`
-- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- PR: https://github.com/James3014/Nexus-new/pull/86
 - deleted: `scripts/brain_de_entropy.py`, `scripts/core/migration_validator.py`,
   `scripts/core/drclaw_diagnosis.py`
 - removed the two `muse_nexus.egg-info/SOURCES.txt` rows referencing the

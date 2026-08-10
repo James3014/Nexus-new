@@ -34,7 +34,7 @@ Completion receipt:
 
 - Task Card authorization commit: `baf2ef096`
 - implementation head: `95d72a7af`
-- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- PR: https://github.com/James3014/Nexus-new/pull/86
 - deleted 3 duplicate module paths + 2 SOURCES.txt rows
 - fresh-main rebind + caller/path/entrypoint checks: zero refs
 - canonical callers intact (ContextHub, migrationsafetyvalidator, DrClaw)
