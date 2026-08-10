@@ -7,7 +7,7 @@
 - **Source groups:** core-bootstrap
 - **Requirements:** REQ-003; REQ-004
 - **Acceptance:** AC-003; AC-004
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** core setup canary pass
 - **Depends on:** TASK-CODEX-DX-001-BEFORE
 - **Dependency unlock evidence:** accepted immutable before-arm setup receipt

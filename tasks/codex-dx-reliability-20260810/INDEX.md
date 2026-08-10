@@ -6,10 +6,10 @@
 - **Source spec ID:** `SPEC-CODEX-DX-RELIABILITY-20260810`
 - **Source spec SHA-256:** `ed2b76c259ca028cc13e136d58ed7129a970aeb19c7c1901d7a662918054f870`
 - **Source basis snapshot:** canonical code baseline b6601270edd95a756c4eab8c7a623006ee1b32d1; clean isolated Target /private/tmp/nexus-codex-dx-019fe8e1; owner decisions DEC-003 and DEC-004
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Parallel execution:** `false`
-- **Current frontier:** `TASK-CODEX-DX-002-HISTORY`
-- **Maximum campaign claim:** owner-accepted immutable before-arm evidence and active history-receipt implementation; no benchmark lift, integration, release, or production claim
+- **Current frontier:** `TASK-CODEX-DX-003-CONTEXT`
+- **Maximum campaign claim:** owner-accepted before/history evidence and active context-contract implementation; no benchmark lift, integration, release, or production claim
 
 ## 1. Source handoff import
 
@@ -44,8 +44,8 @@
 | Task ID | Status | Type | Slicing strategy | Blocked by | Edge type | Unlock evidence | Observable outcome | Verification seam | Maximum claim | Scope class | MCP profile | Transport status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | TASK-CODEX-DX-001-BEFORE | COMPLETED | IMPLEMENTATION | TRACER_BULLET | none | none | none | immutable before-arm receipt bound to b6601270e | benchmark schema tests and 15 fresh-session trial receipts | paired benchmark evidence only | medium | not applicable | NOT_APPLICABLE |
-| TASK-CODEX-DX-002-HISTORY | ACTIVE | IMPLEMENTATION | TRACER_BULLET | none | none | none | versioned history coverage receipt with honest transport gaps | schema tests and unavailable-transport negative control | coverage-bounded taxonomy | small | not applicable | AVAILABLE |
-| TASK-CODEX-DX-003-CONTEXT | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm context-cost receipt | one validated task-to-context index | static validator | bounded retrieval correctness | medium | not applicable | NOT_APPLICABLE |
+| TASK-CODEX-DX-002-HISTORY | COMPLETED | IMPLEMENTATION | TRACER_BULLET | none | none | none | versioned history coverage receipt with honest transport gaps | schema tests and unavailable-transport negative control | coverage-bounded taxonomy | small | not applicable | AVAILABLE |
+| TASK-CODEX-DX-003-CONTEXT | ACTIVE | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm context-cost receipt | one validated task-to-context index | static validator | bounded retrieval correctness | medium | not applicable | AVAILABLE |
 | TASK-CODEX-DX-004-BOOTSTRAP | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-001-BEFORE | EVIDENCE | accepted immutable before-arm setup receipt | clean-cache secrets-free setup canary | clean-cache canary | core setup canary pass | medium | not applicable | NOT_APPLICABLE |
 | TASK-CODEX-DX-005-TESTS | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-004-BOOTSTRAP | CONTRACT | accepted core setup and doctor command contract | isolated canonical command canary | isolated command canary | command truth | medium | not applicable | NOT_APPLICABLE |
 | TASK-CODEX-DX-006-FIXTURES | PLANNED | IMPLEMENTATION | TRACER_BULLET | TASK-CODEX-DX-005-TESTS | CONTRACT | accepted canonical test command contract | five deterministic smoke cases with negative control | fixture negative control | fixture smoke 5/5 | medium | not applicable | NOT_APPLICABLE |
@@ -55,15 +55,15 @@
 
 ## 4. Ready candidates and frontier selection
 
-- **Dependency-ready candidates:** TASK-CODEX-DX-002-HISTORY; TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP
-- **Selected frontier:** TASK-CODEX-DX-002-HISTORY
-- **Selection rationale:** The Owner accepted Candidate `b5017f16fb3d969a654fccc0fd6c5c6d22911ae8` after its exact tests and fresh Luna review passed, then authorized continued execution. History transport is available and Card 002 can bind live bounded coverage before product-facing changes.
+- **Dependency-ready candidates:** TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP
+- **Selected frontier:** TASK-CODEX-DX-003-CONTEXT
+- **Selection rationale:** The Owner accepted Candidate `25735cce15d9f3c3180ce8cef855def0f7617236`, rejected repeated per-card blocking, and authorized direct sequential execution through the existing campaign cards without creating or splitting more cards. Each transition still requires exact gates and fresh independent `REVIEW_PASS` evidence.
 - **Exact unblock condition:** none
 
 ## 5. Campaign authority and non-goals
 
-The Owner approved the source specification and continued governed work. Each implementation card may implement, verify, commit only its scoped changes, and form a Candidate through the repository-owned local governed lifecycle. Workers and reviewers cannot approve, integrate, push, merge, clean up, or claim production readiness. The dirty canonical checkout and unrelated linked worktrees remain out of scope. `AUTO_CHAIN=false` and parallel execution is forbidden.
+The Owner approved the source specification and continued governed work. Each implementation card may implement, verify, commit only its scoped changes, and form a Candidate through the repository-owned local governed lifecycle. Workers and reviewers cannot approve, integrate, push, merge, clean up, or claim production readiness. The dirty canonical checkout and unrelated linked worktrees remain out of scope. `AUTO_CHAIN=true` applies sequentially to the already-existing cards only after exact gates and a fresh independent `REVIEW_PASS`; no new or split cards may be created. Parallel execution remains forbidden. This standing authorization does not grant push, merge, release, production, security-scope expansion, or HARD_BLOCK override authority.
 
 ## 6. Supersession and change history
 
-Initial campaign compiled from owner-approved `SPEC-CODEX-DX-RELIABILITY-20260810`. It supersedes no campaign or Task Card. On 2026-08-10 the Owner accepted the immutable before-arm Candidate `b5017f16fb3d969a654fccc0fd6c5c6d22911ae8` and authorized the frontier transition to `TASK-CODEX-DX-002-HISTORY`.
+Initial campaign compiled from owner-approved `SPEC-CODEX-DX-RELIABILITY-20260810`. It supersedes no campaign or Task Card. On 2026-08-10 the Owner accepted the immutable before-arm Candidate `b5017f16fb3d969a654fccc0fd6c5c6d22911ae8` and authorized the frontier transition to `TASK-CODEX-DX-002-HISTORY`. The Owner later accepted history Candidate `25735cce15d9f3c3180ce8cef855def0f7617236` and granted standing sequential auto-chain authority across the existing cards to eliminate repeated manual acceptance blocks.

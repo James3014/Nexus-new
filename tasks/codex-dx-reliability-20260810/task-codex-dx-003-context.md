@@ -1,13 +1,13 @@
 # TASK-CODEX-DX-003-CONTEXT — Add the canonical bounded Codex context contract
 
 - **Campaign:** `CAMPAIGN-CODEX-DX-RELIABILITY-20260810`
-- **Status:** `PLANNED`
+- **Status:** `ACTIVE`
 - **Source spec:** `SPEC-CODEX-DX-RELIABILITY-20260810`
 - **Source spec SHA-256:** `ed2b76c259ca028cc13e136d58ed7129a970aeb19c7c1901d7a662918054f870`
 - **Source groups:** context-contract
 - **Requirements:** REQ-002
 - **Acceptance:** AC-002
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** bounded retrieval correctness
 - **Depends on:** TASK-CODEX-DX-001-BEFORE
 - **Dependency unlock evidence:** accepted immutable before-arm context-cost receipt

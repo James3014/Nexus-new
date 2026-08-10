@@ -7,7 +7,7 @@
 - **Source groups:** test-contract
 - **Requirements:** REQ-005
 - **Acceptance:** AC-005
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** command truth
 - **Depends on:** TASK-CODEX-DX-004-BOOTSTRAP
 - **Dependency unlock evidence:** accepted core setup and doctor command contract

@@ -7,7 +7,7 @@
 - **Source groups:** paired-benchmark
 - **Requirements:** REQ-008; REQ-009
 - **Acceptance:** AC-008; AC-009
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** paired benchmark evidence only
 - **Depends on:** TASK-CODEX-DX-002-HISTORY; TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP; TASK-CODEX-DX-005-TESTS; TASK-CODEX-DX-006-FIXTURES; TASK-CODEX-DX-007-DOCS; TASK-CODEX-DX-008-FEEDBACK
 - **Dependency unlock evidence:** accepted history coverage receipt; accepted context index receipt; accepted setup canary receipt; accepted test command receipt; accepted fixture smoke receipt; accepted docs audit receipt; accepted prevention mapping receipt

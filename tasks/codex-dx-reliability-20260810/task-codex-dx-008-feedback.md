@@ -7,7 +7,7 @@
 - **Source groups:** durable-feedback
 - **Requirements:** REQ-010
 - **Acceptance:** AC-010
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** prevention mapping
 - **Depends on:** TASK-CODEX-DX-002-HISTORY; TASK-CODEX-DX-006-FIXTURES
 - **Dependency unlock evidence:** accepted failure taxonomy receipt; accepted fixture smoke receipt

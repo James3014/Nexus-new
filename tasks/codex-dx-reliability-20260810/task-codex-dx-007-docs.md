@@ -7,7 +7,7 @@
 - **Source groups:** docs-convergence
 - **Requirements:** REQ-007
 - **Acceptance:** AC-007
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** static convergence
 - **Depends on:** TASK-CODEX-DX-003-CONTEXT; TASK-CODEX-DX-004-BOOTSTRAP; TASK-CODEX-DX-005-TESTS; TASK-CODEX-DX-006-FIXTURES
 - **Dependency unlock evidence:** accepted context index identity; accepted setup command identity; accepted test command identity; accepted smoke benchmark identity

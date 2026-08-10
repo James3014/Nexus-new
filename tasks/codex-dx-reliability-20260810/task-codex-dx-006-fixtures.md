@@ -7,7 +7,7 @@
 - **Source groups:** fixture-benchmark
 - **Requirements:** REQ-006
 - **Acceptance:** AC-006
-- **Auto-chain:** `false`
+- **Auto-chain:** `true`
 - **Maximum claim:** fixture smoke 5/5
 - **Depends on:** TASK-CODEX-DX-005-TESTS
 - **Dependency unlock evidence:** accepted canonical test command contract
