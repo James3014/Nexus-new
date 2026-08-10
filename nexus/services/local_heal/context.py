@@ -1,48 +1,55 @@
-import json
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Any, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from nexus.services.local_heal.errors import PatchError
+from nexus.services.local_heal.interface import LocalizedFile, RepairPlan, ReproductionProvenance
+
 
 @dataclass
 class GovernanceContext:
     """🛡️ Nexus Governance & Probe Metadata (Fail-closed / Accountability)"""
+
     expected_stop_layer: str = "verification"
     expected_reason_family: str = "SOLVED"
     probe_goal: str = "general-repair"
-    
+
     # Audit Signals
     gate_exit: str = "unknown"
     actual_reason_family: str = "unknown"
     stop_layer_matched: bool = False
     family_matched: bool = False
 
-from nexus.services.local_heal.interface import RepairPlan, LocalizedFile
 
 @dataclass
 class OperationalContext:
     """⚙️ Nexus Operational State (Artifacts / Evidence)"""
+
     instance_id: str
     repo_dir: Path
     problem_statement: str
-    
+    task_id: str = ""
+
     # Memory control (BMF5: memory_enabled flag)
     memory_enabled: bool = True  # Set to False for nexus_memory_off arm
     memory_arm: str = ""  # Explicit arm: "nexus_memory_on" or "nexus_memory_off"
-    artifact_output_root: str = "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"  # Configurable output root
+    artifact_output_root: str = (
+        "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"  # Configurable output root
+    )
 
     # Phase 1: Reproduction
     repro_script: str = ""
     repro_evidence: str = ""
     reproduced: bool = False
-    
+    reproduction_provenance: ReproductionProvenance = field(default_factory=ReproductionProvenance)
+
     # Phase 2: Planning
     plan: Optional[RepairPlan] = None
     reasoning_mode: str = "INTUITIVE"
-    
+
     # Phase 3: Localization
     localized_files: List[LocalizedFile] = field(default_factory=list)
-    
+
     # Phase 4: Targeted Edit
     system_prompt: str = ""
     user_prompt: str = ""
@@ -52,12 +59,14 @@ class OperationalContext:
     repair_specification: str = ""  # 🛡️ 規格中心修復：邏輯修復意圖 (Intent-based)
     errors: List[PatchError] = field(default_factory=list)
     model_decisions: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     # Phase 5: Verification
     evaluation_report: str = ""
     hidden_verifier_passed: bool = False
     solve_eligible: bool = False
-    
+    verifier_command_present: bool = False
+    verifier_command_source: str = ""
+
     # Common
     failure_reason: str = ""
     receipt_path: str = ""
@@ -80,15 +89,18 @@ class OperationalContext:
     # T1.6: Semantic retry telemetry
     _semantic_retry_telemetry: Dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass
 class HealContext:
     """🧬 Unified Nexus Heal Context (Composition of Operational & Governance)"""
+
     op: OperationalContext
     gov: GovernanceContext
-    
+
     @property
-    def instance_id(self): return self.op.instance_id
-    
+    def instance_id(self):
+        return self.op.instance_id
+
     # For backward compatibility during refactoring
     def __getattr__(self, name):
         if hasattr(self.op, name):
