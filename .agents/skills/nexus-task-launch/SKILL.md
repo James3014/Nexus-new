@@ -17,6 +17,11 @@ classification, mutation must use the self-hosted lifecycle tools; do not
 create an unmanaged worktree, manually create a branch, or use a direct
 connector edit/write operation.
 
+For Codex task orientation, validate and consult the non-authoritative
+`configs/codex_task_context_index.json`. It only narrows context and test
+lookup; it never selects authority and has no broad fallback.
+Validate with `python3 scripts/ops/validate_codex_context_index.py configs/codex_task_context_index.json`.
+
 ## Required sequence
 
 For governed work only:
