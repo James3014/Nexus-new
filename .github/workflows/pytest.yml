@@ -103,6 +103,28 @@ jobs:
           echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Run Golden Behavior gate on exact pull request head
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_SHA: ${{ steps.base.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/ops/run_golden_behavior_eval.py \
+            --json-report .ci-impact/golden-behavior.json
+          .venv/bin/python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(
+              Path(".ci-impact/golden-behavior.json").read_text(encoding="utf-8")
+          )
+          if report.get("schema") != "nexus.golden_behavior_eval.v1":
+              raise SystemExit("Golden Behavior report schema mismatch")
+          if report.get("source_revision") != os.environ["HEAD_SHA"]:
+              raise SystemExit("Golden Behavior report source revision mismatch")
+          PY
+
       - name: Build tiered exact-base impact plan
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
