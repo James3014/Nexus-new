@@ -30,6 +30,11 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.engine.canonical_task_seam import (
+    VerifiedTaskCardIdentity,
+    build_canonical_dispatch_envelope,
+    build_canonical_planner_admission,
+)
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerExecutionReceipt,
@@ -106,41 +111,13 @@ def _valid_local_dispatch():
     return demands, admission
 
 
-def _valid_online_agy_dispatch():
-    demands = {
-        "schema": "nexus.workforce_demands.v1",
-        "route_authority": "CapabilityPlanner",
-        "demands": [{
-            "schema": "nexus.workforce_demand.v1",
-            "demand_id": "service-online-agy-1",
-            "execution_channel": "online",
-            "requested_role": "fast_bounded_implementation",
-            "minimum_autonomy": "L1",
-            "context_class": "nexus_bounded",
-            "mutation_intent": True,
-            "external_verification_required": True,
-            "route_authority": "CapabilityPlanner",
-        }],
-    }
-    admission = evaluate_runtime_workforce_admission(
-        demands,
-        {"online": {
-            "worker_id": "agy_flash",
-            "provider": "agy",
-            "model": "gemini-3.6-flash-high",
-            "controls": ["task_card", "allowed_files", "mandatory_commands", "independent_verification"],
-        }},
-        WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
-    ).to_dict()
-    return demands, admission
-
-
 def test_workforce_dispatch_binding_is_canonical_and_fail_closed():
     demands, admission = _valid_local_dispatch()
     binding = validate_workforce_dispatch_binding({
         "workforce_demands": demands,
         "workforce_admission": admission,
     })
+    assert binding is not None
     assert binding["worker_id"] == "local_coder_7b"
     assert binding["provider"] == "ollama"
     assert binding["model"] == "qwen2.5-coder:7b-instruct"
@@ -181,7 +158,26 @@ def test_build_contract_binds_selected_admission_identity_and_rejects_override(t
 
 
 def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tmp_path, monkeypatch):
-    demands, admission = _valid_online_agy_dispatch()
+    task_id = "service-online-agy-1"
+    card_path = "tasks/campaign/service-online-agy-1.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="bounded online change",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    demands = internal["workforce_demands"]
+    admission = internal["workforce_admission"]
     calls = []
 
     class FakeAgyAdapter:
@@ -211,17 +207,32 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False, ephemeral=True,
     )
+    attempt_id = "a" * 32
     request = _request(
-        tmp_path, task_id="service-online-agy-1", worker="auto",
+        tmp_path, task_id=task_id, worker="auto",
         model="gemini-3.6-flash-high", execution_lane="ISOLATED_TARGET",
         workforce_demands=demands, workforce_admission=admission,
+        planner_output=internal["planner_output"],
+        task_card_path=card_path, task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
     )
+    request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
     contract = service.build_contract(request)
     binding = validate_workforce_dispatch_binding(request)
-    attempt_id = "a" * 32
     service._write_state(contract.task_id, {
         "task_id": contract.task_id, "status": "SUBMITTED", "attempt_id": attempt_id,
+        "task_card_path": card_path, "task_card_hash": card_hash,
         "request": request, "workforce_dispatch": binding,
+        "canonical_dispatch_envelope": binding["canonical_dispatch_envelope"],
         "workforce_policy_hash": binding["policy_hash"], "workforce_binding_hash": binding["binding_hash"],
         "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
         "selected_worker_id": binding["worker_id"], "selected_provider": binding["provider"],
@@ -273,6 +284,8 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     assert persisted["selected_worker_id"] == "agy_flash"
     assert persisted["selected_provider"] == "agy"
     assert persisted["selected_model"] == "gemini-3.6-flash-high"
+    assert persisted["task_card_path"] == request["canonical_dispatch_envelope"]["task_card_path"]
+    assert persisted["task_card_hash"] == request["canonical_dispatch_envelope"]["task_card_hash"]
     assert persisted["execution"]["provider"] == "agy"
     assert persisted["execution"]["outcome"] == WorkerOutcome.EXECUTION_COMPLETED.value
     assert persisted["fallback_lineage"] == []

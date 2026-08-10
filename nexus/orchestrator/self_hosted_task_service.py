@@ -37,6 +37,7 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     AttemptResolutionVerdict,
@@ -279,7 +280,8 @@ def validate_workforce_dispatch_binding(request: Mapping[str, Any]) -> Optional[
     fallback = str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
     if fallback and fallback != str(binding["provider"]).strip().lower():
         raise RuntimeError("WORKFORCE_ADMISSION_FALLBACK_UNADMITTED")
-    return {
+    raw_envelope = request.get("canonical_dispatch_envelope")
+    result = {
         "demands": _jsonable(demands),
         "admission": _jsonable(admission),
         "demand_id": str(raw_items[0].get("demand_id") or ""),
@@ -290,6 +292,27 @@ def validate_workforce_dispatch_binding(request: Mapping[str, Any]) -> Optional[
         "binding_hash": str(binding["binding_hash"]),
         "aggregate_binding_hash": str(binding["aggregate_binding_hash"]),
     }
+    if raw_envelope is not None:
+        if not isinstance(raw_envelope, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_INVALID")
+        planner_output = request.get("planner_output")
+        if not isinstance(planner_output, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_PLANNER_MISSING")
+        try:
+            envelope = build_canonical_dispatch_envelope(
+                planner_output,
+                {**binding, "demand_id": str(raw_items[0].get("demand_id") or "")},
+                task_id=str(request.get("task_id") or ""),
+                attempt_id=str(request.get("attempt_id") or ""),
+                task_card_path=str(request.get("task_card_path") or ""),
+                task_card_hash=str(request.get("task_card_hash") or ""),
+            ).to_dict()
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"WORKFORCE_DISPATCH_ENVELOPE_INVALID:{exc}") from exc
+        if dict(raw_envelope) != envelope:
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_MISMATCH")
+        result["canonical_dispatch_envelope"] = envelope
+    return result
 
 
 def _parse_time(value: Optional[str]) -> Optional[float]:
@@ -1763,6 +1786,12 @@ class SelfHostedTaskService:
             requested_provider = str(request.get("worker", "auto")).strip().lower()
             if requested_provider not in {"", "auto", dispatch_binding["provider"]}:
                 raise RuntimeError("WORKFORCE_ADMISSION_PROVIDER_MISMATCH")
+            caller_provider = str(request.get("provider") or "").strip().lower()
+            if caller_provider and caller_provider != dispatch_binding["provider"].lower():
+                raise RuntimeError("WORKFORCE_ADMISSION_PROVIDER_MISMATCH")
+            caller_worker_id = str(request.get("worker_id") or "").strip()
+            if caller_worker_id and caller_worker_id != dispatch_binding["worker_id"]:
+                raise RuntimeError("WORKFORCE_ADMISSION_WORKER_MISMATCH")
             requested_model = str(request.get("model") or "").strip()
             if requested_model and requested_model != dispatch_binding["model"]:
                 raise RuntimeError("WORKFORCE_ADMISSION_MODEL_MISMATCH")
@@ -1825,7 +1854,10 @@ class SelfHostedTaskService:
         ]
         verifier_commands = [str(item) for item in request.get("verifier_commands", [])]
         protected_contracts = [str(item) for item in request.get("protected_contracts", [])]
-        if request.get("worker_candidate_ingress"):
+        if (
+            request.get("worker_candidate_ingress")
+            and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value
+        ):
             authority_confirmation = request.get("authority_change_candidate_confirmation", False)
             if not isinstance(authority_confirmation, bool):
                 raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
@@ -2068,6 +2100,19 @@ class SelfHostedTaskService:
         }
         if any(str(state.get(field) or "") != str(value or "") for field, value in expected.items()):
             raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        expected_envelope = binding.get("canonical_dispatch_envelope")
+        persisted_envelope = state.get("canonical_dispatch_envelope")
+        if isinstance(expected_envelope, Mapping) or "canonical_dispatch_envelope" in request:
+            if not isinstance(expected_envelope, Mapping) or dict(persisted_envelope or {}) != dict(expected_envelope):
+                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_STATE_DRIFT")
+            persisted_identity = {
+                "task_id": state.get("task_id"),
+                "attempt_id": state.get("attempt_id"),
+                "task_card_path": state.get("task_card_path"),
+                "task_card_hash": state.get("task_card_hash"),
+            }
+            if any(expected_envelope.get(field) != value for field, value in persisted_identity.items()):
+                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT")
         if active_provider is not None and str(active_provider) != str(binding["provider"]):
             raise RuntimeError("WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT")
 
@@ -2224,7 +2269,11 @@ class SelfHostedTaskService:
                     lease,
                     prompt=self._prompt(contract),
                     model=(
-                        str(dispatch_binding["model"])
+                        str(
+                            (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
+                                "model", dispatch_binding["model"]
+                            )
+                        )
                         if dispatch_binding is not None
                         else str(request.get("model") or "").strip() or None
                     ),
@@ -4203,6 +4252,10 @@ class SelfHostedTaskService:
                 raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
         contract = self.build_contract(request)
         dispatch_binding = validate_workforce_dispatch_binding(request)
+        if dispatch_binding is not None and not isinstance(
+            dispatch_binding.get("canonical_dispatch_envelope"), Mapping
+        ):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_MISSING")
         state_request = dict(request)
         if dispatch_binding is not None:
             state_request.update({
@@ -4214,6 +4267,19 @@ class SelfHostedTaskService:
             })
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
+        if (
+            request.get("worker_candidate_ingress")
+            and str(request.get("contract_kind") or "") == ContractKind.TRACKED_TASK_CARD.value
+        ):
+            requested_card_path = request.get("task_card_path")
+            if not requested_card_path or not request.get("task_card_hash"):
+                raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked path/hash pair required")
+            if (
+                identity.get("contract_kind") != ContractKind.TRACKED_TASK_CARD.value
+                or identity.get("task_card_path") != str(_resolve_task_card_path(requested_card_path))
+                or identity.get("task_card_hash") != request.get("task_card_hash")
+            ):
+                raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked identity drifted")
         collaboration_provenance = CollaborationRealmVerifier.verify_submission(contract)
         if autonomy_grant is not None:
             if autonomy_grant.collaboration_base.head_sha != contract.controller_revision:
@@ -4287,7 +4353,12 @@ class SelfHostedTaskService:
             "contract_kind": identity.get("contract_kind", ContractKind.NONE.value),
             "contract_hash": identity.get("contract_hash"),
             "owner_inline_contract": identity.get("owner_inline_contract"),
-            "task_card_path": identity["task_card_path"],
+            "task_card_path": (
+                request.get("task_card_path")
+                if request.get("worker_candidate_ingress")
+                and identity.get("contract_kind") == ContractKind.TRACKED_TASK_CARD.value
+                else identity["task_card_path"]
+            ),
             "task_card_hash": identity["task_card_hash"],
             "status_history": [{"status": "SUBMITTED", "at": now}],
             "request": _jsonable(state_request),
@@ -4311,6 +4382,10 @@ class SelfHostedTaskService:
             "selected_model": dispatch_binding["model"] if dispatch_binding else str(request.get("model") or ""),
             "provider_order": list(contract.provider_order),
             "workforce_dispatch": dispatch_binding,
+            "canonical_dispatch_envelope": (
+                dispatch_binding.get("canonical_dispatch_envelope")
+                if dispatch_binding else None
+            ),
             "workforce_policy_hash": dispatch_binding["policy_hash"] if dispatch_binding else None,
             "workforce_binding_hash": dispatch_binding["binding_hash"] if dispatch_binding else None,
             "workforce_aggregate_binding_hash": dispatch_binding["aggregate_binding_hash"] if dispatch_binding else None,

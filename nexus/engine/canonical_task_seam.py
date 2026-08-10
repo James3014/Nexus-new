@@ -123,6 +123,138 @@ class CanonicalProductExecutionResult:
         )
 
 
+@dataclass(frozen=True)
+class VerifiedTaskCardIdentity:
+    """Tracked-card identity returned by lifecycle readback, not caller authority."""
+
+    task_id: str
+    task_card_path: str
+    canonical_task_card_path: str
+    task_card_hash: str
+    contract_kind: str = "TRACKED_TASK_CARD"
+
+    def __post_init__(self) -> None:
+        if not self.task_id.strip():
+            raise ValueError("verified_task_card_task_id_missing")
+        path = PurePosixPath(self.task_card_path)
+        if path.is_absolute() or ".." in path.parts or not str(path).startswith("tasks/"):
+            raise ValueError("verified_task_card_path_invalid")
+        canonical_path = Path(self.canonical_task_card_path)
+        if not canonical_path.is_absolute():
+            raise ValueError("verified_task_card_canonical_path_invalid")
+        if len(self.task_card_hash) != 64 or any(
+            char not in "0123456789abcdef" for char in self.task_card_hash
+        ):
+            raise ValueError("verified_task_card_hash_invalid")
+        if self.contract_kind != "TRACKED_TASK_CARD":
+            raise ValueError("verified_task_card_contract_kind_invalid")
+
+
+@dataclass(frozen=True)
+class CanonicalDispatchEnvelope:
+    """The immutable identity passed from planning through registry dispatch."""
+
+    schema: str
+    task_id: str
+    attempt_id: str
+    task_card_path: str
+    task_card_hash: str
+    demand_id: str
+    planner_decision_hash: str
+    planner_plan_hash: str
+    worker_id: str
+    provider: str
+    model: str
+    policy_hash: str
+    binding_hash: str
+    aggregate_binding_hash: str
+
+    def __post_init__(self) -> None:
+        if self.schema != "nexus.canonical_dispatch_envelope.v1":
+            raise ValueError("canonical_dispatch_schema_invalid")
+        for name in (
+            "task_id", "attempt_id", "task_card_path", "demand_id", "worker_id", "provider", "model",
+        ):
+            if not isinstance(getattr(self, name), str) or not getattr(self, name).strip():
+                raise ValueError(f"canonical_dispatch_{name}_missing")
+        for name in (
+            "task_card_hash", "planner_decision_hash", "planner_plan_hash", "policy_hash",
+            "binding_hash", "aggregate_binding_hash",
+        ):
+            value = getattr(self, name)
+            if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+                raise ValueError(f"canonical_dispatch_{name}_invalid")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "schema": self.schema,
+            "task_id": self.task_id,
+            "attempt_id": self.attempt_id,
+            "task_card_path": self.task_card_path,
+            "task_card_hash": self.task_card_hash,
+            "demand_id": self.demand_id,
+            "planner_decision_hash": self.planner_decision_hash,
+            "planner_plan_hash": self.planner_plan_hash,
+            "worker_id": self.worker_id,
+            "provider": self.provider,
+            "model": self.model,
+            "policy_hash": self.policy_hash,
+            "binding_hash": self.binding_hash,
+            "aggregate_binding_hash": self.aggregate_binding_hash,
+        }
+
+
+def build_canonical_dispatch_envelope(
+    planner_output: Mapping[str, Any],
+    dispatch_binding: Mapping[str, Any],
+    *,
+    task_id: str,
+    attempt_id: str,
+    task_card_path: str,
+    task_card_hash: str,
+) -> CanonicalDispatchEnvelope:
+    """Bind the actual Planner decision to the already admitted worker identity."""
+    if not isinstance(planner_output, Mapping):
+        raise ValueError("canonical_dispatch_planner_decision_missing")
+    decision = planner_output.get("execution_decision")
+    if not isinstance(decision, Mapping):
+        raise ValueError("canonical_dispatch_planner_decision_missing")
+    if decision.get("authority") != "CapabilityPlanner":
+        raise ValueError("canonical_dispatch_planner_authority_invalid")
+    if str(decision.get("task_id") or "") != str(task_id):
+        raise ValueError("canonical_dispatch_planner_task_mismatch")
+    decision_hash = str(planner_output.get("decision_hash") or "")
+    plan_hash = str(planner_output.get("plan_hash") or decision.get("plan_hash") or "")
+    if decision_hash == "":
+        raise ValueError("canonical_dispatch_decision_hash_missing")
+    if len(decision_hash) != 64 or any(char not in "0123456789abcdef" for char in decision_hash):
+        raise ValueError("canonical_dispatch_decision_hash_invalid")
+    if len(plan_hash) != 64 or any(char not in "0123456789abcdef" for char in plan_hash):
+        raise ValueError("canonical_dispatch_plan_hash_invalid")
+    required = (
+        "worker_id", "provider", "model", "policy_hash", "binding_hash",
+        "aggregate_binding_hash",
+    )
+    if any(not isinstance(dispatch_binding.get(key), str) or not dispatch_binding[key].strip() for key in required):
+        raise ValueError("canonical_dispatch_admission_identity_missing")
+    return CanonicalDispatchEnvelope(
+        schema="nexus.canonical_dispatch_envelope.v1",
+        task_id=str(task_id),
+        attempt_id=str(attempt_id),
+        task_card_path=str(task_card_path),
+        task_card_hash=str(task_card_hash),
+        demand_id=str(dispatch_binding.get("demand_id") or ""),
+        planner_decision_hash=decision_hash,
+        planner_plan_hash=plan_hash,
+        worker_id=str(dispatch_binding["worker_id"]),
+        provider=str(dispatch_binding["provider"]),
+        model=str(dispatch_binding["model"]),
+        policy_hash=str(dispatch_binding["policy_hash"]),
+        binding_hash=str(dispatch_binding["binding_hash"]),
+        aggregate_binding_hash=str(dispatch_binding["aggregate_binding_hash"]),
+    )
+
+
 def _product_task_id(task_text: str, requested: str = "") -> str:
     raw = str(requested or "").strip()
     if raw and not any(char in raw for char in "/\\\x00") and len(raw) <= 120:
@@ -301,6 +433,107 @@ def _resolve_policy_workforce_bindings(
         }
         providers[channel] = worker.provider
     return bindings, providers
+
+
+def build_canonical_planner_admission(
+    *,
+    task_id: str,
+    task_text: str,
+    allowed_files: tuple[str, ...],
+    verifier_command: tuple[str, ...],
+    task_card_identity: VerifiedTaskCardIdentity,
+) -> dict[str, Any]:
+    """Run the sole planner and current Workforce Admission for one gateway task."""
+    from nexus.contracts.canonical_execution import CanonicalTaskContext
+    from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+    from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
+
+    if not isinstance(task_card_identity, VerifiedTaskCardIdentity):
+        raise ValueError("canonical_task_card_identity_unverified")
+    if task_card_identity.task_id != task_id:
+        raise ValueError("canonical_task_card_task_mismatch")
+
+    context = CanonicalTaskContext(
+        task_id=str(task_id),
+        task_type="feature" if infer_task_kind(task_text) == "feature" else "repair",
+        task_desc=str(task_text),
+        execution_world="product_runtime",
+        transport_ingress="mcp",
+        execution_channels=("online",),
+        task_facts={
+            "mutation_requested": bool(allowed_files),
+            "candidate_required": True,
+        },
+        authority_inputs={
+            "direct_canonical_eligible": False,
+            "isolation_required": True,
+            "owner_authorized": False,
+            "assisted_execution_required": False,
+        },
+        route_features={
+            "bounded_allowed_file_count": len(allowed_files),
+            "deterministic_verifier_available": bool(verifier_command),
+        },
+        codeintel={
+            "allowed_files": list(allowed_files),
+            "verify_commands": list(verifier_command),
+        },
+    )
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
+
+    bundle = plan_canonical_task_bundle(context)
+    planner_output = bundle.to_dict()
+    plan_payload = planner_output["plan_payload"]
+    demands = (plan_payload.get("signal_snapshot") or {}).get("workforce_demands")
+    if not isinstance(demands, Mapping):
+        raise ValueError("canonical_workforce_demands_missing")
+    policy = WorkforcePolicyLoader()
+    snapshot = policy.load()
+    policy_bindings, _ = _resolve_policy_workforce_bindings(
+        plan_payload,
+        allowed_files=allowed_files,
+        verifier_command=verifier_command,
+    )
+    runtime_bindings: dict[str, Any] = {}
+    for channel, policy_binding in policy_bindings.items():
+        worker = snapshot.workers.get(str(policy_binding["worker_id"]))
+        if worker is None:
+            raise ValueError(f"canonical_workforce_worker_missing:{channel}")
+        controls = set(policy_binding.get("controls") or [])
+        controls.add("task_card")
+        runtime_bindings[channel] = {
+            "worker_id": worker.worker_id,
+            "provider": worker.provider,
+            "model": worker.model,
+            "controls": sorted(controls),
+        }
+    admission = evaluate_runtime_workforce_admission(
+        demands,
+        runtime_bindings,
+        policy,
+    ).to_dict()
+    records = admission.get("records")
+    if admission.get("overall_decision") != "ALLOW" or not isinstance(records, list) or len(records) != 1:
+        raise ValueError("canonical_workforce_admission_not_single_allow")
+    record = records[0]
+    decision = record.get("decision") if isinstance(record, Mapping) else None
+    if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
+        raise ValueError("canonical_workforce_admission_not_single_allow")
+    demand = demands["demands"][0]
+    return {
+        "planner_output": planner_output,
+        "workforce_demands": demands,
+        "workforce_admission": admission,
+        "binding": {
+            "demand_id": str(demand.get("demand_id") or ""),
+            "worker_id": str(decision.get("resolved_worker_id") or ""),
+            "provider": str(decision.get("resolved_provider") or ""),
+            "model": str(decision.get("resolved_model") or ""),
+            "policy_hash": str((admission.get("policy_identity") or {}).get("policy_hash") or ""),
+            "binding_hash": str(record.get("binding_hash") or ""),
+            "aggregate_binding_hash": str(admission.get("aggregate_binding_hash") or ""),
+        },
+    }
 
 
 def _execution_learning_observer(context: Mapping[str, Any]) -> dict[str, Any]:
