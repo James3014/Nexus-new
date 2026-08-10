@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -245,6 +246,52 @@ def _actual_dispatch(task_id, what, why):
     )
     result["task_card_evidence"] = card
     return result
+
+
+def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
+    monkeypatch,
+):
+    loader = WorkforcePolicyLoader()
+    snapshot = loader.load()
+    decoy = replace(
+        snapshot.workers["grok_review"],
+        roles=(
+            *snapshot.workers["grok_review"].roles,
+            "fast_bounded_implementation",
+        ),
+        preferred_context="nexus_bounded",
+    )
+    reordered = replace(
+        snapshot,
+        workers={
+            "grok_review": decoy,
+            **{
+                worker_id: worker
+                for worker_id, worker in snapshot.workers.items()
+                if worker_id != "grok_review"
+            },
+        },
+    )
+    monkeypatch.setattr(WorkforcePolicyLoader, "load", lambda _self: reordered)
+
+    result = build_canonical_planner_admission(
+        task_id="canonical-policy-routing",
+        task_text="implement one bounded change",
+        allowed_files=("bounded.py",),
+        verifier_command=("pytest -q tests/bounded.py",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id="canonical-policy-routing",
+            task_card_path="tasks/test/canonical-policy-routing.md",
+            canonical_task_card_path="/tmp/canonical-policy-routing.md",
+            task_card_hash="a" * 64,
+        ),
+    )
+
+    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash"
+    assert result["binding"]["worker_id"] == "agy_flash"
+    assert result["workforce_admission"]["records"][0]["request"][
+        "requested_worker_id"
+    ] == "agy_flash"
 
 
 def _worker_args(

@@ -164,6 +164,10 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     card.parent.mkdir(parents=True)
     card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
     card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
     internal = build_canonical_planner_admission(
         task_id=task_id,
         task_text="bounded online change",
@@ -228,9 +232,11 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     ).to_dict()
     contract = service.build_contract(request)
     binding = validate_workforce_dispatch_binding(request)
+    assert binding is not None
     service._write_state(contract.task_id, {
         "task_id": contract.task_id, "status": "SUBMITTED", "attempt_id": attempt_id,
         "task_card_path": card_path, "task_card_hash": card_hash,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
         "request": request, "workforce_dispatch": binding,
         "canonical_dispatch_envelope": binding["canonical_dispatch_envelope"],
         "workforce_policy_hash": binding["policy_hash"], "workforce_binding_hash": binding["binding_hash"],
@@ -289,6 +295,399 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     assert persisted["execution"]["provider"] == "agy"
     assert persisted["execution"]["outcome"] == WorkerOutcome.EXECUTION_COMPLETED.value
     assert persisted["fallback_lineage"] == []
+
+
+def test_tracked_card_mutated_after_submit_fails_before_preflight_or_registry(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "service-card-drift-after-submit"
+    attempt_id = "d" * 32
+    card_path = f"tasks/campaign/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="bounded online change",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    request = _request(
+        tmp_path,
+        task_id=task_id,
+        worker="auto",
+        model="gemini-3.6-flash-high",
+        execution_lane="ISOLATED_TARGET",
+        workforce_demands=internal["workforce_demands"],
+        workforce_admission=internal["workforce_admission"],
+        planner_output=internal["planner_output"],
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    calls = {"preflight": 0, "invoke": 0}
+
+    class RejectAfterDriftAdapter:
+        provider = "agy"
+
+        def preflight(self):
+            calls["preflight"] += 1
+            raise AssertionError("card drift reached provider preflight")
+
+        def invoke(self, *args, **kwargs):
+            calls["invoke"] += 1
+            raise AssertionError("card drift reached WorkerRegistry invocation")
+
+    adapter = RejectAfterDriftAdapter()
+    registry = WorkerRegistry(
+        {provider: adapter for provider in SUPPORTED_WORKER_PROVIDERS}
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=registry,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    transport = _action_transport(
+        request,
+        attempt_id=attempt_id,
+        action_id="action-card-drift-after-submit",
+        idempotency_key="card-drift-after-submit:attempt-1",
+    )
+
+    def mutate_after_submit_then_run(owned_task_id, owned_attempt_id):
+        submitted = service._read_state(owned_task_id)
+        assert submitted is not None
+        assert submitted["status"] == "SUBMITTED"
+        card.write_text(
+            f"task_id: `{task_id}`\nAUTO_CHAIN: false\ndrift: true\n",
+            encoding="utf-8",
+        )
+        service._run_owned_task(owned_task_id, owned_attempt_id)
+        return service._read_state(owned_task_id)
+
+    monkeypatch.setattr(service, "_launch_worker", mutate_after_submit_then_run)
+    result = service.submit_task(transport)
+
+    assert result["status"] == "FINAL_BLOCK"
+    assert "TASK_CARD_BINDING_MISMATCH" in result["error"]
+    assert calls == {"preflight": 0, "invoke": 0}
+
+
+def test_governed_tracked_request_without_dispatch_binding_final_blocks_zero_call(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "service-tracked-dispatch-missing"
+    attempt_id = "e" * 32
+    card_path = f"tasks/campaign/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    calls = {"preflight": 0, "invoke": 0}
+
+    class RejectUnboundAdapter:
+        provider = "agy"
+
+        def preflight(self):
+            calls["preflight"] += 1
+            raise AssertionError("unbound tracked request reached provider preflight")
+
+        def invoke(self, *args, **kwargs):
+            calls["invoke"] += 1
+            raise AssertionError("unbound tracked request reached WorkerRegistry")
+
+    adapter = RejectUnboundAdapter()
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=WorkerRegistry(
+            {provider: adapter for provider in SUPPORTED_WORKER_PROVIDERS}
+        ),
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id=task_id,
+        worker="agy",
+        provider="agy",
+        model="caller-selected-model",
+        execution_lane="ISOLATED_TARGET",
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    transport = _action_transport(
+        request,
+        attempt_id=attempt_id,
+        action_id="action-tracked-dispatch-missing",
+        idempotency_key="tracked-dispatch-missing:attempt-1",
+    )
+
+    def run_inline(owned_task_id, owned_attempt_id):
+        service._run_owned_task(owned_task_id, owned_attempt_id)
+        return service._read_state(owned_task_id)
+
+    monkeypatch.setattr(service, "_launch_worker", run_inline)
+    result = service.submit_task(transport)
+
+    assert result["status"] == "FINAL_BLOCK"
+    assert "WORKFORCE_ADMISSION_BINDING_MISSING" in result["error"]
+    assert result["selected_worker_id"] is None
+    assert result["selected_provider"] is None
+    assert result["selected_model"] is None
+    assert calls == {"preflight": 0, "invoke": 0}
+
+
+@pytest.mark.parametrize(
+    ("mutate_card", "expected_error"),
+    [
+        (True, "TASK_CARD_BINDING_MISMATCH"),
+        (False, "WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT"),
+    ],
+    ids=("card-drift", "no-card-drift-unadmitted-fallback"),
+)
+def test_unadmitted_fallback_blocks_before_provider_side_work(
+    tmp_path,
+    monkeypatch,
+    mutate_card,
+    expected_error,
+):
+    task_id = "service-card-drift-before-escalation"
+    attempt_id = "f" * 32
+    card_path = f"tasks/campaign/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="bounded online change",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    request = _request(
+        tmp_path,
+        task_id=task_id,
+        worker="auto",
+        model="gemini-3.6-flash-high",
+        execution_lane="ISOLATED_TARGET",
+        workforce_demands=internal["workforce_demands"],
+        workforce_admission=internal["workforce_admission"],
+        planner_output=internal["planner_output"],
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    calls = {
+        "admitted": {"preflight": 0, "provider_calls": 0},
+        "fallback": {"preflight": 0, "provider_calls": 0},
+        "replacement": 0,
+    }
+
+    class EscalationAdapter:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def preflight(self):
+            key = "admitted" if self.provider == "agy" else "fallback"
+            calls[key]["preflight"] += 1
+            return WorkerPreflight(
+                provider=self.provider,
+                executable=f"/bin/{self.provider}",
+                executable_available=True,
+                authorized=True,
+                implementation_status="IMPLEMENTED",
+                ready=True,
+                reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, model=None, **options):
+            key = "admitted" if self.provider == "agy" else "fallback"
+            calls[key]["provider_calls"] += 1
+            assert self.provider == "agy"
+            if mutate_card:
+                card.write_text(
+                    f"task_id: `{task_id}`\nAUTO_CHAIN: false\ndrift: true\n",
+                    encoding="utf-8",
+                )
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=lease.target_worktree,
+                worker_status="TIMED_OUT",
+                outcome=WorkerOutcome.INCOMPLETE.value,
+                exit_code=124,
+                executable_identity=f"/bin/{self.provider}",
+                argv=(self.provider, model or ""),
+                stdout_sha256="a" * 64,
+                stderr_sha256="b" * 64,
+                wall_time_ms=1,
+                process_group_id=None,
+                process_group_killed=True,
+                timed_out=True,
+                provider_calls=1,
+                evidence_complete=True,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason="provider timeout",
+            )
+
+    registry = WorkerRegistry(
+        {
+            provider: EscalationAdapter(provider)
+            for provider in SUPPORTED_WORKER_PROVIDERS
+        }
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=registry,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    real_build_contract = service.build_contract
+
+    def build_escalating_contract(bound_request):
+        contract = real_build_contract(bound_request)
+        return contract.model_copy(
+            update={
+                "fallback_provider": "grok",
+                "provider_order": ["agy", "grok"],
+                "maximum_provider_calls": 2,
+            }
+        )
+
+    monkeypatch.setattr(service, "build_contract", build_escalating_contract)
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            self.root_dir = root_dir
+
+        def verify_controller_unchanged(self, contract, **kwargs):
+            return None
+
+        def _run_git(self, args, *, cwd):
+            return "b" * 40
+
+        def cleanup(self, task_id, *, force=False):
+            calls["replacement"] += 1
+            return None
+
+        def cleanup_terminal_target(self, contract, lease, **kwargs):
+            return SimpleNamespace(
+                decision="REMOVED",
+                blocker=None,
+                performed=True,
+                eligible=True,
+            )
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            self.worktree_manager = worktree_manager
+
+        def prepare_task(self, contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1",
+                lease_id="escalation-lease",
+                task_id=contract.task_id,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"),
+                target_branch="nexus/task/escalation-drift",
+                initial_head="b" * 40,
+                initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64,
+                created_from_exact_revision=True,
+                commit_created=False,
+                merge_performed=False,
+            )
+
+    class FakeVerifier:
+        @staticmethod
+        def validate_static_contract(contract, target):
+            return None
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.WorktreeManager",
+        FakeManager,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController",
+        FakeController,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+        FakeVerifier,
+    )
+    transport = _action_transport(
+        request,
+        attempt_id=attempt_id,
+        action_id="action-card-drift-before-escalation",
+        idempotency_key="card-drift-before-escalation:attempt-1",
+    )
+
+    def run_inline(owned_task_id, owned_attempt_id):
+        service._run_owned_task(owned_task_id, owned_attempt_id)
+        return service._read_state(owned_task_id)
+
+    monkeypatch.setattr(service, "_launch_worker", run_inline)
+    result = service.submit_task(transport)
+
+    assert result["status"] == "FINAL_BLOCK"
+    assert expected_error in result["error"]
+    assert calls["admitted"] == {"preflight": 2, "provider_calls": 1}
+    assert calls["fallback"] == {"preflight": 0, "provider_calls": 0}
+    assert calls["replacement"] == 0
 
 
 def test_checkpoint_telemetry_aggregates_attempts_and_keeps_cost_unmeasured(tmp_path):
@@ -899,6 +1298,112 @@ def test_state_root_inventory_classifies_nested_receipts_and_conflicts(tmp_path,
         "CANONICAL_AUTHORITY", "REHEARSAL_EVIDENCE",
     }
     assert len(inventory["inventory_sha256"]) == 64
+
+
+def test_custom_runner_rejected_for_canonical_non_ephemeral_state(tmp_path, monkeypatch):
+    canonical = Path("/nexus-canonical-state-test")
+    calls = []
+
+    def custom_runner(*args):
+        calls.append(args)
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+    monkeypatch.setattr(
+        SelfHostedTaskService,
+        "canonical_state_dir",
+        staticmethod(lambda: canonical),
+    )
+
+    def initialize_and_submit():
+        service = SelfHostedTaskService(
+            state_dir=canonical,
+            runner=custom_runner,
+            auto_reconcile=False,
+        )
+        return service.submit_task(
+            _request(
+                tmp_path,
+                task_id="forbidden-production-custom-runner",
+                execution_lane="ISOLATED_TARGET",
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="^CUSTOM_RUNNER_REQUIRES_EPHEMERAL_STATE$"):
+        initialize_and_submit()
+
+    assert calls == []
+
+
+def test_explicit_ephemeral_custom_runner_is_test_only_and_cannot_claim(tmp_path):
+    calls = []
+
+    def custom_runner(contract, request, update):
+        calls.append(contract.task_id)
+        update(
+            "WORKER_COMPLETED",
+            {
+                "execution": {"provider": "forged-provider"},
+                "workforce_dispatch": {"overall_decision": "ALLOW"},
+                "verified_receipt": {"verified": True},
+                "provider_receipt_authoritative": True,
+                "workforce_admission_authoritative": True,
+                "public_claim_allowed": True,
+                "production_ready": True,
+            },
+        )
+        return {
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "candidate_commit_created": True,
+            "provider_receipt_authoritative": True,
+            "workforce_admission_authoritative": True,
+            "public_claim_allowed": True,
+            "production_ready": True,
+        }
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=custom_runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id="ephemeral-custom-runner-boundary",
+        execution_lane="ISOLATED_TARGET",
+    )
+
+    service.submit_task(request)
+    state = _wait_for_status(
+        service,
+        request["task_id"],
+        "PENDING_HUMAN_APPROVAL",
+    )
+    receipt = service.get_receipt(request["task_id"])
+    packet = service.get_promotion_packet(request["task_id"])
+
+    assert calls == [request["task_id"]]
+    assert state["execution_authority"] == "EPHEMERAL_TEST_RUNNER"
+    assert state["provider_receipt_authoritative"] is False
+    assert state["workforce_admission_authoritative"] is False
+    assert state["public_claim_allowed"] is False
+    assert state["production_ready"] is False
+    assert state["promotion_eligible"] is False
+    assert state.get("workforce_dispatch") is None
+    assert state.get("verified_receipt") is None
+    assert receipt["execution_authority"] == "EPHEMERAL_TEST_RUNNER"
+    assert receipt["provider_receipt_authoritative"] is False
+    assert receipt["workforce_admission_authoritative"] is False
+    assert packet["public_claim_allowed"] is False
+    assert packet["production_ready"] is False
+
+    with pytest.raises(RuntimeError, match="^CUSTOM_RUNNER_PRODUCTION_CLAIM_FORBIDDEN$"):
+        service.approve_promotion(
+            request["task_id"],
+            candidate_commit_sha="c" * 40,
+            candidate_tree_sha="d" * 40,
+            candidate_state_hash="e" * 64,
+            verified_receipt_hash="f" * 64,
+        )
 
 
 def test_submit_persists_idempotent_task_state(tmp_path):

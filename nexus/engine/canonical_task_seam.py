@@ -378,13 +378,10 @@ def _resolve_policy_workforce_bindings(
     """Resolve Planner demands through the tracked Workforce policy.
 
     Callers cannot supply worker, provider, or model identities.  This function
-    only maps the Planner's demand role to an admissible policy worker; the
-    runtime Workforce Admission gate remains the final authority.
+    projects each Planner demand through the policy's canonical routing map;
+    only Workforce Admission evaluates that mapped identity's eligibility.
     """
-    from nexus.services.model_workforce_policy import (
-        NON_ADMISSIBLE_STATES,
-        WorkforcePolicyLoader,
-    )
+    from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 
     snapshot = WorkforcePolicyLoader().load()
     signal_snapshot = plan_payload.get("signal_snapshot")
@@ -408,25 +405,16 @@ def _resolve_policy_workforce_bindings(
             raise ValueError("canonical_workforce_demand_malformed")
         channel = str(demand.get("execution_channel") or "")
         role = str(demand.get("requested_role") or "")
-        context_class = str(demand.get("context_class") or "")
-        candidates = [
-            worker
-            for worker in snapshot.workers.values()
-            if worker.state not in NON_ADMISSIBLE_STATES
-            and worker.availability == "AVAILABLE"
-            and role in worker.roles
-        ]
-        if context_class:
-            context_matches = [
-                worker
-                for worker in candidates
-                if not worker.preferred_context or worker.preferred_context == context_class
-            ]
-            if context_matches:
-                candidates = context_matches
-        if not candidates:
-            raise ValueError(f"canonical_workforce_worker_missing:{channel}:{role}")
-        worker = candidates[0]
+        route_group_name = "local_first" if channel == "local" else channel
+        route_group = snapshot.routing.get(route_group_name)
+        worker_id = route_group.get(role) if isinstance(route_group, Mapping) else None
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ValueError(f"canonical_workforce_route_missing:{channel}:{role}")
+        worker = snapshot.workers.get(worker_id)
+        if worker is None:
+            raise ValueError(
+                f"canonical_workforce_route_worker_missing:{channel}:{role}:{worker_id}"
+            )
         bindings[channel] = {
             "worker_id": worker.worker_id,
             "controls": sorted(controls),
