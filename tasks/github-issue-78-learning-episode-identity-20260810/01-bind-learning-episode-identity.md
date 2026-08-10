@@ -87,7 +87,21 @@ immutable envelope or signature.
 
 ## Completion receipt
 
-- pending Candidate PR
+- Task Card authorization commit: `14e88e53d`
+- implementation head: `e200cccd6`
+- PR: https://github.com/James3014/Nexus-new/pull/PENDING
+- shared `canonical_episode_identity` helper used by builder and validator;
+  validator recomputes `episode_id` from stored `idempotency_key` and fails
+  closed on empty keys, malformed ids, and mismatches
+- explicit custom idempotency keys and 24-hex format remain compatible
+- verification: 13 focused contract tests; 256 learning/learning_experience
+  suite; 9 Golden corpus (GB-073 mapped); 265 total passed
+- local_heal consumer sweep: identical 91 pre-existing environment failures on
+  base and Candidate (zero regression), 2499 passed
+- Ruff exact-base differential: zero new findings (same 3 pre-existing)
+- Pyright exact-base differential: prod 20 = base 20; test 39 (base 67)
+- `git diff --check`: clean
+- reached `CANDIDATE_PR_READY` (PR opened to `main`; no self-approve/merge)
 
 ## Block classification
 
