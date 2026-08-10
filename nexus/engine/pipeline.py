@@ -634,63 +634,6 @@ class NexusPipeline(
                 if not self._run_formulation_plugin(plugin, ctx):
                     success = False
                     break
-                if False:  # legacy inline executor path retained for history
-                    logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
-                    
-                    ctx.event_store.append(
-                        build_phase_transition_event(
-                            task_id=ctx.task_id,
-                            phase=plugin.name,
-                            transition="start",
-                            payload={"name": plugin.name},
-                        )
-                    )
-                    
-                    try:
-                        validate_required_artifacts(phase=plugin, blackboard=ctx.blackboard)
-                        result = plugin.execute(self, ctx)
-                        record_phase_artifacts(phase=plugin, result=result, blackboard=ctx.blackboard)
-                        
-                        ctx.event_store.append(
-                            build_phase_transition_event(
-                                task_id=ctx.task_id,
-                                phase=plugin.name,
-                                transition="end",
-                                payload={"status": result.status},
-                            )
-                        )
-                        
-                        if result.status in {"FAILED", "fail"}:
-                            logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
-                            success = False
-                            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
-                            break
-                    except RuntimeError as veto_err:
-                        veto_str = str(veto_err)
-                        if veto_str.startswith("SEMANTIC_HANDSHAKE_MISSING_ARTIFACT"):
-                            logger.error("🛑 [Pipeline] Semantic handshake failed: %s", veto_err)
-                            success = False
-                            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
-                            ctx.state.metadata["semantic_handshake_failed"] = True
-                            ctx.state.metadata["semantic_handshake_reason"] = veto_str
-                            break
-                        if "VETO" in veto_str and pxd_attempts < MAX_PXD_RETRIES:
-                            logger.warning("🔄 [Pipeline] D-Stage VETO → Feeding back to P-Stage for replan (Attempt %d/%d)", pxd_attempts, MAX_PXD_RETRIES)
-                            ctx.kwargs["veto_feedback"] = veto_str
-                            pxd_veto = True
-                            break  # Break inner for loop, retry outer while loop
-                        elif "VETO" in veto_str or "Plan Quality Gate" in veto_str:
-                            logger.error("🛑 [Pipeline] Governance VETO terminal: %s", veto_err)
-                            success = False
-                            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
-                            ctx.state.metadata["governance_veto_reason"] = veto_str
-                            break
-                        raise  # 非治理異常，繼續上拋
-                    except Exception as e:
-                        logger.exception(f"Unhandled failure in plugin {plugin.name}: {e}")
-                        success = False
-                        ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
-                        break
             
             if not pxd_veto and success:
                 research_plugin = plugins.get("X")
