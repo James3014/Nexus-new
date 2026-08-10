@@ -1,39 +1,56 @@
-# Contributing to Nexus v9 Autonomic | 參與 Nexus v9 自主演進 🚀
+# Contributing to Nexus
 
-**[EN]** Welcome! To ensure the highest quality in autonomous code evolution, please follow the Nexus **P-D-R-A-C** autonomic protocol.
-**[ZH]** 歡迎！為確保自主代碼演進的最高品質，請遵循 Nexus **P-D-R-A-C** 自主協議。
+Keep changes bounded, reproducible, and independently verifiable. Read
+[`AGENTS.md`](AGENTS.md) for repository authority and task-scope rules before
+editing. Documentation and navigation pages cannot grant route, lifecycle,
+approval, integration, or release authority.
 
-## 🧬 P-D-R-A-C Protocol | P-D-R-A-C 協議
+## Setup
 
-1.  **P (Plan)**: Define your task. Use specialized planners (`nexus-planner-expert`).
-    **P (計畫)**: 定義任務，使用專業計畫職能 (`nexus-planner-expert`)。
-2.  **D (Diagnose)**: Identify failure modes. Use `nexus-debug-expert` for deep RCA.
-    **D (診斷)**: 識別失效模式，使用 `nexus-debug-expert` 執行深層根因分析 (RCA)。
-3.  **R (Repair/Refine)**: Apply patches using the autonomic fallback chain.
-    **R (修復/精煉)**: 透過自主備援鏈套用補丁，確保可靠性。
-4.  **A (Audit/Analyze)**: Run `nexus:test --full-chain` and `FlashJudge 8.0` validation.
-    **A (審計/分析)**: 執行 `nexus:test --full-chain` 指令與 `FlashJudge 8.0` 驗證。
-5.  **C (Crystallize/Commit)**: Use `nexus:crystal` to integrate the experience into the brain.
-    **C (結晶/提交)**: 使用 `nexus:crystal` 將經驗整合至系統大腦。
-
-## 🛡️ Guidelines | 開發指南
-
-- **Autonomic Awareness**: Every execution generates a trace in `tracelog.jsonl`.
-  **自主意識**: 每一次執行都會在 `tracelog.jsonl` 中留下軌跡，確保變更可追蹤。
-- **Skill Modularity**: New features should be registered in `skills_inventory.json`.
-  **職能模組化**: 新功能應作為「技能 (Skill)」註冊至 `skills_inventory.json`。
-- **Isolation**: Always use isolated environments for task execution.
-  **隔離執行**: 始終使用隔離環境執行任務，防止副作用。
-- **Resilience**: Design for failure. Always provide backup logic for critical paths.
-  **韌性設計**: 為失敗而設計，始終為關鍵路徑提供備援邏輯。
-
-## 🧪 How to Verify | 如何驗證
-
-**[EN]** Run the full autonomic verification chain:
-**[ZH]** 執行完整的自主驗證鏈：
+Bootstrap the pinned Python 3.12 environment from the lockfile first:
 
 ```bash
-python3 scripts/nexus_cli.py nexus:test --full-chain "Your implemented feature"
+UV_CACHE_DIR=/tmp/nexus-uv-cache uv sync --frozen --all-groups
+bash scripts/ops/test_repo.sh environment
 ```
 
-Happy Evolving! | 祝演進順利！ 🛡️💎🚀✨🚩
+The core preflight runs the portable doctor without reading `.env`, probing
+credentials, or requiring provider tools.
+
+Provider checks are optional and explicit:
+
+```bash
+NEXUS_PREFLIGHT_PROVIDER=1 bash scripts/ops/test_repo.sh environment
+```
+
+## Focused verification
+
+Use the command matrix in `scripts/ops/test_repo.sh`:
+
+```bash
+bash scripts/ops/test_repo.sh fast
+bash scripts/ops/test_repo.sh changed <changed-paths...>
+bash scripts/ops/test_repo.sh lint <python-files...>
+bash scripts/ops/test_repo.sh fixture
+```
+
+The fixture command runs exactly five deterministic local cases with checked
+fixtures and verifiers. It is not a provider benchmark. A full regression is an
+explicit escalation:
+
+```bash
+bash scripts/ops/test_repo.sh full --confirm-full
+```
+
+## Context and secrets
+
+`configs/codex_task_context_index.json` is a bounded retrieval aid, not an
+authority surface. Its validator enforces five task classes, concrete paths,
+at most four context files per class, a 16,000-byte context ceiling, and an
+8,000-byte index ceiling. Never add live secrets to documentation, fixtures, or
+receipts; provider values are presence-only and redacted.
+
+## Pull requests
+
+Include the exact commands run, their outcomes, and the changed-file scope in
+the pull request. Preserve historical reports and unrelated worktree changes.
