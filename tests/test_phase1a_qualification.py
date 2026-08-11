@@ -135,9 +135,7 @@ def test_thresholds_are_explicit_and_not_legacy_vap_defaults():
         make_manifest(meaningful_improvement_thresholds={})
     with pytest.raises(ValueError, match="legacy VAP threshold"):
         make_manifest(meaningful_improvement_thresholds={"vap_online_token_ratio": 0.85})
-    explicit = make_manifest(
-        meaningful_improvement_thresholds={"phase1a_min_work_reduction": 0.85}
-    )
+    explicit = make_manifest(meaningful_improvement_thresholds={"phase1a_min_work_reduction": 0.85})
     assert explicit.meaningful_improvement_thresholds["phase1a_min_work_reduction"] == 0.85
 
 
@@ -186,17 +184,10 @@ def test_counterbalanced_assignment_is_deterministic_and_balanced():
 
 def test_counterbalanced_assignment_is_seed_deterministic():
     tasks = tuple(f"task-{index:02d}" for index in range(12))
-    first = {
-        item.task_id: item.permutation
-        for item in assign_counterbalanced_orders(tasks, 1)
-    }
-    repeat = {
-        item.task_id: item.permutation
-        for item in assign_counterbalanced_orders(tasks, 1)
-    }
+    first = {item.task_id: item.permutation for item in assign_counterbalanced_orders(tasks, 1)}
+    repeat = {item.task_id: item.permutation for item in assign_counterbalanced_orders(tasks, 1)}
     second_seed = {
-        item.task_id: item.permutation
-        for item in assign_counterbalanced_orders(tasks, 2)
+        item.task_id: item.permutation for item in assign_counterbalanced_orders(tasks, 2)
     }
     assert first == repeat
     assert first != second_seed
@@ -204,12 +195,10 @@ def test_counterbalanced_assignment_is_seed_deterministic():
 
 def test_run_classifier_separates_semantic_failure_from_invalidity():
     assert (
-        classify_run(RunValidityEvidence(semantic_success=True))
-        == RunClassification.VALID_SUCCESS
+        classify_run(RunValidityEvidence(semantic_success=True)) == RunClassification.VALID_SUCCESS
     )
     assert (
-        classify_run(RunValidityEvidence(semantic_success=False))
-        == RunClassification.VALID_FAILURE
+        classify_run(RunValidityEvidence(semantic_success=False)) == RunClassification.VALID_FAILURE
     )
     assert (
         classify_run(RunValidityEvidence(semantic_success=False, provider_runtime_ok=False))
@@ -220,21 +209,11 @@ def test_run_classifier_separates_semantic_failure_from_invalidity():
         == RunClassification.INFRA_INVALID
     )
     assert (
-        classify_run(
-            RunValidityEvidence(
-                semantic_success=False,
-                required_telemetry_complete=False,
-            )
-        )
+        classify_run(RunValidityEvidence(semantic_success=False, required_telemetry_complete=False))
         == RunClassification.INFRA_INVALID
     )
     assert (
-        classify_run(
-            RunValidityEvidence(
-                semantic_success=False,
-                treatment_identity_ok=False,
-            )
-        )
+        classify_run(RunValidityEvidence(semantic_success=False, treatment_identity_ok=False))
         == RunClassification.TREATMENT_INVALID
     )
     assert (
@@ -242,58 +221,29 @@ def test_run_classifier_separates_semantic_failure_from_invalidity():
         == RunClassification.TREATMENT_INVALID
     )
     assert (
-        classify_run(
-            RunValidityEvidence(
-                semantic_success=False,
-                forbidden_local_call_in_b=True,
-            )
-        )
+        classify_run(RunValidityEvidence(semantic_success=False, forbidden_local_call_in_b=True))
         == RunClassification.TREATMENT_INVALID
     )
     assert (
-        classify_run(
-            RunValidityEvidence(
-                semantic_success=False,
-                source_integrity_ok=False,
-            )
-        )
+        classify_run(RunValidityEvidence(semantic_success=False, source_integrity_ok=False))
         == RunClassification.INTEGRITY_INVALID
     )
 
 
 def test_formal_effect_rows_exclude_qualification_and_invalid_runs():
     manifest = make_manifest(
-        qualification_task_ids=("qual-1",),
-        formal_task_ids=("formal-1", "formal-2", "formal-3"),
+        qualification_task_ids=("qual-1",), formal_task_ids=("formal-1", "formal-2", "formal-3")
     )
     rows = (
         Phase1ARunRow(
-            "qual-1",
-            RunKind.QUALIFICATION,
-            RunClassification.VALID_SUCCESS,
-            {"noise": 0.1},
+            "qual-1", RunKind.QUALIFICATION, RunClassification.VALID_SUCCESS, {"noise": 0.1}
         ),
-        Phase1ARunRow(
-            "formal-1",
-            RunKind.FORMAL,
-            RunClassification.VALID_FAILURE,
-            {"quality": 0},
-        ),
-        Phase1ARunRow(
-            "formal-2",
-            RunKind.FORMAL,
-            RunClassification.INFRA_INVALID,
-            {"quality": 0},
-        ),
+        Phase1ARunRow("formal-1", RunKind.FORMAL, RunClassification.VALID_FAILURE, {"quality": 0}),
+        Phase1ARunRow("formal-2", RunKind.FORMAL, RunClassification.INFRA_INVALID, {"quality": 0}),
     )
     selected = select_formal_effect_rows(manifest, rows)
     assert [row.task_id for row in selected] == ["formal-1"]
-    mislabeled = Phase1ARunRow(
-        "qual-1",
-        RunKind.FORMAL,
-        RunClassification.VALID_FAILURE,
-        {},
-    )
+    mislabeled = Phase1ARunRow("qual-1", RunKind.FORMAL, RunClassification.VALID_FAILURE, {})
     with pytest.raises(ValueError, match="outside formal corpus"):
         select_formal_effect_rows(manifest, (mislabeled,))
 
