@@ -4,7 +4,7 @@ owner: James Chen
 status: active
 campaign_id: github-issue-94-ollama-ledger-metrics-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/94
-baseline_main: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
+baseline_main: 8e05e0827fe913e3e408f87dc274e005bdc0bf92
 current_frontier: 01-ollama-ledger-metrics.md
 frontier_status: ACTIVE
 AUTO_CHAIN: false
