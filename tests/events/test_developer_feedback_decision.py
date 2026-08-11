@@ -300,6 +300,37 @@ def test_subprocess_same_and_different_task_contention(tmp_path: Path):
     assert sorted(queue.get(timeout=1) for _ in processes) == [1, 1]
 
 
+def test_subprocess_same_task_same_decision_is_idempotent(tmp_path: Path):
+    queue = multiprocessing.Queue()
+    processes = [
+        multiprocessing.Process(
+            target=_subprocess_append, args=(str(tmp_path), "same", "task-1", queue)
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=5)
+    assert [queue.get(timeout=1) for _ in processes] == [1, 1]
+    assert len(DeveloperFeedbackDecisionStore(tmp_path).read_recent()) == 1
+
+
+def test_subprocess_same_task_different_decisions_are_sequenced(tmp_path: Path):
+    queue = multiprocessing.Queue()
+    processes = [
+        multiprocessing.Process(
+            target=_subprocess_append, args=(str(tmp_path), f"d{i}", "task-1", queue)
+        )
+        for i in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=5)
+    assert sorted(queue.get(timeout=1) for _ in processes) == [1, 2]
+
+
 def test_observer_failure_is_post_commit(tmp_path: Path):
     old_subscribers = NexusEventBus._subscribers
     old_broadcaster = NexusEventBus._remote_broadcaster
