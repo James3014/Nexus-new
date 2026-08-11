@@ -1,7 +1,9 @@
 import json
-import click
 from pathlib import Path
 from typing import Any, Dict
+
+import click
+
 
 class AosService:
     """
@@ -24,17 +26,17 @@ class AosService:
             click.echo("-" * 65)
             # 這裡原本包含大量 import，重構後封裝在此
             from nexus.core.engine.nexus_transaction import TransactionManager
-            from nexus.core.ops.nexus_probe import EnvProber
+            from nexus.services.nexus_probe import EnvProber
             
-            tx = TransactionManager(self.repo_root)
-            click.echo(f"🟢 P0 TransactionManager: ACTIVE")
-            prober = EnvProber(self.repo_root)
-            click.echo(f"🟢 P1 EnvProber: EXCELLENT")
-            click.echo(f"🟢 P2 Conflict Guard: SAFE")
-            click.echo(f"🟢 P3 Tool Lockdown: INSTITUTIONALIZED")
+            TransactionManager(self.repo_root)
+            click.echo("🟢 P0 TransactionManager: ACTIVE")
+            EnvProber(self.repo_root)
+            click.echo("🟢 P1 EnvProber: EXCELLENT")
+            click.echo("🟢 P2 Conflict Guard: SAFE")
+            click.echo("🟢 P3 Tool Lockdown: INSTITUTIONALIZED")
 
             if aos_full:
-                click.echo(f"🟢 P4 Swarm Fortress: 0 POLLUTION")
+                click.echo("🟢 P4 Swarm Fortress: 0 POLLUTION")
         
         # 預設回傳狀態
         res = {
