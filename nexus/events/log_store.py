@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -102,6 +103,9 @@ class DeveloperFeedbackDecisionStore:
             or isinstance(obj.get("sequence"), bool)
             or not isinstance(obj.get("parent_digest"), str)
             or not isinstance(obj.get("record_digest"), str)
+            or (obj["request_digest"] and not re.fullmatch(r"[0-9a-f]{64}", obj["request_digest"]))
+            or not re.fullmatch(r"[0-9a-f]{64}", obj["parent_digest"])
+            or not re.fullmatch(r"[0-9a-f]{64}", obj["record_digest"])
         ):
             raise ValueError("invalid decision field types")
         return obj
