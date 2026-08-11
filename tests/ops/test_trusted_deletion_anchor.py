@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
 import json
@@ -15,6 +16,7 @@ from tempfile import TemporaryDirectory
 import pytest
 import yaml
 
+import scripts.ops.trusted_deletion_anchor as trusted_anchor
 from scripts.ops.trusted_deletion_anchor import (
     SCHEMA_VERSION,
     _json,
@@ -245,6 +247,41 @@ def test_supplied_trees_cannot_override_immutable_commit_trees():
     )
 
 
+def test_controller_rejects_missing_exact_tree_before_deriving_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(_event()), encoding="utf-8")
+    derived_operations: list[str] = []
+
+    def fake_git(repo: Path, *args: str, binary: bool = False) -> str:
+        del repo, binary
+        if args[:3] == ("fetch", "--no-tags", "--unshallow"):
+            return ""
+        if args == ("rev-parse", "--is-shallow-repository"):
+            return "false"
+        if args[0] == "cat-file" and args[-1].endswith("^{commit}"):
+            return ""
+        if args[0] == "rev-parse" and args[-1].endswith("^{tree}"):
+            return "d" * 40
+        if args[0] == "cat-file" and args[-1] == f"{'d' * 40}^{{tree}}":
+            raise ValueError("missing exact tree")
+        if args[0] in {"diff", "archive"}:
+            derived_operations.append(args[0])
+        raise AssertionError(f"unexpected git invocation: {args!r}")
+
+    monkeypatch.setattr(trusted_anchor, "_git", fake_git)
+    with pytest.raises(ValueError, match="missing exact tree"):
+        trusted_anchor._controller(
+            argparse.Namespace(
+                event_json=str(event_path),
+                repo_root=str(tmp_path / "repo.git"),
+                output_dir=str(tmp_path / "bundle"),
+            )
+        )
+    assert derived_operations == []
+
+
 @pytest.mark.parametrize("status", ["SKIPPED", "NEUTRAL", "CANCELLED", "MISSING"])
 def test_non_complete_status_fails_closed(status: str):
     manifest = _manifest()
@@ -307,6 +344,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         root = Path(directory)
         origin = root / "origin.git"
         checkout = root / "checkout"
+        controller_repo = root / "controller.git"
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
         subprocess.run(
             ["git", "clone", str(origin), str(checkout)], check=True, capture_output=True
@@ -323,6 +361,11 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         _run_git(checkout, "commit", "-am", "head")
         head_sha = _run_git(checkout, "rev-parse", "HEAD")
         _run_git(checkout, "push", "origin", "HEAD:main")
+        subprocess.run(
+            ["git", "init", "--bare", str(controller_repo)], check=True, capture_output=True
+        )
+        _run_git(controller_repo, "remote", "add", "origin", str(origin))
+        _run_git(controller_repo, "fetch", "--no-tags", "--depth=1", "origin", base_sha)
         event = _event()
         event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
         event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
@@ -337,7 +380,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
                 "--event-json",
                 str(event_path),
                 "--repo-root",
-                str(checkout),
+                str(controller_repo),
                 "--output-dir",
                 str(bundle),
             ],
@@ -443,6 +486,116 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
             ).returncode
             != 0
         )
+
+
+def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
+    with TemporaryDirectory(prefix="trusted-anchor-shallow-merge-") as directory:
+        root = Path(directory)
+        source = root / "source"
+        origin = root / "origin.git"
+        controller_repo = root / "controller.git"
+        verifier_repo = root / "verifier.git"
+        subprocess.run(["git", "init", str(source)], check=True, capture_output=True)
+        _run_git(source, "config", "user.email", "test@example.invalid")
+        _run_git(source, "config", "user.name", "trusted-anchor-shallow-test")
+        test_path = source / "tests/ops/test_pr_impact_gate.py"
+        test_path.parent.mkdir(parents=True)
+        test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
+        _run_git(source, "add", "tests/ops/test_pr_impact_gate.py")
+        _run_git(source, "commit", "-m", "base")
+        base_sha = _run_git(source, "rev-parse", "HEAD")
+        subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        _run_git(source, "remote", "add", "origin", str(origin))
+        _run_git(source, "push", "origin", f"{base_sha}:refs/heads/main")
+
+        _run_git(source, "switch", "-c", "feature")
+        (source / "feature.txt").write_text("feature\n", encoding="utf-8")
+        _run_git(source, "add", "feature.txt")
+        _run_git(source, "commit", "-m", "feature")
+        feature_sha = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "switch", "main")
+        _run_git(source, "merge", "--no-ff", feature_sha, "-m", "merge head")
+        head_sha = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "push", "origin", f"{head_sha}:refs/heads/merge-head")
+
+        subprocess.run(
+            ["git", "init", "--bare", str(controller_repo)], check=True, capture_output=True
+        )
+        _run_git(controller_repo, "remote", "add", "origin", str(origin))
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(controller_repo),
+                "fetch",
+                "--no-tags",
+                "--depth=1",
+                "origin",
+                base_sha,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        assert _run_git(controller_repo, "rev-parse", "--is-shallow-repository") == "true"
+        missing_merge_parent = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(controller_repo),
+                "cat-file",
+                "-e",
+                f"{feature_sha}^{{commit}}",
+            ],
+            capture_output=True,
+        )
+        assert missing_merge_parent.returncode != 0
+
+        event = _event()
+        event["workflow_sha"] = base_sha
+        event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
+        event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+        event_path = root / "event.json"
+        event_path.write_bytes(_json(event))
+        bundle = root / "bundle"
+        subprocess.run(
+            [
+                sys.executable,
+                "scripts/ops/trusted_deletion_anchor.py",
+                "controller",
+                "--event-json",
+                str(event_path),
+                "--repo-root",
+                str(controller_repo),
+                "--output-dir",
+                str(bundle),
+            ],
+            check=True,
+        )
+        assert _run_git(controller_repo, "rev-parse", "--is-shallow-repository") == "false"
+        assert _run_git(controller_repo, "cat-file", "-e", f"{base_sha}^{{commit}}") == ""
+        assert _run_git(controller_repo, "cat-file", "-e", f"{head_sha}^{{commit}}") == ""
+        subprocess.run(
+            ["git", "init", "--bare", str(verifier_repo)], check=True, capture_output=True
+        )
+        for ref, revision in (
+            ("refs/trusted-anchor/base", base_sha),
+            ("refs/trusted-anchor/head", head_sha),
+        ):
+            _run_git(verifier_repo, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
+            assert _run_git(verifier_repo, "rev-parse", f"{ref}^{{commit}}") == revision
+            assert _run_git(verifier_repo, "rev-parse", f"{ref}^{{tree}}") == _run_git(
+                controller_repo, "rev-parse", f"{revision}^{{tree}}"
+            )
+        head_with_parents = next(
+            line
+            for line in _run_git(
+                verifier_repo, "rev-list", "--parents", "refs/trusted-anchor/head"
+            ).splitlines()
+            if line.startswith(head_sha)
+        ).split()
+        assert head_with_parents[0] == head_sha
+        assert set(head_with_parents[1:]) == {base_sha, feature_sha}
+        _run_git(verifier_repo, "merge-base", "--is-ancestor", base_sha, head_sha)
 
 
 def test_workflow_is_three_job_isolated_anchor():

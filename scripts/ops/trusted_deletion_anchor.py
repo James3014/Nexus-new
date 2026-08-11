@@ -264,11 +264,17 @@ def _create_git_bundle(repo: Path, output: Path, base_sha: str, head_sha: str) -
 def _controller(args: argparse.Namespace) -> None:
     event = json.loads(Path(args.event_json).read_text(encoding="utf-8"))
     repo = Path(args.repo_root)
-    head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
-    _git(repo, "fetch", "--no-tags", "--depth=1", "origin", head_sha)
     base_sha = _exact_sha(_event_value(event, "pull_request", "base", "sha"), "base_sha")
-    for revision in (base_sha, head_sha):
+    head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
+    _git(repo, "fetch", "--no-tags", "--unshallow", "origin", base_sha, head_sha)
+    if _git(repo, "rev-parse", "--is-shallow-repository") != "false":
+        raise ValueError("controller repository remains shallow")
+    trees: dict[str, str] = {}
+    for label, revision in (("base", base_sha), ("head", head_sha)):
         _git(repo, "cat-file", "-e", f"{revision}^{{commit}}")
+        tree = _exact_sha(_git(repo, "rev-parse", f"{revision}^{{tree}}"), f"{label}_tree")
+        _git(repo, "cat-file", "-e", f"{tree}^{{tree}}")
+        trees[label] = tree
     raw_diff = _git(repo, "diff", "--raw", "-z", "--no-renames", base_sha, head_sha, binary=True)
     assert isinstance(raw_diff, bytes)
     inventory = _git(repo, "ls-tree", "-r", "--name-only", head_sha, "--", "tests", binary=False)
@@ -291,8 +297,8 @@ def _controller(args: argparse.Namespace) -> None:
         raw_diff=raw_diff,
         test_inventory=selected,
         source_archive=source_archive,
-        base_tree=_git(repo, "rev-parse", f"{base_sha}^{{tree}}"),
-        head_tree=_git(repo, "rev-parse", f"{head_sha}^{{tree}}"),
+        base_tree=trees["base"],
+        head_tree=trees["head"],
         git_bundle=git_bundle,
     )
     (output / "source.tar").write_bytes(source_archive)
