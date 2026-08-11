@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-from typing import Any, Dict
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict
 
+from nexus.feedback.contracts import DeveloperFeedbackDecisionRequest
 
 PHASE_OBSERVER_HOOKS = frozenset(
     {
@@ -23,6 +24,7 @@ PHASE_OBSERVER_HOOKS = frozenset(
 @dataclass(frozen=True)
 class NexusEvent:
     """不可變的系統事件"""
+
     event_id: str
     task_id: str
     phase: str
@@ -35,9 +37,11 @@ class NexusEvent:
         return asdict(self)
 
 
-def build_lifecycle_hook_event(*, task_id: str, phase: str, hook: str, payload: Dict[str, Any] | None = None) -> NexusEvent:
+def build_lifecycle_hook_event(
+    *, task_id: str, phase: str, hook: str, payload: Dict[str, Any] | None = None
+) -> NexusEvent:
     return NexusEvent(
-        event_id=f"evt_{hook}_{phase}_{int(time.time()*1000)}",
+        event_id=f"evt_{hook}_{phase}_{int(time.time() * 1000)}",
         task_id=task_id,
         phase=phase,
         event_type="lifecycle_hook",
@@ -45,9 +49,11 @@ def build_lifecycle_hook_event(*, task_id: str, phase: str, hook: str, payload: 
     )
 
 
-def build_phase_transition_event(*, task_id: str, phase: str, transition: str, payload: Dict[str, Any] | None = None) -> NexusEvent:
+def build_phase_transition_event(
+    *, task_id: str, phase: str, transition: str, payload: Dict[str, Any] | None = None
+) -> NexusEvent:
     return NexusEvent(
-        event_id=f"evt_{transition}_{phase}_{int(time.time()*1000)}",
+        event_id=f"evt_{transition}_{phase}_{int(time.time() * 1000)}",
         task_id=task_id,
         phase=phase,
         event_type="phase_transition",
@@ -63,3 +69,10 @@ def build_phase_observer_event(
     if hook not in PHASE_OBSERVER_HOOKS:
         raise ValueError(f"unknown_phase_observer_hook:{hook}")
     return build_lifecycle_hook_event(task_id=task_id, phase=phase, hook=hook, payload=payload)
+
+
+def build_developer_feedback_decision_event(
+    request: DeveloperFeedbackDecisionRequest,
+) -> dict[str, object]:
+    """Return the typed request envelope without adding untrusted fields."""
+    return {"event_type": "developer_feedback_decision", "payload": request.to_dict()}
