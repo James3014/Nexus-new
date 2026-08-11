@@ -122,6 +122,8 @@ class NexusEventBus:
     ) -> Dict[str, Any]:
         """Persist a typed recommendation, then notify observers after commit."""
         record = cls._developer_feedback_store.append(decision, expected_tail=expected_tail)
+        if getattr(record, "replayed", False):
+            return record
         payload = dict(record)
         with cls._subs_lock:
             handlers = cls._subscribers.get("developer_feedback_decision", [])[:]

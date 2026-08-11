@@ -169,6 +169,36 @@ def test_typed_emitter_notifies_after_commit_and_generic_is_reserved(tmp_path: P
     assert (tmp_path / ".nexus/events/developer_feedback_decision.v1.jsonl").exists()
 
 
+def test_replay_does_not_notify_and_replay_stale_tail_is_checked(tmp_path: Path):
+    NexusEventBus.configure(tmp_path)
+    old_subscribers = NexusEventBus._subscribers
+    seen = []
+    try:
+        NexusEventBus._subscribers = {}
+        NexusEventBus.subscribe("developer_feedback_decision", seen.append)
+        first = NexusEventBus.emit_developer_feedback_decision(decision("replay"))
+        assert seen == [first]
+        replay = NexusEventBus.emit_developer_feedback_decision(decision("replay"))
+        assert replay == first
+        assert seen == [first]
+        with pytest.raises(ValueError, match="stale"):
+            NexusEventBus.emit_developer_feedback_decision(
+                decision("replay"), expected_tail="0" * 64
+            )
+    finally:
+        NexusEventBus._subscribers = old_subscribers
+
+
+def test_max_bytes_rejects_append_and_read(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    store.MAX_BYTES = 1
+    with pytest.raises(ValueError, match="ceiling"):
+        store.append(decision())
+    store.path.write_bytes(b"{}\n")
+    with pytest.raises(ValueError):
+        store.read_recent()
+
+
 def test_deterministic_directive_mapping():
     assert (
         DeveloperFeedbackDecision.from_directive(

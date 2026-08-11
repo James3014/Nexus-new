@@ -47,6 +47,14 @@ class JsonlEventLogStore:
         return events
 
 
+class DecisionAppendResult(dict):
+    """Dict-compatible append result with an internal replay signal."""
+
+    def __init__(self, record: Dict[str, Any], *, replayed: bool) -> None:
+        super().__init__(record)
+        self.replayed = replayed
+
+
 class DeveloperFeedbackDecisionStore:
     """Fail-closed append-only POSIX JSONL store for typed feedback decisions."""
 
@@ -198,7 +206,7 @@ class DeveloperFeedbackDecisionStore:
                         old_unsigned = dict(old)
                         old_unsigned.pop("record_digest", None)
                         if self._canonical(candidate) == self._canonical(old_unsigned):
-                            return old
+                            return DecisionAppendResult(old, replayed=True)
                         raise ValueError("idempotency conflict")
                 record = decision.to_record(sequence=sequence, parent_digest=tail)
                 record["record_digest"] = hashlib.sha256(self._canonical(record)).hexdigest()
@@ -216,7 +224,7 @@ class DeveloperFeedbackDecisionStore:
                         os.fsync(directory_fd)
                     finally:
                         os.close(directory_fd)
-                return record
+                return DecisionAppendResult(record, replayed=False)
             finally:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
