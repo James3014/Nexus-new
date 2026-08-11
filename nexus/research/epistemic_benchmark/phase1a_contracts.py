@@ -162,7 +162,9 @@ class Phase1AArmIdentity:
             "VAP_B",
             "VAP_D",
         ):
-            raise ValueError(f"Legacy VAP B/D semantics/label '{raw_str}' rejected for Phase 1A arms")
+            raise ValueError(
+                f"Legacy VAP B/D semantics/label '{raw_str}' rejected for Phase 1A arms"
+            )
 
         try:
             return Phase1AArm(normalized)
@@ -174,7 +176,9 @@ class Phase1AArmIdentity:
         if value is None:
             raise ValueError(f"Required field '{name}' cannot be None")
         if not isinstance(value, str):
-            raise ValueError(f"Required field '{name}' must be a string, got {type(value).__name__}")
+            raise ValueError(
+                f"Required field '{name}' must be a string, got {type(value).__name__}"
+            )
         if not value.strip():
             raise ValueError(f"Required field '{name}' cannot be empty or whitespace")
 
@@ -270,11 +274,17 @@ def compare_arm_identities(
 
     if left.task_contract_hash != right.task_contract_hash:
         reasons.append(ComparabilityReason.TASK_CONTRACT_DRIFT)
-        details["task_contract_hash"] = {"left": left.task_contract_hash, "right": right.task_contract_hash}
+        details["task_contract_hash"] = {
+            "left": left.task_contract_hash,
+            "right": right.task_contract_hash,
+        }
 
     if left.source_corpus_id != right.source_corpus_id:
         reasons.append(ComparabilityReason.SOURCE_CORPUS_DRIFT)
-        details["source_corpus_id"] = {"left": left.source_corpus_id, "right": right.source_corpus_id}
+        details["source_corpus_id"] = {
+            "left": left.source_corpus_id,
+            "right": right.source_corpus_id,
+        }
 
     if left.online_provider != right.online_provider:
         reasons.append(ComparabilityReason.ONLINE_PROVIDER_DRIFT)
@@ -297,7 +307,10 @@ def compare_arm_identities(
 
     if _canonical_json(left.budgets_timeouts) != _canonical_json(right.budgets_timeouts):
         reasons.append(ComparabilityReason.BUDGET_TIMEOUT_DRIFT)
-        details["budgets_timeouts"] = {"left": left.budgets_timeouts, "right": right.budgets_timeouts}
+        details["budgets_timeouts"] = {
+            "left": left.budgets_timeouts,
+            "right": right.budgets_timeouts,
+        }
 
     if left.final_verifier_contract_hash != right.final_verifier_contract_hash:
         reasons.append(ComparabilityReason.FINAL_VERIFIER_CONTRACT_DRIFT)
@@ -388,5 +401,7 @@ def compute_triplet_comparability_fingerprint(
     res = validate_triplet_comparability(arm_a, arm_b, arm_c)
     if not res.is_comparable:
         reasons_str = ", ".join(r.value for r in res.reasons)
-        raise ValueError(f"Cannot compute triplet fingerprint for non-comparable triplet: {reasons_str}")
+        raise ValueError(
+            f"Cannot compute triplet fingerprint for non-comparable triplet: {reasons_str}"
+        )
     return arm_a.triplet_fingerprint()
