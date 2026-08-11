@@ -38,7 +38,8 @@ class ComparabilityReason(str, Enum):
 
 @dataclass(frozen=True)
 class Phase1AArmSemantics:
-    nexus_baseline: bool
+    is_baseline_arm: bool
+    uses_nexus_baseline_substrate: bool
     deterministic_evidence_mediation: bool
     bounded_local_semantic_exploration: bool
     online_required: bool = True
@@ -47,17 +48,20 @@ class Phase1AArmSemantics:
 
 _ARM_SEMANTICS = {
     Phase1AArm.A: Phase1AArmSemantics(
-        nexus_baseline=True,
+        is_baseline_arm=True,
+        uses_nexus_baseline_substrate=True,
         deterministic_evidence_mediation=False,
         bounded_local_semantic_exploration=False,
     ),
     Phase1AArm.B: Phase1AArmSemantics(
-        nexus_baseline=False,
+        is_baseline_arm=False,
+        uses_nexus_baseline_substrate=True,
         deterministic_evidence_mediation=True,
         bounded_local_semantic_exploration=False,
     ),
     Phase1AArm.C: Phase1AArmSemantics(
-        nexus_baseline=False,
+        is_baseline_arm=False,
+        uses_nexus_baseline_substrate=True,
         deterministic_evidence_mediation=True,
         bounded_local_semantic_exploration=True,
     ),
