@@ -1,13 +1,22 @@
 ---
 name: nexus-issue-execution-capsule
-description: Execute bounded Nexus GitHub Issue, PR, or CI repair and implementation with authoritative context, exact-environment reproduction, bounded sibling checks, and revision-fresh evidence. Use when repeated exploration, environment drift, or sibling call-site failures could invalidate the fix or its claim.
+description: Execute bounded worker-side Nexus GitHub Issue, PR, or CI repair and implementation with authoritative context, exact-environment reproduction, bounded sibling checks, and revision-fresh evidence. Use when repeated exploration, environment drift, or sibling call-site failures could invalidate the fix or its claim. Do not use for nexus-mcp-task-executor, nexus-bug-diagnosis, Candidate acceptance, approval or promotion, route authority, or lifecycle authority.
 ---
 
 # Nexus Issue Execution Capsule
 
-Use this skill for one bounded Nexus GitHub Issue, PR, or CI repair or
-implementation. Optimize for correctness over speed. Do not widen scope or
-perform a repository-wide refactor.
+Use this skill for one bounded, worker-side Nexus GitHub Issue, PR, or CI repair
+or implementation. It is an execution-discipline overlay only: it structures
+investigation, repair, and evidence without becoming an executor, diagnostician,
+Candidate acceptance gate, route authority, or lifecycle controller. Optimize
+for correctness over speed. Do not widen scope or perform a repository-wide
+refactor.
+
+Do not invoke this skill for `nexus-mcp-task-executor` or
+`nexus-bug-diagnosis`; those skills retain their own execution and diagnosis
+contracts. Do not use it to create, accept, approve, promote, integrate, or
+release a Candidate, or to select routes, mutate lifecycle state, or replace
+the governing route/lifecycle authority. Stop and hand off at those gates.
 
 ## Establish the capsule
 
