@@ -230,6 +230,21 @@ class DeveloperFeedbackDecisionStore:
 
     append_decision = append
 
-    def read_recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def read_recent(self, limit: int = 50, *, lock_timeout: float = 5.0) -> List[Dict[str, Any]]:
         with self._lock:
-            return self._scan()[0][-limit:]
+            if not self.lock_path:
+                raise RuntimeError("store is not configured")
+            with open(self.lock_path, "a+", encoding="utf-8") as lock:
+                deadline = time.monotonic() + lock_timeout
+                while True:
+                    try:
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("decision stream lock timeout")
+                        time.sleep(0.01)
+                try:
+                    return self._scan()[0][-limit:]
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)

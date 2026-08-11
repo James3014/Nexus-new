@@ -156,6 +156,30 @@ def test_lock_timeout_under_contention(tmp_path: Path):
             holder.terminate()
             holder.join()
     assert holder.exitcode == 0
+    assert store.read_recent() == []
+
+
+def test_reader_lock_timeout_under_writer_contention(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    acquired = multiprocessing.Event()
+    release = multiprocessing.Event()
+    holder = multiprocessing.Process(
+        target=_hold_decision_lock,
+        args=(str(store.lock_path), acquired, release),
+    )
+    holder.start()
+    try:
+        assert acquired.wait(timeout=5)
+        with pytest.raises(TimeoutError, match="lock timeout"):
+            store.read_recent(lock_timeout=0.02)
+    finally:
+        release.set()
+        holder.join(timeout=5)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join()
+    assert holder.exitcode == 0
+    assert store.read_recent() == []
 
 
 def test_typed_emitter_notifies_after_commit_and_generic_is_reserved(tmp_path: Path):
