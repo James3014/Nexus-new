@@ -14,6 +14,8 @@ from pydantic import (
 )
 import os
 
+from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
+
 
 _EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -89,6 +91,7 @@ class SelfHostedTaskContract(BaseModel):
     maximum_replans: int = Field(default=0, ge=0)
     mutation_mode: MutationMode = MutationMode.WORKING_TREE_ONLY
     human_approval_required: bool = True
+    collaboration_realm: Optional[CollaborationExecutionRealm] = None
 
     @field_validator("task_id")
     @classmethod
@@ -144,6 +147,24 @@ class SelfHostedTaskContract(BaseModel):
         target_root = Path(self.target_repo_root).expanduser().resolve(strict=False)
         if controller_root == target_root:
             raise ValueError("controller and target roots must be physically separate")
+        if self.collaboration_realm is not None:
+            realm = self.collaboration_realm
+            collaboration_root = Path(realm.collaboration.repo_root).resolve(strict=False)
+            execution_root = Path(realm.execution_root).resolve(strict=False)
+            control_plane_root = Path(realm.control_plane.repo_root).resolve(strict=False)
+            target_worktree_root = Path(self.target_worktree_root).resolve(strict=False)
+            if controller_root != collaboration_root:
+                raise ValueError("collaboration realm repository root must be controller_repo_root")
+            if target_worktree_root != execution_root:
+                raise ValueError("collaboration realm execution root must be target_worktree_root")
+            if target_root == execution_root or execution_root not in target_root.parents:
+                raise ValueError("collaboration target must be below the collaboration execution root")
+            if control_plane_root == controller_root:
+                raise ValueError("control plane and collaboration repositories must be physically separate")
+            if self.controller_revision != realm.collaboration.base.head_sha:
+                raise ValueError("controller_revision must match the collaboration base SHA")
+            if self.target_base_revision != realm.collaboration.base.head_sha:
+                raise ValueError("target_base_revision must match the collaboration base SHA")
         if len(set(self.provider_order)) != len(self.provider_order):
             raise ValueError("provider_order must not contain duplicates")
         configured = {provider for provider in (self.preferred_provider, self.fallback_provider) if provider}

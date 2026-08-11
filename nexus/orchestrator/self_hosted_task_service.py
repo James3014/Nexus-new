@@ -23,36 +23,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
-from nexus.executors.worker_contract import (
-    SUPPORTED_WORKER_PROVIDERS,
-    AttemptResolutionVerdict,
-    WorkerExecutionReceipt,
-    WorkerOutcome,
-    resolve_attempt,
-)
-from nexus.executors.worker_registry import WorkerRegistry
-from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
-from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
-from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
-from nexus.orchestrator.governed_integration import ControlledIntegrationManager, IntegrationExecutionError
-from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
-from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
-from nexus.orchestrator.task_contract import (
-    AcceptanceProfile,
-    ArchitectTaskContract,
-    ArchitectureDecision,
-    DevelopmentGoal,
-    HumanApprovalPolicy,
-    MutationMode,
-)
-from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
-from nexus.orchestrator.lifecycle_guards import (
-    pre_action_guard,
-    trusted_runtime_manifest_hash,
-    validate_approval_grant,
-    validate_architecture_approval,
-)
+from nexus.contracts.autonomy_goal import AutonomyGoalGrant
+from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionEnvelope,
@@ -64,8 +36,49 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
-from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
+from nexus.executors.worker_contract import (
+    SUPPORTED_WORKER_PROVIDERS,
+    AttemptResolutionVerdict,
+    WorkerExecutionReceipt,
+    WorkerOutcome,
+    resolve_attempt,
+)
+from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.autonomy_policy import (
+    AutonomySubmissionBinding,
+    project_autonomy_submission,
+)
+from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
+from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
+from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
+from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
+from nexus.orchestrator.governed_integration import (
+    ControlledIntegrationManager,
+    IntegrationExecutionError,
+)
+from nexus.orchestrator.lifecycle_guards import (
+    pre_action_guard,
+    trusted_runtime_manifest_hash,
+    validate_approval_grant,
+    validate_architecture_approval,
+)
+from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
+from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
+from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
+from nexus.orchestrator.task_contract import (
+    AcceptanceProfile,
+    ArchitectTaskContract,
+    ArchitectureDecision,
+    DevelopmentGoal,
+    HumanApprovalPolicy,
+    MutationMode,
+)
+from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
+from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
@@ -138,6 +151,30 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _validate_existing_autonomy_binding(
+    state: Mapping[str, Any],
+    grant: Optional[AutonomyGoalGrant],
+) -> None:
+    """Reject any attempt to add or replace autonomy after task creation."""
+    raw_binding = state.get("autonomy_submission_binding")
+    if grant is None:
+        if raw_binding is not None:
+            raise ValueError("AUTONOMY_GOAL_GRANT_REQUIRED")
+        return
+    if raw_binding is None:
+        raise ValueError("POST_SUBMISSION_GRANT_INJECTION")
+    try:
+        binding = AutonomySubmissionBinding.model_validate(raw_binding)
+    except Exception as exc:
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_INVALID") from exc
+    if binding.task_id != state.get("task_id"):
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
+    if binding.goal_id != grant.goal_id or binding.grant_hash != grant.grant_hash:
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
+    if not project_autonomy_submission(state).get("eligible"):
+        raise ValueError("AUTONOMY_SUBMISSION_BINDING_DRIFT")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -145,6 +182,154 @@ def _utc_now() -> str:
 def _bounded_failure_text(value: Any, *, limit: int = 512) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _workforce_dispatch_inputs(request: Mapping[str, Any]) -> tuple[Any, Any]:
+    """Extract the planner/admission pair without inventing a fallback source."""
+    planner = request.get("planner_output")
+    if not isinstance(planner, Mapping):
+        planner = request.get("planner")
+    snapshot = request.get("signal_snapshot")
+    if not isinstance(snapshot, Mapping) and isinstance(planner, Mapping):
+        snapshot = planner.get("signal_snapshot")
+    demands = request.get("workforce_demands")
+    if demands is None and isinstance(snapshot, Mapping):
+        demands = snapshot.get("workforce_demands")
+    admission = request.get("workforce_admission")
+    if admission is None and isinstance(planner, Mapping):
+        admission = planner.get("workforce_admission")
+    if admission is None:
+        admission = request.get("admission_binding")
+    return demands, admission
+
+
+def _tracked_dispatch_required(
+    request: Mapping[str, Any],
+    state: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    tracked = ContractKind.TRACKED_TASK_CARD.value
+    return str(request.get("contract_kind") or "") == tracked or (
+        isinstance(state, Mapping)
+        and str(state.get("contract_kind") or "") == tracked
+    )
+
+
+def validate_workforce_dispatch_binding(
+    request: Mapping[str, Any],
+    *,
+    require_binding: bool = False,
+) -> Optional[dict[str, Any]]:
+    """Validate the exact Planner -> admission -> registry dispatch binding.
+
+    The runtime admission service remains the policy authority.  This seam only
+    verifies its durable, canonical ALLOW receipt before selecting a registry
+    identity; it never resolves a worker or recomputes policy.
+    """
+    demands, admission = _workforce_dispatch_inputs(request)
+    if demands is None and admission is None:
+        if require_binding:
+            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
+        return None
+    if demands is None or admission is None:
+        raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
+    if not isinstance(admission, Mapping) or admission.get("overall_decision") != "ALLOW":
+        raise RuntimeError("WORKFORCE_ADMISSION_BINDING_INVALID:overall decision is not ALLOW")
+    try:
+        raw_items = demands.get("demands") if isinstance(demands, Mapping) else None
+        records = admission.get("records")
+        if not isinstance(raw_items, list) or len(raw_items) != 1:
+            raise ValueError("workforce dispatch requires exactly one demand")
+        if not isinstance(records, list) or len(records) != 1:
+            raise ValueError("workforce dispatch requires exactly one admission record")
+        record = records[0]
+        record_demand = record.get("demand") if isinstance(record, Mapping) else None
+        if not isinstance(record_demand, Mapping) or any(
+            record_demand.get(field) != raw_items[0].get(field)
+            for field in ("demand_id", "execution_channel")
+        ):
+            raise ValueError("workforce admission demand/record mismatch")
+        record_request = record.get("request")
+        if not isinstance(record_request, Mapping):
+            raise ValueError("workforce admission record request missing")
+        channel = str(raw_items[0].get("execution_channel") or "")
+        if channel not in {"local", "online"}:
+            raise ValueError("workforce dispatch execution channel invalid")
+        binding: dict[str, Any] = {
+            "worker_id": record_request.get("requested_worker_id"),
+            "provider": record_request.get("provider"),
+            "model": record_request.get("model"),
+            "controls": record_request.get("provided_controls") or [],
+            "explicit_experiment_authorization": bool(
+                record_request.get("explicit_experiment_authorization", False)
+            ),
+        }
+        if not binding["worker_id"] and not binding["provider"] and not binding["model"]:
+            raise ValueError("workforce admission record identity missing")
+        fresh = evaluate_runtime_workforce_admission(
+            demands,
+            {channel: binding},
+            WorkforcePolicyLoader(),
+        ).to_dict()
+        if fresh != dict(admission):
+            raise ValueError("workforce admission receipt is stale or tampered")
+        fresh_records = fresh.get("records") or []
+        if (
+            fresh.get("overall_decision") != "ALLOW"
+            or len(fresh_records) != 1
+            or (fresh_records[0].get("decision") or {}).get("decision") != "ALLOW"
+        ):
+            raise ValueError("workforce admission is not a single ALLOW record")
+        decision = fresh_records[0].get("decision") or {}
+        binding = {
+            "worker_id": decision.get("resolved_worker_id"),
+            "provider": decision.get("resolved_provider"),
+            "model": decision.get("resolved_model"),
+            "policy_hash": (fresh.get("policy_identity") or {}).get("policy_hash"),
+            "binding_hash": fresh_records[0].get("binding_hash"),
+            "aggregate_binding_hash": fresh.get("aggregate_binding_hash"),
+        }
+        if any(not isinstance(binding[field], str) or not binding[field].strip() for field in (
+            "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"
+        )):
+            raise ValueError("workforce admission resolved identity missing")
+    except (TypeError, ValueError, KeyError) as exc:
+        raise RuntimeError(f"WORKFORCE_ADMISSION_BINDING_INVALID:{exc}") from exc
+    fallback = str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
+    if fallback and fallback != str(binding["provider"]).strip().lower():
+        raise RuntimeError("WORKFORCE_ADMISSION_FALLBACK_UNADMITTED")
+    raw_envelope = request.get("canonical_dispatch_envelope")
+    result = {
+        "demands": _jsonable(demands),
+        "admission": _jsonable(admission),
+        "demand_id": str(raw_items[0].get("demand_id") or ""),
+        "worker_id": str(binding["worker_id"]),
+        "provider": str(binding["provider"]),
+        "model": str(binding["model"]),
+        "policy_hash": str(binding["policy_hash"]),
+        "binding_hash": str(binding["binding_hash"]),
+        "aggregate_binding_hash": str(binding["aggregate_binding_hash"]),
+    }
+    if raw_envelope is not None:
+        if not isinstance(raw_envelope, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_INVALID")
+        planner_output = request.get("planner_output")
+        if not isinstance(planner_output, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_PLANNER_MISSING")
+        try:
+            envelope = build_canonical_dispatch_envelope(
+                planner_output,
+                {**binding, "demand_id": str(raw_items[0].get("demand_id") or "")},
+                task_id=str(request.get("task_id") or ""),
+                attempt_id=str(request.get("attempt_id") or ""),
+                task_card_path=str(request.get("task_card_path") or ""),
+                task_card_hash=str(request.get("task_card_hash") or ""),
+            ).to_dict()
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"WORKFORCE_DISPATCH_ENVELOPE_INVALID:{exc}") from exc
+        if dict(raw_envelope) != envelope:
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_MISMATCH")
+        result["canonical_dispatch_envelope"] = envelope
+    return result
 
 
 def _parse_time(value: Optional[str]) -> Optional[float]:
@@ -680,6 +865,22 @@ def resolve_execution_lane(
 
 
 class SelfHostedTaskService:
+    _CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS = frozenset({
+        "admission_binding",
+        "canonical_dispatch_envelope",
+        "execution",
+        "executions",
+        "execution_outcome",
+        "verified_receipt",
+        "verified_receipt_hash",
+        "worker_preflight",
+        "workforce_admission",
+        "workforce_aggregate_binding_hash",
+        "workforce_binding_hash",
+        "workforce_dispatch",
+        "workforce_policy_hash",
+    })
+
     @staticmethod
     def canonical_state_dir() -> Path:
         configured = os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip()
@@ -712,6 +913,8 @@ class SelfHostedTaskService:
         if self.state_dir != canonical and not ephemeral and not is_temporary:
             raise ValueError(f"production tasks must use canonical state root: {canonical}")
         self.ephemeral = ephemeral or is_temporary
+        if runner is not None and not self.ephemeral:
+            raise RuntimeError("CUSTOM_RUNNER_REQUIRES_EPHEMERAL_STATE")
         self._custom_runner = runner
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
@@ -722,6 +925,23 @@ class SelfHostedTaskService:
 
     def _state_path(self, task_id: str) -> Path:
         return self.state_dir / f"{task_id}.json"
+
+    @classmethod
+    def _bound_custom_runner_values(cls, values: Mapping[str, Any]) -> dict[str, Any]:
+        bounded = {
+            key: value
+            for key, value in values.items()
+            if key not in cls._CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS
+        }
+        bounded.update({
+            "execution_authority": "EPHEMERAL_TEST_RUNNER",
+            "provider_receipt_authoritative": False,
+            "workforce_admission_authoritative": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "promotion_eligible": False,
+        })
+        return bounded
 
     def _archive_root(self) -> Path:
         return self.state_dir.parent / "nexus-state-archive"
@@ -790,6 +1010,42 @@ class SelfHostedTaskService:
         if "blocker" in state and state["blocker"] is not None:
             return state["blocker"]
         return cls._terminal_failure_blocker(state)
+
+    @classmethod
+    def _settled_candidate_less_final_block(cls, state: Mapping[str, Any]) -> bool:
+        """Identify a terminal failure whose retry is historical, not required."""
+        if (
+            state.get("status") != "FINAL_BLOCK"
+            or state.get("promotion_status") != "NOT_CREATED"
+            or state.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            or state.get("cleanup_blocker")
+            or state.get("reconciliation_required") is True
+            or state.get("reconciliation_status") not in {None, "RECONCILED", "NOT_REQUIRED"}
+            or state.get("reconciliation_decision") not in {None, "NO_MUTATION_OBSERVED"}
+            or state.get("uncertain_mutation") is True
+            or state.get("candidate_created") not in {None, False}
+            or state.get("candidate_status") not in {None, "", "NOT_CREATED", "FINAL_BLOCK"}
+            or state.get("state_retention_status") not in {None, "TERMINAL", "ARCHIVED"}
+            or state.get("approved_binding")
+            or state.get("integration_receipt")
+            or state.get("integration_result_sha")
+            or state.get("merge_performed")
+        ):
+            return False
+
+        candidate = state.get("promotion_packet")
+        candidate_fields = (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+            "candidate_ref",
+        )
+        if any(state.get(field) for field in candidate_fields):
+            return False
+        if isinstance(candidate, Mapping) and any(candidate.get(field) for field in candidate_fields):
+            return False
+        return True
 
     @classmethod
     def _task_action_envelope(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -867,6 +1123,9 @@ class SelfHostedTaskService:
             else:
                 next_action = "inspect_receipt_and_candidate"
                 recommended_tool = "nexus_self_hosted_get_receipt"
+            if cls._settled_candidate_less_final_block(state):
+                action_state = "TERMINAL"
+                attention_required = False
         elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
             action_state = "ACTION_REQUIRED"
             attention_required = True
@@ -925,6 +1184,200 @@ class SelfHostedTaskService:
         state["task_action"] = cls._task_action_envelope(state)
         return state
 
+    @staticmethod
+    def _approval_requirements(state: Mapping[str, Any]) -> dict[str, Any]:
+        """Project durable Architecture Approval inputs without granting approval."""
+        input_reasons: list[str] = []
+
+        def approval_source(name: str) -> Mapping[str, Any]:
+            if name not in state:
+                return {}
+            source = state[name]
+            if source is None:
+                return {}
+            if isinstance(source, Mapping):
+                if not source:
+                    input_reasons.append(
+                        f"malformed_source:{name}:empty_or_missing_contract_fields"
+                    )
+                return source
+            input_reasons.append(f"malformed_source:{name}:expected_mapping")
+            return {}
+
+        packet = approval_source("promotion_packet")
+        candidate = state.get("candidate") if isinstance(state.get("candidate"), Mapping) else {}
+        receipt = approval_source("verified_receipt")
+
+        def values(
+            field: str,
+            *sources: tuple[str, Mapping[str, Any]],
+            pattern: str,
+        ) -> list[tuple[str, str]]:
+            resolved = []
+            for name, source in sources:
+                raw = source.get(field)
+                if raw is None or raw == "":
+                    continue
+                if type(raw) is not str:
+                    input_reasons.append(f"invalid_type:{name}.{field}")
+                    continue
+                value = raw.strip()
+                if not value:
+                    continue
+                if not re.fullmatch(pattern, value):
+                    input_reasons.append(f"invalid_format:{name}.{field}")
+                    continue
+                resolved.append((name, value))
+            return resolved
+
+        required_values = []
+        for name, source in (
+            ("promotion_packet", packet),
+            ("verified_receipt", receipt),
+        ):
+            raw = source.get("authority_change_required", False)
+            if type(raw) is not bool:
+                input_reasons.append(f"invalid_type:{name}.authority_change_required")
+                raw = False
+            required_values.append((name, raw))
+        required = any(value for _, value in required_values)
+
+        approval_shaped = any(
+            isinstance(value, Mapping) and value.get("architecture_approval") is not None
+            for value in (state.get("approved_binding"), packet, receipt)
+        )
+        binding = {
+            "bound_task_id": "",
+            "bound_attempt_id": "",
+            "candidate_commit_sha": "",
+            "candidate_tree_sha": "",
+            "authority_findings_sha256": "",
+        }
+        for state_field, binding_field in (
+            ("task_id", "bound_task_id"),
+            ("attempt_id", "bound_attempt_id"),
+        ):
+            raw = state.get(state_field)
+            if raw is None or raw == "":
+                continue
+            if type(raw) is not str:
+                input_reasons.append(f"invalid_type:task.{state_field}")
+                continue
+            binding[binding_field] = raw.strip()
+        if state.get("state_valid") is False:
+            blocker = state.get("blocker") if isinstance(state.get("blocker"), Mapping) else {}
+            source_reasons = blocker.get("approval_requirements_reasons")
+            if isinstance(source_reasons, list) and all(
+                type(reason) is str and reason for reason in source_reasons
+            ):
+                input_reasons.extend(source_reasons)
+            else:
+                code = blocker.get("code") if type(blocker.get("code")) is str else "UNKNOWN"
+                input_reasons.append(f"invalid_state:{code}")
+
+        field_sources = {
+            "candidate_commit_sha": values(
+                "candidate_commit_sha",
+                ("task", state),
+                ("promotion_packet", packet),
+                ("candidate", candidate),
+                ("verified_receipt", receipt),
+                pattern=r"[0-9a-f]{40}",
+            )
+            + values(
+                "commit_sha",
+                ("candidate", candidate),
+                pattern=r"[0-9a-f]{40}",
+            ),
+            "candidate_tree_sha": values(
+                "candidate_tree_sha",
+                ("task", state),
+                ("promotion_packet", packet),
+                ("candidate", candidate),
+                ("verified_receipt", receipt),
+                pattern=r"[0-9a-f]{40}",
+            )
+            + values(
+                "tree_sha",
+                ("candidate", candidate),
+                pattern=r"[0-9a-f]{40}",
+            ),
+            "authority_findings_sha256": values(
+                "authority_findings_sha256",
+                ("promotion_packet", packet),
+                ("verified_receipt", receipt),
+                pattern=r"[0-9a-f]{64}",
+            ),
+        }
+        missing: list[str] = []
+        mismatches: list[str] = []
+        for field, source_values in field_sources.items():
+            unique_values = {value for _, value in source_values}
+            if not source_values:
+                missing.append(field)
+            elif len(unique_values) > 1:
+                mismatches.append(field)
+            else:
+                binding[field] = source_values[0][1]
+
+        if not binding["bound_task_id"]:
+            missing.append("bound_task_id")
+        if not binding["bound_attempt_id"]:
+            missing.append("bound_attempt_id")
+        if required_values[0][1] != required_values[1][1] and any(
+            value for _, value in required_values
+        ):
+            mismatches.append("authority_change_required")
+        missing = sorted(set(missing))
+        mismatches = sorted(set(mismatches))
+
+        stale = approval_shaped or (
+            required
+            and state.get("promotion_status") in {"APPROVED", "INTEGRATED", "APPROVAL_INVALIDATED"}
+        )
+        if not required and input_reasons:
+            status = "NOT_APPROVABLE"
+            completeness = "INCOMPLETE"
+            approvability = "NOT_APPROVABLE"
+        elif not required:
+            status = "NOT_REQUIRED"
+            completeness = "NOT_REQUIRED"
+            approvability = "NOT_REQUIRED"
+        elif stale:
+            status = "NOT_APPROVABLE"
+            completeness = "INCOMPLETE"
+            approvability = "NOT_APPROVABLE"
+            missing.append("stale_approval_requirements")
+        elif input_reasons or missing or mismatches:
+            status = "NOT_APPROVABLE"
+            completeness = "INCOMPLETE"
+            approvability = "NOT_APPROVABLE"
+        else:
+            status = "APPROVABLE"
+            completeness = "COMPLETE"
+            approvability = "APPROVABLE"
+
+        reasons = list(input_reasons)
+        if required:
+            reasons.extend(f"missing:{field}" for field in missing)
+            reasons.extend(f"mismatch:{field}" for field in mismatches)
+        if stale:
+            reasons.append("stale:approval_requirements")
+        return {
+            "schema": "nexus.architecture_approval_requirements.v1",
+            "required": required,
+            "status": status,
+            "completeness": completeness,
+            "approvability": approvability,
+            "task_id": binding["bound_task_id"],
+            "attempt_id": binding["bound_attempt_id"],
+            "binding": binding,
+            "missing": sorted(set(missing)),
+            "mismatches": mismatches,
+            "reasons": sorted(set(reasons)),
+            "stale": stale,
+        }
+
     @classmethod
     def _invalid_state_status(
         cls,
@@ -933,20 +1386,26 @@ class SelfHostedTaskService:
         code: str,
         detail: str,
         source_path: Path,
+        approval_requirements_reasons: Sequence[str] = (),
     ) -> dict[str, Any]:
-        return cls._with_task_action({
-            "schema": "nexus.self_hosted_task_status.v1",
-            "task_id": task_id,
-            "status": "BLOCKED_INVALID_STATE",
-            "found": True,
-            "state_valid": False,
-            "retry_authorized": False,
-            "blocker": {
-                "code": code,
-                "detail": detail,
-                "source_path": str(source_path),
-            },
-        })
+        blocker: dict[str, Any] = {
+            "code": code,
+            "detail": detail,
+            "source_path": str(source_path),
+        }
+        if approval_requirements_reasons:
+            blocker["approval_requirements_reasons"] = sorted(set(approval_requirements_reasons))
+        return cls._with_task_action(
+            {
+                "schema": "nexus.self_hosted_task_status.v1",
+                "task_id": task_id,
+                "status": "BLOCKED_INVALID_STATE",
+                "found": True,
+                "state_valid": False,
+                "retry_authorized": False,
+                "blocker": blocker,
+            }
+        )
 
     @classmethod
     def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
@@ -998,8 +1457,7 @@ class SelfHostedTaskService:
         for field in ("attempts", "executions"):
             value = state.get(field)
             if field in state and (
-                not isinstance(value, list)
-                or any(not isinstance(item, Mapping) for item in value)
+                not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value)
             ):
                 return cls._invalid_state_status(
                     task_id,
@@ -1007,7 +1465,7 @@ class SelfHostedTaskService:
                     detail=f"state {field} must be a list of objects",
                     source_path=path,
                 )
-        for field in (
+        object_fields = (
             "action",
             "attempt_resolution",
             "contract",
@@ -1015,14 +1473,26 @@ class SelfHostedTaskService:
             "promotion_packet",
             "request",
             "verified_receipt",
-        ):
-            if field in state and state[field] is not None and not isinstance(state[field], Mapping):
-                return cls._invalid_state_status(
-                    task_id,
-                    code="STATE_FIELD_INVALID",
-                    detail=f"state {field} must be an object",
-                    source_path=path,
-                )
+        )
+        invalid_object_fields = [
+            field
+            for field in object_fields
+            if field in state and state[field] is not None and not isinstance(state[field], Mapping)
+        ]
+        if invalid_object_fields:
+            field = invalid_object_fields[0]
+            approval_reasons = [
+                f"malformed_source:{name}:expected_mapping"
+                for name in invalid_object_fields
+                if name in {"promotion_packet", "verified_receipt"}
+            ]
+            return cls._invalid_state_status(
+                task_id,
+                code="STATE_FIELD_INVALID",
+                detail=f"state {field} must be an object",
+                source_path=path,
+                approval_requirements_reasons=approval_reasons,
+            )
         return cls._with_task_action(state)
 
     def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
@@ -1363,6 +1833,28 @@ class SelfHostedTaskService:
     def build_contract(self, request: Mapping[str, Any]) -> ArchitectTaskContract:
         if "prompt" in request:
             raise ValueError("prompt is not accepted; submit WHAT and WHY")
+        dispatch_binding = validate_workforce_dispatch_binding(request)
+        if dispatch_binding is not None:
+            requested_provider = str(request.get("worker", "auto")).strip().lower()
+            if requested_provider not in {"", "auto", dispatch_binding["provider"]}:
+                raise RuntimeError("WORKFORCE_ADMISSION_PROVIDER_MISMATCH")
+            caller_provider = str(request.get("provider") or "").strip().lower()
+            if caller_provider and caller_provider != dispatch_binding["provider"].lower():
+                raise RuntimeError("WORKFORCE_ADMISSION_PROVIDER_MISMATCH")
+            caller_worker_id = str(request.get("worker_id") or "").strip()
+            if caller_worker_id and caller_worker_id != dispatch_binding["worker_id"]:
+                raise RuntimeError("WORKFORCE_ADMISSION_WORKER_MISMATCH")
+            requested_model = str(request.get("model") or "").strip()
+            if requested_model and requested_model != dispatch_binding["model"]:
+                raise RuntimeError("WORKFORCE_ADMISSION_MODEL_MISMATCH")
+            request = dict(request)
+            request.update({
+                "worker": dispatch_binding["provider"],
+                "provider": dispatch_binding["provider"],
+                "model": dispatch_binding["model"],
+                "worker_id": dispatch_binding["worker_id"],
+                "worker_order": [dispatch_binding["provider"]],
+            })
         worker = str(request.get("worker", "codex")).strip().lower()
         requested_worker = worker
         if worker not in SUPPORTED_WORKER_PROVIDERS:
@@ -1414,7 +1906,10 @@ class SelfHostedTaskService:
         ]
         verifier_commands = [str(item) for item in request.get("verifier_commands", [])]
         protected_contracts = [str(item) for item in request.get("protected_contracts", [])]
-        if request.get("worker_candidate_ingress"):
+        if (
+            request.get("worker_candidate_ingress")
+            and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value
+        ):
             authority_confirmation = request.get("authority_change_candidate_confirmation", False)
             if not isinstance(authority_confirmation, bool):
                 raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_INVALID")
@@ -1450,6 +1945,16 @@ class SelfHostedTaskService:
         else:
             target_base_revision = str(target_base_revision)
 
+        raw_collaboration_realm = request.get("collaboration_realm")
+        collaboration_realm: Optional[CollaborationExecutionRealm] = None
+        if raw_collaboration_realm is not None:
+            if not isinstance(raw_collaboration_realm, Mapping):
+                raise ValueError("COLLABORATION_REALM_INVALID")
+            try:
+                collaboration_realm = CollaborationExecutionRealm.model_validate(raw_collaboration_realm)
+            except Exception as exc:
+                raise ValueError("COLLABORATION_REALM_INVALID") from exc
+
         return ArchitectTaskContract(
             task_id=task_id,
             objective=what,
@@ -1481,6 +1986,7 @@ class SelfHostedTaskService:
             maximum_replans=0,
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,
+            collaboration_realm=collaboration_realm,
         )
 
     @staticmethod
@@ -1597,10 +2103,13 @@ class SelfHostedTaskService:
     def _select_initial_provider(
         self,
         contract: ArchitectTaskContract,
+        *,
+        before_preflight: Callable[[str], None],
     ) -> tuple[str, Any]:
         providers = list(contract.provider_order or [str(contract.preferred_provider or "codex")])
         failures: list[str] = []
         for provider in providers:
+            before_preflight(provider)
             preflight = self.worker_registry.preflight(provider)
             if preflight.ready:
                 return provider, preflight
@@ -1611,14 +2120,131 @@ class SelfHostedTaskService:
         self,
         policy: WorkerEscalationPolicy,
         attempts: Sequence[WorkerExecutionReceipt],
+        *,
+        before_preflight: Callable[[str], None],
     ) -> Optional[str]:
         attempted = {attempt.provider for attempt in attempts}
         for provider in policy.provider_order or (policy.strong_provider,):
             if provider in attempted:
                 continue
+            before_preflight(provider)
             if self.worker_registry.preflight(provider).ready:
                 return provider
         return None
+
+    @staticmethod
+    def _assert_persisted_workforce_dispatch(
+        state: Mapping[str, Any],
+        request: Mapping[str, Any],
+        binding: Optional[Mapping[str, Any]],
+        *,
+        active_provider: Optional[str] = None,
+    ) -> None:
+        if binding is None:
+            return
+        persisted = state.get("workforce_dispatch")
+        if not isinstance(persisted, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        original_demands, original_admission = _workforce_dispatch_inputs(request)
+        if persisted.get("demands") != _jsonable(original_demands) or persisted.get("admission") != _jsonable(original_admission):
+            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        expected = {
+            "selected_worker_id": binding["worker_id"],
+            "selected_provider": binding["provider"],
+            "selected_model": binding["model"],
+            "workforce_policy_hash": binding["policy_hash"],
+            "workforce_binding_hash": binding["binding_hash"],
+            "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
+        }
+        if any(str(state.get(field) or "") != str(value or "") for field, value in expected.items()):
+            raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
+        expected_envelope = binding.get("canonical_dispatch_envelope")
+        persisted_envelope = state.get("canonical_dispatch_envelope")
+        if isinstance(expected_envelope, Mapping) or "canonical_dispatch_envelope" in request:
+            if not isinstance(expected_envelope, Mapping) or dict(persisted_envelope or {}) != dict(expected_envelope):
+                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_STATE_DRIFT")
+            persisted_identity = {
+                "task_id": state.get("task_id"),
+                "attempt_id": state.get("attempt_id"),
+                "task_card_path": state.get("task_card_path"),
+                "task_card_hash": state.get("task_card_hash"),
+            }
+            if any(expected_envelope.get(field) != value for field, value in persisted_identity.items()):
+                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT")
+        if active_provider is not None and str(active_provider) != str(binding["provider"]):
+            raise RuntimeError("WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT")
+
+    def _revalidate_tracked_dispatch_task_card(
+        self,
+        contract: ArchitectTaskContract,
+        request: Mapping[str, Any],
+        state: Mapping[str, Any],
+        binding: Optional[Mapping[str, Any]],
+    ) -> None:
+        """Re-read the tracked card immediately before provider-side work."""
+        if binding is None:
+            if _tracked_dispatch_required(request, state):
+                raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
+            return
+        envelope = binding.get("canonical_dispatch_envelope")
+        if not isinstance(envelope, Mapping):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_MISSING")
+        if str(request.get("contract_kind") or "") != ContractKind.TRACKED_TASK_CARD.value:
+            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked dispatch card required")
+
+        validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
+        identity = resolve_lifecycle_identity(
+            contract,
+            request,
+            is_ephemeral=self.ephemeral,
+        )
+        requested_path = str(request.get("task_card_path") or "")
+        expected = {
+            "task_id": contract.task_id,
+            "attempt_id": str(request.get("attempt_id") or ""),
+            "task_card_path": requested_path,
+            "task_card_hash": str(request.get("task_card_hash") or ""),
+        }
+        if not all(expected.values()):
+            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked identity incomplete")
+        if any(str(envelope.get(field) or "") != value for field, value in expected.items()):
+            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: dispatch envelope identity drifted")
+        persisted = {
+            "task_id": str(state.get("task_id") or ""),
+            "attempt_id": str(state.get("attempt_id") or ""),
+            "task_card_path": str(state.get("task_card_path") or ""),
+            "task_card_hash": str(state.get("task_card_hash") or ""),
+        }
+        if persisted != expected:
+            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: persisted card identity drifted")
+        if str(state.get("contract_kind") or "") != ContractKind.TRACKED_TASK_CARD.value:
+            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: persisted tracked contract missing")
+        if (
+            identity.get("contract_kind") != ContractKind.TRACKED_TASK_CARD.value
+            or str(identity.get("task_card_path") or "")
+            != str(_resolve_task_card_path(requested_path))
+            or str(identity.get("task_card_hash") or "") != expected["task_card_hash"]
+        ):
+            raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked card changed after submit")
+
+    def _revalidate_provider_boundary(
+        self,
+        contract: ArchitectTaskContract,
+        request: Mapping[str, Any],
+        task_id: str,
+        binding: Optional[Mapping[str, Any]],
+        *,
+        active_provider: Optional[str] = None,
+    ) -> None:
+        """Re-read all governed identity immediately before provider-side work."""
+        state = self._read_state(task_id) or {}
+        self._revalidate_tracked_dispatch_task_card(contract, request, state, binding)
+        self._assert_persisted_workforce_dispatch(
+            state,
+            request,
+            binding,
+            active_provider=active_provider,
+        )
 
     @staticmethod
     def _replace_failed_target(
@@ -1651,10 +2277,21 @@ class SelfHostedTaskService:
         task_id: str,
         attempt_id: str,
     ) -> dict[str, Any]:
-        manager = WorktreeManager(root_dir=contract.target_worktree_root)
-        controller = SelfHostedDevelopmentController(worktree_manager=manager)
         state = self._read_state(task_id) or {}
         status = str(state.get("status"))
+        dispatch_binding = validate_workforce_dispatch_binding(
+            request,
+            require_binding=_tracked_dispatch_required(request, state),
+        )
+        self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
+        self._revalidate_tracked_dispatch_task_card(
+            contract,
+            request,
+            state,
+            dispatch_binding,
+        )
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        controller = SelfHostedDevelopmentController(worktree_manager=manager)
         policy = self._escalation_policy(contract)
         attempts = [
             receipt
@@ -1671,7 +2308,23 @@ class SelfHostedTaskService:
         }
 
         if status == "SUBMITTED":
-            provider, preflight = self._select_initial_provider(contract)
+            self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
+            self._revalidate_tracked_dispatch_task_card(
+                contract,
+                request,
+                state,
+                dispatch_binding,
+            )
+            provider, preflight = self._select_initial_provider(
+                contract,
+                before_preflight=lambda provider: self._revalidate_provider_boundary(
+                    contract,
+                    request,
+                    task_id,
+                    dispatch_binding,
+                    active_provider=provider,
+                ),
+            )
             worktree_started = time.perf_counter()
             # Snapshot durable ownership immediately before leasing.  The
             # manager uses this to distinguish passive retained evidence from
@@ -1705,12 +2358,28 @@ class SelfHostedTaskService:
             provider = str(state.get("next_provider") or "")
             if not provider:
                 raise RuntimeError("escalation state is missing next_provider")
+            self._assert_persisted_workforce_dispatch(
+                state, request, dispatch_binding, active_provider=provider
+            )
+            self._revalidate_tracked_dispatch_task_card(
+                contract,
+                request,
+                state,
+                dispatch_binding,
+            )
             lease = self._replace_failed_target(
                 manager,
                 controller,
                 contract,
                 lease,
                 task_states=self._workspace_task_states(),
+            )
+            self._revalidate_provider_boundary(
+                contract,
+                request,
+                task_id,
+                dispatch_binding,
+                active_provider=provider,
             )
             preflight = self.worker_registry.preflight(provider)
             if not preflight.ready:
@@ -1750,6 +2419,15 @@ class SelfHostedTaskService:
                     or contract.preferred_provider
                     or "codex"
                 )
+                self._assert_persisted_workforce_dispatch(
+                    state, request, dispatch_binding, active_provider=provider
+                )
+                self._revalidate_tracked_dispatch_task_card(
+                    contract,
+                    request,
+                    state,
+                    dispatch_binding,
+                )
                 consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
                 configured_budget = int(fast_lane_values["maximum_provider_calls"])
                 remaining_calls = configured_budget - consumed_calls
@@ -1758,12 +2436,27 @@ class SelfHostedTaskService:
                 invoke_contract = contract
                 if remaining_calls != configured_budget and hasattr(contract, "model_copy"):
                     invoke_contract = contract.model_copy(update={"maximum_provider_calls": remaining_calls})
+                self._revalidate_provider_boundary(
+                    contract,
+                    request,
+                    task_id,
+                    dispatch_binding,
+                    active_provider=provider,
+                )
                 execution_receipt = self.worker_registry.invoke(
                     provider,
                     invoke_contract,
                     lease,
                     prompt=self._prompt(contract),
-                    model=str(request.get("model") or "").strip() or None,
+                    model=(
+                        str(
+                            (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
+                                "model", dispatch_binding["model"]
+                            )
+                        )
+                        if dispatch_binding is not None
+                        else str(request.get("model") or "").strip() or None
+                    ),
                     timeout_seconds=float(request.get("timeout_seconds", 900.0)),
                     on_process_group=on_process_group,
                 )
@@ -1806,7 +2499,19 @@ class SelfHostedTaskService:
                 raise RuntimeError(
                     latest.failure_reason or f"worker execution did not complete: {latest.outcome}"
                 )
-            next_provider = self._next_ready_provider(policy, attempts)
+            if policy is None:
+                raise RuntimeError("worker escalation policy is missing")
+            next_provider = self._next_ready_provider(
+                policy,
+                attempts,
+                before_preflight=lambda provider: self._revalidate_provider_boundary(
+                    contract,
+                    request,
+                    task_id,
+                    dispatch_binding,
+                    active_provider=provider,
+                ),
+            )
             if not next_provider:
                 raise RuntimeError("no unattempted ready provider remains for escalation")
             update(
@@ -1815,7 +2520,22 @@ class SelfHostedTaskService:
                     "executions": attempts,
                     "next_provider": next_provider,
                     "escalation_reason": decision.reason,
+                    "fallback_lineage": list(state.get("fallback_lineage") or []) + [{
+                        "from_provider": str(latest.provider),
+                        "to_provider": next_provider,
+                        "reason": decision.reason,
+                        "admission_binding_hash": (
+                            dispatch_binding.get("binding_hash") if dispatch_binding else None
+                        ),
+                    }],
                 },
+            )
+            self._revalidate_provider_boundary(
+                contract,
+                request,
+                task_id,
+                dispatch_binding,
+                active_provider=next_provider,
             )
             lease = self._replace_failed_target(
                 manager,
@@ -1823,6 +2543,13 @@ class SelfHostedTaskService:
                 contract,
                 lease,
                 task_states=self._workspace_task_states(),
+            )
+            self._revalidate_provider_boundary(
+                contract,
+                request,
+                task_id,
+                dispatch_binding,
+                active_provider=next_provider,
             )
             preflight = self.worker_registry.preflight(next_provider)
             if not preflight.ready:
@@ -1998,6 +2725,8 @@ class SelfHostedTaskService:
         heartbeat.start()
 
         def update(status: str, values: dict[str, Any]) -> None:
+            if self._custom_runner is not None:
+                values = self._bound_custom_runner_values(values)
             self._checkpoint(task_id, status, values, attempt_id=attempt_id)
 
         try:
@@ -2012,6 +2741,7 @@ class SelfHostedTaskService:
                 )
             else:
                 result = self._custom_runner(contract, state["request"], update)
+                result = self._bound_custom_runner_values(result)
             current = self._read_state(task_id) or {}
             if current.get("status") not in TERMINAL_STATUSES:
                 final_status = "PENDING_HUMAN_APPROVAL" if result.get("promotion_status") == "PENDING_HUMAN_APPROVAL" else "CANDIDATE_COMMITTED"
@@ -3630,6 +4360,20 @@ class SelfHostedTaskService:
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         request, _ = _validated_action_request(request)
         task_id = self._resolve_current_execution_task_id(request)
+        raw_autonomy_grant = request.get("autonomy_goal_grant")
+        autonomy_grant: Optional[AutonomyGoalGrant] = None
+        if raw_autonomy_grant is not None:
+            if not isinstance(raw_autonomy_grant, Mapping):
+                raise ValueError("AUTONOMY_GOAL_GRANT_INVALID")
+            try:
+                autonomy_grant = AutonomyGoalGrant.model_validate(raw_autonomy_grant)
+            except Exception as exc:
+                raise ValueError("AUTONOMY_GOAL_GRANT_INVALID") from exc
+            now = datetime.now(timezone.utc)
+            if autonomy_grant.issued_at > now:
+                raise ValueError("AUTONOMY_GOAL_GRANT_NOT_YET_VALID")
+            if autonomy_grant.expires_at <= now:
+                raise ValueError("AUTONOMY_GOAL_GRANT_EXPIRED")
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
         if action and not self.ephemeral:
             # The service remains lifecycle authority; this synchronous guard
@@ -3653,10 +4397,16 @@ class SelfHostedTaskService:
             or self._request_hash(request)
         )
         states = self._submission_task_states()
+        for current in states.values():
+            if current.get("task_id") != task_id:
+                continue
+            _validate_existing_autonomy_binding(current, autonomy_grant)
         if request.get("worker_candidate_ingress") and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
             semantic_fields = (
                 "what", "why", "allowed_files", "verifier_commands", "worker", "worker_id",
-                "provider", "model", "controller_revision", "authority_change_candidate_confirmation",
+                "provider", "model", "controller_revision", "target_base_revision",
+                "controller_repo_root", "target_repo_root", "target_worktree_root",
+                "collaboration_realm", "authority_change_candidate_confirmation",
                 "protected_contracts",
                 "provider_probe_evidence_hash", "provider_binary_path",
                 "provider_binary_sha256", "provider_cli_version_sha256",
@@ -3702,12 +4452,63 @@ class SelfHostedTaskService:
         requested_lane = str(request.get("execution_lane") or "").strip().upper()
         if requested_lane in {"", "DIRECT_CANONICAL"}:
             if lane["eligible"]:
+                if request.get("collaboration_realm") is not None:
+                    raise ValueError("COLLABORATION_REALM_DIRECT_CANONICAL_UNSUPPORTED")
+                if autonomy_grant is not None:
+                    raise ValueError("AUTONOMY_DIRECT_CANONICAL_UNSUPPORTED")
                 return self._submit_direct_canonical(request, task_id)
             if requested_lane == "DIRECT_CANONICAL" and str(request.get("worker", "primary")).strip().lower() in {"", "primary", "codex"}:
                 raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
         contract = self.build_contract(request)
+        dispatch_binding = validate_workforce_dispatch_binding(request)
+        tracked_dispatch_required = _tracked_dispatch_required(request)
+        if dispatch_binding is not None and not isinstance(
+            dispatch_binding.get("canonical_dispatch_envelope"), Mapping
+        ):
+            raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_MISSING")
+        state_request = dict(request)
+        if dispatch_binding is not None:
+            state_request.update({
+                "worker": dispatch_binding["provider"],
+                "provider": dispatch_binding["provider"],
+                "model": dispatch_binding["model"],
+                "worker_id": dispatch_binding["worker_id"],
+                "worker_order": [dispatch_binding["provider"]],
+            })
         validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
         identity = resolve_lifecycle_identity(contract, request, is_ephemeral=self.ephemeral)
+        if (
+            request.get("worker_candidate_ingress")
+            and str(request.get("contract_kind") or "") == ContractKind.TRACKED_TASK_CARD.value
+        ):
+            requested_card_path = request.get("task_card_path")
+            if not requested_card_path or not request.get("task_card_hash"):
+                raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked path/hash pair required")
+            if (
+                identity.get("contract_kind") != ContractKind.TRACKED_TASK_CARD.value
+                or identity.get("task_card_path") != str(_resolve_task_card_path(requested_card_path))
+                or identity.get("task_card_hash") != request.get("task_card_hash")
+            ):
+                raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked identity drifted")
+        collaboration_provenance = CollaborationRealmVerifier.verify_submission(contract)
+        if autonomy_grant is not None:
+            if autonomy_grant.collaboration_base.head_sha != contract.controller_revision:
+                raise ValueError("AUTONOMY_COLLABORATION_BASE_MISMATCH")
+            try:
+                scope_allowed = all(
+                    autonomy_grant.path_policy.allows(str(path).rstrip("/"))
+                    for path in contract.allowed_files
+                )
+            except ValueError as exc:
+                raise ValueError("AUTONOMY_TASK_SCOPE_INVALID") from exc
+            if not scope_allowed:
+                raise ValueError("AUTONOMY_TASK_SCOPE_EXCEEDED")
+            if contract.collaboration_realm is not None:
+                collaboration = contract.collaboration_realm.collaboration
+                if autonomy_grant.repository != collaboration.repository:
+                    raise ValueError("AUTONOMY_COLLABORATION_REPOSITORY_MISMATCH")
+                if autonomy_grant.collaboration_base != collaboration.base:
+                    raise ValueError("AUTONOMY_COLLABORATION_BASE_MISMATCH")
         existing_states = list(self._submission_task_states().values())
         for current in existing_states:
             current_key = str(current.get("idempotency_key") or "")
@@ -3762,10 +4563,15 @@ class SelfHostedTaskService:
             "contract_kind": identity.get("contract_kind", ContractKind.NONE.value),
             "contract_hash": identity.get("contract_hash"),
             "owner_inline_contract": identity.get("owner_inline_contract"),
-            "task_card_path": identity["task_card_path"],
+            "task_card_path": (
+                request.get("task_card_path")
+                if request.get("worker_candidate_ingress")
+                and identity.get("contract_kind") == ContractKind.TRACKED_TASK_CARD.value
+                else identity["task_card_path"]
+            ),
             "task_card_hash": identity["task_card_hash"],
             "status_history": [{"status": "SUBMITTED", "at": now}],
-            "request": _jsonable(dict(request)),
+            "request": _jsonable(state_request),
             "action": _jsonable(dict(action)) if action else None,
             "action_id": action_id or None,
             "attempt_id_hint": attempt_id_hint or None,
@@ -3780,7 +4586,40 @@ class SelfHostedTaskService:
             "target_initial_revision": contract.target_base_revision,
             "target_branch": f"nexus/task/{contract.task_id}",
             "target_created_at": None,
-            "worker_provider": contract.preferred_provider,
+            "worker_provider": (
+                None
+                if tracked_dispatch_required and dispatch_binding is None
+                else contract.preferred_provider
+            ),
+            "selected_worker_id": (
+                dispatch_binding["worker_id"]
+                if dispatch_binding
+                else None if tracked_dispatch_required else request.get("worker_id")
+            ),
+            "selected_provider": (
+                dispatch_binding["provider"]
+                if dispatch_binding
+                else None if tracked_dispatch_required else contract.preferred_provider
+            ),
+            "selected_model": (
+                dispatch_binding["model"]
+                if dispatch_binding
+                else None if tracked_dispatch_required else str(request.get("model") or "")
+            ),
+            "provider_order": (
+                []
+                if tracked_dispatch_required and dispatch_binding is None
+                else list(contract.provider_order)
+            ),
+            "workforce_dispatch": dispatch_binding,
+            "canonical_dispatch_envelope": (
+                dispatch_binding.get("canonical_dispatch_envelope")
+                if dispatch_binding else None
+            ),
+            "workforce_policy_hash": dispatch_binding["policy_hash"] if dispatch_binding else None,
+            "workforce_binding_hash": dispatch_binding["binding_hash"] if dispatch_binding else None,
+            "workforce_aggregate_binding_hash": dispatch_binding["aggregate_binding_hash"] if dispatch_binding else None,
+            "fallback_lineage": [],
             "execution_lane": lane["execution_lane"],
             "execution_lane_blockers": lane["blockers"],
             "worker_selection_mode": str(
@@ -3805,6 +4644,15 @@ class SelfHostedTaskService:
             "heartbeat_at": now,
             "updated_at": now,
             "promotion_status": "NOT_CREATED",
+            "execution_authority": (
+                "EPHEMERAL_TEST_RUNNER"
+                if self._custom_runner is not None
+                else "WORKER_REGISTRY"
+            ),
+            "provider_receipt_authoritative": self._custom_runner is None,
+            "workforce_admission_authoritative": self._custom_runner is None,
+            "public_claim_allowed": False,
+            "production_ready": False,
             "execution_outcome": None,
             "verification_verdict": None,
             "candidate_commit_sha": None,
@@ -3831,9 +4679,39 @@ class SelfHostedTaskService:
             "archive_location": None,
             "merge_performed": False,
             "push_performed": False,
+            "collaboration_realm": (
+                contract.collaboration_realm.model_dump(mode="json")
+                if contract.collaboration_realm is not None else None
+            ),
+            "submission_collaboration_provenance": collaboration_provenance or None,
+            "collaboration_provenance": collaboration_provenance or None,
         }
+        if autonomy_grant is not None:
+            autonomy_binding = AutonomySubmissionBinding.issue(
+                task_id=contract.task_id,
+                initial_attempt_id=attempt_id,
+                action_request_hash=action_request_hash,
+                contract_hash=contract.contract_hash,
+                controller_revision=contract.controller_revision,
+                repository=autonomy_grant.repository,
+                collaboration_base=autonomy_grant.collaboration_base,
+                allowed_paths=tuple(
+                    str(path).rstrip("/") for path in contract.allowed_files
+                ),
+                goal_id=autonomy_grant.goal_id,
+                grant_hash=autonomy_grant.grant_hash,
+            )
+            state.update({
+                "autonomy_goal_id": autonomy_grant.goal_id,
+                "autonomy_goal_grant_hash": autonomy_grant.grant_hash,
+                "autonomy_mode": "SHADOW",
+                "autonomy_submission_binding": autonomy_binding.model_dump(
+                    mode="json"
+                ),
+            })
         existing, created = self._create_state(contract.task_id, state)
         if not created:
+            _validate_existing_autonomy_binding(existing, autonomy_grant)
             retained_retry = (
                 existing.get("status") == "RETAINED_FOR_REVIEW"
                 and existing.get("promotion_status") == "NOT_CREATED"
@@ -3873,6 +4751,9 @@ class SelfHostedTaskService:
                         })
                     if contract_refreshed:
                         previous_contract = current.get("contract") or {}
+                        retry_collaboration_provenance = (
+                            CollaborationRealmVerifier.verify_submission(contract) or None
+                        )
                         current.setdefault("contract_history", []).append({
                             "attempt_id": current.get("attempt_id"),
                             "contract_hash": current.get("contract_hash"),
@@ -3892,6 +4773,12 @@ class SelfHostedTaskService:
                             "target_branch": f"nexus/task/{contract.task_id}",
                             "target_created_at": None,
                             "worker_provider": contract.preferred_provider,
+                            "collaboration_realm": (
+                                contract.collaboration_realm.model_dump(mode="json")
+                                if contract.collaboration_realm is not None else None
+                            ),
+                            "submission_collaboration_provenance": retry_collaboration_provenance,
+                            "collaboration_provenance": retry_collaboration_provenance,
                         })
                     current.update({
                         "request": _jsonable(dict(request)),
@@ -4879,13 +5766,16 @@ class SelfHostedTaskService:
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         return self.get_task_snapshot(task_id, include_details=True)
 
-    def get_task_snapshot(self, task_id: str, *, include_details: bool = False) -> Optional[dict[str, Any]]:
+    def get_task_snapshot(
+        self, task_id: str, *, include_details: bool = False
+    ) -> Optional[dict[str, Any]]:
         """Read status without reconciliation or state-lock acquisition."""
         state = self._read_state_snapshot(task_id)
         if state is None:
             return None
+        approval_requirements = self._approval_requirements(state)
         if include_details:
-            return state
+            return {**state, "approval_requirements": approval_requirements}
         action = state.get("task_action") or self._task_action_envelope(state)
         return {
             "schema": "nexus.self_hosted_task_status.v1",
@@ -4898,6 +5788,8 @@ class SelfHostedTaskService:
             "blocker": self._projected_blocker(state),
             "retry_authorized": state.get("retry_authorized"),
             "task_action": action,
+            "autonomy": project_autonomy_submission(state),
+            "approval_requirements": approval_requirements,
         }
 
     def get_receipt(self, task_id: str) -> Optional[dict[str, Any]]:
@@ -4907,6 +5799,18 @@ class SelfHostedTaskService:
         contract = state.get("contract") or {}
         lease = state.get("lease") or {}
         packet = state.get("promotion_packet") or {}
+        candidate = state.get("candidate") or {}
+        verified_receipt = state.get("verified_receipt") or {}
+        candidate_collaboration_provenance = (
+            candidate.get("collaboration_provenance")
+            or verified_receipt.get("collaboration_provenance")
+            or packet.get("collaboration_provenance")
+            or lease.get("collaboration_provenance")
+        )
+        collaboration_provenance = (
+            candidate_collaboration_provenance
+            or state.get("collaboration_provenance")
+        )
         archived_path, _ = self._latest_archived_state(task_id)
         return {
             "task_id": task_id,
@@ -4954,7 +5858,21 @@ class SelfHostedTaskService:
             "execution": state.get("execution"),
             "candidate": state.get("candidate"),
             "verified_receipt": state.get("verified_receipt"),
+            "execution_authority": state.get("execution_authority"),
+            "provider_receipt_authoritative": state.get(
+                "provider_receipt_authoritative", False
+            ),
+            "workforce_admission_authoritative": state.get(
+                "workforce_admission_authoritative", False
+            ),
             "runtime_development_mapping": state.get("runtime_development_mapping"),
+            "collaboration_realm": state.get("collaboration_realm") or contract.get("collaboration_realm"),
+            "submission_collaboration_provenance": (
+                state.get("submission_collaboration_provenance")
+                or state.get("collaboration_provenance")
+            ),
+            "collaboration_provenance": collaboration_provenance,
+            "candidate_collaboration_provenance": candidate_collaboration_provenance,
             "error": state.get("error"),
         }
 
@@ -5393,6 +6311,8 @@ class SelfHostedTaskService:
         verified_receipt_hash: str,
         approval_context: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any]:
+        if self._custom_runner is not None:
+            raise RuntimeError("CUSTOM_RUNNER_PRODUCTION_CLAIM_FORBIDDEN")
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")

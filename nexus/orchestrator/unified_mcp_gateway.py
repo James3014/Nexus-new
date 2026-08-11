@@ -33,10 +33,14 @@ from nexus.contracts.lifecycle_action import (
     MutationDomain,
     PermissionProfile,
     build_action_envelope,
-    build_owner_inline_contract,
 )
 from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
-from nexus.engine.canonical_task_seam import execute_canonical_product_task
+from nexus.engine.canonical_task_seam import (
+    VerifiedTaskCardIdentity,
+    build_canonical_dispatch_envelope,
+    build_canonical_planner_admission,
+    execute_canonical_product_task,
+)
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
@@ -52,6 +56,8 @@ from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
     resolve_contract_identity,
+    resolve_lifecycle_identity,
+    validate_task_card_binding,
 )
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.services.unified_runtime import (
@@ -964,7 +970,19 @@ class UnifiedMCPGateway:
         key = str(provider or "").strip().lower()
         return key in ONLINE_CLI_SPEC_REGISTRY and key not in LOCAL_ONLY_PROVIDERS
 
-    def _provider_execution_ready(self, preflight: Mapping[str, Any], *, provider: str) -> tuple[bool, Optional[str]]:
+    def _provider_execution_ready(
+        self,
+        preflight: Mapping[str, Any],
+        *,
+        provider: str,
+        model: Optional[str] = None,
+    ) -> tuple[bool, Optional[str]]:
+        if preflight.get("provider") != provider:
+            return False, "WORKER_PREFLIGHT_PROVIDER_MISMATCH"
+        if model is not None and preflight.get("requested_model") != model:
+            return False, "WORKER_PREFLIGHT_REQUESTED_MODEL_MISMATCH"
+        if model is not None and preflight.get("resolved_model") != model:
+            return False, "WORKER_PREFLIGHT_RESOLVED_MODEL_MISMATCH"
         if str(preflight.get("status") or "") != "VERSION_VERIFIED":
             return False, str(preflight.get("blocker") or "WORKER_PREFLIGHT_FAILED")
         blocker = str(preflight.get("blocker") or "")
@@ -1613,14 +1631,35 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
-    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+    @staticmethod
+    def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:
+        """Project one Assisted job into current action and pending-count state."""
         status = str(job.get("status") or "UNKNOWN")
         terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
-        result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
+        reconciliation_required = status == "UNKNOWN_REQUIRES_RECONCILE" or bool(job.get("reconciliation_required"))
+        cleanup_settled = job.get("process_cleanup") is True and not job.get("cleanup_error")
+        settled_failure = (
+            status in {"FAILED", "CANCELLED"}
+            and not reconciliation_required
+            and cleanup_settled
+            and job.get("durable_exit_marker") is True
+            and not job.get("uncertain_mutation")
+        )
         if status == "UNKNOWN_REQUIRES_RECONCILE":
             next_action = "nexus_task_reconcile"
         else:
+            result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
             next_action = result_tool if not terminal else ("none" if status == "COMPLETED" else "nexus_task_retry")
+        return {
+            "attention_required": status == "UNKNOWN_REQUIRES_RECONCILE" or (status in {"FAILED", "CANCELLED"} and not settled_failure),
+            "next_action": next_action,
+            "recommended_tool": next_action,
+            "pending": not terminal or status == "UNKNOWN_REQUIRES_RECONCILE",
+        }
+
+    def _assist_response(self, job: Mapping[str, Any], *, operation: str = "status") -> dict[str, Any]:
+        status = str(job.get("status") or "UNKNOWN")
+        action = self._assist_action(job)
         return {
             "schema": "nexus.assisted_provider_job.v1",
             "operation": operation,
@@ -1660,6 +1699,7 @@ class UnifiedMCPGateway:
             "authentication_evidence": job.get("authentication_evidence"),
             "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
             "reconciliation_required": bool(job.get("reconciliation_required", False)),
+            "uncertain_mutation": bool(job.get("uncertain_mutation", False)),
             "context_arm": job.get("context_arm"),
             "context_arm_applied": bool(job.get("context_arm_applied", False)),
             "context_arm_semantics": job.get("context_arm_semantics", "record_only_not_applied"),
@@ -1678,9 +1718,9 @@ class UnifiedMCPGateway:
             "connector_disconnected_at": job.get("connector_disconnected_at"),
             "reconnected_at": job.get("reconnected_at"),
             "artifacts": {"stdout": job.get("stdout_artifact"), "stderr": job.get("stderr_artifact")},
-            "attention_required": status in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"},
-            "next_action": next_action,
-            "recommended_tool": next_action,
+            "attention_required": action["attention_required"],
+            "next_action": action["next_action"],
+            "recommended_tool": action["recommended_tool"],
         }
 
     def _assist_submit(self, arguments: Mapping[str, Any], *, action: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
@@ -2429,28 +2469,12 @@ class UnifiedMCPGateway:
             return worker.provider, worker.model, worker.worker_id
         return key, model, None
 
-    def _resolve_worker_candidate(self, requested: str) -> tuple[str, str, str]:
-        """Resolve one admissible registered worker without accepting overrides."""
-        key = _text(requested, "worker", max_length=128).lower()
-        snapshot = self._workforce_loader.load()
-        def eligible(item: Any) -> bool:
-            return item.state not in NON_ADMISSIBLE_STATES and str(item.state).upper() != "EXPERIMENT_ONLY" and str(getattr(item, "availability", "AVAILABLE")).upper() == "AVAILABLE"
-        worker = snapshot.workers.get(key)
-        if worker is None:
-            matches = [item for item in snapshot.workers.values() if str(item.provider).lower() == key and eligible(item)]
-            if not matches:
-                raise GatewayInputError("WORKER_NOT_FOUND")
-            if len(matches) != 1:
-                raise GatewayInputError("WORKER_AMBIGUOUS")
-            worker = matches[0]
-        if not eligible(worker):
-            raise GatewayInputError(f"WORKER_NOT_ADMISSIBLE:{worker.worker_id}")
-        return str(worker.provider), str(worker.model), str(worker.worker_id)
-
     def _worker_candidate(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         allowed_keys = {
-            "task_id", "what", "why", "worker", "allowed_files", "verifier_commands",
+            "task_id", "what", "why", "worker", "provider", "model", "allowed_files", "verifier_commands",
             "owner_confirmation", "authority_change_candidate_confirmation",
+            "workforce_demands", "workforce_admission", "planner_output",
+            "task_card_path", "task_card_hash",
         }
         unknown = sorted(set(arguments) - allowed_keys)
         if unknown:
@@ -2473,9 +2497,134 @@ class UnifiedMCPGateway:
             raise GatewayInputError("verifier_commands must contain 1-4 bounded commands")
         if any(any(token in command for token in (";", "&&", "||", "`", "$(", "|")) for command in verifiers):
             raise GatewayInputError("verifier_commands must be bounded")
-        provider, model, worker_id = self._resolve_worker_candidate(str(arguments.get("worker") or ""))
+        raw_task_card_path = arguments.get("task_card_path")
+        raw_task_card_hash = arguments.get("task_card_hash")
+        task_card_path = raw_task_card_path if isinstance(raw_task_card_path, str) else ""
+        task_card_hash = raw_task_card_hash if isinstance(raw_task_card_hash, str) else ""
+        if bool(task_card_path) != bool(task_card_hash):
+            raise GatewayInputError("TASK_CARD_PATH_HASH_PAIR_REQUIRED")
+        if not task_card_path:
+            raise GatewayInputError("TRACKED_TASK_CARD_REQUIRED")
+        _safe_relative_path(task_card_path, "task_card_path")
+        if not task_card_path.startswith("tasks/"):
+            raise GatewayInputError("TASK_CARD_PATH_INVALID")
+        if len(task_card_hash) != 64 or any(char not in "0123456789abcdef" for char in task_card_hash):
+            raise GatewayInputError("TASK_CARD_HASH_INVALID")
+        head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
+        contract_binding = {
+            "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+            "contract_hash": None,
+            "owner_inline_contract": None,
+            "task_card_path": task_card_path,
+            "task_card_hash": task_card_hash,
+        }
+        protected_contracts = ["repository-authority-change.v1"] if authority_confirmation else []
+        card_request = self._canonical_request(
+            task_id,
+            what,
+            why,
+            allowed,
+            verifiers,
+            head,
+            contract_binding=contract_binding,
+        )
+        card_request.update({
+            "worker": "auto",
+            "execution_lane": "ISOLATED_TARGET",
+            "primary_agent": False,
+            "worker_candidate_ingress": True,
+            "task_card_required": True,
+            "lifecycle_identity_required": True,
+            "protected_contracts": protected_contracts,
+        })
+        if authority_confirmation:
+            card_request["authority_change_candidate_confirmation"] = True
+        try:
+            contract = self.service.build_contract(card_request)
+            validate_task_card_binding(
+                contract,
+                card_request,
+                is_ephemeral=bool(getattr(self.service, "ephemeral", False)),
+            )
+            lifecycle_identity = resolve_lifecycle_identity(
+                contract,
+                card_request,
+                is_ephemeral=bool(getattr(self.service, "ephemeral", False)),
+            )
+            canonical_card_path = Path(str(lifecycle_identity.get("task_card_path") or "")).resolve()
+            canonical_relative_path = canonical_card_path.relative_to(CANONICAL_SOURCE_ROOT.resolve()).as_posix()
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"TASK_CARD_BINDING_INVALID:{exc}") from exc
+        if (
+            lifecycle_identity.get("contract_kind") != ContractKind.TRACKED_TASK_CARD.value
+            or canonical_relative_path != task_card_path
+            or lifecycle_identity.get("task_card_hash") != task_card_hash
+        ):
+            raise GatewayInputError("TASK_CARD_BINDING_MISMATCH")
+        verified_task_card = VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=task_card_path,
+            canonical_task_card_path=str(canonical_card_path),
+            task_card_hash=task_card_hash,
+        )
+        try:
+            internal = build_canonical_planner_admission(
+                task_id=task_id,
+                task_text=what,
+                allowed_files=tuple(allowed),
+                verifier_command=tuple(verifiers),
+                task_card_identity=verified_task_card,
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise GatewayInputError(f"WORKFORCE_INTERNAL_BINDING_INVALID:{exc}") from exc
+        planner_output = internal["planner_output"]
+        demands = internal["workforce_demands"]
+        admission = internal["workforce_admission"]
+        dispatch_binding = dict(internal["binding"])
+        for field, expected in (
+            ("planner_output", planner_output),
+            ("workforce_demands", demands),
+            ("workforce_admission", admission),
+        ):
+            supplied = arguments.get(field)
+            if supplied is not None and supplied != expected:
+                raise GatewayInputError(f"WORKFORCE_CALLER_EVIDENCE_MISMATCH:{field}")
+        requested_worker = str(arguments.get("worker") or "").strip().lower()
+        if requested_worker and requested_worker != "auto" and requested_worker not in {
+            dispatch_binding["worker_id"].lower(), dispatch_binding["provider"].lower(),
+        }:
+            raise GatewayInputError("WORKFORCE_ADMISSION_WORKER_MISMATCH")
+        for field in ("provider", "model"):
+            supplied = str(arguments.get(field) or "").strip()
+            if supplied and supplied != dispatch_binding[field]:
+                raise GatewayInputError(f"WORKFORCE_ADMISSION_{field.upper()}_MISMATCH")
+        provider = dispatch_binding["provider"]
+        model = dispatch_binding["model"]
+        worker_id = dispatch_binding["worker_id"]
+        try:
+            validate_task_card_binding(
+                contract,
+                card_request,
+                is_ephemeral=bool(getattr(self.service, "ephemeral", False)),
+            )
+            current_identity = resolve_lifecycle_identity(
+                contract,
+                card_request,
+                is_ephemeral=bool(getattr(self.service, "ephemeral", False)),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"TASK_CARD_DRIFT:{exc}") from exc
+        if (
+            current_identity.get("task_card_path") != str(canonical_card_path)
+            or current_identity.get("task_card_hash") != task_card_hash
+        ):
+            raise GatewayInputError("TASK_CARD_DRIFT")
         preflight = self._provider_preflight({"provider": provider, "model": model})
-        ready, blocker = self._provider_execution_ready(preflight, provider=provider)
+        ready, blocker = self._provider_execution_ready(
+            preflight,
+            provider=provider,
+            model=model if dispatch_binding is not None else None,
+        )
         if not ready:
             detail = blocker or "WORKER_PREFLIGHT_FAILED"
             if preflight.get("next_action"):
@@ -2511,22 +2660,6 @@ class UnifiedMCPGateway:
                 preflight.get("authentication_evidence") or "local_provider_no_auth_required"
             ),
         }
-        head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
-        issued = self._utc_now()
-        expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        contract = build_owner_inline_contract(
-            task_id=task_id, objective=what, allowed_files=allowed,
-            verifier_commands=verifiers, expected_head=head, issued_at=issued,
-            expires_at=expires, permission_profile=PermissionProfile.CANDIDATE,
-            worker_may_commit=False,
-            authority_change_candidate_confirmation=authority_confirmation,
-        )
-        contract_binding = {
-            "contract_kind": ContractKind.OWNER_INLINE.value,
-            "contract_hash": contract["contract_hash"],
-            "owner_inline_contract": contract,
-            "task_card_path": None, "task_card_hash": None,
-        }
         bound = self._canonical_request(
             task_id, what, why, allowed, verifiers, head,
             contract_binding=contract_binding,
@@ -2536,6 +2669,11 @@ class UnifiedMCPGateway:
                       "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
                       "worker_candidate_ingress": True,
                       "protected_contracts": protected_contracts})
+        bound["workforce_demands"] = demands
+        bound["workforce_admission"] = admission
+        bound["planner_output"] = planner_output
+        bound["task_card_required"] = True
+        bound["lifecycle_identity_required"] = True
         bound.update(readiness_binding)
         if authority_confirmation:
             bound["authority_change_candidate_confirmation"] = True
@@ -2543,9 +2681,9 @@ class UnifiedMCPGateway:
             task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
             request=bound, tool_manifest_hash=TOOL_MANIFEST_REVISION,
             expected_head=head, allowed_paths=allowed, mutation=True,
-            task_card_path=None, task_card_hash=None,
-            contract_kind=ContractKind.OWNER_INLINE,
-            contract_hash=contract["contract_hash"],
+            task_card_path=task_card_path, task_card_hash=task_card_hash,
+            contract_kind=ContractKind.TRACKED_TASK_CARD,
+            contract_hash=None,
             permission_profile=PermissionProfile.CANDIDATE,
             mutation_domain=MutationDomain.TARGET,
         ).model_dump(mode="json")
@@ -2554,12 +2692,22 @@ class UnifiedMCPGateway:
             "idempotency_key": action["idempotency_key"],
             "action_type": action["action_type"],
         })
+        canonical_dispatch_envelope = build_canonical_dispatch_envelope(
+            planner_output,
+            dispatch_binding,
+            task_id=task_id,
+            attempt_id=str(bound["attempt_id"]),
+            task_card_path=task_card_path,
+            task_card_hash=task_card_hash,
+        ).to_dict()
+        bound["canonical_dispatch_envelope"] = canonical_dispatch_envelope
         action = build_action_envelope(
             task_id=task_id, action_type=LifecycleActionType.TASK_RUN,
             request=bound, tool_manifest_hash=TOOL_MANIFEST_REVISION,
             expected_head=head, allowed_paths=allowed, mutation=True,
-            contract_kind=ContractKind.OWNER_INLINE,
-            contract_hash=contract["contract_hash"],
+            task_card_path=task_card_path, task_card_hash=task_card_hash,
+            contract_kind=ContractKind.TRACKED_TASK_CARD,
+            contract_hash=None,
             permission_profile=PermissionProfile.CANDIDATE,
             mutation_domain=MutationDomain.TARGET,
             attempt_id=bound["attempt_id"], action_id=bound["action_id"],
@@ -2573,7 +2721,13 @@ class UnifiedMCPGateway:
         request["request_hash"] = action["request_hash"]
         request.update({"provider": provider, "model": model, "worker": provider, "worker_id": worker_id,
                         "execution_lane": "ISOLATED_TARGET", "primary_agent": False,
-                        "worker_candidate_ingress": True})
+                        "worker_candidate_ingress": True,
+                        "task_card_required": True,
+                        "lifecycle_identity_required": True})
+        request["workforce_demands"] = demands
+        request["workforce_admission"] = admission
+        request["planner_output"] = planner_output
+        request["canonical_dispatch_envelope"] = canonical_dispatch_envelope
         request.update(readiness_binding)
         if authority_confirmation:
             request["authority_change_candidate_confirmation"] = True
@@ -2656,20 +2810,30 @@ class UnifiedMCPGateway:
             },
             {
                 "name": "nexus_worker_candidate",
-                "description": "Submit one explicit Owner Inline worker candidate through an isolated Target.",
+                "description": "Submit one tracked-card worker candidate through canonical planner/admission dispatch.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["what", "why", "worker", "allowed_files", "verifier_commands", "owner_confirmation"],
+                    "required": [
+                        "what", "why", "allowed_files", "verifier_commands",
+                        "owner_confirmation", "task_card_path", "task_card_hash",
+                    ],
                     "additionalProperties": False,
                     "properties": {
                         "task_id": {"type": "string", "maxLength": 80},
                         "what": {"type": "string", "maxLength": 4000},
                         "why": {"type": "string", "maxLength": 4000},
                         "worker": {"type": "string", "maxLength": 128},
+                        "provider": {"type": "string", "maxLength": 128},
+                        "model": {"type": "string", "maxLength": 256},
+                        "task_card_path": {"type": "string", "pattern": "^tasks/.+\\.md$"},
+                        "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "allowed_files": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 4},
                         "owner_confirmation": {"type": "boolean", "const": True},
                         "authority_change_candidate_confirmation": {"type": "boolean", "default": False},
+                        "workforce_demands": {"type": "object"},
+                        "workforce_admission": {"type": "object"},
+                        "planner_output": {"type": "object"},
                     },
                 },
             },
@@ -2995,8 +3159,10 @@ class UnifiedMCPGateway:
                 job = json.loads(job_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if isinstance(job, Mapping) and job.get("status") not in {"COMPLETED", "FAILED", "CANCELLED"}:
-                pending_actions += 1
+            if isinstance(job, Mapping):
+                action = self._assist_action(job)
+                if action["pending"] or action["attention_required"]:
+                    pending_actions += 1
         action_sha_current, action_contract_ok, action_contract_reasons = _action_contract_fingerprint()
         permission_sha_current, permission_contract_ok, permission_contract_reasons = _permission_enforcement_fingerprint()
         freshness = _evaluate_freshness(
@@ -3110,9 +3276,11 @@ class UnifiedMCPGateway:
                 job = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if not isinstance(job, Mapping) or job.get("status") not in {"FAILED", "CANCELLED", "UNKNOWN_REQUIRES_RECONCILE"}:
+            if not isinstance(job, Mapping):
                 continue
-            tasks.append(self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list"))
+            response = self._assist_response(self._assist_refresh(str(job.get("task_id"))) or job, operation="list")
+            if response.get("attention_required") is True:
+                tasks.append(response)
         return {
             "schema": "nexus.task_actionable_list.v1",
             "actionable_count": len(tasks),

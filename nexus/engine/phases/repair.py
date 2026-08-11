@@ -274,12 +274,3 @@ class RepairPhaseHandler(BasePhaseHandler):
             "worktree": os.getenv("NEXUS_WORKTREE"),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-
-        return {
-            "status": "REJECTED",
-            "result_object": {"summary": "Dual-engine demo requires local repair loop."},
-            "tokens_used": 500,
-            "token_raw_model": 0,
-            "token_fallback_est": 500,
-            "token_capture_status": "dual-sim"
-        }

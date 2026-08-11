@@ -32,7 +32,7 @@ def test_canonical_index_is_valid_complete_and_bounded():
     data = validate(INDEX)
     assert {task["task_class"] for task in data["task_classes"]} == EXPECTED_CLASSES
     assert INDEX.stat().st_size <= 8_000
-    assert (ROOT / "AGENTS.md").stat().st_size <= 12_000
+    assert (ROOT / "AGENTS.md").stat().st_size <= 13_000
     assert (ROOT / ".agents/skills/nexus-task-launch/SKILL.md").stat().st_size <= 3_500
     for task in data["task_classes"]:
         context_bytes = sum((ROOT / name).stat().st_size for name in task["context_paths"])

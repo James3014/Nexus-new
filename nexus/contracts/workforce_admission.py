@@ -218,6 +218,11 @@ class WorkforceAdmissionDecision:
             val = getattr(self, field_name)
             if isinstance(val, (list, set)):
                 object.__setattr__(self, field_name, tuple(val))
+        if not isinstance(self.decision, AdmissionDecision):
+            raise ValueError(
+                "WorkforceAdmissionDecision.decision must be an AdmissionDecision "
+                f"member, got: {self.decision!r}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         decision_val = self.decision.value if isinstance(self.decision, Enum) else str(self.decision)

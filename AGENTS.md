@@ -19,8 +19,30 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Codex implements a Ready Issue on an issue-specific branch such as
   `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
   request to `main`.
-- Codex and other coding agents do not push directly to, merge, force-push, or
-  delete `main`. Review and final merge authority remain with the Owner.
+- Codex and other coding agents never direct-push, force-push, or delete
+  `main`. Manual, legacy, and non-autonomy-enabled work remains Owner-reviewed
+  and Owner-authorized for final merge. The bounded autonomy exception below
+  applies only to this program's autonomy-enabled Goals.
+- The local runtime repository and this sanitized collaboration repository have
+  intentionally separate histories. Never treat SHA mismatch as missing work,
+  or normal-merge, rebase, or cherry-pick local runtime history into GitHub
+  `main` merely to align SHAs; synchronize by reviewed content or semantic
+  delta and preserve GitHub-only governance without resurrecting secrets,
+  runtime state, or generated artifacts.
+- For manual, legacy, and non-autonomy-enabled work, final GitHub merge still
+  requires explicit current Owner authorization. For an autonomy-enabled Goal,
+  one bounded Owner Goal Grant may instead derive an exact action-bound machine
+  authorization only after machine policy evaluation and independent
+  acceptance; this is not unlimited autonomous merge authority and has no
+  retroactive effect on older work.
+- Every autonomous merge still requires fresh SHA-bound verification of the PR
+  number, exact head, current base/main, complete diff, Goal Grant identity,
+  independent acceptance, CI/check evidence, unresolved threads or blockers,
+  and current authorization validity. A moved PR head fails closed.
+- Under that exception, only the designated integration action may perform the
+  exact-head merge after all listed gates pass; it may not direct-push `main`,
+  broaden the Goal Grant, or merge manual/legacy work. This bounded exception
+  is the specific, non-general authorization for an autonomy-enabled Goal.
 - A Ready Issue defines GitHub collaboration scope only. It does not bypass
   Task Card or lifecycle requirements for delegated, isolated,
   lifecycle/security/schema, Candidate, approval, integration, release, or
@@ -56,8 +78,11 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Implementation and commit, Candidate creation, verification, approval,
   integration, push, and release are distinct authorities and evidence stages.
 - An agent may implement, test, commit, push an authorized issue branch, and
-  open a PR. It cannot convert its own implementation or Candidate into
-  approval, integration, merge, release, or production truth.
+  open a PR. For manual/legacy work it cannot convert its own implementation
+  or Candidate into approval, integration, merge, release, or production truth.
+  For this program's autonomy-enabled Goals, a separate designated integration
+  action may perform only the exact machine-authorized merge after independent
+  acceptance and fresh merge-gate verification.
 - GitHub review/merge does not silently perform Nexus lifecycle approval or
   runtime integration. Local Nexus runtime actions keep their existing formal
   authority and evidence requirements until a separate migration changes them.
@@ -75,6 +100,11 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   solve truth.
 - A local or delegated model produces a candidate only; it cannot approve,
   promote, integrate, push, claim production readiness, or clean up.
+- If the self-hosting/controller identity contract is itself under repair and
+  cannot bind a clean trustworthy execution identity, stop that path and use
+  the bounded external bootstrap procedure in
+  `docs/governance/rollback_runbook.md`; it creates no second authority and
+  never implies approval, integration, push, reload, or activation.
 - Governed workers may commit only their scoped card changes. Approval,
   integration, push, cleanup, and production/public claims remain separate
   authorities.
@@ -152,11 +182,13 @@ Load the smallest authoritative surface that matches the task:
 
 ## Authority invariants
 
-- `CapabilityPlanner` and `HybridRouteDecision` remain route authority;
-  overlays and policy files cannot create a second router.
-- Workforce admission constrains eligible workers and escalation. Exact model
+- `CapabilityPlanner` is the sole route and capability-selection authority.
+  `HybridRouteDecision` is a Planner-derived decision contract/projection, not
+  a second selector, router, or planner; overlays and policy files cannot
+  create another one.
+- Workforce admission only constrains worker eligibility. Exact model
   identity, adapter preflight, parser, verifier, and receipt gates remain
-  fail-closed.
+  fail-closed; admission does not select a route or capability.
 - Optional telemetry may be zero for structural gates, but model calls require
   real execution metrics. Missing verifier artifact/status or source hash
   fails claim gates closed.

@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import copy
 import hashlib
 import json
@@ -17,8 +19,6 @@ sys.path.insert(0, repo_root)
 
 import pytest
 
-from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome, WorkerPreflight
-from nexus.executors.worker_registry import WorkerRegistry
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionType,
@@ -30,21 +30,36 @@ from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
+from nexus.engine.canonical_task_seam import (
+    VerifiedTaskCardIdentity,
+    build_canonical_dispatch_envelope,
+    build_canonical_planner_admission,
+)
+from nexus.executors.worker_contract import (
+    SUPPORTED_WORKER_PROVIDERS,
+    WorkerExecutionReceipt,
+    WorkerOutcome,
+    WorkerPreflight,
+)
+from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.repository_contract_gate import (
+    RepositoryContractGate,
+    RepositoryContractGateReceipt,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     SelfHostedTaskService,
     resolve_canonical_target_roots,
     resolve_execution_lane,
     validate_task_card_binding,
-)
-from nexus.orchestrator.repository_contract_gate import (
-    RepositoryContractGate,
-    RepositoryContractGateReceipt,
+    validate_workforce_dispatch_binding,
 )
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
     get_canonical_git_hooks_dir,
 )
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
 
 def _request(tmp_path: Path, **overrides):
@@ -65,6 +80,614 @@ def _request(tmp_path: Path, **overrides):
     }
     values.update(overrides)
     return values
+
+
+def _valid_local_dispatch():
+    demands = {
+        "schema": "nexus.workforce_demands.v1",
+        "route_authority": "CapabilityPlanner",
+        "demands": [{
+            "schema": "nexus.workforce_demand.v1",
+            "demand_id": "dispatch-local-1",
+            "execution_channel": "local",
+            "requested_role": "bounded_code_candidate",
+            "minimum_autonomy": "L1",
+            "context_class": "nexus_bounded",
+            "mutation_intent": True,
+            "external_verification_required": True,
+            "route_authority": "CapabilityPlanner",
+        }],
+    }
+    admission = evaluate_runtime_workforce_admission(
+        demands,
+        {"local": {
+            "worker_id": "local_coder_7b",
+            "provider": "ollama",
+            "model": "qwen2.5-coder:7b-instruct",
+            "controls": ["focused_tests", "compile", "parser", "small_scope", "reversible_application"],
+        }},
+        WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
+    ).to_dict()
+    return demands, admission
+
+
+def test_workforce_dispatch_binding_is_canonical_and_fail_closed():
+    demands, admission = _valid_local_dispatch()
+    binding = validate_workforce_dispatch_binding({
+        "workforce_demands": demands,
+        "workforce_admission": admission,
+    })
+    assert binding is not None
+    assert binding["worker_id"] == "local_coder_7b"
+    assert binding["provider"] == "ollama"
+    assert binding["model"] == "qwen2.5-coder:7b-instruct"
+    assert binding["aggregate_binding_hash"] == admission["aggregate_binding_hash"]
+
+    blocked = dict(admission)
+    blocked["overall_decision"] = "BLOCK"
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding({"workforce_demands": demands, "workforce_admission": blocked})
+
+    mismatched = json.loads(json.dumps(admission))
+    mismatched["records"][0]["decision"]["resolved_model"] = "tampered-model"
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding({"workforce_demands": demands, "workforce_admission": mismatched})
+
+
+def test_build_contract_binds_selected_admission_identity_and_rejects_override(tmp_path):
+    demands, admission = _valid_local_dispatch()
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(
+        tmp_path,
+        task_id="admitted-dispatch",
+        worker="auto",
+        model="qwen2.5-coder:7b-instruct",
+        execution_lane="ISOLATED_TARGET",
+        workforce_demands=demands,
+        workforce_admission=admission,
+    )
+    contract = service.build_contract(request)
+    assert contract.preferred_provider == "ollama"
+    assert contract.provider_order == ["ollama"]
+
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_FALLBACK_UNADMITTED"):
+        service.build_contract({**request, "fallback_worker": "opencode"})
+
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_MODEL_MISMATCH"):
+        service.build_contract({**request, "model": "tampered-model"})
+
+
+def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tmp_path, monkeypatch):
+    task_id = "service-online-agy-1"
+    card_path = "tasks/campaign/service-online-agy-1.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="bounded online change",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    demands = internal["workforce_demands"]
+    admission = internal["workforce_admission"]
+    calls = []
+
+    class FakeAgyAdapter:
+        provider = "agy"
+
+        def preflight(self):
+            return WorkerPreflight(
+                provider="agy", executable="/bin/agy", executable_available=True,
+                authorized=True, implementation_status="IMPLEMENTED", ready=True, reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, model=None, **options):
+            calls.append((self.provider, model, contract.task_id, lease.target_worktree))
+            return WorkerExecutionReceipt(
+                provider="agy", task_id=contract.task_id,
+                target_worktree=lease.target_worktree, worker_status="COMPLETED",
+                outcome=WorkerOutcome.EXECUTION_COMPLETED.value, exit_code=0,
+                executable_identity="/bin/agy", argv=("agy", model or ""),
+                stdout_sha256="a" * 64, stderr_sha256="b" * 64, wall_time_ms=1,
+                process_group_id=None, process_group_killed=False, timed_out=False,
+                provider_calls=1, evidence_complete=True, commit_created=False,
+                merge_performed=False, push_performed=False,
+            )
+
+    adapter = FakeAgyAdapter()
+    registry = WorkerRegistry({provider: adapter for provider in SUPPORTED_WORKER_PROVIDERS})
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False, ephemeral=True,
+    )
+    attempt_id = "a" * 32
+    request = _request(
+        tmp_path, task_id=task_id, worker="auto",
+        model="gemini-3.6-flash-high", execution_lane="ISOLATED_TARGET",
+        workforce_demands=demands, workforce_admission=admission,
+        planner_output=internal["planner_output"],
+        task_card_path=card_path, task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    contract = service.build_contract(request)
+    binding = validate_workforce_dispatch_binding(request)
+    assert binding is not None
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "SUBMITTED", "attempt_id": attempt_id,
+        "task_card_path": card_path, "task_card_hash": card_hash,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+        "request": request, "workforce_dispatch": binding,
+        "canonical_dispatch_envelope": binding["canonical_dispatch_envelope"],
+        "workforce_policy_hash": binding["policy_hash"], "workforce_binding_hash": binding["binding_hash"],
+        "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
+        "selected_worker_id": binding["worker_id"], "selected_provider": binding["provider"],
+        "selected_model": binding["model"], "provider_order": [binding["provider"]],
+        "worker_provider": binding["provider"], "fallback_lineage": [], "attempts": [{"attempt_id": attempt_id}],
+        "executions": [], "submitted_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            self.root_dir = root_dir
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            pass
+
+        def prepare_task(self, contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1", lease_id="agy-lease",
+                task_id=contract.task_id, controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"), target_branch="nexus/task/agy",
+                initial_head="b" * 40, initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64, created_from_exact_revision=True,
+                commit_created=False, merge_performed=False,
+            )
+
+    class FakeVerifier:
+        @staticmethod
+        def validate_static_contract(contract, target):
+            return None
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", FakeController)
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier", FakeVerifier)
+
+    def update(status, values):
+        service._checkpoint(contract.task_id, status, values, attempt_id=attempt_id)
+        if status == "WORKER_COMPLETED":
+            raise RuntimeError("stop after registry receipt")
+
+    with pytest.raises(RuntimeError, match="stop after registry receipt"):
+        service._run_default_resumable(
+            contract, request, update, task_id=contract.task_id, attempt_id=attempt_id,
+        )
+
+    persisted = service._read_state(contract.task_id)
+    assert calls == [("agy", "gemini-3.6-flash-high", contract.task_id, str(tmp_path / "target"))]
+    assert persisted["selected_worker_id"] == "agy_flash"
+    assert persisted["selected_provider"] == "agy"
+    assert persisted["selected_model"] == "gemini-3.6-flash-high"
+    assert persisted["task_card_path"] == request["canonical_dispatch_envelope"]["task_card_path"]
+    assert persisted["task_card_hash"] == request["canonical_dispatch_envelope"]["task_card_hash"]
+    assert persisted["execution"]["provider"] == "agy"
+    assert persisted["execution"]["outcome"] == WorkerOutcome.EXECUTION_COMPLETED.value
+    assert persisted["fallback_lineage"] == []
+
+
+def test_tracked_card_mutated_after_submit_fails_before_preflight_or_registry(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "service-card-drift-after-submit"
+    attempt_id = "d" * 32
+    card_path = f"tasks/campaign/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="bounded online change",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    request = _request(
+        tmp_path,
+        task_id=task_id,
+        worker="auto",
+        model="gemini-3.6-flash-high",
+        execution_lane="ISOLATED_TARGET",
+        workforce_demands=internal["workforce_demands"],
+        workforce_admission=internal["workforce_admission"],
+        planner_output=internal["planner_output"],
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    calls = {"preflight": 0, "invoke": 0}
+
+    class RejectAfterDriftAdapter:
+        provider = "agy"
+
+        def preflight(self):
+            calls["preflight"] += 1
+            raise AssertionError("card drift reached provider preflight")
+
+        def invoke(self, *args, **kwargs):
+            calls["invoke"] += 1
+            raise AssertionError("card drift reached WorkerRegistry invocation")
+
+    adapter = RejectAfterDriftAdapter()
+    registry = WorkerRegistry(
+        {provider: adapter for provider in SUPPORTED_WORKER_PROVIDERS}
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=registry,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    transport = _action_transport(
+        request,
+        attempt_id=attempt_id,
+        action_id="action-card-drift-after-submit",
+        idempotency_key="card-drift-after-submit:attempt-1",
+    )
+
+    def mutate_after_submit_then_run(owned_task_id, owned_attempt_id):
+        submitted = service._read_state(owned_task_id)
+        assert submitted is not None
+        assert submitted["status"] == "SUBMITTED"
+        card.write_text(
+            f"task_id: `{task_id}`\nAUTO_CHAIN: false\ndrift: true\n",
+            encoding="utf-8",
+        )
+        service._run_owned_task(owned_task_id, owned_attempt_id)
+        return service._read_state(owned_task_id)
+
+    monkeypatch.setattr(service, "_launch_worker", mutate_after_submit_then_run)
+    result = service.submit_task(transport)
+
+    assert result["status"] == "FINAL_BLOCK"
+    assert "TASK_CARD_BINDING_MISMATCH" in result["error"]
+    assert calls == {"preflight": 0, "invoke": 0}
+
+
+def test_governed_tracked_request_without_dispatch_binding_final_blocks_zero_call(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "service-tracked-dispatch-missing"
+    attempt_id = "e" * 32
+    card_path = f"tasks/campaign/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    calls = {"preflight": 0, "invoke": 0}
+
+    class RejectUnboundAdapter:
+        provider = "agy"
+
+        def preflight(self):
+            calls["preflight"] += 1
+            raise AssertionError("unbound tracked request reached provider preflight")
+
+        def invoke(self, *args, **kwargs):
+            calls["invoke"] += 1
+            raise AssertionError("unbound tracked request reached WorkerRegistry")
+
+    adapter = RejectUnboundAdapter()
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=WorkerRegistry(
+            {provider: adapter for provider in SUPPORTED_WORKER_PROVIDERS}
+        ),
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id=task_id,
+        worker="agy",
+        provider="agy",
+        model="caller-selected-model",
+        execution_lane="ISOLATED_TARGET",
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    transport = _action_transport(
+        request,
+        attempt_id=attempt_id,
+        action_id="action-tracked-dispatch-missing",
+        idempotency_key="tracked-dispatch-missing:attempt-1",
+    )
+
+    def run_inline(owned_task_id, owned_attempt_id):
+        service._run_owned_task(owned_task_id, owned_attempt_id)
+        return service._read_state(owned_task_id)
+
+    monkeypatch.setattr(service, "_launch_worker", run_inline)
+    result = service.submit_task(transport)
+
+    assert result["status"] == "FINAL_BLOCK"
+    assert "WORKFORCE_ADMISSION_BINDING_MISSING" in result["error"]
+    assert result["selected_worker_id"] is None
+    assert result["selected_provider"] is None
+    assert result["selected_model"] is None
+    assert calls == {"preflight": 0, "invoke": 0}
+
+
+@pytest.mark.parametrize(
+    ("mutate_card", "expected_error"),
+    [
+        (True, "TASK_CARD_BINDING_MISMATCH"),
+        (False, "WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT"),
+    ],
+    ids=("card-drift", "no-card-drift-unadmitted-fallback"),
+)
+def test_unadmitted_fallback_blocks_before_provider_side_work(
+    tmp_path,
+    monkeypatch,
+    mutate_card,
+    expected_error,
+):
+    task_id = "service-card-drift-before-escalation"
+    attempt_id = "f" * 32
+    card_path = f"tasks/campaign/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="bounded online change",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    request = _request(
+        tmp_path,
+        task_id=task_id,
+        worker="auto",
+        model="gemini-3.6-flash-high",
+        execution_lane="ISOLATED_TARGET",
+        workforce_demands=internal["workforce_demands"],
+        workforce_admission=internal["workforce_admission"],
+        planner_output=internal["planner_output"],
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+        contract_kind=ContractKind.TRACKED_TASK_CARD.value,
+        worker_candidate_ingress=True,
+        attempt_id=attempt_id,
+    )
+    request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    calls = {
+        "admitted": {"preflight": 0, "provider_calls": 0},
+        "fallback": {"preflight": 0, "provider_calls": 0},
+        "replacement": 0,
+    }
+
+    class EscalationAdapter:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def preflight(self):
+            key = "admitted" if self.provider == "agy" else "fallback"
+            calls[key]["preflight"] += 1
+            return WorkerPreflight(
+                provider=self.provider,
+                executable=f"/bin/{self.provider}",
+                executable_available=True,
+                authorized=True,
+                implementation_status="IMPLEMENTED",
+                ready=True,
+                reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, model=None, **options):
+            key = "admitted" if self.provider == "agy" else "fallback"
+            calls[key]["provider_calls"] += 1
+            assert self.provider == "agy"
+            if mutate_card:
+                card.write_text(
+                    f"task_id: `{task_id}`\nAUTO_CHAIN: false\ndrift: true\n",
+                    encoding="utf-8",
+                )
+            return WorkerExecutionReceipt(
+                provider=self.provider,
+                task_id=contract.task_id,
+                target_worktree=lease.target_worktree,
+                worker_status="TIMED_OUT",
+                outcome=WorkerOutcome.INCOMPLETE.value,
+                exit_code=124,
+                executable_identity=f"/bin/{self.provider}",
+                argv=(self.provider, model or ""),
+                stdout_sha256="a" * 64,
+                stderr_sha256="b" * 64,
+                wall_time_ms=1,
+                process_group_id=None,
+                process_group_killed=True,
+                timed_out=True,
+                provider_calls=1,
+                evidence_complete=True,
+                commit_created=False,
+                merge_performed=False,
+                push_performed=False,
+                failure_reason="provider timeout",
+            )
+
+    registry = WorkerRegistry(
+        {
+            provider: EscalationAdapter(provider)
+            for provider in SUPPORTED_WORKER_PROVIDERS
+        }
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=registry,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    real_build_contract = service.build_contract
+
+    def build_escalating_contract(bound_request):
+        contract = real_build_contract(bound_request)
+        return contract.model_copy(
+            update={
+                "fallback_provider": "grok",
+                "provider_order": ["agy", "grok"],
+                "maximum_provider_calls": 2,
+            }
+        )
+
+    monkeypatch.setattr(service, "build_contract", build_escalating_contract)
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            self.root_dir = root_dir
+
+        def verify_controller_unchanged(self, contract, **kwargs):
+            return None
+
+        def _run_git(self, args, *, cwd):
+            return "b" * 40
+
+        def cleanup(self, task_id, *, force=False):
+            calls["replacement"] += 1
+            return None
+
+        def cleanup_terminal_target(self, contract, lease, **kwargs):
+            return SimpleNamespace(
+                decision="REMOVED",
+                blocker=None,
+                performed=True,
+                eligible=True,
+            )
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            self.worktree_manager = worktree_manager
+
+        def prepare_task(self, contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1",
+                lease_id="escalation-lease",
+                task_id=contract.task_id,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(tmp_path / "target"),
+                target_branch="nexus/task/escalation-drift",
+                initial_head="b" * 40,
+                initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64,
+                created_from_exact_revision=True,
+                commit_created=False,
+                merge_performed=False,
+            )
+
+    class FakeVerifier:
+        @staticmethod
+        def validate_static_contract(contract, target):
+            return None
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.WorktreeManager",
+        FakeManager,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController",
+        FakeController,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+        FakeVerifier,
+    )
+    transport = _action_transport(
+        request,
+        attempt_id=attempt_id,
+        action_id="action-card-drift-before-escalation",
+        idempotency_key="card-drift-before-escalation:attempt-1",
+    )
+
+    def run_inline(owned_task_id, owned_attempt_id):
+        service._run_owned_task(owned_task_id, owned_attempt_id)
+        return service._read_state(owned_task_id)
+
+    monkeypatch.setattr(service, "_launch_worker", run_inline)
+    result = service.submit_task(transport)
+
+    assert result["status"] == "FINAL_BLOCK"
+    assert expected_error in result["error"]
+    assert calls["admitted"] == {"preflight": 2, "provider_calls": 1}
+    assert calls["fallback"] == {"preflight": 0, "provider_calls": 0}
+    assert calls["replacement"] == 0
 
 
 def test_checkpoint_telemetry_aggregates_attempts_and_keeps_cost_unmeasured(tmp_path):
@@ -231,15 +854,22 @@ def test_production_bound_ephemeral_receipt_cannot_be_approved(tmp_path):
 
 
 def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypatch):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     task_id = "snapshot-only"
-    service._write_state(task_id, {
-        "task_id": task_id,
-        "status": "FINAL_BLOCK",
-        "promotion_status": "NOT_CREATED",
-        "attempts": [{"attempt_id": "a"}],
-    })
-    monkeypatch.setattr(service, "reconcile_task", lambda *_: (_ for _ in ()).throw(AssertionError("reconciled")))
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "status": "FINAL_BLOCK",
+            "promotion_status": "NOT_CREATED",
+            "attempts": [{"attempt_id": "a"}],
+        },
+    )
+    monkeypatch.setattr(
+        service, "reconcile_task", lambda *_: (_ for _ in ()).throw(AssertionError("reconciled"))
+    )
 
     compact = service.get_task_snapshot(task_id)
     detailed = service.get_task_snapshot(task_id, include_details=True)
@@ -248,6 +878,302 @@ def test_status_snapshot_does_not_reconcile_or_expand_details(tmp_path, monkeypa
     assert compact["task_action"]["next_action"] == "inspect_receipt_and_candidate"
     assert "attempts" not in compact
     assert detailed["attempts"] == [{"attempt_id": "a"}]
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["status"] == "NOT_REQUIRED"
+    assert compact["approval_requirements"]["reasons"] == []
+
+
+def _approval_requirement_state(*, required=True):
+    return {
+        "task_id": "approval-projection",
+        "attempt_id": "attempt-1",
+        "status": "CANDIDATE_COMMITTED",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "promotion_packet": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "authority_change_required": required,
+            "authority_findings_sha256": "a" * 64,
+        },
+        "candidate": {
+            "commit_sha": "c" * 40,
+            "tree_sha": "d" * 40,
+        },
+        "verified_receipt": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "authority_change_required": required,
+            "authority_findings_sha256": "a" * 64,
+        },
+    }
+
+
+def test_snapshot_projects_complete_architecture_approval_requirements(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    service._write_state("approval-projection", _approval_requirement_state())
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["status"] == "APPROVABLE"
+    assert requirements["completeness"] == "COMPLETE"
+    assert requirements["approvability"] == "APPROVABLE"
+    assert requirements["reasons"] == []
+    assert requirements["binding"] == {
+        "bound_task_id": "approval-projection",
+        "bound_attempt_id": "attempt-1",
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "authority_findings_sha256": "a" * 64,
+    }
+    assert "approval_id" not in requirements
+
+
+def test_compact_and_detailed_snapshots_share_pure_approval_projection(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    state["attempts"] = [{"attempt_id": "attempt-1"}]
+    service._write_state("approval-projection", state)
+    state_path = service._state_path("approval-projection")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert "attempts" not in compact
+    assert detailed["attempts"] == [{"attempt_id": "attempt-1"}]
+    assert state_path.read_bytes() == durable_before
+    assert "approval_requirements" not in json.loads(durable_before)
+
+
+def test_malformed_approval_source_containers_fail_closed_without_mutation(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state["promotion_packet"] = []
+    state["verified_receipt"] = []
+    expected_reasons = [
+        "malformed_source:promotion_packet:expected_mapping",
+        "malformed_source:verified_receipt:expected_mapping",
+    ]
+    direct = service._approval_requirements(state)
+    service.state_dir.mkdir(parents=True)
+    state_path = service._state_path("approval-projection")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert direct["status"] == "NOT_APPROVABLE"
+    assert direct["reasons"] == expected_reasons
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["required"] is False
+    assert compact["approval_requirements"]["status"] == "NOT_APPROVABLE"
+    assert compact["approval_requirements"]["reasons"] == expected_reasons
+    assert state_path.read_bytes() == durable_before
+
+
+@pytest.mark.parametrize(
+    "empty_sources",
+    [
+        ("promotion_packet",),
+        ("verified_receipt",),
+        ("promotion_packet", "verified_receipt"),
+    ],
+)
+def test_empty_approval_sources_fail_closed_without_mutation(tmp_path, empty_sources):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    for source_name in empty_sources:
+        state[source_name] = {}
+    expected_reasons = sorted(
+        f"malformed_source:{name}:empty_or_missing_contract_fields" for name in empty_sources
+    )
+    direct = service._approval_requirements(state)
+    service.state_dir.mkdir(parents=True)
+    state_path = service._state_path("approval-projection")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert direct["status"] == "NOT_APPROVABLE"
+    assert direct["reasons"] == expected_reasons
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["required"] is False
+    assert compact["approval_requirements"]["status"] == "NOT_APPROVABLE"
+    assert compact["approval_requirements"]["reasons"] == expected_reasons
+    assert state_path.read_bytes() == durable_before
+
+
+def test_none_approval_sources_remain_non_required_without_mutation(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state["promotion_packet"] = None
+    state["verified_receipt"] = None
+    service.state_dir.mkdir(parents=True)
+    state_path = service._state_path("approval-projection")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    durable_before = state_path.read_bytes()
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["status"] == "NOT_REQUIRED"
+    assert compact["approval_requirements"]["reasons"] == []
+    assert state_path.read_bytes() == durable_before
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_reason"),
+    [
+        (None, "missing:bound_attempt_id"),
+        (
+            lambda state: state["promotion_packet"].update(candidate_commit_sha="bad"),
+            "invalid_format:promotion_packet.candidate_commit_sha",
+        ),
+        (
+            lambda state: state["verified_receipt"].update(authority_findings_sha256="bad"),
+            "invalid_format:verified_receipt.authority_findings_sha256",
+        ),
+    ],
+)
+def test_snapshot_missing_or_malformed_approval_inputs_fail_closed(
+    tmp_path, change, expected_reason
+):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    if change is None:
+        state.pop("attempt_id")
+    else:
+        change(state)
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["status"] == "NOT_APPROVABLE"
+    assert requirements["approvability"] == "NOT_APPROVABLE"
+    assert expected_reason in requirements["reasons"]
+
+
+@pytest.mark.parametrize("invalid_value", ["false", 1, [], {}])
+@pytest.mark.parametrize("source_name", ["promotion_packet", "verified_receipt"])
+def test_snapshot_rejects_non_bool_authority_requirement(tmp_path, invalid_value, source_name):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state[source_name]["authority_change_required"] = invalid_value
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["required"] is False
+    assert requirements["status"] == "NOT_APPROVABLE"
+    assert requirements["reasons"] == [f"invalid_type:{source_name}.authority_change_required"]
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_reason"),
+    [
+        (
+            lambda state: state.update(attempt_id=7),
+            "invalid_type:task.attempt_id",
+        ),
+        (
+            lambda state: state["promotion_packet"].update(candidate_commit_sha=7),
+            "invalid_type:promotion_packet.candidate_commit_sha",
+        ),
+        (
+            lambda state: state["candidate"].update(tree_sha=[]),
+            "invalid_type:candidate.tree_sha",
+        ),
+        (
+            lambda state: state["verified_receipt"].update(authority_findings_sha256={}),
+            "invalid_type:verified_receipt.authority_findings_sha256",
+        ),
+    ],
+)
+def test_snapshot_rejects_non_string_binding_fields(tmp_path, change, expected_reason):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    change(state)
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["status"] == "NOT_APPROVABLE"
+    assert expected_reason in requirements["reasons"]
+
+
+def test_snapshot_rejects_non_string_durable_task_id_without_coercion(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state()
+    state["task_id"] = {"not": "a string"}
+    service._write_state("approval-projection", state)
+
+    compact = service.get_task_snapshot("approval-projection")
+    detailed = service.get_task_snapshot("approval-projection", include_details=True)
+
+    assert compact["approval_requirements"] == detailed["approval_requirements"]
+    assert compact["approval_requirements"]["status"] == "NOT_APPROVABLE"
+    assert compact["approval_requirements"]["reasons"] == ["invalid_state:STATE_FIELD_INVALID"]
+
+
+def test_snapshot_mismatch_and_stale_approval_inputs_fail_closed(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    mismatch = _approval_requirement_state()
+    mismatch["candidate"]["tree_sha"] = "e" * 40
+    service._write_state("approval-projection", mismatch)
+    result = service.get_task_snapshot("approval-projection")["approval_requirements"]
+    assert result["status"] == "NOT_APPROVABLE"
+    assert "candidate_tree_sha" in result["mismatches"]
+    assert "mismatch:candidate_tree_sha" in result["reasons"]
+
+    stale = _approval_requirement_state()
+    stale["promotion_status"] = "APPROVED"
+    service._write_state("approval-projection", stale)
+    result = service.get_task_snapshot("approval-projection")["approval_requirements"]
+    assert result["stale"] is True
+    assert result["status"] == "NOT_APPROVABLE"
+    assert "stale:approval_requirements" in result["reasons"]
+
+
+def test_snapshot_non_required_approval_is_deterministic(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = _approval_requirement_state(required=False)
+    state["approved_binding"] = {"architecture_approval": {"schema": "stale"}}
+    service._write_state("approval-projection", state)
+
+    requirements = service.get_task_snapshot("approval-projection")["approval_requirements"]
+
+    assert requirements["required"] is False
+    assert requirements["status"] == "NOT_REQUIRED"
+    assert requirements["completeness"] == "NOT_REQUIRED"
+    assert requirements["approvability"] == "NOT_REQUIRED"
+    assert requirements["stale"] is True
 
 
 @pytest.mark.parametrize(
@@ -372,6 +1298,112 @@ def test_state_root_inventory_classifies_nested_receipts_and_conflicts(tmp_path,
         "CANONICAL_AUTHORITY", "REHEARSAL_EVIDENCE",
     }
     assert len(inventory["inventory_sha256"]) == 64
+
+
+def test_custom_runner_rejected_for_canonical_non_ephemeral_state(tmp_path, monkeypatch):
+    canonical = Path("/nexus-canonical-state-test")
+    calls = []
+
+    def custom_runner(*args):
+        calls.append(args)
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+    monkeypatch.setattr(
+        SelfHostedTaskService,
+        "canonical_state_dir",
+        staticmethod(lambda: canonical),
+    )
+
+    def initialize_and_submit():
+        service = SelfHostedTaskService(
+            state_dir=canonical,
+            runner=custom_runner,
+            auto_reconcile=False,
+        )
+        return service.submit_task(
+            _request(
+                tmp_path,
+                task_id="forbidden-production-custom-runner",
+                execution_lane="ISOLATED_TARGET",
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="^CUSTOM_RUNNER_REQUIRES_EPHEMERAL_STATE$"):
+        initialize_and_submit()
+
+    assert calls == []
+
+
+def test_explicit_ephemeral_custom_runner_is_test_only_and_cannot_claim(tmp_path):
+    calls = []
+
+    def custom_runner(contract, request, update):
+        calls.append(contract.task_id)
+        update(
+            "WORKER_COMPLETED",
+            {
+                "execution": {"provider": "forged-provider"},
+                "workforce_dispatch": {"overall_decision": "ALLOW"},
+                "verified_receipt": {"verified": True},
+                "provider_receipt_authoritative": True,
+                "workforce_admission_authoritative": True,
+                "public_claim_allowed": True,
+                "production_ready": True,
+            },
+        )
+        return {
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "candidate_commit_created": True,
+            "provider_receipt_authoritative": True,
+            "workforce_admission_authoritative": True,
+            "public_claim_allowed": True,
+            "production_ready": True,
+        }
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=custom_runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id="ephemeral-custom-runner-boundary",
+        execution_lane="ISOLATED_TARGET",
+    )
+
+    service.submit_task(request)
+    state = _wait_for_status(
+        service,
+        request["task_id"],
+        "PENDING_HUMAN_APPROVAL",
+    )
+    receipt = service.get_receipt(request["task_id"])
+    packet = service.get_promotion_packet(request["task_id"])
+
+    assert calls == [request["task_id"]]
+    assert state["execution_authority"] == "EPHEMERAL_TEST_RUNNER"
+    assert state["provider_receipt_authoritative"] is False
+    assert state["workforce_admission_authoritative"] is False
+    assert state["public_claim_allowed"] is False
+    assert state["production_ready"] is False
+    assert state["promotion_eligible"] is False
+    assert state.get("workforce_dispatch") is None
+    assert state.get("verified_receipt") is None
+    assert receipt["execution_authority"] == "EPHEMERAL_TEST_RUNNER"
+    assert receipt["provider_receipt_authoritative"] is False
+    assert receipt["workforce_admission_authoritative"] is False
+    assert packet["public_claim_allowed"] is False
+    assert packet["production_ready"] is False
+
+    with pytest.raises(RuntimeError, match="^CUSTOM_RUNNER_PRODUCTION_CLAIM_FORBIDDEN$"):
+        service.approve_promotion(
+            request["task_id"],
+            candidate_commit_sha="c" * 40,
+            candidate_tree_sha="d" * 40,
+            candidate_state_hash="e" * 64,
+            verified_receipt_hash="f" * 64,
+        )
 
 
 def test_submit_persists_idempotent_task_state(tmp_path):
@@ -2441,6 +3473,73 @@ def test_final_block_clean_no_candidate_recommends_same_task_retry(tmp_path):
 
     assert action["next_action"] == "retry_same_task"
     assert action["recommended_tool"] == "nexus_self_hosted_retry"
+    assert action["action_state"] == "TERMINAL"
+    assert action["attention_required"] is False
+
+
+@pytest.mark.parametrize("cleanup_decision", ["REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"])
+def test_clean_candidate_less_final_block_preserves_optional_retry_and_evidence(tmp_path, cleanup_decision):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("settled-failure", {
+        "task_id": "settled-failure",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": cleanup_decision,
+        "candidate_created": False,
+        "candidate_status": "FINAL_BLOCK",
+        "state_retention_status": "TERMINAL",
+        "reconciliation_status": "RECONCILED",
+        "reconciliation_decision": "NO_MUTATION_OBSERVED",
+        "uncertain_mutation": False,
+        "error": "provider failed",
+    })
+
+    state = service.get_task("settled-failure")
+    action = state["task_action"]
+
+    assert action["action_state"] == "TERMINAL"
+    assert action["attention_required"] is False
+    assert action["next_action"] == "retry_same_task"
+    assert action["recommended_tool"] == "nexus_self_hosted_retry"
+    assert state["error"] == "provider failed"
+    assert service.list_actionable_tasks()["actionable_count"] == 0
+
+
+@pytest.mark.parametrize("state", [
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED"},
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "cleanup_blocker": "unknown"},
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "reconciliation_required": True},
+    {"status": "FINAL_BLOCK", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED", "promotion_packet": {"candidate_commit_sha": "c" * 40}},
+    {"status": "FINAL_BLOCK", "promotion_status": "PENDING_HUMAN_APPROVAL", "cleanup_decision": "REMOVED"},
+    {"status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED"},
+    {"status": "INTEGRATION_FAILED", "promotion_status": "INTEGRATION_FAILED", "cleanup_decision": "REMOVED", "approved_binding": {"candidate_commit_sha": "c" * 40}},
+])
+def test_unresolved_failure_states_remain_actionable(state):
+    action = SelfHostedTaskService._task_action_envelope({"task_id": "unresolved", **state})
+
+    assert action["attention_required"] is True
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("candidate_created", True),
+    ("candidate_status", "PENDING_HUMAN_APPROVAL"),
+    ("state_retention_status", "ACTIVE"),
+    ("reconciliation_decision", "RETAINED_FOR_REVIEW"),
+    ("uncertain_mutation", True),
+])
+def test_clean_final_block_fails_closed_on_hidden_unresolved_state(field, value):
+    state = {
+        "task_id": "hidden-unresolved",
+        "status": "FINAL_BLOCK",
+        "promotion_status": "NOT_CREATED",
+        "cleanup_decision": "REMOVED",
+        field: value,
+    }
+
+    action = SelfHostedTaskService._task_action_envelope(state)
+
+    assert action["attention_required"] is True
+    assert action["action_state"] == "FINAL_BLOCK"
 
 
 def test_duplicate_task_card_hash_returns_existing_task_and_retry_action(tmp_path):
@@ -3684,7 +4783,7 @@ def test_close_task_without_candidate_final_block_success(tmp_path):
     service._write_state(task_id, state)
 
     actionable_before = service.list_actionable_tasks()
-    assert any(t["task_id"] == task_id for t in actionable_before["tasks"])
+    assert not any(t["task_id"] == task_id for t in actionable_before["tasks"])
 
     result = service.close_task_without_candidate(task_id, superseded_by="ref-evidence-789")
 

@@ -41,8 +41,8 @@
     {
       "id": "dx-verification-v1",
       "task_class": "verification",
-      "authority_path": ".github/workflows/pytest.yml",
-      "context_paths": [".github/workflows/pytest.yml", "docs/testing/test_runbook.md"],
+      "authority_path": "docs/testing/test_runbook.md",
+      "context_paths": ["docs/testing/test_runbook.md"],
       "test": {"cwd": "TARGET_ROOT", "argv": ["python3", "-m", "pytest", "-q", "tests/benchmark/test_codex_dx_benchmark.py"]},
       "fixture_policy": {"kind": "local_fixture_only", "network": false, "secrets": false},
       "forbidden_scope": [".env", ".git", ".nexus"]

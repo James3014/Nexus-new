@@ -11,9 +11,13 @@
 **Benchmark matrix:** `nexus/config/model_three_arm_matrix.yaml`
 **Last verified:** 2026-07-29
 
-This file defines which model workers Nexus may assign, the context each worker may receive, its autonomy ceiling, and the conditions that require escalation. It does not replace CapabilityPlanner, HybridRouteDecision, execution authorization, Verifier, Receipt, Learning, Git safety, or account-pool policy.
+This file defines workforce eligibility: which model workers Nexus may admit,
+the context each worker may receive, its autonomy ceiling, and the conditions
+that require escalation. It does not select routes or capabilities, and it does
+not replace `CapabilityPlanner`, `HybridRouteDecision`, execution
+authorization, Verifier, Receipt, Learning, Git safety, or account-pool policy.
 
-Provider selection is open across the registered adapter surface. `auto` and
+Provider eligibility is open across the registered adapter surface. `auto` and
 `agy` are defaults, not an allowlist. An explicit provider still requires a
 registered adapter, exact model identity, executable/authorization preflight,
 bounded scope, parser/verifier evidence, and a receipt. Unknown providers fail
@@ -38,7 +42,10 @@ Every candidate has two independent dimensions:
 
 Provider/client failure is not scored as model reasoning failure. Conversely, a semantic answer passing the Full arm is not lifecycle closure: the 2026-07-29 matrix did not establish `receipt_complete=true` or `capability_closure_complete=true` for any model.
 
-CapabilityPlanner and HybridRouteDecision remain the only route authority. This policy is a workforce constraint consumed after route authorization, not another router.
+`CapabilityPlanner` is the sole route and capability-selection authority.
+`HybridRouteDecision` is a Planner-derived decision contract/projection, not a
+second selector, router, or planner. This policy is a workforce eligibility
+constraint consumed after route authorization, not another router or selector.
 
 ## 2. Uniform three-arm benchmark status
 
@@ -131,22 +138,58 @@ Blocked models receive no active assignment. Their zero benchmark scores are not
 
 `opencode/laguna-s-2.1-free` scored 11/11 on all arms but wrote `output.json` inside the isolated working directory despite a text-only task. The formal Nexus workspace was not changed, but the behavior demonstrates tool-discipline drift. It remains quarantined until tool denial is verified and a clean three-arm rerun passes.
 
-## 6. Routing policy
+## 6. Post-route worker dispatch guidance
 
-Nexus must route in this order:
+This section applies only after `CapabilityPlanner` has selected the route and
+capabilities and the route has been authorized. It is dispatch preference
+guidance for choosing an eligible worker within that already-authorized
+execution; it is not a routing order, capability selector, topology selector,
+governance selector, or claim decision.
 
-1. Complete the task deterministically when rules, AST, exact search, schema validation, or existing evidence are sufficient.
-2. Use Local Advisor 3B for compact classification, extraction, compression, or diagnosis.
-3. Use Local Coder 7B for a small bounded code candidate protected by parser, compile, and focused tests.
-4. Use Qwen3 8B only as a bounded shadow candidate or counterexample searcher.
-5. Use Agy for fast bounded online implementation.
-6. Use Grok for independent review, hidden defects, or evidence pressure testing.
-7. Use Codex for complex milestone closure when the governed adapter, independent verification, and receipt controls are present.
-8. Use OpenCode candidates when subscription-free remote execution is useful and high fixed context overhead is acceptable.
+Immediately before dispatch, the caller must obtain a fresh Workforce Admission
+receipt. The receipt's `ALLOW`, `BLOCK`, or `ESCALATE` result, exact worker and
+model identity, provider, autonomy level, context/scope, policy hash, and
+reasons are binding. A stale roster, prior benchmark result, or worker
+preference cannot substitute for fresh admission.
 
-No Local model is approved as a default Full-context worker. Full context is not assumed to be better: several models regressed, leaked thinking traces, changed schema, or lost the answer envelope.
+Within the authorized route, prefer deterministic completion when rules, AST,
+exact search, schema validation, or existing evidence are sufficient. When a
+worker is required, use the following role guidance rather than a fixed model
+sequence:
 
-Mandatory escalation applies to architecture or authority choices, ambiguous product behavior, security or irreversible risk, production/claim adjudication, unbounded multi-file work, Local disagreement or verifier failure, integration/runtime closure, and unsafe resource pressure.
+1. Use Local Advisor 3B for compact classification, extraction, compression,
+   or diagnosis.
+2. Use Local Coder 7B for a small bounded code candidate protected by parser,
+   compile, and focused tests.
+3. Use Qwen3 8B only as a bounded shadow candidate or counterexample searcher.
+4. Use Agy for fast bounded online implementation.
+5. Use Grok for independent review, hidden defects, or evidence pressure
+   testing.
+6. Use Codex for complex milestone closure when the governed adapter,
+   independent verification, and receipt controls are present.
+7. Use OpenCode candidates when subscription-free remote execution is useful
+   and high fixed context overhead is acceptable.
+
+These preferences never choose or revise a route, capability, execution
+topology, governance depth, or claim outcome. They also do not bypass fresh
+admission, parser/verifier gates, receipt requirements, or human authority.
+
+Governance depth is task-driven: the authorized task's risk, mutation scope,
+external side effects, ambiguity, integration requirements, and claim/evidence
+sensitivity determine the required context and controls. Each dispatch must
+respect the combined ceilings for autonomy, context, scope, provider/model
+eligibility, resource budget, and claim authority. A worker may be eligible in
+one dimension and still be blocked by another; no aggregate score or
+Capability Index is introduced.
+
+No Local model is approved as a default Full-context worker. Full context is
+not assumed to be better: several models regressed, leaked thinking traces,
+changed schema, or lost the answer envelope.
+
+Mandatory escalation applies to architecture or authority choices, ambiguous
+product behavior, security or irreversible risk, production/claim adjudication,
+unbounded multi-file work, Local disagreement or verifier failure,
+integration/runtime closure, and unsafe resource pressure.
 
 ## 7. Verification and claim rules
 

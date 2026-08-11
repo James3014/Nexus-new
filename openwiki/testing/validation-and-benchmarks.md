@@ -31,7 +31,9 @@ Verification in Nexus Singularity OS spans over 100 test modules under `tests/` 
 - **`tests/test_route_optimization.py`**: Verifies routing weight adjustments and execution depth calculations.
 
 ### 3. MCP & Gateway Ingress Tests
-- **`tests/test_battlesuit_gateway.py`**: Tests `[UnifiedMCPGateway](../runtime/mcp-gateway.md)` tool registration, ingress handling, and error payloads.
+- **`tests/nexus/orchestrator/test_unified_mcp_gateway.py`**: Tests `[UnifiedMCPGateway](../runtime/mcp-gateway.md)` tool registration, execution, and error payloads.
+- **`tests/nexus/orchestrator/test_mcp_canonical_ingress.py`**: Tests canonical MCP ingress and route-bound task dispatch.
+- **`tests/nexus/orchestrator/test_unified_mcp_gateway_http.py`** and **`tests/nexus/orchestrator/test_self_hosted_mcp.py`**: Test HTTP transport and self-hosted server behavior.
 
 ### 4. Governance & Completion Gate Tests
 - **`tests/test_task_runner_completion_gate.py`**: Verifies fail-closed behavior in `[CompletionEnforcer](../governance/gates-and-contracts.md)`.

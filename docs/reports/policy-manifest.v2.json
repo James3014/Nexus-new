@@ -1048,7 +1048,7 @@
     "promotion_allowed_count": 0,
     "lane_distribution": {
       "hard": {
-        "count": 10,
+        "count": 11,
         "policies": [
           "P-S2T-01",
           "P-S2T-02",
@@ -1059,7 +1059,8 @@
           "P-DELIVERY-01",
           "P-DELIVERY-02",
           "P-FLOW-01",
-          "P-CONTAM-01"
+          "P-CONTAM-01",
+          "P-TEST-NODRILL-01"
         ]
       },
       "soft": {
