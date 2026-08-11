@@ -69,6 +69,35 @@ def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
     ]
 
 
+def test_issue_86_pr_cleanup_surfaces_resolve_to_intended_targets(tmp_path):
+    rules = load_impact_rules()
+    issue_86_paths = [
+        "scripts/brain_de_entropy.py",
+        "scripts/core/migration_validator.py",
+        "scripts/core/drclaw_diagnosis.py",
+        "muse_nexus.egg-info/SOURCES.txt",
+    ]
+
+    details = select_target_details(
+        issue_86_paths,
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+
+    targets = details.targets
+    assert "tests/core/test_context_hub_strict_deps.py" in targets
+    assert "tests/core/test_context_budget_sources.py" in targets
+    assert "tests/core/test_context_text_store.py" in targets
+    assert "tests/core/test_migration_validator_contract.py" in targets
+    assert "tests/benchmark/test_drclaw_diagnosis_contract.py" in targets
+    assert "tests/ops/test_source_inventory_integrity.py" in targets
+
+
 def test_default_impact_map_covers_new_learning_modules_without_shadowing_specific_rules(tmp_path):
     rules = load_impact_rules()
 
