@@ -1,4 +1,5 @@
 """Run the bounded provider-free fixture smoke benchmark."""
+
 from __future__ import annotations
 
 import argparse

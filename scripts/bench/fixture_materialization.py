@@ -37,8 +37,7 @@ class ExternalFixtureRequest:
 
 
 class ExternalFixtureAdapter(Protocol):
-    def resolve(self, request: ExternalFixtureRequest) -> FixtureMaterializationResult:
-        ...
+    def resolve(self, request: ExternalFixtureRequest) -> FixtureMaterializationResult: ...
 
 
 class ExternalFixtureAdapterRequired(NotImplementedError):
@@ -52,7 +51,9 @@ class ExternalFixturePolicyError(ValueError):
 def _normalized_relative_file(rel_name: str) -> str:
     rel_path = Path(rel_name)
     if rel_path.is_absolute() or ".." in rel_path.parts:
-        raise ExternalFixturePolicyError(f"external fixture manifest file must stay relative: {rel_name}")
+        raise ExternalFixturePolicyError(
+            f"external fixture manifest file must stay relative: {rel_name}"
+        )
     return rel_path.as_posix()
 
 
@@ -81,11 +82,17 @@ class OfflineCachedExternalFixtureAdapter:
     def resolve(self, request: ExternalFixtureRequest) -> FixtureMaterializationResult:
         manifest = self.cache_manifest
         if manifest is None:
-            raise ExternalFixturePolicyError("offline cache manifest is required for external fixture setup")
+            raise ExternalFixturePolicyError(
+                "offline cache manifest is required for external fixture setup"
+            )
         if manifest.network_allowed:
-            raise ExternalFixturePolicyError("live network external fixture setup is not implemented")
+            raise ExternalFixturePolicyError(
+                "live network external fixture setup is not implemented"
+            )
         if request.repo != manifest.allowed_repo or request.repo_ref != manifest.allowed_ref:
-            raise ExternalFixturePolicyError("external fixture repo/ref not allowed by offline cache manifest")
+            raise ExternalFixturePolicyError(
+                "external fixture repo/ref not allowed by offline cache manifest"
+            )
 
         declared_files = [request.target_file, request.test_file]
         if request.hidden_test_file:
@@ -115,9 +122,9 @@ class SandboxedLocalExternalFixtureAdapter:
 
     def __post_init__(self) -> None:
         workspace_root = Path(self.workspace_root).resolve()
-        allowed_source_roots = tuple(Path(root).resolve() for root in self.allowed_source_roots) or (
-            workspace_root,
-        )
+        allowed_source_roots = tuple(
+            Path(root).resolve() for root in self.allowed_source_roots
+        ) or (workspace_root,)
         object.__setattr__(self, "workspace_root", workspace_root)
         object.__setattr__(self, "allowed_source_roots", allowed_source_roots)
 
@@ -165,24 +172,35 @@ class SandboxedLocalExternalFixtureAdapter:
         elif parsed.scheme in {"http", "https", "ssh", "git"} or parsed.netloc:
             raise ExternalFixturePolicyError("remote external fixture repo not allowed")
         elif parsed.scheme:
-            raise ExternalFixturePolicyError(f"unsupported external fixture repo scheme: {parsed.scheme}")
+            raise ExternalFixturePolicyError(
+                f"unsupported external fixture repo scheme: {parsed.scheme}"
+            )
         else:
             source_root = Path(repo).expanduser().resolve()
 
         if not source_root.is_dir():
-            raise ExternalFixturePolicyError(f"external fixture repo must be an existing directory: {repo}")
-        if not any(source_root == root or source_root.is_relative_to(root) for root in self.allowed_source_roots):
+            raise ExternalFixturePolicyError(
+                f"external fixture repo must be an existing directory: {repo}"
+            )
+        if not any(
+            source_root == root or source_root.is_relative_to(root)
+            for root in self.allowed_source_roots
+        ):
             raise ExternalFixturePolicyError("external fixture source is outside allowed roots")
         return source_root
 
     def _case_dir(self, task_id: str) -> Path:
         task_path = Path(task_id)
         if task_path.is_absolute():
-            raise ExternalFixturePolicyError(f"external fixture task_id must be relative: {task_id}")
+            raise ExternalFixturePolicyError(
+                f"external fixture task_id must be relative: {task_id}"
+            )
         case_dir = (self.workspace_root / ".nexus" / "bench_cases" / task_path).resolve()
         bench_cases_root = (self.workspace_root / ".nexus" / "bench_cases").resolve()
         if not case_dir.is_relative_to(bench_cases_root):
-            raise ExternalFixturePolicyError(f"external fixture task_id escapes bench case root: {task_id}")
+            raise ExternalFixturePolicyError(
+                f"external fixture task_id escapes bench case root: {task_id}"
+            )
         case_dir.mkdir(parents=True, exist_ok=True)
         return case_dir
 
@@ -209,7 +227,9 @@ class SandboxedLocalExternalFixtureAdapter:
             raise ExternalFixturePolicyError(f"external fixture file must be relative: {rel_name}")
         source_file = (source_root / rel_path).resolve()
         if not source_file.is_relative_to(source_root):
-            raise ExternalFixturePolicyError(f"external fixture file escapes external fixture source: {rel_name}")
+            raise ExternalFixturePolicyError(
+                f"external fixture file escapes external fixture source: {rel_name}"
+            )
         if not source_file.is_file():
             raise ExternalFixturePolicyError(f"external fixture file does not exist: {rel_name}")
         return source_file
@@ -218,10 +238,14 @@ class SandboxedLocalExternalFixtureAdapter:
     def _safe_case_file(case_dir: Path, rel_name: str) -> Path:
         rel_path = Path(rel_name)
         if rel_path.is_absolute():
-            raise ExternalFixturePolicyError(f"external fixture output file must be relative: {rel_name}")
+            raise ExternalFixturePolicyError(
+                f"external fixture output file must be relative: {rel_name}"
+            )
         destination = (case_dir / rel_path).resolve()
         if not destination.is_relative_to(case_dir):
-            raise ExternalFixturePolicyError(f"external fixture output file escapes case dir: {rel_name}")
+            raise ExternalFixturePolicyError(
+                f"external fixture output file escapes case dir: {rel_name}"
+            )
         return destination
 
 
@@ -237,7 +261,9 @@ def resolve_external_fixture(
     return adapter.resolve(request)
 
 
-def materialize_local_fixture(repo_root: Path, *, task_id: str, source: LocalFixtureSource) -> FixtureMaterializationResult:
+def materialize_local_fixture(
+    repo_root: Path, *, task_id: str, source: LocalFixtureSource
+) -> FixtureMaterializationResult:
     root = (repo_root / ".nexus" / "bench_cases").resolve()
     case_dir = (root / task_id).resolve()
     if not case_dir.is_relative_to(root):
@@ -324,8 +350,7 @@ def deterministic_fixture_patch(fixture_kind: str) -> str:
             "    return out\n"
         ),
         "codex_dx_gate": (
-            "def solve(status, artifact):\n"
-            "    return status == 'pass' and bool(artifact)\n"
+            "def solve(status, artifact):\n    return status == 'pass' and bool(artifact)\n"
         ),
     }
     try:
@@ -747,8 +772,7 @@ def nexus_value_fixture_source(fixture_kind: str) -> tuple[str, str, str]:
             "    assert apply_events(events) == {'count': 5, 'seen': ['a', 'b']}\n",
         ),
         "nexus_value_hidden_parser": (
-            "def normalize_key(text):\n"
-            "    return text.strip().lower().replace(' ', '-')\n",
+            "def normalize_key(text):\n    return text.strip().lower().replace(' ', '-')\n",
             "from target import normalize_key\n\n"
             "def test_normalize_key_boundaries():\n"
             "    assert normalize_key('  User   Name  ') == 'user-name'\n"
@@ -777,8 +801,7 @@ def nexus_value_fixture_source(fixture_kind: str) -> tuple[str, str, str]:
             "    assert remaining_ms(100, 90, 50) == 50\n",
         ),
         "nexus_value_mempalace_secret_redaction": (
-            "def redact(record):\n"
-            "    return dict(record)\n",
+            "def redact(record):\n    return dict(record)\n",
             "from target import redact\n\n"
             "def test_redact_never_leaks_secret_fields():\n"
             "    out = redact({'user': 'ada', 'token': 'abc', 'password': 'pw', 'note': 'ok'})\n"
@@ -810,8 +833,7 @@ def nexus_value_fixture_source(fixture_kind: str) -> tuple[str, str, str]:
             "    assert verified_claims(claims) == ['a']\n",
         ),
         "nexus_value_artifact_phase_report": (
-            "def phase_ready(phase):\n"
-            "    return phase.get('status') == 'pass'\n",
+            "def phase_ready(phase):\n    return phase.get('status') == 'pass'\n",
             "from target import phase_ready\n\n"
             "def test_phase_ready_requires_evidence_and_failure_reason():\n"
             "    assert phase_ready({'status': 'pass', 'evidence': 'x.json', 'reason': ''}) is True\n"
@@ -820,9 +842,7 @@ def nexus_value_fixture_source(fixture_kind: str) -> tuple[str, str, str]:
             "    assert phase_ready({'status': 'fail', 'evidence': 'x.json', 'reason': ''}) is False\n",
         ),
         "nexus_value_context_docs_contract": (
-            "FIELD = 'status'\n\n"
-            "def build_response(value):\n"
-            "    return {FIELD: value}\n",
+            "FIELD = 'status'\n\ndef build_response(value):\n    return {FIELD: value}\n",
             "from target import build_response\n\n"
             "def test_response_uses_canonical_result_field():\n"
             "    assert build_response('ok') == {'result': 'ok'}\n",
