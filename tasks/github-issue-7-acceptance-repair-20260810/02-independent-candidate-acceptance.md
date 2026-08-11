@@ -1,18 +1,28 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: ACTIVE
 task_id: github-issue-7-m3-b-independent-acceptance
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
+owner_gate: M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE
+owner_gate_status: GRANTED
+owner_gate_granted_at: 2026-08-11
+baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 AUTO_CHAIN: false
-worker_may_commit: false
+worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
-worker_may_push: false
+worker_may_push: true
 ---
 
 # M3-B Independent Exact-Candidate Acceptance
+
+Current frontier. The Owner granted the M3-B autonomy-conditional acceptance
+receipt/approval gate (`M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE`) in the active
+Codex thread on 2026-08-11. This grant authorizes only this card's bounded
+Candidate implementation; it does not authorize approval, integration, merge,
+activation, or public claims.
 
 ## Objective
 
