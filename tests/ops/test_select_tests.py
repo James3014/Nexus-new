@@ -252,6 +252,30 @@ def test_default_impact_map_covers_new_learning_modules_without_shadowing_specif
     assert "tests/learning" not in unknown_details.targets
 
 
+def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp_path):
+    rules = load_impact_rules()
+    workforce_rule = next(
+        rule for rule in rules if rule.code_path == "nexus/config/model_workforce.yaml"
+    )
+    details = select_target_details(
+        ["nexus/config/model_workforce.yaml"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/contracts/test_model_workforce_policy.py",
+        "tests/services/test_model_workforce_policy_loader.py",
+    ]
+    assert workforce_rule.risk_reason == "workforce_policy_contract"
+    assert details.risk == "medium"
+    assert details.high_risk_escalated is False
+    assert details.fallback_used is False
+    assert details.unmatched_paths == []
+
+
 def test_select_targets_uses_fallback_when_no_paths_match():
     targets, reasons = select_targets(
         ["nexus/app/flow.py"],
