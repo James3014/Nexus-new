@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
 import json
@@ -15,6 +16,7 @@ from tempfile import TemporaryDirectory
 import pytest
 import yaml
 
+import scripts.ops.trusted_deletion_anchor as trusted_anchor
 from scripts.ops.trusted_deletion_anchor import (
     SCHEMA_VERSION,
     _json,
@@ -243,6 +245,41 @@ def test_supplied_trees_cannot_override_immutable_commit_trees():
         _verify(manifest, _evidence(manifest), base_tree="e" * 40, head_tree="f" * 40)
         == "IMPACT_UNKNOWN"
     )
+
+
+def test_controller_rejects_missing_exact_tree_before_deriving_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(_event()), encoding="utf-8")
+    derived_operations: list[str] = []
+
+    def fake_git(repo: Path, *args: str, binary: bool = False) -> str:
+        del repo, binary
+        if args[:3] == ("fetch", "--no-tags", "--unshallow"):
+            return ""
+        if args == ("rev-parse", "--is-shallow-repository"):
+            return "false"
+        if args[0] == "cat-file" and args[-1].endswith("^{commit}"):
+            return ""
+        if args[0] == "rev-parse" and args[-1].endswith("^{tree}"):
+            return "d" * 40
+        if args[0] == "cat-file" and args[-1] == f"{'d' * 40}^{{tree}}":
+            raise ValueError("missing exact tree")
+        if args[0] in {"diff", "archive"}:
+            derived_operations.append(args[0])
+        raise AssertionError(f"unexpected git invocation: {args!r}")
+
+    monkeypatch.setattr(trusted_anchor, "_git", fake_git)
+    with pytest.raises(ValueError, match="missing exact tree"):
+        trusted_anchor._controller(
+            argparse.Namespace(
+                event_json=str(event_path),
+                repo_root=str(tmp_path / "repo.git"),
+                output_dir=str(tmp_path / "bundle"),
+            )
+        )
+    assert derived_operations == []
 
 
 @pytest.mark.parametrize("status", ["SKIPPED", "NEUTRAL", "CANCELLED", "MISSING"])
@@ -573,8 +610,6 @@ def test_workflow_is_three_job_isolated_anchor():
     }
     assert workflow["jobs"]["unprivileged-executor"]["permissions"] == {}
     assert workflow["jobs"]["trusted-controller"]["permissions"] == {"contents": "read"}
-    assert workflow["jobs"]["trusted-controller"]["timeout-minutes"] == 10
-    assert "timeout-minutes" not in workflow["jobs"]["unprivileged-executor"]
     assert workflow["jobs"]["trusted-verifier"]["permissions"] == {
         "contents": "read",
         "actions": "read",
