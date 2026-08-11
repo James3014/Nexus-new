@@ -31,6 +31,19 @@ jobs:
           set -euo pipefail
           bare_repo="$RUNNER_TEMP/trusted-controller.git"
           trusted_dir="$RUNNER_TEMP/trusted-controller-source"
+          cleanup_on_exit() {
+            status=$?
+            trap - EXIT INT TERM
+            if [ "$status" -ne 0 ]; then
+              rm -rf -- "$bare_repo" "$trusted_dir"
+              test ! -e "$bare_repo"
+              test ! -e "$trusted_dir"
+            fi
+            exit "$status"
+          }
+          trap cleanup_on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
           workflow_path='.github/workflows/trusted-deletion-anchor.yml'
           test "$EVENT_NAME" = pull_request_target
           test "$REPOSITORY" = James3014/Nexus-new
@@ -39,7 +52,8 @@ jobs:
           test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
           git init --bare "$bare_repo"
           git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
-          git -C "$bare_repo" -c "http.extraheader=Authorization: bearer $TRUSTED_TOKEN" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: bearer $TRUSTED_TOKEN" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
           test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
           test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
           commit_identity="$(git -C "$bare_repo" cat-file commit "$WORKFLOW_SHA")"
@@ -49,22 +63,23 @@ jobs:
           tree_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$workflow_path")"
           test "$tree_entry" = "100644 blob $(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$workflow_path")	$workflow_path"
           blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$workflow_path")"
-          mkdir -p "$trusted_dir"
-          trusted_script="$trusted_dir/trusted_deletion_anchor.py"
           test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$workflow_path")" = blob
-          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:scripts/ops/trusted_deletion_anchor.py" > "$trusted_script"
           script_path='scripts/ops/trusted_deletion_anchor.py'
           script_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$script_path")"
           test "$script_entry" = "100644 blob $(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$script_path")	$script_path"
           script_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$script_path")"
           test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$script_path")" = blob
+          mkdir -p "$trusted_dir"
+          trusted_script="$trusted_dir/trusted_deletion_anchor.py"
+          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:$script_path" > "$trusted_script"
           test "$(stat -c '%a' "$trusted_script" 2>/dev/null || stat -f '%Lp' "$trusted_script")" = 644
+          test "$(git hash-object "$trusted_script")" = "$script_blob_id"
           script_sha256="$(sha256sum "$trusted_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_script" | cut -d' ' -f1)"
           printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
           test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: bearer $TRUSTED_TOKEN"
           python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/anchor-event.json", "w"))'
-          python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: bearer $TRUSTED_TOKEN" \
+            python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor"
       - name: Publish fixed external anchor
         id: external-anchor
         run: |
@@ -82,9 +97,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          test ! -e "$RUNNER_TEMP/trusted-controller.git/config.lock"
-          test ! -e "$RUNNER_TEMP/trusted-controller.git/config" || ! grep -Eiq 'token|authorization|extraheader|credential' "$RUNNER_TEMP/trusted-controller.git/config"
-          rm -rf "$RUNNER_TEMP/trusted-controller.git" "$RUNNER_TEMP/trusted-controller-source"
+          rm -rf -- "$RUNNER_TEMP/trusted-controller.git" "$RUNNER_TEMP/trusted-controller-source"
           test ! -e "$RUNNER_TEMP/trusted-controller.git"
           test ! -e "$RUNNER_TEMP/trusted-controller-source"
 
@@ -103,7 +116,8 @@ jobs:
       - name: Execute only the hash-bound bundle
         run: |
           set -euo pipefail
-          python "${RUNNER_TEMP}/trusted-anchor/trusted_deletion_anchor.py" executor --bundle-dir "$RUNNER_TEMP/trusted-anchor"
+          python "${RUNNER_TEMP}/trusted-anchor/trusted_deletion_anchor.py" executor \
+            --bundle-dir "$RUNNER_TEMP/trusted-anchor"
       - name: Upload fixed-schema raw evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -134,6 +148,19 @@ jobs:
           set -euo pipefail
           bare_repo="$RUNNER_TEMP/trusted-verifier.git"
           trusted_dir="$RUNNER_TEMP/trusted-verifier-source"
+          cleanup_on_exit() {
+            status=$?
+            trap - EXIT INT TERM
+            if [ "$status" -ne 0 ]; then
+              rm -rf -- "$bare_repo" "$trusted_dir"
+              test ! -e "$bare_repo"
+              test ! -e "$trusted_dir"
+            fi
+            exit "$status"
+          }
+          trap cleanup_on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
           workflow_path='.github/workflows/trusted-deletion-anchor.yml'
           script_path='scripts/ops/trusted_deletion_anchor.py'
           test "$EVENT_NAME" = pull_request_target
@@ -143,7 +170,8 @@ jobs:
           test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
           git init --bare "$bare_repo"
           git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
-          git -C "$bare_repo" -c "http.extraheader=Authorization: bearer $TRUSTED_TOKEN" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: bearer $TRUSTED_TOKEN" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
           test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
           test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
           commit_identity="$(git -C "$bare_repo" cat-file commit "$WORKFLOW_SHA")"
@@ -193,8 +221,6 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          test ! -e "$RUNNER_TEMP/trusted-verifier.git/config.lock"
-          test ! -e "$RUNNER_TEMP/trusted-verifier.git/config" || ! grep -Eiq 'token|authorization|extraheader|credential' "$RUNNER_TEMP/trusted-verifier.git/config"
-          rm -rf "$RUNNER_TEMP/trusted-verifier.git" "$RUNNER_TEMP/trusted-verifier-source"
+          rm -rf -- "$RUNNER_TEMP/trusted-verifier.git" "$RUNNER_TEMP/trusted-verifier-source"
           test ! -e "$RUNNER_TEMP/trusted-verifier.git"
           test ! -e "$RUNNER_TEMP/trusted-verifier-source"

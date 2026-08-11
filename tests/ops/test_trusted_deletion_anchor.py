@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +23,19 @@ from scripts.ops.trusted_deletion_anchor import (
 
 ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github/workflows/trusted-deletion-anchor.yml"
+
+
+def _workflow() -> dict[str, object]:
+    return yaml.safe_load(WORKFLOW.read_text())
+
+
+def _named_step(job_name: str, step_name: str) -> dict[str, object]:
+    workflow = _workflow()
+    return next(
+        step
+        for step in workflow["jobs"][job_name]["steps"]  # type: ignore[index]
+        if step.get("name") == step_name
+    )
 
 
 def _event() -> dict[str, object]:
@@ -83,6 +100,112 @@ def _run_git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def _trusted_origin(
+    root: Path, *, script_object: str = "blob", hostile_head: bool = False
+) -> tuple[Path, str, str, Path]:
+    source = root / "trusted-source"
+    origin = root / "origin.git"
+    marker = root / "head-code-executed"
+    subprocess.run(["git", "init", str(source)], check=True, capture_output=True)
+    _run_git(source, "config", "user.email", "test@example.invalid")
+    _run_git(source, "config", "user.name", "trusted-source-test")
+    workflow_path = source / ".github/workflows/trusted-deletion-anchor.yml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text("name: trusted source fixture\n", encoding="utf-8")
+    script_path = source / "scripts/ops/trusted_deletion_anchor.py"
+    script_path.parent.mkdir(parents=True)
+    if script_object == "tree":
+        script_path.mkdir()
+        (script_path / "payload.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
+    else:
+        script_path.write_bytes((ROOT / "scripts/ops/trusted_deletion_anchor.py").read_bytes())
+        if script_object == "executable":
+            script_path.chmod(0o755)
+        elif script_object == "symlink":
+            script_path.unlink()
+            script_path.symlink_to("hostile-target.py")
+    test_path = source / "tests/ops/test_pr_impact_gate.py"
+    test_path.parent.mkdir(parents=True)
+    test_path.write_text("def test_fixture():\n    assert True\n", encoding="utf-8")
+    hostile_path = source / "scripts/ops/$(touch hostile-path-executed)"
+    hostile_path.write_text("data only\n", encoding="utf-8")
+    _run_git(source, "add", ".")
+    _run_git(source, "commit", "-m", "trusted workflow source")
+    workflow_sha = _run_git(source, "rev-parse", "HEAD")
+    subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+    _run_git(source, "remote", "add", "origin", str(origin))
+    _run_git(source, "push", "origin", f"{workflow_sha}:refs/heads/main")
+    head_sha = workflow_sha
+    if hostile_head and script_object == "blob":
+        script_path.write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n",
+            encoding="utf-8",
+        )
+        _run_git(source, "commit", "-am", "hostile head code")
+        head_sha = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "push", "origin", f"{head_sha}:refs/heads/hostile-head")
+    return origin, workflow_sha, head_sha, marker
+
+
+def _git_logging_path(root: Path) -> tuple[str, Path]:
+    real_git = shutil.which("git")
+    assert real_git
+    bin_dir = root / "bin"
+    bin_dir.mkdir()
+    argv_log = root / "git-argv.bin"
+    wrapper = bin_dir / "git"
+    wrapper.write_text(
+        '#!/bin/sh\nprintf "%s\\0" "$@" >> "$ARGV_LOG"\nexec "$REAL_GIT" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    return (
+        f"{bin_dir}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+        argv_log,
+    )
+
+
+def _acquisition_environment(
+    run_root: Path, workflow_sha: str, head_sha: str, *, token: str = "token-must-not-be-argv"
+) -> dict[str, str]:
+    event = _event()
+    event["workflow_sha"] = workflow_sha
+    event["pull_request"]["base"]["sha"] = workflow_sha  # type: ignore[index]
+    event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+    path, argv_log = _git_logging_path(run_root)
+    return {
+        **os.environ,
+        "ARGV_LOG": str(argv_log),
+        "REAL_GIT": shutil.which("git") or "git",
+        "PATH": path,
+        "RUNNER_TEMP": str(run_root),
+        "EVENT_JSON": json.dumps(event),
+        "EVENT_NAME": "pull_request_target",
+        "WORKFLOW_REF": event["workflow_ref"],
+        "WORKFLOW_SHA": workflow_sha,
+        "RUN_ID": str(event["run_id"]),
+        "REPOSITORY": event["repository"]["full_name"],
+        "DEFAULT_BRANCH": event["repository"]["default_branch"],
+        "TRUSTED_TOKEN": token,
+    }
+
+
+def _local_acquisition_run(job_name: str, origin: Path) -> str:
+    step_name = (
+        "Acquire and execute exact trusted controller source"
+        if job_name == "trusted-controller"
+        else "Acquire exact trusted verifier source"
+    )
+    run = _named_step(job_name, step_name)["run"]
+    return run.replace('"https://github.com/$REPOSITORY.git"', shlex.quote(str(origin)))
+
+
+def _job_block(text: str, job_name: str, next_job_name: str) -> str:
+    start = text.index(f"  {job_name}:\n")
+    end = text.index(f"  {next_job_name}:\n", start)
+    return text[start:end]
 
 
 def test_valid_fixed_schema_evidence_is_accepted():
@@ -203,6 +326,14 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
             anchor["manifest_sha256"]
             == hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest()
         )
+        clone = root / "bundle-clone.git"
+        subprocess.run(["git", "init", "--bare", str(clone)], check=True, capture_output=True)
+        for ref, revision in (
+            ("refs/trusted-anchor/base", base_sha),
+            ("refs/trusted-anchor/head", head_sha),
+        ):
+            _run_git(clone, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
+            assert _run_git(clone, "rev-parse", f"{ref}^{{commit}}") == revision
         subprocess.run(
             [
                 sys.executable,
@@ -253,6 +384,24 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
             text=True,
         )
         assert '"status": "PASS"' in verified.stdout
+        evidence_path = bundle / "raw-evidence.json"
+        original_evidence = evidence_path.read_bytes()
+        head_tree_tamper = json.loads(original_evidence)
+        head_tree_tamper["head_tree"] = "0" * 40 if manifest["head_tree"] != "0" * 40 else "1" * 40
+        evidence_path.write_bytes(_json(head_tree_tamper) + b"\n")
+        head_tree_rejected = subprocess.run(
+            [
+                sys.executable,
+                "scripts/ops/trusted_deletion_anchor.py",
+                "verifier",
+                "--bundle-dir",
+                str(bundle),
+                *expected,
+            ],
+            capture_output=True,
+        )
+        assert head_tree_rejected.returncode != 0
+        evidence_path.write_bytes(original_evidence)
         tampered = dict(manifest)
         tampered["head_sha"] = "d" * 40
         (bundle / "manifest.json").write_bytes(_json(tampered) + b"\n")
@@ -273,7 +422,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
 
 
 def test_workflow_is_three_job_isolated_anchor():
-    workflow = yaml.safe_load(WORKFLOW.read_text())
+    workflow = _workflow()
     trigger = workflow.get("on", workflow.get(True))
     assert "pull_request_target" in trigger
     assert workflow["permissions"] == {}
@@ -295,12 +444,29 @@ def test_workflow_is_three_job_isolated_anchor():
                 "actions/upload-artifact@",
                 "actions/download-artifact@",
             )):
-                assert len(step["uses"].split("@", 1)[1].split()[0]) == 40
+                pin = step["uses"].split("@", 1)[1].split()[0]
+                assert re.fullmatch(r"[0-9a-f]{40}", pin)
     assert "--verify-evidence" in next(
         step["run"]
         for step in workflow["jobs"]["trusted-verifier"]["steps"]
         if step.get("name") == "Verify fixed schema and recomputed digests"
     )
+
+
+def test_executor_workflow_block_is_byte_equivalent_to_setup_baseline():
+    baseline = subprocess.run(
+        [
+            "git",
+            "show",
+            "49c1495d2bc131831d388acb77f098f02c3feb64:.github/workflows/trusted-deletion-anchor.yml",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert _job_block(
+        WORKFLOW.read_text(), "unprivileged-executor", "trusted-verifier"
+    ) == _job_block(baseline, "unprivileged-executor", "trusted-verifier")
 
 
 def test_trusted_jobs_use_bare_exact_sha_and_allowlisted_regular_blob():
@@ -322,24 +488,167 @@ def test_trusted_jobs_use_bare_exact_sha_and_allowlisted_regular_blob():
 
 
 def test_trusted_source_identity_and_token_isolation_are_fail_closed():
-    workflow = yaml.safe_load(WORKFLOW.read_text())
+    workflow = _workflow()
     text = WORKFLOW.read_text().lower()
     assert "https://github.com/$repository.git" in text
-    assert "http.extraheader=authorization: bearer $trusted_token" in text
+    assert "git_config_key_0=http.extraheader" in text
+    assert 'git_config_value_0="authorization: bearer $trusted_token"' in text
     assert "persist-credentials" not in text
     assert "credential.helper" not in text
     assert "github.token" in text
     assert "permissions: {}" in text
+    assert not re.search(r"\bgit\b[^\n]*\s-c\s[^\n]*\$trusted_token", text)
+    assert not re.search(r"\bgit\b[^\n]*(?:authorization|token)[^\n]*\$trusted_token", text)
+    assert "env git" not in text
+    assert "env python" not in text
     for job_name in ("trusted-controller", "trusted-verifier"):
         steps = workflow["jobs"][job_name]["steps"]
         cleanup = [step for step in steps if step.get("if") == "always()"]
         assert cleanup and steps[-1] is cleanup[-1]
-        assert "rm -rf" in cleanup[-1]["run"]
-        assert "config" in cleanup[-1]["run"]
+        cleanup_lines = [line.strip() for line in cleanup[-1]["run"].splitlines()]
+        remove_index = next(
+            index for index, line in enumerate(cleanup_lines) if line.startswith("rm -rf")
+        )
+        prove_indexes = [
+            index for index, line in enumerate(cleanup_lines) if line.startswith("test ! -e")
+        ]
+        assert prove_indexes and remove_index < min(prove_indexes)
+        acquisition = steps[0]["run"]
+        assert "trap cleanup_on_exit EXIT" in acquisition
+        assert "trap 'exit 130' INT" in acquisition
+        assert "trap 'exit 143' TERM" in acquisition
     executor = str(workflow["jobs"]["unprivileged-executor"]).lower()
     assert "secrets" not in executor
     assert "cache" not in executor
     assert "token" not in executor
+
+
+@pytest.mark.parametrize("job_name", ["trusted-controller", "trusted-verifier"])
+def test_cleanup_shell_deletes_lock_and_credential_residue_before_proving_absence(
+    job_name: str, tmp_path: Path
+):
+    prefix = "trusted-controller" if job_name == "trusted-controller" else "trusted-verifier"
+    bare_repo = tmp_path / f"{prefix}.git"
+    trusted_dir = tmp_path / f"{prefix}-source"
+    bare_repo.mkdir()
+    trusted_dir.mkdir()
+    (bare_repo / "config.lock").write_text("stale lock\n")
+    (bare_repo / "config").write_text("http.extraheader=Authorization: bearer secret\n")
+    (trusted_dir / "token-file").write_text("ghs_secret\n")
+    cleanup = _named_step(
+        job_name,
+        f"Cleanup trusted {'controller' if job_name == 'trusted-controller' else 'verifier'} source",
+    )
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", cleanup["run"]],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not bare_repo.exists()
+    assert not trusted_dir.exists()
+
+
+@pytest.mark.parametrize("job_name", ["trusted-controller", "trusted-verifier"])
+def test_no_checkout_acquisition_shell_executes_only_exact_trusted_blob(
+    job_name: str, tmp_path: Path
+):
+    origin, workflow_sha, head_sha, marker = _trusted_origin(tmp_path, hostile_head=True)
+    run_root = tmp_path / f"run-{job_name}"
+    run_root.mkdir()
+    token = "token-must-not-be-argv"
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", _local_acquisition_run(job_name, origin)],
+        env=_acquisition_environment(run_root, workflow_sha, head_sha, token=token),
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert token not in completed.stdout
+    assert token not in completed.stderr
+    assert token.encode() not in (run_root / "git-argv.bin").read_bytes()
+    assert not marker.exists()
+    assert not (run_root / "hostile-path-executed").exists()
+    prefix = "trusted-controller" if job_name == "trusted-controller" else "trusted-verifier"
+    receipt = (run_root / f"{prefix}-source/trusted-source.receipt").read_text()
+    assert f"commit={workflow_sha}" in receipt
+    assert "path=scripts/ops/trusted_deletion_anchor.py" in receipt
+    assert re.search(r"(?m)^blob=[0-9a-f]{40}$", receipt)
+    assert re.search(r"(?m)^sha256=[0-9a-f]{64}$", receipt)
+    assert token not in receipt
+    if job_name == "trusted-controller":
+        assert (run_root / "trusted-anchor/manifest.json").is_file()
+
+
+@pytest.mark.parametrize("script_object", ["executable", "symlink", "tree"])
+def test_acquisition_shell_rejects_non_regular_or_wrong_mode_source(
+    script_object: str, tmp_path: Path
+):
+    origin, workflow_sha, head_sha, _ = _trusted_origin(tmp_path, script_object=script_object)
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    completed = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            _local_acquisition_run("trusted-verifier", origin),
+        ],
+        env=_acquisition_environment(run_root, workflow_sha, head_sha),
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not (run_root / "trusted-verifier.git").exists()
+    assert not (run_root / "trusted-verifier-source").exists()
+
+
+def test_acquisition_shell_rejects_wrong_workflow_sha_and_cleans_up(tmp_path: Path):
+    origin, _, head_sha, _ = _trusted_origin(tmp_path)
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    wrong_sha = "f" * 40
+    completed = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            _local_acquisition_run("trusted-verifier", origin),
+        ],
+        env=_acquisition_environment(run_root, wrong_sha, head_sha),
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not (run_root / "trusted-verifier.git").exists()
+    assert not (run_root / "trusted-verifier-source").exists()
+
+
+@pytest.mark.parametrize("interruption", ["false", "kill -TERM $$"])
+def test_acquisition_trap_removes_config_lock_on_failure_or_signal(
+    interruption: str, tmp_path: Path
+):
+    origin, workflow_sha, head_sha, _ = _trusted_origin(tmp_path)
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    run = _local_acquisition_run("trusted-verifier", origin)
+    remote_line = f'git -C "$bare_repo" remote add origin {shlex.quote(str(origin))}'
+    run = run.replace(
+        remote_line,
+        f'{remote_line}\ntouch "$bare_repo/config.lock"\n{interruption}',
+    )
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env=_acquisition_environment(run_root, workflow_sha, head_sha),
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not (run_root / "trusted-verifier.git").exists()
+    assert not (run_root / "trusted-verifier-source").exists()
 
 
 def test_trusted_jobs_never_execute_head_code_or_materialize_a_worktree():
