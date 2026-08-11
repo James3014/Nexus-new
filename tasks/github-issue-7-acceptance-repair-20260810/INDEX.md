@@ -5,7 +5,7 @@ status: active
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 baseline_main: 599227f0efbe1e9a4ca8cd6bff56824f0a6d9965
-reconciled_main: 70fd467ab0d29f4373616a5e98d85b014efcd4de
+reconciled_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 rebind_owner_directive: https://github.com/James3014/Nexus-new/issues/7#issuecomment-5250252765
 rebind_date: 2026-08-11
 ordered_cards:
@@ -14,7 +14,7 @@ ordered_cards:
   - 03-bounded-repair-attempts.md
   - 04-ordered-attempt-events-and-e2e.md
 current_frontier: 02-independent-candidate-acceptance.md
-frontier_status: BLOCKED_OWNER_GATE
+frontier_status: ACTIVE
 completed_cards:
   - 01-canonical-planner-dispatch-binding.md
 blocked_cards: []
@@ -46,11 +46,10 @@ M3-A completed on main via PR #81: head
 `c68379ea98e090c22847669fbefc50ada6335157`, merged as
 `41e5ee06eeecb4abd7df7c15c36af13142a1da56` on 2026-08-11.
 
-Current frontier M3-B (`02-independent-candidate-acceptance.md`) is
-`BLOCKED_OWNER_GATE`: implementation starts only after the Owner approves the
-M3-B autonomy-conditional acceptance receipt/approval gate
-(`M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE`). The block is carried by
-`frontier_status`, so M3-B is not moved into `blocked_cards`.
+Current frontier M3-B (`02-independent-candidate-acceptance.md`) is `ACTIVE`.
+The Owner granted `M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE` in the active Codex
+thread on 2026-08-11, after PR #149 physically merged as
+`9dddd018ad2761face3d2f3ce29dff8d8feae72d`.
 
-`AUTO_CHAIN=false`; all worker mutation/commit/push/approval/integration
-permissions remain false.
+`AUTO_CHAIN=false`; scoped worker mutation, commit, and issue-branch push are
+allowed by the active card. Approval, integration, and merge remain separate.
