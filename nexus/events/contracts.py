@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 
-from typing import Any, Dict
 import time
-from dataclasses import dataclass, field, asdict
-
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict
 
 PHASE_OBSERVER_HOOKS = frozenset(
     {
