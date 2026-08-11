@@ -5,7 +5,7 @@ status: ACTIVE
 task_id: github-issue-150-skill-descriptor-impact-map
 campaign_id: github-issue-150-skill-descriptor-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/150
-baseline_main: 70fd467ab0d29f4373616a5e98d85b014efcd4de
+baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_approve: false
@@ -27,7 +27,7 @@ tests.
 ## Dependencies and sequencing
 
 - Exact GitHub main at dispatch:
-  `70fd467ab0d29f4373616a5e98d85b014efcd4de`.
+  `9dddd018ad2761face3d2f3ce29dff8d8feae72d`.
 - This mapping Candidate must physically merge before PR #138 rebases or
   normal-merges fresh main and reruns exact-base impact.
 - No file from PR #138 belongs to this card.
@@ -45,6 +45,9 @@ authorization artifacts outside that ceiling.
 
 - Scan the actual repository `.agents/skills/**/SKILL.md` inventory and any
   sibling `agents/openai.yaml` descriptors.
+- Within each skill directory, admit the existing descriptor support layouts
+  `references/`, `scripts/`, and `agents/`; any other unexpected layout fails
+  closed.
 - Require SKILL frontmatter delimiters and non-empty `name` and `description`;
   reject malformed YAML, invalid field types, and path/name mismatch.
 - For `agents/openai.yaml`, require `interface.display_name`,
@@ -69,7 +72,8 @@ authorization artifacts outside that ceiling.
 - Focused artifact and selector tests pass.
 - Catalog/schema/CI trust target tests pass.
 - Selector JSON for both descriptor path forms reports `fallback_used=false`,
-  `unmatched_paths=[]`, high risk, and the declared targets.
+  `unmatched_paths=[]`, high risk, the four declared targets, and the existing
+  automatic high-risk `tests/services/test_policy_gate.py` escalation target.
 - Ruff and compileall pass for changed Python tests.
 - `git diff --check` and exact allowed-file/deletion audit pass.
 
