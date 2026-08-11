@@ -264,9 +264,9 @@ def _create_git_bundle(repo: Path, output: Path, base_sha: str, head_sha: str) -
 def _controller(args: argparse.Namespace) -> None:
     event = json.loads(Path(args.event_json).read_text(encoding="utf-8"))
     repo = Path(args.repo_root)
-    head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
-    _git(repo, "fetch", "--no-tags", "--depth=1", "origin", head_sha)
     base_sha = _exact_sha(_event_value(event, "pull_request", "base", "sha"), "base_sha")
+    head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
+    _git(repo, "fetch", "--no-tags", "origin", base_sha, head_sha)
     for revision in (base_sha, head_sha):
         _git(repo, "cat-file", "-e", f"{revision}^{{commit}}")
     raw_diff = _git(repo, "diff", "--raw", "-z", "--no-renames", base_sha, head_sha, binary=True)

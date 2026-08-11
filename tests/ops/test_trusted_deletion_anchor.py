@@ -445,6 +445,112 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         )
 
 
+def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
+    with TemporaryDirectory(prefix="trusted-anchor-shallow-merge-") as directory:
+        root = Path(directory)
+        source = root / "source"
+        origin = root / "origin.git"
+        shallow = root / "shallow"
+        controller_repo = root / "controller-repo"
+        subprocess.run(["git", "init", str(source)], check=True, capture_output=True)
+        _run_git(source, "config", "user.email", "test@example.invalid")
+        _run_git(source, "config", "user.name", "trusted-anchor-shallow-test")
+        test_path = source / "tests/ops/test_pr_impact_gate.py"
+        test_path.parent.mkdir(parents=True)
+        test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
+        _run_git(source, "add", "tests/ops/test_pr_impact_gate.py")
+        _run_git(source, "commit", "-m", "base")
+        base_sha = _run_git(source, "rev-parse", "HEAD")
+        subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        _run_git(source, "remote", "add", "origin", str(origin))
+        _run_git(source, "push", "origin", f"{base_sha}:refs/heads/main")
+
+        _run_git(source, "switch", "-c", "feature")
+        (source / "feature.txt").write_text("feature\n", encoding="utf-8")
+        _run_git(source, "add", "feature.txt")
+        _run_git(source, "commit", "-m", "feature")
+        feature_sha = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "switch", "main")
+        _run_git(source, "merge", "--no-ff", feature_sha, "-m", "merge head")
+        head_sha = _run_git(source, "rev-parse", "HEAD")
+
+        subprocess.run(
+            ["git", "clone", "--branch", "main", f"file://{origin}", str(shallow)],
+            check=True,
+            capture_output=True,
+        )
+        _run_git(source, "push", "origin", f"{head_sha}:refs/heads/merge-head")
+        subprocess.run(
+            ["git", "-C", str(shallow), "fetch", "--no-tags", "--depth=1", "origin", head_sha],
+            check=True,
+            capture_output=True,
+        )
+        shallow_feature = subprocess.run(
+            ["git", "-C", str(shallow), "cat-file", "-e", f"{feature_sha}^{{commit}}"],
+            capture_output=True,
+        )
+        assert shallow_feature.returncode != 0
+        shallow_bundle = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(shallow),
+                "bundle",
+                "create",
+                str(root / "shallow.bundle"),
+                base_sha,
+                head_sha,
+            ],
+            capture_output=True,
+        )
+        boundary = subprocess.run(
+            ["git", "-C", str(shallow), "rev-list", "--boundary", base_sha, head_sha],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert shallow_bundle.returncode != 0 or any(line.startswith("-") for line in boundary)
+        subprocess.run(
+            ["git", "clone", "--branch", "main", f"file://{origin}", str(controller_repo)],
+            check=True,
+            capture_output=True,
+        )
+
+        event = _event()
+        event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
+        event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+        event_path = root / "event.json"
+        event_path.write_bytes(_json(event))
+        bundle = root / "bundle"
+        subprocess.run(
+            [
+                sys.executable,
+                "scripts/ops/trusted_deletion_anchor.py",
+                "controller",
+                "--event-json",
+                str(event_path),
+                "--repo-root",
+                str(controller_repo),
+                "--output-dir",
+                str(bundle),
+            ],
+            check=True,
+        )
+        assert _run_git(controller_repo, "cat-file", "-e", f"{base_sha}^{{commit}}") == ""
+        assert _run_git(controller_repo, "cat-file", "-e", f"{head_sha}^{{commit}}") == ""
+        clone = root / "bundle-clone.git"
+        subprocess.run(["git", "init", "--bare", str(clone)], check=True, capture_output=True)
+        for ref, revision in (
+            ("refs/trusted-anchor/base", base_sha),
+            ("refs/trusted-anchor/head", head_sha),
+        ):
+            _run_git(clone, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
+            assert _run_git(clone, "rev-parse", f"{ref}^{{commit}}") == revision
+            assert _run_git(clone, "rev-parse", f"{ref}^{{tree}}") == _run_git(
+                controller_repo, "rev-parse", f"{revision}^{{tree}}"
+            )
+
+
 def test_workflow_is_three_job_isolated_anchor():
     workflow = _workflow()
     trigger = workflow.get("on", workflow.get(True))
