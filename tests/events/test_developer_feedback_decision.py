@@ -211,32 +211,48 @@ def test_fsync_uncertainty_does_not_claim_success(tmp_path: Path, monkeypatch):
         store.append(decision())
 
 
-def _subprocess_append(root: str, decision_id: str, queue) -> None:
+def _subprocess_append(root: str, decision_id: str, task_id: str, queue) -> None:
     store = DeveloperFeedbackDecisionStore(Path(root))
-    queue.put(store.append(decision(decision_id))["sequence"])
+    value = DeveloperFeedbackDecision(
+        task_id=task_id, decision_id=decision_id, decision=FeedbackDecision.KEEP
+    )
+    queue.put(store.append(value)["sequence"])
 
 
 def test_subprocess_same_and_different_task_contention(tmp_path: Path):
     queue = multiprocessing.Queue()
     processes = [
-        multiprocessing.Process(target=_subprocess_append, args=(str(tmp_path), f"d{i}", queue))
+        multiprocessing.Process(
+            target=_subprocess_append,
+            args=(str(tmp_path), f"d{i}", "task-1" if i == 0 else "task-2", queue),
+        )
         for i in range(2)
     ]
     for process in processes:
         process.start()
     for process in processes:
         process.join(timeout=5)
-    assert sorted(queue.get(timeout=1) for _ in processes) == [1, 2]
+    assert sorted(queue.get(timeout=1) for _ in processes) == [1, 1]
 
 
 def test_observer_failure_is_post_commit(tmp_path: Path):
-    NexusEventBus.configure(tmp_path)
-    NexusEventBus.subscribe(
-        "developer_feedback_decision", lambda _: (_ for _ in ()).throw(RuntimeError("observer"))
-    )
-    NexusEventBus.set_remote_broadcaster(lambda *_: (_ for _ in ()).throw(RuntimeError("remote")))
-    record = NexusEventBus.emit_developer_feedback_decision(decision("observer"))
-    assert DeveloperFeedbackDecisionStore(tmp_path).read_recent() == [record]
+    old_subscribers = NexusEventBus._subscribers
+    old_broadcaster = NexusEventBus._remote_broadcaster
+    try:
+        NexusEventBus.configure(tmp_path)
+        NexusEventBus._subscribers = {}
+        NexusEventBus.subscribe(
+            "developer_feedback_decision",
+            lambda _: (_ for _ in ()).throw(RuntimeError("observer")),
+        )
+        NexusEventBus.set_remote_broadcaster(
+            lambda *_: (_ for _ in ()).throw(RuntimeError("remote"))
+        )
+        record = NexusEventBus.emit_developer_feedback_decision(decision("observer"))
+        assert DeveloperFeedbackDecisionStore(tmp_path).read_recent() == [record]
+    finally:
+        NexusEventBus._subscribers = old_subscribers
+        NexusEventBus._remote_broadcaster = old_broadcaster
 
 
 def test_record_ceiling_fails_closed(tmp_path: Path):
