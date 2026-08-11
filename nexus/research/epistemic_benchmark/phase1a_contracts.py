@@ -69,7 +69,9 @@ def _canonical_normalize(obj: Any) -> Any:
         return obj.value
     if isinstance(obj, dict):
         return {str(k): _canonical_normalize(v) for k, v in sorted(obj.items())}
-    if isinstance(obj, (list, tuple, set)):
+    if isinstance(obj, (set, frozenset)):
+        raise TypeError("unordered set/frozenset is not permitted in Phase 1A fingerprint input")
+    if isinstance(obj, (list, tuple)):
         return [_canonical_normalize(x) for x in obj]
     return obj
 
@@ -177,6 +179,19 @@ class Phase1AArmIdentity:
             raise ValueError(f"Required field '{name}' cannot be empty or whitespace")
 
     @staticmethod
+    def _reject_unordered_containers(name: str, value: Any, path: str = "") -> None:
+        if isinstance(value, (set, frozenset)):
+            raise ValueError(
+                f"Required container field '{name}{path}' cannot contain unordered set/frozenset"
+            )
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                Phase1AArmIdentity._reject_unordered_containers(name, nested, f"{path}[{key!r}]")
+        elif isinstance(value, (list, tuple)):
+            for index, nested in enumerate(value):
+                Phase1AArmIdentity._reject_unordered_containers(name, nested, f"{path}[{index}]")
+
+    @staticmethod
     def _validate_container_field(name: str, value: Any) -> None:
         if value is None:
             raise ValueError(f"Required container field '{name}' cannot be None")
@@ -186,6 +201,7 @@ class Phase1AArmIdentity:
             raise ValueError(
                 f"Required container field '{name}' must be {allowed_names}, got {type(value).__name__}"
             )
+        Phase1AArmIdentity._reject_unordered_containers(name, value)
         if len(value) == 0:
             raise ValueError(f"Required container field '{name}' cannot be empty")
 
