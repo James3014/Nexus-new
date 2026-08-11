@@ -329,7 +329,7 @@ def _executor(args: argparse.Namespace) -> None:
     source = bundle / "source"
     source.mkdir()
     with tarfile.open(bundle / "source.tar") as archive:
-        archive.extractall(source, filter="data")
+        archive.extractall(source, filter=_executor_archive_filter)
     result = subprocess.run(
         [sys.executable, "-m", "pytest", *manifest["test_inventory"], "-q"], cwd=source
     )
@@ -342,6 +342,15 @@ def _executor(args: argparse.Namespace) -> None:
     }
     (bundle / "raw-evidence.json").write_bytes(_json(evidence) + b"\n")
     raise SystemExit(result.returncode)
+
+
+def _executor_archive_filter(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo | None:
+    """Skip irrelevant external links while retaining the data filter."""
+
+    try:
+        return tarfile.data_filter(member, destination)
+    except (tarfile.AbsoluteLinkError, tarfile.LinkOutsideDestinationError):
+        return None
 
 
 def _verifier(args: argparse.Namespace) -> None:
