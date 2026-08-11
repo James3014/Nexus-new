@@ -178,6 +178,14 @@ class LedgerRecord:
     resolved_model: str = ""
     model_resolution_source: str = ""
     model_alias_applied: bool = False
+    ollama_total_duration: int | None = None
+    ollama_load_duration: int | None = None
+    ollama_prompt_eval_count: int | None = None
+    ollama_prompt_eval_duration: int | None = None
+    ollama_eval_count: int | None = None
+    ollama_eval_duration: int | None = None
+    ollama_done_reason: str | None = None
+    ollama_metrics_available: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -196,6 +204,14 @@ class LedgerRecord:
             "resolved_model": self.resolved_model,
             "model_resolution_source": self.model_resolution_source,
             "model_alias_applied": self.model_alias_applied,
+            "ollama_total_duration": self.ollama_total_duration,
+            "ollama_load_duration": self.ollama_load_duration,
+            "ollama_prompt_eval_count": self.ollama_prompt_eval_count,
+            "ollama_prompt_eval_duration": self.ollama_prompt_eval_duration,
+            "ollama_eval_count": self.ollama_eval_count,
+            "ollama_eval_duration": self.ollama_eval_duration,
+            "ollama_done_reason": self.ollama_done_reason,
+            "ollama_metrics_available": self.ollama_metrics_available,
         }
 
 
@@ -269,6 +285,44 @@ class RecordingLocalModelProvider(LocalModelProvider):
                 resolved_model=resolution.resolved_name or model_str,
                 model_resolution_source=resolution.resolution_source,
                 model_alias_applied=resolution.alias_applied,
+                ollama_total_duration=(
+                    resp.ollama_total_duration
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_load_duration=(
+                    resp.ollama_load_duration
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_prompt_eval_count=(
+                    resp.ollama_prompt_eval_count
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_prompt_eval_duration=(
+                    resp.ollama_prompt_eval_duration
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_eval_count=(
+                    resp.ollama_eval_count
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_eval_duration=(
+                    resp.ollama_eval_duration
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_done_reason=(
+                    resp.ollama_done_reason
+                    if resp is not None and resp.ollama_metrics_available
+                    else None
+                ),
+                ollama_metrics_available=bool(
+                    resp is not None and resp.ollama_metrics_available
+                ),
             )
             self.ledger.append(record)
 
