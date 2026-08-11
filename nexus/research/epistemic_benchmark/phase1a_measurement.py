@@ -219,8 +219,7 @@ def build_admissible_observation_set(
         "task_id": first.task_id,
         "arm": first.arm.value,
         "observations": [
-            {"observation_id": obs_id, "observation_sha256": obs_hash}
-            for obs_id, obs_hash in pairs
+            {"observation_id": obs_id, "observation_sha256": obs_hash} for obs_id, obs_hash in pairs
         ],
     }
     return AdmissibleObservationSet(
@@ -305,19 +304,15 @@ class ActionEvent:
         if self.physical_artifact_sha256:
             _require_sha256("physical_artifact_sha256", self.physical_artifact_sha256)
         if self.fuzzy_signature is not None:
-            raise ValueError(
-                "fuzzy signature is exploratory-only and cannot be decision-bearing"
-            )
+            raise ValueError("fuzzy signature is exploratory-only and cannot be decision-bearing")
 
     @property
     def action_signature(self) -> str:
-        return _stable_hash(
-            {
-                "action_kind": self.action_kind.value,
-                "normalized_target": self.normalized_target,
-                "signature_payload_sha256": self._signature_payload_sha256,
-            }
-        )
+        return _stable_hash({
+            "action_kind": self.action_kind.value,
+            "normalized_target": self.normalized_target,
+            "signature_payload_sha256": self._signature_payload_sha256,
+        })
 
     @property
     def trajectory_identity(self) -> tuple[str, ...]:
@@ -397,12 +392,10 @@ def validate_trajectory(
         event_hashes.append(event.event_sha256)
     return Phase1ATrajectory(
         events=tuple(events),
-        trajectory_sha256=_stable_hash(
-            {
-                "trajectory_identity": list(first_identity),
-                "event_sha256s": event_hashes,
-            }
-        ),
+        trajectory_sha256=_stable_hash({
+            "trajectory_identity": list(first_identity),
+            "event_sha256s": event_hashes,
+        }),
     )
 
 
@@ -598,18 +591,14 @@ def compute_phase1a_metrics(
             sum(event.duration_ms for event in final_events) / 1000.0
         ),
         "provider_call_count": sum(
-            1
-            for event in trajectory.events
-            if event.action_kind == ActionKind.PROVIDER_CALL
+            1 for event in trajectory.events if event.action_kind == ActionKind.PROVIDER_CALL
         ),
         "provider_retry_count": sum(
             event.retry_count
             for event in trajectory.events
             if event.action_kind == ActionKind.PROVIDER_CALL
         ),
-        "online_wall_time_seconds": (
-            sum(event.duration_ms for event in online_events) / 1000.0
-        ),
+        "online_wall_time_seconds": (sum(event.duration_ms for event in online_events) / 1000.0),
         "uncached_equivalent_online_input_tokens": sum(
             event.uncached_input_tokens for event in online_events
         ),
@@ -661,9 +650,7 @@ def _evidence_rates(
             verified_assist_consumption,
         )
         if proof.get("ok") is not True:
-            raise ValueError(
-                f"physical consumption verification failed: {proof.get('reason')}"
-            )
+            raise ValueError(f"physical consumption verification failed: {proof.get('reason')}")
         physically_consumed = True
     denominator = len(known_ids)
     if denominator == 0:
@@ -696,9 +683,7 @@ def _repeated_exact_actions(
     events: tuple[ActionEvent, ...],
     kind: ActionKind,
 ) -> int:
-    counts = Counter(
-        event.action_signature for event in events if event.action_kind == kind
-    )
+    counts = Counter(event.action_signature for event in events if event.action_kind == kind)
     return sum(max(0, count - 1) for count in counts.values())
 
 
