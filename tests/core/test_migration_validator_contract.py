@@ -1,7 +1,8 @@
-from pathlib import Path
+import os
 import subprocess
 import sys
-import pytest
+from pathlib import Path
+
 from nexus.core.migration_validator import MigrationValidator
 
 
@@ -37,8 +38,6 @@ def test_migration_validator_behavior(tmp_path: Path):
     clean_val = MigrationValidator(tmp_path)
     assert clean_val.run_full_scan() is True
 
-
-import os
 
 def test_migration_safety_validator_script_entrypoint():
     repo_root = Path(__file__).resolve().parents[2]
