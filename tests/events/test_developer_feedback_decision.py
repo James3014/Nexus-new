@@ -1,5 +1,6 @@
 import fcntl
 import hashlib
+import multiprocessing
 import threading
 from pathlib import Path
 
@@ -19,6 +20,14 @@ def decision(i="d1", **kwargs):
     return DeveloperFeedbackDecision(task_id="task-1", decision_id=i, decision=FeedbackDecision.KEEP, **kwargs)
 
 
+def _hold_decision_lock(path: str, acquired, release) -> None:
+    with open(path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        acquired.set()
+        release.wait(timeout=5)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def test_append_chain_and_idempotent_replay(tmp_path: Path):
     store = DeveloperFeedbackDecisionStore(tmp_path)
     first = store.append(decision())
@@ -36,6 +45,15 @@ def test_validation_rejects_free_text_paths_and_authority():
         decision(evidence_refs=("/tmp/private",))
     with pytest.raises(ValueError):
         decision(authority_flags=(("approval", True),))
+
+
+def test_constructor_rejects_nonsemantic_field_types():
+    with pytest.raises(ValueError):
+        decision(reason_codes=True)
+    with pytest.raises(ValueError):
+        decision(evidence_refs=1)
+    with pytest.raises(ValueError):
+        decision(request_digest=True)
 
 
 def test_corruption_and_tamper_fail_closed(tmp_path: Path):
@@ -77,13 +95,25 @@ def test_stale_tail_and_concurrent_append(tmp_path: Path):
 
 def test_lock_timeout_under_contention(tmp_path: Path):
     store = DeveloperFeedbackDecisionStore(tmp_path)
-    with open(store.lock_path, "a+", encoding="utf-8") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            with pytest.raises(TimeoutError, match="lock timeout"):
-                store.append(decision(), lock_timeout=0.02)
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    acquired = multiprocessing.Event()
+    release = multiprocessing.Event()
+
+    holder = multiprocessing.Process(
+        target=_hold_decision_lock,
+        args=(str(store.lock_path), acquired, release),
+    )
+    holder.start()
+    try:
+        assert acquired.wait(timeout=5)
+        with pytest.raises(TimeoutError, match="lock timeout"):
+            store.append(decision(), lock_timeout=0.02)
+    finally:
+        release.set()
+        holder.join(timeout=5)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join()
+    assert holder.exitcode == 0
 
 
 def test_typed_emitter_notifies_after_commit_and_generic_is_reserved(tmp_path: Path):

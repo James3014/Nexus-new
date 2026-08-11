@@ -41,7 +41,7 @@ AUTHORITY_FLAG_KEYS = frozenset({"approval", "production", "route"})
 
 
 def _tokens(values: Any, pattern: re.Pattern[str], name: str) -> Tuple[str, ...]:
-    if isinstance(values, (str, bytes)):
+    if not isinstance(values, (list, tuple)):
         raise ValueError(f"{name} must be a sequence")
     result = tuple(values or ())
     if len(result) > 32:
@@ -67,6 +67,8 @@ class DeveloperFeedbackDecision:
     schema: str = "nexus.developer_feedback_decision.v1"
 
     def __post_init__(self) -> None:
+        if self.schema != "nexus.developer_feedback_decision.v1":
+            raise ValueError("unsupported developer feedback schema")
         if not isinstance(self.task_id, str) or not _REF_RE.fullmatch(self.task_id):
             raise ValueError("invalid task_id")
         if not isinstance(self.decision_id, str) or not _REF_RE.fullmatch(self.decision_id):
@@ -74,6 +76,8 @@ class DeveloperFeedbackDecision:
         object.__setattr__(self, "decision", FeedbackDecision(self.decision))
         object.__setattr__(self, "reason_codes", _tokens(self.reason_codes, _CODE_RE, "reason_codes"))
         object.__setattr__(self, "evidence_refs", _tokens(self.evidence_refs, _REF_RE, "evidence_refs"))
+        if not isinstance(self.request_digest, str):
+            raise ValueError("request_digest must be a string")
         if self.request_digest and not re.fullmatch(r"[0-9a-f]{64}", self.request_digest):
             raise ValueError("request_digest must be sha256")
         flags = tuple(self.authority_flags)
