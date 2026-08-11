@@ -1,3 +1,9 @@
+---
+name: sf2-ui_validator-route-fit-spec
+description: Candidate-only route-fit specification for ui_validator.
+runtime_eligible: false
+---
+
 # SF2 ui_validator Route Fit Spec
 
 Purpose: candidate-only route-fit skill for `ui_validator`.
