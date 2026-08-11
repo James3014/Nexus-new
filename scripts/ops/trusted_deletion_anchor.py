@@ -300,15 +300,13 @@ def _controller(args: argparse.Namespace) -> None:
     (output / "test-inventory.json").write_bytes(_json(selected) + b"\n")
     (output / "manifest.json").write_bytes(_json(manifest) + b"\n")
     (output / "external-anchor.json").write_bytes(
-        _json(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
-                "workflow_identity": manifest["workflow_identity"],
-                "base_sha": manifest["base_sha"],
-                "head_sha": manifest["head_sha"],
-            }
-        )
+        _json({
+            "schema_version": SCHEMA_VERSION,
+            "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
+            "workflow_identity": manifest["workflow_identity"],
+            "base_sha": manifest["base_sha"],
+            "head_sha": manifest["head_sha"],
+        })
         + b"\n"
     )
     (output / "trusted_deletion_anchor.py").write_bytes(Path(__file__).read_bytes())

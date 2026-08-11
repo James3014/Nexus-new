@@ -203,9 +203,11 @@ def test_workflow_is_three_job_isolated_anchor():
     for job in workflow["jobs"].values():
         for step in job["steps"]:
             action = step.get("uses", "")
-            if action.startswith(
-                ("actions/checkout@", "actions/upload-artifact@", "actions/download-artifact@")
-            ):
+            if action.startswith((
+                "actions/checkout@",
+                "actions/upload-artifact@",
+                "actions/download-artifact@",
+            )):
                 assert len(action.split("@", 1)[1].split()[0]) == 40
                 assert action.split("@", 1)[1].split()[0].isalnum()
     verifier_run = next(
