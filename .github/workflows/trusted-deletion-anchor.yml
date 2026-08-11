@@ -1,0 +1,111 @@
+name: Trusted deletion-evidence bootstrap anchor
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  trusted-controller:
+    name: Trusted controller (default branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+      - name: Build immutable controller bundle
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/anchor-event.json", "w"))'
+          python scripts/ops/trusted_deletion_anchor.py controller \
+            --event-json "$RUNNER_TEMP/anchor-event.json" \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --output-dir "$RUNNER_TEMP/trusted-anchor"
+      - name: Upload controller bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: trusted-anchor-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor/
+          if-no-files-found: error
+          retention-days: 7
+
+  unprivileged-executor:
+    name: Unprivileged executor (bundle only)
+    needs: trusted-controller
+    if: needs.trusted-controller.result == 'success'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Download controller bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: trusted-anchor-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor
+      - name: Execute only the hash-bound bundle
+        run: |
+          set -euo pipefail
+          python "${RUNNER_TEMP}/trusted-anchor/trusted_deletion_anchor.py" executor \
+            --bundle-dir "$RUNNER_TEMP/trusted-anchor"
+      - name: Upload fixed-schema raw evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trusted-anchor-executor-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor/raw-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+
+  trusted-verifier:
+    name: Trusted verifier (default branch)
+    needs: [trusted-controller, unprivileged-executor]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Download controller bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: trusted-anchor-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor
+      - name: Download executor evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: trusted-anchor-executor-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor/evidence
+      - name: Verify fixed schema and recomputed digests
+        env:
+          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json"
+          cp "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json" "$RUNNER_TEMP/trusted-anchor/raw-evidence.json"
+          python scripts/ops/trusted_deletion_anchor.py verifier \
+            --bundle-dir "$RUNNER_TEMP/trusted-anchor" \
+            --expected-workflow-ref "$EXPECTED_WORKFLOW_REF" \
+            --expected-workflow-sha "$EXPECTED_WORKFLOW_SHA" \
+            --expected-run-id "$EXPECTED_RUN_ID"
