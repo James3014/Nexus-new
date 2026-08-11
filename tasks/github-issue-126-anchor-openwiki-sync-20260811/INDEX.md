@@ -12,7 +12,11 @@ docs-only successor commit on top of the independently reviewed Issue #124
 candidate chain. It does not widen Issue #124, change workflow behavior, or
 claim protected deletion provenance.
 
-Frontier: `01-sync-workflow-inventory.md`
+Frontier: `02-sync-workflow-inventory-contract.md`
+
+Superseded card: `01-sync-workflow-inventory.md` (docs-only scope could not
+satisfy the hard-coded 9-workflow test expectation; no red implementation
+commit was created).
 
 Dependency head: `1301514dba50587f25631c3b0a8d2ed0137be2d0`.
 

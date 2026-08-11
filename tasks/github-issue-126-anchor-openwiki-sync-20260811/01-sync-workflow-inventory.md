@@ -1,9 +1,10 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: superseded
 purpose: Synchronize the derived OpenWiki workflow table with the Issue #124 trusted anchor candidate.
 issue: 126
+superseded_by: 02-sync-workflow-inventory-contract.md
 ---
 
 ## Objective
