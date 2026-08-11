@@ -4,22 +4,23 @@ Covers all 17 required test cases (Section 28 of spec).
 """
 import json
 import os
+
 import pytest
 
-from nexus.research.epistemic_benchmark.contracts import compute_canonical_sha256
-from nexus.research.epistemic_benchmark.corpus import get_all_oracles, REQUIRED_CASE_IDS
+from nexus.research.epistemic_benchmark.corpus import get_all_oracles
+from nexus.research.epistemic_benchmark.metrics import (
+    _build_alias_to_case_private,
+    compute_all_metrics,
+    compute_paired_comparison,
+)
 from nexus.research.epistemic_benchmark.observations import (
     build_synthetic_observation,
     import_observation,
 )
-from nexus.research.epistemic_benchmark.metrics import (
-    compute_arm_metrics,
-    compute_paired_comparison,
-    compute_all_metrics,
-    _build_alias_to_case_private,
+from nexus.research.epistemic_benchmark.packets import (
+    load_public_run_manifest,
+    prepare_benchmark_run,
 )
-from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, load_public_run_manifest
-
 
 # ---------------------------------------------------------------------------
 # Shared fixture: run dir with known observations
@@ -86,7 +87,6 @@ def populated_run(tmp_path_factory):
     # Import observations for all three arms for all cases
     for case_id, oracle in oracles.items():
         oracle_decision = oracle["oracle_decision"]
-        oracle_class = oracle["oracle_class"]
 
         for arm in ("standard_review", "strong_protocol", "epistemic_workflow"):
             # Correct decision for most cases
@@ -450,6 +450,398 @@ def test_paired_deltas(populated_run):
         missing = required_keys - set(comp.keys())
         assert not missing, f"Missing keys in comparison: {missing}"
         assert "Observed deltas are descriptive only" in comp["disclaimer"]
+        assert comp["paired_metric_denominators"]["appropriate_abstention"] > 0
+        assert comp["appropriate_abstention_delta"] is not None
+        assert comp["paired_metric_denominators"]["intervention"] == 0
+        assert comp["intervention_delta"] is None
+
+
+def test_paired_deltas_use_exact_intersection_not_min_or_full_arm_aggregates():
+    """Unpaired cases and full-arm summaries must not affect paired deltas."""
+    arm_a = {
+        "_observed_case_ids": {"shared", "a-only"},
+        "_case_metrics": {
+            "shared": {"success": 1.0, "latency": 10.0, "cost": 2.0, "intervention": 0.0},
+            "a-only": {"success": 0.0, "latency": 1000.0, "cost": 1000.0, "intervention": 100.0},
+        },
+        "decision_accuracy": 0.5,
+        "median_duration_seconds": 505.0,
+        "total_cost_usd": 1002.0,
+    }
+    arm_b = {
+        "_observed_case_ids": {"shared", "b-only"},
+        "_case_metrics": {
+            "shared": {"success": 0.0, "latency": 20.0, "cost": 7.0, "intervention": 1.0},
+            "b-only": {"success": 1.0, "latency": 2000.0, "cost": 2000.0, "intervention": 200.0},
+        },
+        "decision_accuracy": 0.5,
+        "median_duration_seconds": 1010.0,
+        "total_cost_usd": 2007.0,
+    }
+
+    comparison = compute_paired_comparison(arm_a, arm_b, "a", "b")
+
+    assert comparison["paired_case_count"] == 1
+    assert comparison["arm_a_unpaired_case_count"] == 1
+    assert comparison["arm_b_unpaired_case_count"] == 1
+    assert comparison["success_delta"] == -1.0
+    assert comparison["latency_delta_seconds"] == 10.0
+    assert comparison["cost_delta_usd"] == 5.0
+    assert comparison["intervention_delta"] is None
+    assert comparison["paired_metric_denominators"]["intervention"] == 0
+    assert comparison["paired_missingness"]["intervention"] == 1
+    assert comparison["decision_accuracy_delta"] == -1.0
+    assert comparison["median_duration_delta_seconds"] == 10.0
+    assert comparison["median_cost_delta_usd"] == 5.0
+
+
+def test_paired_comparison_rejects_missing_identity_metadata():
+    """A fabricated denominator must fail closed without exact case identities."""
+    with pytest.raises(ValueError, match="PAIRED_CASE_IDENTITIES_REQUIRED"):
+        compute_paired_comparison(
+            {"_observed_cases": 1},
+            {"_observed_cases": 1},
+            "a",
+            "b",
+        )
+
+
+def test_paired_comparison_rejects_zero_exact_intersection():
+    """Two non-empty arms without a shared case cannot fabricate a denominator."""
+    comparison = compute_paired_comparison(
+        {
+            "_observed_case_ids": ["a-only"],
+            "_case_metrics": {"a-only": {"success": 1.0}},
+        },
+        {
+            "_observed_case_ids": ["b-only"],
+            "_case_metrics": {"b-only": {"success": 1.0}},
+        },
+        "a",
+        "b",
+    )
+
+    assert comparison["pairing_status"] == "NO_EXACT_INTERSECTION"
+    assert comparison["paired_case_count"] == 0
+    assert comparison["paired_denominator"] is None
+    assert comparison["success_delta"] is None
+
+
+def test_appropriate_abstention_remains_available_when_intervention_is_unavailable():
+    """Paired abstention remains truthful without legal intervention telemetry."""
+    arm_a = {
+        "_observed_case_ids": ["shared"],
+        "_case_metrics": {
+            "shared": {
+                "success": 1.0,
+                "appropriate_abstention": 0.0,
+                "intervention": 10.0,
+            }
+        },
+    }
+    arm_b = {
+        "_observed_case_ids": ["shared"],
+        "_case_metrics": {
+            "shared": {
+                "success": 1.0,
+                "appropriate_abstention": 1.0,
+                "intervention": 20.0,
+            }
+        },
+    }
+
+    comparison = compute_paired_comparison(arm_a, arm_b, "a", "b")
+
+    assert comparison["appropriate_abstention_delta"] == 1.0
+    assert comparison["paired_metric_denominators"]["appropriate_abstention"] == 1
+    assert comparison["intervention_delta"] is None
+    assert comparison["paired_metric_denominators"]["intervention"] == 0
+    assert comparison["paired_missingness"]["intervention"] == 1
+
+
+def test_paired_comparison_rejects_none_case_metrics_deterministically():
+    """Malformed per-case rows must be ValueError, never incidental AttributeError."""
+    with pytest.raises(ValueError, match=r"PAIRED_CASE_METRICS_INVALID: arm=a case=shared"):
+        compute_paired_comparison(
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": None},
+            },
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": {"success": 1.0}},
+            },
+            "a",
+            "b",
+        )
+
+
+def test_paired_metric_denominators_expose_usable_pairs_with_missing_values():
+    """Each delta discloses how many exact pairs had values in both arms."""
+    arm_a = {
+        "_observed_case_ids": ["case-1", "case-2"],
+        "_case_metrics": {
+            "case-1": {"success": 1.0, "latency": 10.0, "cost": 2.0},
+            "case-2": {"success": 0.0, "latency": None, "cost": 4.0},
+        },
+    }
+    arm_b = {
+        "_observed_case_ids": ["case-1", "case-2"],
+        "_case_metrics": {
+            "case-1": {"success": 0.0, "latency": 15.0, "cost": 3.0},
+            "case-2": {"success": 1.0, "latency": 25.0, "cost": None},
+        },
+    }
+
+    comparison = compute_paired_comparison(arm_a, arm_b, "a", "b")
+
+    assert comparison["paired_denominator"] == 2
+    assert comparison["paired_metric_denominators"] == {
+        "success": 2,
+        "latency": 1,
+        "cost": 1,
+        "intervention": 0,
+        "appropriate_abstention": 0,
+    }
+    assert comparison["success_delta"] == 0.0
+    assert comparison["latency_delta_seconds"] == 5.0
+    assert comparison["cost_delta_usd"] == 1.0
+    assert comparison["intervention_delta"] is None
+    assert comparison["paired_missingness"]["latency"] == 1
+    assert comparison["paired_missingness"]["cost"] == 1
+
+
+def test_public_comparison_does_not_expose_private_case_identities():
+    arm_a = {
+        "_observed_case_ids": ["shared", "a-private"],
+        "_case_metrics": {
+            "shared": {"success": 1.0},
+            "a-private": {"success": 0.0},
+        },
+    }
+    arm_b = {
+        "_observed_case_ids": ["shared", "b-private"],
+        "_case_metrics": {
+            "shared": {"success": 1.0},
+            "b-private": {"success": 0.0},
+        },
+    }
+
+    comparison = compute_paired_comparison(arm_a, arm_b, "a", "b")
+
+    assert comparison["paired_case_count"] == 1
+    assert comparison["arm_a_unpaired_case_count"] == 1
+    assert comparison["arm_b_unpaired_case_count"] == 1
+    assert not any(key.endswith("_case_ids") for key in comparison)
+
+
+def test_intervention_is_unavailable_even_when_private_metrics_inject_values():
+    arm_a = {
+        "_observed_case_ids": ["case-1", "case-2"],
+        "_case_metrics": {
+            "case-1": {"success": 1.0, "intervention": 10.0},
+            "case-2": {"success": 1.0, "intervention": 20.0},
+        },
+    }
+    arm_b = {
+        "_observed_case_ids": ["case-1", "case-2"],
+        "_case_metrics": {
+            "case-1": {"success": 1.0, "intervention": 30.0},
+            "case-2": {"success": 1.0, "intervention": 40.0},
+        },
+    }
+
+    comparison = compute_paired_comparison(arm_a, arm_b, "a", "b")
+
+    assert comparison["intervention_delta"] is None
+    assert comparison["paired_metric_denominators"]["intervention"] == 0
+    assert comparison["paired_missingness"]["intervention"] == 2
+
+
+def test_intervention_unavailable_through_real_observation_path(populated_run):
+    from nexus.research.epistemic_benchmark.observations import load_valid_observations
+
+    valid_obs, _ = load_valid_observations(populated_run["run_dir"])
+    comparisons = compute_all_metrics(
+        populated_run["run_dir"],
+        valid_obs,
+        private_context_path=populated_run["priv_path"],
+    )["comparisons"]
+
+    for comparison in comparisons:
+        assert comparison["intervention_delta"] is None
+        assert comparison["paired_metric_denominators"]["intervention"] == 0
+        assert (
+            comparison["paired_missingness"]["intervention"]
+            == comparison["paired_case_count"]
+        )
+
+
+def test_duration_delta_uses_median_of_exact_paired_values():
+    arm_a = {
+        "_observed_case_ids": ["case-1", "case-2", "case-3"],
+        "_case_metrics": {
+            "case-1": {"success": 1.0, "latency": 1.0},
+            "case-2": {"success": 1.0, "latency": 2.0},
+            "case-3": {"success": 1.0, "latency": 100.0},
+        },
+    }
+    arm_b = {
+        "_observed_case_ids": ["case-1", "case-2", "case-3"],
+        "_case_metrics": {
+            "case-1": {"success": 1.0, "latency": 2.0},
+            "case-2": {"success": 1.0, "latency": 4.0},
+            "case-3": {"success": 1.0, "latency": 101.0},
+        },
+    }
+
+    comparison = compute_paired_comparison(arm_a, arm_b, "a", "b")
+
+    assert comparison["median_duration_delta_seconds"] == 1.0
+    assert comparison["latency_delta_seconds"] == 1.0
+
+
+def test_real_observation_path_uses_median_pair_delta_and_exact_intersection(tmp_path):
+    from nexus.research.epistemic_benchmark.observations import load_valid_observations
+
+    run_dir = str(tmp_path / "paired_median_run")
+    priv_path = str(tmp_path / "_paired_median_private_context.json")
+    prepare_benchmark_run(
+        public_output_dir=run_dir,
+        private_context_path=priv_path,
+        seed=24680,
+        corpus_version="v0",
+    )
+    manifest = load_public_run_manifest(run_dir)
+    with open(priv_path) as f:
+        alias_to_case = _build_alias_to_case_private(json.load(f))
+    case_to_aliases = {}
+    for alias, case_id in alias_to_case.items():
+        case_to_aliases.setdefault(case_id, {})[_get_arm_of_alias(run_dir, alias)] = alias
+
+    oracles = {oracle["case_id"]: oracle for oracle in get_all_oracles()}
+    case_ids = sorted(oracles)[:5]
+    shared_cases = case_ids[:3]
+    arm_a_only = case_ids[3]
+    arm_b_only = case_ids[4]
+
+    def _import(arm, case_id, duration, cost, suffix):
+        alias = case_to_aliases[case_id][arm]
+        packet_path = os.path.join(run_dir, "packets", arm, f"{alias}.json")
+        with open(packet_path) as f:
+            packet = json.load(f)
+        refs = packet.get("common_materials", {}).get("available_evidence_refs", [])
+        observation = build_synthetic_observation(
+            benchmark_run_id=manifest["benchmark_run_id"],
+            arm=arm,
+            case_alias=alias,
+            observation_id=f"OBS-real-paired-{suffix}",
+            decision=oracles[case_id]["oracle_decision"],
+            packet_sha256=packet["packet_sha256"],
+            cited_evidence_refs=[refs[0]] if refs else [],
+            duration_seconds=duration,
+            cost_usd=cost,
+        )
+        success, errors = import_observation(run_dir, observation)
+        assert success, errors
+
+    for index, (case_id, duration_a, duration_b) in enumerate(
+        zip(shared_cases, [0.0, 100.0, 101.0], [1.0, 2.0, 102.0])
+    ):
+        _import("standard_review", case_id, duration_a, index + 1.0, f"a-{index}")
+        _import("strong_protocol", case_id, duration_b, index + 2.0, f"b-{index}")
+    _import("standard_review", arm_a_only, 10000.0, 10000.0, "a-only")
+    _import("strong_protocol", arm_b_only, 20000.0, 20000.0, "b-only")
+
+    valid_observations, invalid_observations = load_valid_observations(run_dir)
+    assert not invalid_observations
+    comparison = compute_all_metrics(
+        run_dir,
+        valid_observations,
+        private_context_path=priv_path,
+    )["comparisons"][0]
+
+    assert comparison["paired_case_count"] == 3
+    assert comparison["arm_a_unpaired_case_count"] == 1
+    assert comparison["arm_b_unpaired_case_count"] == 1
+    assert comparison["median_duration_delta_seconds"] == 1.0
+    assert comparison["latency_delta_seconds"] == 1.0
+    assert comparison["cost_delta_usd"] == 1.0
+    assert comparison["success_delta"] == 0.0
+
+
+def test_paired_comparison_rejects_unhashable_identity_deterministically():
+    with pytest.raises(ValueError, match="PAIRED_CASE_ID_INVALID"):
+        compute_paired_comparison(
+            {
+                "_observed_case_ids": [["unhashable"]],
+                "_case_metrics": {},
+            },
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": {"success": 1.0}},
+            },
+            "a",
+            "b",
+        )
+
+
+@pytest.mark.parametrize("metric", ["latency", "cost"])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_paired_comparison_rejects_nonfinite_numeric_values(metric, bad_value):
+    with pytest.raises(
+        ValueError,
+        match=rf"PAIRED_CASE_METRIC_VALUE_NONFINITE: arm=a case=shared metric={metric}",
+    ):
+        compute_paired_comparison(
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": {"success": 1.0, metric: bad_value}},
+            },
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": {"success": 1.0, metric: 1.0}},
+            },
+            "a",
+            "b",
+        )
+
+
+@pytest.mark.parametrize("bad_success", [-1, 0.5, 2, float("nan"), float("inf")])
+def test_paired_comparison_rejects_success_outside_boolean_semantics(bad_success):
+    with pytest.raises(
+        ValueError,
+        match=r"PAIRED_CASE_SUCCESS_VALUE_INVALID: arm=a case=shared",
+    ):
+        compute_paired_comparison(
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": {"success": bad_success}},
+            },
+            {
+                "_observed_case_ids": ["shared"],
+                "_case_metrics": {"shared": {"success": 1.0}},
+            },
+            "a",
+            "b",
+        )
+
+
+def test_paired_comparison_accepts_boolean_success_values():
+    comparison = compute_paired_comparison(
+        {
+            "_observed_case_ids": ["shared"],
+            "_case_metrics": {"shared": {"success": False}},
+        },
+        {
+            "_observed_case_ids": ["shared"],
+            "_case_metrics": {"shared": {"success": True}},
+        },
+        "a",
+        "b",
+    )
+
+    assert comparison["success_delta"] == 1.0
 
 
 # ---------------------------------------------------------------------------
