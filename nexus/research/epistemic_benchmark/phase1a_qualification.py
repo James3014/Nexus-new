@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import math
 from collections import Counter
 from dataclasses import dataclass, field
@@ -76,7 +77,7 @@ class Phase1AFrozenManifest:
     required_issue29_evidence_identity: str
     manifest_version: str
     manifest_sha256: str = field(init=False)
-    _frozen_body: Mapping[str, Any] = field(init=False, repr=False)
+    _frozen_body_json: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         hash_fields = (
@@ -140,7 +141,11 @@ class Phase1AFrozenManifest:
 
         body = self._manifest_body()
         manifest_hash = _stable_hash(body)
-        object.__setattr__(self, "_frozen_body", MappingProxyType(copy.deepcopy(body)))
+        object.__setattr__(
+            self,
+            "_frozen_body_json",
+            json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+        )
         object.__setattr__(self, "manifest_sha256", manifest_hash)
 
     def _manifest_body(self) -> dict[str, Any]:
@@ -179,7 +184,7 @@ class Phase1AFrozenManifest:
         }
 
     def to_dict(self) -> dict[str, Any]:
-        body = copy.deepcopy(dict(self._frozen_body))
+        body = json.loads(self._frozen_body_json)
         body["manifest_sha256"] = self.manifest_sha256
         return body
 
