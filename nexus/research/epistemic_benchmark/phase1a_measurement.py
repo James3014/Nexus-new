@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -10,8 +11,10 @@ from nexus.research.epistemic_benchmark.phase1a_contracts import (
     Phase1AArm,
     compute_canonical_sha256,
 )
+from nexus.services.verified_assist_contract import evaluate_assist_credit
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_OBSERVATION_SET_MARKER = "admissible_observation_set_sha256="
 
 
 class EvidenceProducerPhase(str, Enum):
@@ -90,80 +93,57 @@ class EvidenceObservation:
     claims_final_semantic_correctness: bool = False
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "arm", _coerce_enum(Phase1AArm, self.arm, "arm"))
+        object.__setattr__(self, "arm", _coerce(Phase1AArm, self.arm, "arm"))
         object.__setattr__(
             self,
             "producer_phase",
-            _coerce_enum(
-                EvidenceProducerPhase,
-                self.producer_phase,
-                "producer_phase",
-            ),
+            _coerce(EvidenceProducerPhase, self.producer_phase, "producer_phase"),
         )
         object.__setattr__(
             self,
             "epistemic_type",
-            _coerce_enum(EpistemicType, self.epistemic_type, "epistemic_type"),
+            _coerce(EpistemicType, self.epistemic_type, "epistemic_type"),
         )
         object.__setattr__(
             self,
             "validation_state",
-            _coerce_enum(
-                ValidationState,
-                self.validation_state,
-                "validation_state",
-            ),
+            _coerce(ValidationState, self.validation_state, "validation_state"),
         )
-
         _require_text("task_id", self.task_id)
         _require_text("bounded_claim", self.bounded_claim)
         _require_sha256("validator_contract_hash", self.validator_contract_hash)
         _require_text_tuple("derivation_lineage", self.derivation_lineage)
         _require_text_tuple("validator_evidence_refs", self.validator_evidence_refs)
-
         if not isinstance(self.evidence_refs, tuple):
             raise ValueError("evidence_refs must be a tuple")
         if not all(isinstance(ref, EvidenceRef) for ref in self.evidence_refs):
             raise ValueError("evidence_refs must contain EvidenceRef values")
-
         if self.epistemic_type == EpistemicType.OBSERVED:
             if not self.evidence_refs:
                 raise ValueError("OBSERVED requires physical evidence references")
             if any(not ref.physical for ref in self.evidence_refs):
                 raise ValueError("OBSERVED evidence references must be physical")
-
-        if self.epistemic_type == EpistemicType.INFERRED:
-            if not self.derivation_lineage:
-                raise ValueError("INFERRED requires derivation lineage")
-
+        if self.epistemic_type == EpistemicType.INFERRED and not self.derivation_lineage:
+            raise ValueError("INFERRED requires derivation lineage")
         if self.validation_state == ValidationState.ADMISSIBLE:
             if not self.validator_evidence_refs:
                 raise ValueError("ADMISSIBLE requires validator evidence")
             if not self.producer_verifier_independent:
-                raise ValueError(
-                    "ADMISSIBLE requires producer/verifier independence"
-                )
-
-        if self.producer_phase == EvidenceProducerPhase.LOCAL:
-            if self.arm != Phase1AArm.C:
-                raise ValueError("Phase 1A Local evidence is allowed only in Arm C")
-
+                raise ValueError("ADMISSIBLE requires producer/verifier independence")
+        if self.producer_phase == EvidenceProducerPhase.LOCAL and self.arm != Phase1AArm.C:
+            raise ValueError("Phase 1A Local evidence is allowed only in Arm C")
         authority_flags = {
             "claims_proven": self.claims_proven,
             "claims_final": self.claims_final,
             "claims_approval_authority": self.claims_approval_authority,
             "claims_routing_authority": self.claims_routing_authority,
-            "claims_final_semantic_correctness": (
-                self.claims_final_semantic_correctness
-            ),
+            "claims_final_semantic_correctness": self.claims_final_semantic_correctness,
         }
         for name, value in authority_flags.items():
             if not isinstance(value, bool):
                 raise ValueError(f"{name} must be bool")
             if value:
-                raise ValueError(
-                    f"Phase 1A observation cannot claim authority: {name}"
-                )
+                raise ValueError(f"Phase 1A observation cannot claim authority: {name}")
 
     def identity_dict(self) -> dict[str, Any]:
         return {
@@ -207,10 +187,12 @@ class AdmissibleObservationSet:
             "task_id": self.task_id,
             "arm": self.arm.value,
             "observation_ids": list(self.observation_ids),
-            "admissible_observation_set_sha256": (
-                self.admissible_observation_set_sha256
-            ),
+            "admissible_observation_set_sha256": self.admissible_observation_set_sha256,
         }
+
+    @property
+    def vap_identity_marker(self) -> str:
+        return _OBSERVATION_SET_MARKER + self.admissible_observation_set_sha256
 
 
 def build_admissible_observation_set(
@@ -220,21 +202,19 @@ def build_admissible_observation_set(
         raise ValueError("admissible observation set cannot be empty")
     if not all(isinstance(obs, EvidenceObservation) for obs in observations):
         raise ValueError("observation set contains an invalid observation value")
-
     first = observations[0]
     pairs: list[tuple[str, str]] = []
-    seen_ids: set[str] = set()
+    seen_hashes: set[str] = set()
     for obs in observations:
         if obs.validation_state != ValidationState.ADMISSIBLE:
             raise ValueError("only ADMISSIBLE observations may enter handoff")
         if obs.task_id != first.task_id or obs.arm != first.arm:
             raise ValueError("observation set task/arm identity drift")
-        if obs.observation_id in seen_ids:
+        if obs.observation_sha256 in seen_hashes:
             raise ValueError("duplicate observation identity")
-        seen_ids.add(obs.observation_id)
+        seen_hashes.add(obs.observation_sha256)
         pairs.append((obs.observation_id, obs.observation_sha256))
-
-    pairs.sort(key=lambda item: item[0])
+    pairs.sort(key=lambda item: (item[0], item[1]))
     body = {
         "task_id": first.task_id,
         "arm": first.arm.value,
@@ -279,20 +259,16 @@ class ActionEvent:
     validation_evidence_refs: tuple[str, ...] = ()
     uncached_input_tokens: int = 0
     fuzzy_signature: str | None = None
+    _signature_payload_sha256: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "arm", _coerce_enum(Phase1AArm, self.arm, "arm"))
-        object.__setattr__(
-            self,
-            "phase",
-            _coerce_enum(TrajectoryPhase, self.phase, "phase"),
-        )
+        object.__setattr__(self, "arm", _coerce(Phase1AArm, self.arm, "arm"))
+        object.__setattr__(self, "phase", _coerce(TrajectoryPhase, self.phase, "phase"))
         object.__setattr__(
             self,
             "action_kind",
-            _coerce_enum(ActionKind, self.action_kind, "action_kind"),
+            _coerce(ActionKind, self.action_kind, "action_kind"),
         )
-
         for name in (
             "experiment_id",
             "manifest_id",
@@ -306,7 +282,6 @@ class ActionEvent:
             "status",
         ):
             _require_text(name, getattr(self, name))
-
         if not isinstance(self.sequence, int) or isinstance(self.sequence, bool):
             raise ValueError("sequence must be an integer")
         if self.sequence < 0:
@@ -314,34 +289,24 @@ class ActionEvent:
         _require_nonnegative_int("retry_count", self.retry_count)
         _require_nonnegative_int("started_at_ms", self.started_at_ms)
         _require_nonnegative_int("duration_ms", self.duration_ms)
-        _require_nonnegative_int(
-            "uncached_input_tokens",
-            self.uncached_input_tokens,
-        )
+        _require_nonnegative_int("uncached_input_tokens", self.uncached_input_tokens)
         _require_text_tuple("evidence_refs", self.evidence_refs)
-        _require_text_tuple(
-            "validation_evidence_refs",
-            self.validation_evidence_refs,
-        )
-
+        _require_text_tuple("validation_evidence_refs", self.validation_evidence_refs)
         if not isinstance(self.signature_payload, dict):
             raise ValueError("signature_payload must be a dict")
-        _stable_hash(self.signature_payload)
-
+        object.__setattr__(
+            self,
+            "_signature_payload_sha256",
+            _stable_hash(self.signature_payload),
+        )
         if self.action_kind == ActionKind.PROVIDER_CALL:
             _require_text("provider", self.provider)
             _require_text("model", self.model)
-
         if self.physical_artifact_sha256:
-            _require_sha256(
-                "physical_artifact_sha256",
-                self.physical_artifact_sha256,
-            )
-
+            _require_sha256("physical_artifact_sha256", self.physical_artifact_sha256)
         if self.fuzzy_signature is not None:
             raise ValueError(
-                "fuzzy signature is exploratory-only and cannot be "
-                "decision-bearing"
+                "fuzzy signature is exploratory-only and cannot be decision-bearing"
             )
 
     @property
@@ -350,7 +315,7 @@ class ActionEvent:
             {
                 "action_kind": self.action_kind.value,
                 "normalized_target": self.normalized_target,
-                "signature_payload": self.signature_payload,
+                "signature_payload_sha256": self._signature_payload_sha256,
             }
         )
 
@@ -409,10 +374,6 @@ class Phase1ATrajectory:
     def arm(self) -> Phase1AArm:
         return self.events[0].arm
 
-    @property
-    def task_id(self) -> str:
-        return self.events[0].task_id
-
     def phase_events(self, phase: TrajectoryPhase) -> tuple[ActionEvent, ...]:
         return tuple(event for event in self.events if event.phase == phase)
 
@@ -424,7 +385,6 @@ def validate_trajectory(
         raise ValueError("trajectory cannot be empty")
     if not all(isinstance(event, ActionEvent) for event in events):
         raise ValueError("trajectory contains an invalid event value")
-
     first_identity = events[0].trajectory_identity
     previous_sequence = -1
     event_hashes: list[str] = []
@@ -435,14 +395,14 @@ def validate_trajectory(
             raise ValueError("trajectory sequence must be strictly increasing")
         previous_sequence = event.sequence
         event_hashes.append(event.event_sha256)
-
-    body = {
-        "trajectory_identity": list(first_identity),
-        "event_sha256s": event_hashes,
-    }
     return Phase1ATrajectory(
         events=tuple(events),
-        trajectory_sha256=_stable_hash(body),
+        trajectory_sha256=_stable_hash(
+            {
+                "trajectory_identity": list(first_identity),
+                "event_sha256s": event_hashes,
+            }
+        ),
     )
 
 
@@ -482,19 +442,14 @@ def compute_recomputation_avoided(
     _require_text("mechanism", mechanism)
     baseline_counts = Counter(event.action_signature for event in baseline_online)
     prework_counts = Counter(event.action_signature for event in validated_prework)
-    treatment_counts = Counter(
-        event.action_signature for event in treatment_online
-    )
-
+    treatment_counts = Counter(event.action_signature for event in treatment_online)
     rows: list[SignatureRecomputation] = []
-    signatures = sorted(set(baseline_counts) | set(prework_counts))
-    for signature in signatures:
+    for signature in sorted(set(baseline_counts) | set(prework_counts)):
         baseline_count = baseline_counts[signature]
         prework_count = prework_counts[signature]
         treatment_count = treatment_counts[signature]
         potential = min(baseline_count, prework_count)
         recomputed = min(potential, treatment_count)
-        avoided = potential - recomputed
         rows.append(
             SignatureRecomputation(
                 action_signature=signature,
@@ -503,10 +458,9 @@ def compute_recomputation_avoided(
                 treatment_online_count=treatment_count,
                 potential=potential,
                 recomputed=recomputed,
-                avoided=avoided,
+                avoided=potential - recomputed,
             )
         )
-
     return RecomputationResult(
         mechanism=mechanism,
         potential_total=sum(row.potential for row in rows),
@@ -527,19 +481,15 @@ def compute_phase1a_recomputation(
         raise ValueError("second trajectory must be Phase 1A Arm B")
     if arm_c.arm != Phase1AArm.C:
         raise ValueError("third trajectory must be Phase 1A Arm C")
-
-    common_a = _triplet_measurement_identity(arm_a)
-    if _triplet_measurement_identity(arm_b) != common_a:
+    common_identity = _triplet_measurement_identity(arm_a)
+    if _triplet_measurement_identity(arm_b) != common_identity:
         raise ValueError("A/B measurement identity drift")
-    if _triplet_measurement_identity(arm_c) != common_a:
+    if _triplet_measurement_identity(arm_c) != common_identity:
         raise ValueError("A/C measurement identity drift")
-
     a_online = arm_a.phase_events(TrajectoryPhase.ONLINE)
     b_prework = tuple(
         event
-        for event in arm_b.phase_events(
-            TrajectoryPhase.DETERMINISTIC_PREWORK
-        )
+        for event in arm_b.phase_events(TrajectoryPhase.DETERMINISTIC_PREWORK)
         if event.validation_evidence_refs
     )
     b_online = arm_b.phase_events(TrajectoryPhase.ONLINE)
@@ -549,7 +499,6 @@ def compute_phase1a_recomputation(
         if event.validation_evidence_refs
     )
     c_online = arm_c.phase_events(TrajectoryPhase.ONLINE)
-
     return Phase1ARecomputation(
         ba=compute_recomputation_avoided(
             baseline_online=a_online,
@@ -581,50 +530,65 @@ class FrozenTargetOracle:
             raise ValueError("target oracle must be explicitly independent")
 
 
+def verify_observation_set_consumption(
+    observation_set: AdmissibleObservationSet,
+    verified_assist_packet: Any,
+    verified_assist_consumption: Any,
+) -> dict[str, Any]:
+    packet = _mapping_from_value(verified_assist_packet, "verified_assist_packet")
+    packet_hash = str(packet.get("packet_hash") or "").strip()
+    if not packet_hash:
+        return {"ok": False, "reason": "packet_hash_missing"}
+    assertions_raw = packet.get("semantic_assertions") or ()
+    if not isinstance(assertions_raw, (list, tuple)):
+        return {"ok": False, "reason": "semantic_assertions_invalid"}
+    assertions = {str(value) for value in assertions_raw}
+    if observation_set.vap_identity_marker not in assertions:
+        return {"ok": False, "reason": "observation_set_identity_not_bound"}
+    credit = evaluate_assist_credit(verified_assist_consumption)
+    if credit.get("assist_credited") is not True:
+        return {
+            "ok": False,
+            "reason": f"vap_credit_denied:{credit.get('reason') or 'unknown'}",
+        }
+    if str(credit.get("packet_hash") or "") != packet_hash:
+        return {"ok": False, "reason": "consumption_packet_hash_mismatch"}
+    return {
+        "ok": True,
+        "reason": "physical_consumption_verified",
+        "packet_hash": packet_hash,
+        "consumption_proof": str(credit.get("consumption_proof") or ""),
+    }
+
+
 def compute_phase1a_metrics(
     trajectory: Phase1ATrajectory,
     *,
     recomputation: RecomputationResult | None = None,
     observation_set: AdmissibleObservationSet | None = None,
-    consumed_observation_set_sha256: str | None = None,
-    physical_consumption_proof_sha256: str | None = None,
+    verified_assist_packet: Any = None,
+    verified_assist_consumption: Any = None,
     reverified_observation_ids: tuple[str, ...] = (),
     contradictory_observation_ids: tuple[str, ...] = (),
     frozen_target_oracle: FrozenTargetOracle | None = None,
 ) -> dict[str, Any]:
     online_events = trajectory.phase_events(TrajectoryPhase.ONLINE)
     final_events = trajectory.phase_events(TrajectoryPhase.FINAL_VERIFIER)
-
     online_tool_kinds = {
         ActionKind.FILE_READ,
         ActionKind.SEARCH,
         ActionKind.TEST,
         ActionKind.TOOL_ACTION,
     }
-    online_tool_events = tuple(
-        event for event in online_events if event.action_kind in online_tool_kinds
-    )
-
     metrics: dict[str, Any] = {
-        "online_tool_action_count": len(online_tool_events),
-        "recomputation_avoided_count": (
-            recomputation.avoided_total if recomputation else 0
+        "online_tool_action_count": sum(
+            1 for event in online_events if event.action_kind in online_tool_kinds
         ),
-        "recomputation_repeated_count": (
-            recomputation.recomputed_total if recomputation else 0
-        ),
-        "repeated_file_reads": _repeated_exact_actions(
-            online_events,
-            ActionKind.FILE_READ,
-        ),
-        "repeated_searches": _repeated_exact_actions(
-            online_events,
-            ActionKind.SEARCH,
-        ),
-        "repeated_tests": _repeated_exact_actions(
-            online_events,
-            ActionKind.TEST,
-        ),
+        "recomputation_avoided_count": recomputation.avoided_total if recomputation else 0,
+        "recomputation_repeated_count": recomputation.recomputed_total if recomputation else 0,
+        "repeated_file_reads": _repeated_exact_actions(online_events, ActionKind.FILE_READ),
+        "repeated_searches": _repeated_exact_actions(online_events, ActionKind.SEARCH),
+        "repeated_tests": _repeated_exact_actions(online_events, ActionKind.TEST),
         "time_to_first_correct_target_seconds": _time_to_first_target(
             trajectory,
             frozen_target_oracle,
@@ -650,46 +614,36 @@ def compute_phase1a_metrics(
             event.uncached_input_tokens for event in online_events
         ),
     }
-
-    utilization = _evidence_rates(
-        observation_set=observation_set,
-        consumed_observation_set_sha256=consumed_observation_set_sha256,
-        physical_consumption_proof_sha256=(
-            physical_consumption_proof_sha256
-        ),
-        reverified_observation_ids=reverified_observation_ids,
-        contradictory_observation_ids=contradictory_observation_ids,
+    metrics.update(
+        _evidence_rates(
+            observation_set=observation_set,
+            verified_assist_packet=verified_assist_packet,
+            verified_assist_consumption=verified_assist_consumption,
+            reverified_observation_ids=reverified_observation_ids,
+            contradictory_observation_ids=contradictory_observation_ids,
+        )
     )
-    metrics.update(utilization)
     return metrics
 
 
 def _evidence_rates(
     *,
     observation_set: AdmissibleObservationSet | None,
-    consumed_observation_set_sha256: str | None,
-    physical_consumption_proof_sha256: str | None,
+    verified_assist_packet: Any,
+    verified_assist_consumption: Any,
     reverified_observation_ids: tuple[str, ...],
     contradictory_observation_ids: tuple[str, ...],
 ) -> dict[str, float | None]:
-    _require_text_tuple(
-        "reverified_observation_ids",
-        reverified_observation_ids,
-    )
-    _require_text_tuple(
-        "contradictory_observation_ids",
-        contradictory_observation_ids,
-    )
-
+    _require_text_tuple("reverified_observation_ids", reverified_observation_ids)
+    _require_text_tuple("contradictory_observation_ids", contradictory_observation_ids)
     if observation_set is None:
-        if consumed_observation_set_sha256 or physical_consumption_proof_sha256:
+        if verified_assist_packet is not None or verified_assist_consumption is not None:
             raise ValueError("consumption evidence requires an observation set")
         return {
             "evidence_utilization_rate": None,
             "evidence_reverification_rate": None,
             "contradictory_evidence_rate": None,
         }
-
     known_ids = set(observation_set.observation_ids)
     reverified = set(reverified_observation_ids)
     contradictory = set(contradictory_observation_ids)
@@ -697,31 +651,23 @@ def _evidence_rates(
         raise ValueError("reverified observation identity is outside the set")
     if not contradictory <= known_ids:
         raise ValueError("contradictory observation identity is outside the set")
-
+    if (verified_assist_packet is None) != (verified_assist_consumption is None):
+        raise ValueError("packet and consumption record must be supplied together")
+    physically_consumed = False
+    if verified_assist_packet is not None:
+        proof = verify_observation_set_consumption(
+            observation_set,
+            verified_assist_packet,
+            verified_assist_consumption,
+        )
+        if proof.get("ok") is not True:
+            raise ValueError(
+                f"physical consumption verification failed: {proof.get('reason')}"
+            )
+        physically_consumed = True
     denominator = len(known_ids)
     if denominator == 0:
         raise ValueError("admissible observation set cannot be empty")
-
-    physically_consumed = False
-    if consumed_observation_set_sha256 is not None:
-        _require_sha256(
-            "consumed_observation_set_sha256",
-            consumed_observation_set_sha256,
-        )
-        if (
-            consumed_observation_set_sha256
-            != observation_set.admissible_observation_set_sha256
-        ):
-            raise ValueError("observation-set substitution detected")
-        if physical_consumption_proof_sha256 is not None:
-            _require_sha256(
-                "physical_consumption_proof_sha256",
-                physical_consumption_proof_sha256,
-            )
-            physically_consumed = True
-    elif physical_consumption_proof_sha256 is not None:
-        raise ValueError("physical consumption proof lacks set identity")
-
     return {
         "evidence_utilization_rate": 1.0 if physically_consumed else 0.0,
         "evidence_reverification_rate": len(reverified) / denominator,
@@ -768,7 +714,18 @@ def _triplet_measurement_identity(
     )
 
 
-def _coerce_enum(enum_type: type[Enum], value: Any, name: str) -> Any:
+def _mapping_from_value(value: Any, name: str) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        mapped = to_dict()
+        if isinstance(mapped, Mapping):
+            return dict(mapped)
+    raise ValueError(f"{name} must be a mapping or expose to_dict()")
+
+
+def _coerce(enum_type: type[Enum], value: Any, name: str) -> Any:
     if isinstance(value, enum_type):
         return value
     try:
