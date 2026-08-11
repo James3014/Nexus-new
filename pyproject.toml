@@ -54,7 +54,10 @@ name = "nexus-singularity"
 version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = ["Nexus Engineers <eng@nexus-singularity.os>"]
-packages = [{include = "nexus"}]
+packages = [
+    {include = "nexus"},
+    {include = "scripts"},
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"
