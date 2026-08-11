@@ -14,7 +14,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_IMPACT_MAP = ROOT / "docs" / "testing" / "test_impact_map.md"
 DEFAULT_IMPACT_INDEX = ROOT / ".nexus" / "test_impact_index.json"
@@ -126,7 +125,9 @@ def load_impact_index(path: Path = DEFAULT_IMPACT_INDEX) -> dict[str, list[str]]
     out: dict[str, list[str]] = {}
     for key, value in mappings.items():
         if isinstance(key, str) and isinstance(value, list):
-            out[_normalize_path(key)] = [_normalize_path(str(item)) for item in value if str(item).strip()]
+            out[_normalize_path(key)] = [
+                _normalize_path(str(item)) for item in value if str(item).strip()
+            ]
     return out
 
 
@@ -144,7 +145,9 @@ def load_test_history(path: Path = DEFAULT_TEST_HISTORY) -> dict[str, dict]:
             continue
         if not isinstance(row, dict):
             continue
-        targets = [_normalize_path(str(target)) for target in row.get("targets", []) if str(target).strip()]
+        targets = [
+            _normalize_path(str(target)) for target in row.get("targets", []) if str(target).strip()
+        ]
         target_durations = row.get("target_durations", {})
         if not isinstance(target_durations, dict):
             target_durations = {}
@@ -208,7 +211,9 @@ def _sort_targets_by_history(targets: list[str], history: dict[str, dict]) -> li
     return [target for _, target in sorted(enumerate(targets), key=key)]
 
 
-def _predictive_scores(changed_paths: list[str], targets: list[str], impact_stats: dict[str, dict[str, dict]]) -> dict[str, dict]:
+def _predictive_scores(
+    changed_paths: list[str], targets: list[str], impact_stats: dict[str, dict[str, dict]]
+) -> dict[str, dict]:
     scores: dict[str, dict] = {}
     for target in targets:
         score = 0.0
@@ -311,10 +316,16 @@ def select_target_details(
         ]
         if matching_rules:
             most_specific_len = max(len(rule.code_path) for rule in matching_rules)
-            matched_rules = [rule for rule in matching_rules if len(rule.code_path) == most_specific_len]
+            matched_rules = [
+                rule for rule in matching_rules if len(rule.code_path) == most_specific_len
+            ]
             path_high_risk = any(rule.risk == "high" for rule in matched_rules)
             for rule in matched_rules:
-                if rule.risk == "high" and rule.risk_reason and rule.risk_reason not in risk_reasons:
+                if (
+                    rule.risk == "high"
+                    and rule.risk_reason
+                    and rule.risk_reason not in risk_reasons
+                ):
                     risk_reasons.append(rule.risk_reason)
         mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
         for target in mapped_targets:
@@ -352,7 +363,13 @@ def select_target_details(
     expanded = _sort_targets_by_history(_expand_existing_targets(selected), history)
     target_scores = _predictive_scores(normalized_paths, expanded, impact_stats)
     if ranking == "predictive" and any(meta["score"] for meta in target_scores.values()):
-        expanded = sorted(expanded, key=lambda target: (-float(target_scores.get(target, {}).get("score", 0.0)), expanded.index(target)))
+        expanded = sorted(
+            expanded,
+            key=lambda target: (
+                -float(target_scores.get(target, {}).get("score", 0.0)),
+                expanded.index(target),
+            ),
+        )
     retry_recommended = [
         target for target in expanded if bool(history.get(target, {}).get("flaky", False))
     ]
@@ -382,7 +399,10 @@ def select_target_details(
         high_risk_escalated=high_risk,
         risk_reasons=risk_reasons,
         retry_recommended=retry_recommended,
-        target_scores={target: target_scores.get(target, {"score": 0.0, "score_reasons": []}) for target in expanded},
+        target_scores={
+            target: target_scores.get(target, {"score": 0.0, "score_reasons": []})
+            for target in expanded
+        },
     )
 
 

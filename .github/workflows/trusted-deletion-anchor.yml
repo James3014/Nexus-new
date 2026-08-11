@@ -1,0 +1,248 @@
+name: Trusted deletion-evidence bootstrap anchor
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  trusted-controller:
+    name: Trusted controller (default branch)
+    outputs:
+      manifest_sha256: ${{ steps.external-anchor.outputs.manifest_sha256 }}
+      external_anchor_sha256: ${{ steps.external-anchor.outputs.external_anchor_sha256 }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Acquire fixed trusted runtime builder
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.2"
+          enable-cache: false
+      - name: Acquire and execute exact trusted controller source
+        id: trusted-source
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRUSTED_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bare_repo="$RUNNER_TEMP/trusted-controller.git"
+          trusted_dir="$RUNNER_TEMP/trusted-controller-source"
+          runtime_dir="$RUNNER_TEMP/trusted-runtime"
+          cleanup_on_exit() {
+            status=$?
+            trap - EXIT INT TERM
+            if [ "$status" -ne 0 ]; then
+              rm -rf -- "$bare_repo" "$trusted_dir" "$runtime_dir"
+              test ! -e "$bare_repo"
+              test ! -e "$trusted_dir"
+              test ! -e "$runtime_dir"
+            fi
+            exit "$status"
+          }
+          trap cleanup_on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          workflow_path='.github/workflows/trusted-deletion-anchor.yml'
+          test "$EVENT_NAME" = pull_request_target
+          test "$REPOSITORY" = James3014/Nexus-new
+          test "$DEFAULT_BRANCH" = main
+          test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
+          test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          test -n "$basic_auth"
+          test "$(printf '%s' "$basic_auth" | tr -cd '\n' | wc -c)" -eq 0
+          git init --bare "$bare_repo"
+          git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
+          commit_identity="$(git -C "$bare_repo" cat-file commit "$WORKFLOW_SHA")"
+          printf '%s\n' "$commit_identity" | grep -E '^tree [0-9a-f]{40}$'
+          printf '%s\n' "$commit_identity" | grep -E '^author .+ <[^>]+> [0-9]+ [+-][0-9]{4}$'
+          printf '%s\n' "$commit_identity" | grep -E '^committer .+ <[^>]+> [0-9]+ [+-][0-9]{4}$'
+          tree_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$workflow_path")"
+          test "$tree_entry" = "100644 blob $(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$workflow_path")	$workflow_path"
+          blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$workflow_path")"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$workflow_path")" = blob
+          script_path='scripts/ops/trusted_deletion_anchor.py'
+          script_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$script_path")"
+          test "$script_entry" = "100644 blob $(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$script_path")	$script_path"
+          script_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$script_path")"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$script_path")" = blob
+          mkdir -p "$trusted_dir"
+          trusted_script="$trusted_dir/trusted_deletion_anchor.py"
+          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:$script_path" > "$trusted_script"
+          test "$(stat -c '%a' "$trusted_script" 2>/dev/null || stat -f '%Lp' "$trusted_script")" = 644
+          test "$(git hash-object "$trusted_script")" = "$script_blob_id"
+          script_sha256="$(sha256sum "$trusted_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_script" | cut -d' ' -f1)"
+          printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
+          test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
+          python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/anchor-event.json", "w"))'
+          python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor" --runtime-dir "$runtime_dir"
+      - name: Publish fixed external anchor
+        id: external-anchor
+        run: |
+          set -euo pipefail
+          echo "manifest_sha256=$(sha256sum "$RUNNER_TEMP/trusted-anchor/manifest.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "external_anchor_sha256=$(sha256sum "$RUNNER_TEMP/trusted-anchor/external-anchor.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload controller bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-anchor-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Cleanup trusted controller source
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "$RUNNER_TEMP/trusted-controller.git" "$RUNNER_TEMP/trusted-controller-source" "$RUNNER_TEMP/trusted-runtime"
+          test ! -e "$RUNNER_TEMP/trusted-controller.git"
+          test ! -e "$RUNNER_TEMP/trusted-controller-source"
+          test ! -e "$RUNNER_TEMP/trusted-runtime"
+
+  unprivileged-executor:
+    name: Unprivileged executor (bundle only)
+    needs: trusted-controller
+    if: needs.trusted-controller.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Download controller bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-anchor-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor
+      - name: Execute only the hash-bound bundle
+        run: |
+          set -euo pipefail
+          python "${RUNNER_TEMP}/trusted-anchor/trusted_deletion_anchor.py" executor \
+            --bundle-dir "$RUNNER_TEMP/trusted-anchor"
+      - name: Upload fixed-schema raw evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-anchor-executor-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor/raw-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Cleanup unprivileged executor material
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "$RUNNER_TEMP/trusted-anchor/source" "$RUNNER_TEMP/trusted-anchor/runtime"
+          test ! -e "$RUNNER_TEMP/trusted-anchor/source"
+          test ! -e "$RUNNER_TEMP/trusted-anchor/runtime"
+
+  trusted-verifier:
+    name: Trusted verifier (default branch)
+    needs: [trusted-controller, unprivileged-executor]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Acquire exact trusted verifier source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRUSTED_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bare_repo="$RUNNER_TEMP/trusted-verifier.git"
+          trusted_dir="$RUNNER_TEMP/trusted-verifier-source"
+          cleanup_on_exit() {
+            status=$?
+            trap - EXIT INT TERM
+            if [ "$status" -ne 0 ]; then
+              rm -rf -- "$bare_repo" "$trusted_dir"
+              test ! -e "$bare_repo"
+              test ! -e "$trusted_dir"
+            fi
+            exit "$status"
+          }
+          trap cleanup_on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          workflow_path='.github/workflows/trusted-deletion-anchor.yml'
+          script_path='scripts/ops/trusted_deletion_anchor.py'
+          test "$EVENT_NAME" = pull_request_target
+          test "$REPOSITORY" = James3014/Nexus-new
+          test "$DEFAULT_BRANCH" = main
+          test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
+          test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          test -n "$basic_auth"
+          test "$(printf '%s' "$basic_auth" | tr -cd '\n' | wc -c)" -eq 0
+          git init --bare "$bare_repo"
+          git -C "$bare_repo" remote add origin "https://github.com/$REPOSITORY.git"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$bare_repo" fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA^{commit}")" = "$WORKFLOW_SHA"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA")" = commit
+          commit_identity="$(git -C "$bare_repo" cat-file commit "$WORKFLOW_SHA")"
+          printf '%s\n' "$commit_identity" | grep -E '^tree [0-9a-f]{40}$'
+          printf '%s\n' "$commit_identity" | grep -E '^author .+ <[^>]+> [0-9]+ [+-][0-9]{4}$'
+          printf '%s\n' "$commit_identity" | grep -E '^committer .+ <[^>]+> [0-9]+ [+-][0-9]{4}$'
+          script_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$script_path")"
+          script_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$script_path")"
+          test "$script_entry" = "100644 blob $script_blob_id	$script_path"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$script_path")" = blob
+          mkdir -p "$trusted_dir"
+          trusted_script="$trusted_dir/trusted_deletion_anchor.py"
+          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:$script_path" > "$trusted_script"
+          test "$(stat -c '%a' "$trusted_script" 2>/dev/null || stat -f '%Lp' "$trusted_script")" = 644
+          script_sha256="$(sha256sum "$trusted_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_script" | cut -d' ' -f1)"
+          printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
+          test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
+      - name: Download controller bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-anchor-controller-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor
+      - name: Download executor evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trusted-anchor-executor-${{ github.run_id }}
+          path: ${{ runner.temp }}/trusted-anchor/evidence
+      - name: Verify fixed schema and recomputed digests
+        env:
+          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
+          EXPECTED_EXTERNAL_ANCHOR_SHA256: ${{ needs.trusted-controller.outputs.external_anchor_sha256 }}
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json"
+          cp "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json" "$RUNNER_TEMP/trusted-anchor/raw-evidence.json"
+          python "$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py" verifier --bundle-dir "$RUNNER_TEMP/trusted-anchor" --expected-workflow-ref "$EXPECTED_WORKFLOW_REF" --expected-workflow-sha "$EXPECTED_WORKFLOW_SHA" --expected-run-id "$EXPECTED_RUN_ID" --verify-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --expected-external-anchor-sha256 "$EXPECTED_EXTERNAL_ANCHOR_SHA256" --expected-event-name "$EXPECTED_EVENT_NAME" --expected-repository "$EXPECTED_REPOSITORY" --expected-default-branch "$EXPECTED_DEFAULT_BRANCH" --expected-pull-request-number "$EXPECTED_PULL_REQUEST_NUMBER" --expected-base-sha "$EXPECTED_BASE_SHA" --expected-head-sha "$EXPECTED_HEAD_SHA"
+      - name: Cleanup trusted verifier source
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "$RUNNER_TEMP/trusted-verifier.git" "$RUNNER_TEMP/trusted-verifier-source"
+          test ! -e "$RUNNER_TEMP/trusted-verifier.git"
+          test ! -e "$RUNNER_TEMP/trusted-verifier-source"
