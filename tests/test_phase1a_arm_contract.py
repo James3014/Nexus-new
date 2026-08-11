@@ -239,10 +239,16 @@ def test_empty_identity_variants_fail_closed():
         make_valid_identity(tool_surface=[])
     with pytest.raises(ValueError, match="must be dict, list, tuple"):
         make_valid_identity(tool_surface={"alpha", "beta"})
+    with pytest.raises(ValueError, match="unordered set/frozenset"):
+        make_valid_identity(tool_surface={"tools": {"read", "search"}})
+    with pytest.raises(ValueError, match="unordered set/frozenset"):
+        make_valid_identity(tool_surface={"nested": [{"tools": frozenset({"read", "search"})}]})
     with pytest.raises(ValueError, match="cannot be empty"):
         make_valid_identity(budgets_timeouts={})
     with pytest.raises(ValueError, match="must be dict"):
         make_valid_identity(budgets_timeouts=[("timeout", 300)])
+    with pytest.raises(ValueError, match="unordered set/frozenset"):
+        make_valid_identity(budgets_timeouts={"limits": {"tiers": {"fast", "slow"}}})
 
 
 def test_bare_arm_strings_rejected():
