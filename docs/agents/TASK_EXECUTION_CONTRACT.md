@@ -25,7 +25,9 @@ delegated, requires an isolated Target, crosses subsystems, changes
 route/lifecycle/workforce authority, weakens security, changes a migration or
 schema, performs cleanup or protected-branch/ref operations, creates a
 Candidate, or supports a production/public claim. Direct work does not commit,
-push, merge, delete, or auto-chain without exact Owner authority.
+push, merge, delete, or auto-chain without exact Owner authority. The standing
+coordinator grant does not expand `DIRECT_CANONICAL`; it applies only to the
+governed GitHub Ready-Issue actions defined below.
 
 ## Governed discovery and authority
 
@@ -40,14 +42,25 @@ allowed files, forbidden scope, verification commands, required evidence, exit
 criteria, residual-debt handling, and block classification. Its allowed and
 forbidden paths, file-count ceiling, and commit policy are the operative scope.
 
+When the Owner has granted standing coordinator authority and its durable grant
+receipt is current, the primary Codex coordinator may create and commit a
+missing Task Card/INDEX for an already Ready Issue after freezing the effective
+Issue contract, current baseline, overlap, Workforce receipt, verification,
+and claim ceiling. Delegated workers cannot create or widen their own
+authority; they begin only after the card is physically committed and its hash
+is read back. The grant does not authorize local runtime/lifecycle actions,
+direct protected-main push, force-push, ref deletion, successor work outside
+the active Goal, release, or production/public claims.
+
 ## Mutation safety
 
 - Preserve unrelated dirty state. Use a clean governed Target for isolation;
   never reset, stash, clean, overwrite, or absorb ambiguous changes.
 - Do not hand-edit lifecycle JSON or protected control-plane state. Use formal
   API, CLI, or service surfaces and preserve receipts.
-- A worker may not approve, integrate, push, delete refs, or clean up its own
-  Candidate unless the card grants that exact authority.
+- A worker may never approve, integrate, merge, or delete refs for its own
+  Candidate. A card may grant only a scoped issue-branch push and bounded
+  non-destructive cleanup; it cannot grant self-approval or self-integration.
 
 ## Commit and Candidate gates
 
@@ -63,6 +76,12 @@ Candidate formation binds the verified commit SHA and task-card hash to the
 receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
+
+The primary coordinator may perform the GitHub protected merge under the root
+standing-authority gate only after an independent exact-head review, terminal
+success for every ruleset-required check, an up-to-date base, a complete scope
+and deletion audit, and an expected-head/CAS merge. This GitHub action does not
+approve or integrate local Nexus lifecycle state.
 
 ## Blocks and residual debt
 
