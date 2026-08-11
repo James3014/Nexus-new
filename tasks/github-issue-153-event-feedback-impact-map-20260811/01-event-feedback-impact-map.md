@@ -5,6 +5,10 @@ status: ACTIVE
 task_id: github-issue-153-event-feedback-impact-map
 campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
+baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
+candidate_head: 88a6c616fdf145738e582aa625c94abbf90daf66
+implementation_commit: 4ffbd1fa7e4b88c932615daf3dfa3dec9e8ecd7b
+rebind_commit: 88a6c616fdf145738e582aa625c94abbf90daf66
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_approve: false
