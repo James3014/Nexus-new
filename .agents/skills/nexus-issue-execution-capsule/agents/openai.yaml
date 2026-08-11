@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nexus Issue Execution Capsule"
+  short_description: "Bounded Nexus issue repair with fresh evidence"
+  default_prompt: "Use $nexus-issue-execution-capsule to execute a bounded Nexus issue repair."
