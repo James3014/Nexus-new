@@ -41,7 +41,7 @@ python3 scripts/ops/validate_codex_context_index.py configs/codex_task_context_i
 The repository-derived knowledge base is organized into seven core concept domains:
 
 1. **[Architecture Overview](architecture/overview.md)**: Explains the P-X-D-R-A-C (Plan, Execute, Diagnose, Research, Audit, Crystallize) engine lifecycle, process isolation via `SanitizedRunner`, and execution streaming via `AsyncProcessExecutor`.
-2. **[Capability Planner & Routing Authority](routing/capability-planner.md)**: Documents `CapabilityPlanner` and `HybridRouteDecision`, the sole route authorities governing capability selection and topology planning across all runtime surfaces.
+2. **[Capability Planner & Routing Authority](routing/capability-planner.md)**: Documents `CapabilityPlanner`, the sole route authority, and its `HybridRouteDecision` projection across runtime surfaces.
 3. **[MCP Gateway & Ingress Protocols](runtime/mcp-gateway.md)**: Covers the Model Context Protocol execution gateway, HTTP/stdio transport adapters, and self-hosted MCP servers.
 4. **[CLI Commands & Cueline Operations](runtime/cli-and-cueline.md)**: Details the primary `nexus` CLI surface (`scripts/engine/nexus_cli.py`), command delivery modes (`ask`, `high`), health check levels, and `nexus-cueline-worker` background task execution.
 5. **[Governance Gates & Completion Contracts](governance/gates-and-contracts.md)**: Explains delivery verification gates, completion contract envelopes, and `CompletionEnforcer` fail-closed verification.
@@ -94,8 +94,9 @@ per class and 8,000 bytes overall.
 The source observations below are navigation aids only; verify every claim
 against current source and tests:
 
-- [Capability planner](routing/capability-planner.md) — `CapabilityPlanner` and
-  `HybridRouteDecision` remain route authorities.
+- [Capability planner](routing/capability-planner.md) — `CapabilityPlanner`
+  remains the sole route authority; `HybridRouteDecision` is its derived
+  projection.
 - [CLI and cueline](runtime/cli-and-cueline.md) — the primary CLI source is
   `scripts/engine/nexus_cli.py`.
 - [Validation suites](testing/validation-and-benchmarks.md) — use the current
