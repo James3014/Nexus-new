@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
+
 import pytest
 import yaml
 
@@ -238,6 +239,33 @@ def test_admission_blocks_missing_required_controls() -> None:
     assert dec.decision == AdmissionDecision.BLOCK
     assert "allowed_files" in dec.missing_controls
     assert "independent_verification" in dec.missing_controls
+
+
+def _deepseek_request(**overrides: object) -> WorkforceAdmissionRequest:
+    values: dict[str, object] = {"requested_worker_id": "opencode_deepseek_v4_flash", "provider": "opencode", "model": "opencode/deepseek-v4-flash-free", "role": "bounded_candidate_generation", "autonomy": "L1", "context": "nexus_bounded", "route_authorized": True, "provided_controls": ["isolated_directory", "bounded_context", "json_event_receipt", "parser", "focused_tests", "verifier"]}
+    values.update(overrides)
+    return WorkforceAdmissionRequest(**values)  # type: ignore[arg-type]
+
+
+def test_owner_approved_deepseek_candidate_admission_is_generic_and_fail_closed() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    allowed = loader.admit(_deepseek_request())
+    assert allowed.decision == AdmissionDecision.ALLOW
+    assert allowed.resolved_model == "opencode/deepseek-v4-flash-free"
+    assert allowed.admitted_role == "bounded_candidate_generation"
+    assert allowed.autonomy_ceiling == "L1"
+    reviewer = loader.admit(_deepseek_request(role="independent_review"))
+    assert reviewer.decision == AdmissionDecision.ESCALATE
+    assert reviewer.admitted_role is None
+    l15 = loader.admit(_deepseek_request(role="independent_review", autonomy="L1.5"))
+    assert l15.decision == AdmissionDecision.BLOCK
+    assert any("Invalid requested autonomy level" in reason for reason in l15.decision_reasons)
+    missing_control = loader.admit(_deepseek_request(provided_controls=["isolated_directory", "bounded_context", "json_event_receipt", "parser", "focused_tests"]))
+    assert missing_control.decision == AdmissionDecision.BLOCK
+    assert missing_control.missing_controls == ("verifier",)
+    wrong_model = loader.admit(_deepseek_request(model="opencode/not-deepseek-v4-flash-free"))
+    assert wrong_model.decision == AdmissionDecision.BLOCK
+    assert any("Mismatched model" in reason for reason in wrong_model.decision_reasons)
 
 
 def test_admission_escalates_role_mismatch() -> None:
