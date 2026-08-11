@@ -675,13 +675,24 @@ def parse_junit_metadata(path: Path) -> dict[str, Any]:
 
 
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
-    fields = (
-        "collection_count",
-        "node_ids",
-    )
-    if not any(getattr(base, field) or getattr(head, field) for field in fields):
+    base_nodes = set(base.node_ids)
+    head_nodes = set(head.node_ids)
+    if not base_nodes and not head_nodes:
         return False
-    return any(getattr(base, field) != getattr(head, field) for field in fields)
+    if not base_nodes or not head_nodes or not base_nodes <= head_nodes:
+        return True
+
+    head_only = head_nodes - base_nodes
+    if head_only and base.test_inventory_tree == head.test_inventory_tree:
+        return True
+    if not head_only <= set(head.passed_node_ids):
+        return True
+    if not set(head.skipped_node_ids) <= set(base.skipped_node_ids):
+        return True
+
+    downgraded = set(base.passed_node_ids) - set(head.passed_node_ids)
+    classified_failures = set(head.failed_node_ids) | set(head.error_node_ids)
+    return bool(downgraded - classified_failures)
 
 
 def _valid_test_provenance(result: PytestRunResult) -> bool:

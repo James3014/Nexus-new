@@ -105,6 +105,59 @@ def _run(
     )
 
 
+def _with_node_outcomes(
+    run: PytestRunResult,
+    *,
+    passed: list[str],
+    failed: list[str] | None = None,
+    errors: list[str] | None = None,
+    skipped: list[str] | None = None,
+    test_inventory_tree: str | None = None,
+) -> PytestRunResult:
+    failed = failed or []
+    errors = errors or []
+    skipped = skipped or []
+    node_ids = sorted(set(passed) | set(failed) | set(errors) | set(skipped))
+    failures = sorted(set(failed) | set(errors))
+    exit_code = 1 if failures else 0
+    inventory_tree = test_inventory_tree or run.test_inventory_tree
+    return replace(
+        run,
+        exit_code=exit_code,
+        failures=failures,
+        test_inventory_tree=inventory_tree,
+        bound_test_inventory_tree=inventory_tree,
+        collection_count=len(node_ids),
+        node_ids=node_ids,
+        passed_node_ids=sorted(passed),
+        failed_node_ids=sorted(failed),
+        error_node_ids=sorted(errors),
+        skipped_node_ids=sorted(skipped),
+        provenance_digest=compute_test_provenance_digest(
+            revision=run.revision,
+            source_tree=run.source_tree,
+            test_inventory_tree=inventory_tree,
+            plan_digest=run.plan_digest,
+            verifier_digest=run.verifier_digest,
+            collection_count=len(node_ids),
+            node_ids=node_ids,
+            passed_node_ids=sorted(passed),
+            failed_node_ids=sorted(failed),
+            error_node_ids=sorted(errors),
+            skipped_node_ids=sorted(skipped),
+            terminal_status=run.terminal_status,
+            exit_code=exit_code,
+            status=run.status,
+            failures=failures,
+            executed_targets=run.executed_targets,
+            missing_targets=run.missing_targets,
+            selected_targets=run.selected_targets,
+            unexpected_missing_targets=run.unexpected_missing_targets,
+            impact_class=run.impact_class,
+        ),
+    )
+
+
 def _make_exact_git_repo(tmp_path: Path, *, include_addition: bool) -> dict[str, object]:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -274,6 +327,163 @@ def test_preexisting_exact_base_failure_is_distinguished_from_new_regression():
     assert result.classification == "EXACT_BASELINE_DEBT"
     assert result.blocking is False
     assert result.new_failures == []
+
+
+def test_passing_head_only_tests_preserve_a_trustworthy_exact_base_comparison():
+    existing = "tests.test_contract::test_existing"
+    added = "tests.test_contract::test_added"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[existing],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[existing, added],
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+def test_head_only_nodes_without_an_exact_test_tree_delta_fail_closed():
+    existing = "tests.test_contract::test_existing"
+    added = "tests.test_contract::test_unattributed"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[existing],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[existing, added],
+        test_inventory_tree=base.test_inventory_tree,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+
+
+def test_passing_head_only_tests_preserve_exact_baseline_debt():
+    passed = "tests.test_contract::test_passing"
+    debt = "tests.test_contract::test_existing_debt"
+    added = "tests.test_contract::test_added"
+    base = _with_node_outcomes(
+        _run(1, [debt], revision="base"),
+        passed=[passed],
+        failed=[debt],
+    )
+    head = _with_node_outcomes(
+        _run(1, [debt], revision="head"),
+        passed=[passed, added],
+        failed=[debt],
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "EXACT_BASELINE_DEBT"
+    assert result.blocking is False
+    assert result.new_failures == []
+
+
+@pytest.mark.parametrize("added_outcome", ["failed", "errors", "skipped"])
+def test_nonpassing_head_only_nodes_fail_closed(added_outcome):
+    existing = "tests.test_contract::test_existing"
+    added = "tests.test_contract::test_added"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[existing],
+    )
+    outcomes = {
+        "passed": [existing],
+        "test_inventory_tree": "f" * 40,
+        added_outcome: [added],
+    }
+    head = _with_node_outcomes(_run(0, [], revision="head"), **outcomes)
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+
+
+def test_missing_base_node_and_replacement_substitution_fail_closed():
+    retained = "tests.test_contract::test_retained"
+    removed = "tests.test_contract::test_removed"
+    replacement = "tests.test_contract::test_replacement"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[retained, removed],
+    )
+
+    for head_nodes in ([retained], [retained, replacement]):
+        head = _with_node_outcomes(
+            _run(0, [], revision="head"),
+            passed=head_nodes,
+            test_inventory_tree="f" * 40,
+        )
+        result = classify_regression(base, head)
+        assert result.classification == "IMPACT_UNKNOWN"
+        assert result.blocking is True
+
+
+def test_empty_or_downgraded_inventory_metadata_fails_closed():
+    existing = "tests.test_contract::test_existing"
+    empty_base = _with_node_outcomes(_run(0, [], revision="base"), passed=[])
+    populated_head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[existing],
+        test_inventory_tree="f" * 40,
+    )
+    assert classify_regression(empty_base, populated_head).classification == (
+        "IMPACT_UNKNOWN"
+    )
+
+    populated_base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[existing],
+    )
+    empty_head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[],
+        test_inventory_tree="f" * 40,
+    )
+    assert classify_regression(populated_base, empty_head).classification == (
+        "IMPACT_UNKNOWN"
+    )
+
+    skipped_head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[],
+        skipped=[existing],
+    )
+    assert classify_regression(populated_base, skipped_head).classification == (
+        "IMPACT_UNKNOWN"
+    )
+
+
+@pytest.mark.parametrize("base_outcome", ["failed", "errors"])
+def test_existing_failure_cannot_be_hidden_by_a_head_skip(base_outcome):
+    node = "tests.test_contract::test_existing_debt"
+    base = _with_node_outcomes(
+        _run(1, [node], revision="base"),
+        passed=[],
+        **{base_outcome: [node]},
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[],
+        skipped=[node],
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
 
 
 def test_new_failure_cannot_be_hidden_by_baseline_mechanism():
