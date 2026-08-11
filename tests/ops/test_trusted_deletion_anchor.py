@@ -339,7 +339,7 @@ def test_recomputed_artifact_digest_rejects_replay():
     )
 
 
-def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anchor():
+def test_controller_executor_verifier_path_from_non_repository_cwd():
     with TemporaryDirectory(prefix="trusted-anchor-e2e-") as directory:
         root = Path(directory)
         origin = root / "origin.git"
@@ -372,10 +372,13 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         event_path = root / "event.json"
         event_path.write_bytes(_json(event))
         bundle = root / "bundle"
+        non_repository_cwd = root / "non-repository-cwd"
+        non_repository_cwd.mkdir()
+        verifier_script = ROOT / "scripts/ops/trusted_deletion_anchor.py"
         subprocess.run(
             [
                 sys.executable,
-                "scripts/ops/trusted_deletion_anchor.py",
+                str(verifier_script),
                 "controller",
                 "--event-json",
                 str(event_path),
@@ -385,6 +388,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
                 str(bundle),
             ],
             check=True,
+            cwd=non_repository_cwd,
         )
         manifest = json.loads((bundle / "manifest.json").read_text())
         anchor = json.loads((bundle / "external-anchor.json").read_text())
@@ -440,7 +444,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         verified = subprocess.run(
             [
                 sys.executable,
-                "scripts/ops/trusted_deletion_anchor.py",
+                str(verifier_script),
                 "verifier",
                 "--bundle-dir",
                 str(bundle),
@@ -449,6 +453,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
             check=True,
             capture_output=True,
             text=True,
+            cwd=non_repository_cwd,
         )
         assert '"status": "PASS"' in verified.stdout
         evidence_path = bundle / "raw-evidence.json"
@@ -459,13 +464,14 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         head_tree_rejected = subprocess.run(
             [
                 sys.executable,
-                "scripts/ops/trusted_deletion_anchor.py",
+                str(verifier_script),
                 "verifier",
                 "--bundle-dir",
                 str(bundle),
                 *expected,
             ],
             capture_output=True,
+            cwd=non_repository_cwd,
         )
         assert head_tree_rejected.returncode != 0
         evidence_path.write_bytes(original_evidence)
@@ -476,13 +482,14 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
             subprocess.run(
                 [
                     sys.executable,
-                    "scripts/ops/trusted_deletion_anchor.py",
+                    str(verifier_script),
                     "verifier",
                     "--bundle-dir",
                     str(bundle),
                     *expected,
                 ],
                 capture_output=True,
+                cwd=non_repository_cwd,
             ).returncode
             != 0
         )
