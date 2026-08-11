@@ -37,6 +37,7 @@ class FeedbackDecision(str, Enum):
 _CODE_RE = re.compile(r"^[A-Z][A-Z0-9_.:-]{0,63}$")
 _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$")
 _FORBIDDEN = re.compile(r"[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
+AUTHORITY_FLAG_KEYS = frozenset({"approval", "production", "route"})
 
 
 def _tokens(values: Any, pattern: re.Pattern[str], name: str) -> Tuple[str, ...]:
@@ -76,6 +77,9 @@ class DeveloperFeedbackDecision:
         if self.request_digest and not re.fullmatch(r"[0-9a-f]{64}", self.request_digest):
             raise ValueError("request_digest must be sha256")
         flags = tuple(self.authority_flags)
+        keys = [k for k, _ in flags]
+        if len(keys) != len(set(keys)) or set(keys) != AUTHORITY_FLAG_KEYS:
+            raise ValueError("authority flags must use the fixed key set")
         if any(not isinstance(k, str) or not isinstance(v, bool) for k, v in flags) or any(v for _, v in flags):
             raise ValueError("developer feedback cannot assert authority")
         object.__setattr__(self, "authority_flags", flags)

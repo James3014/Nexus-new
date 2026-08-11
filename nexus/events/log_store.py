@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from nexus.feedback.contracts import DeveloperFeedbackDecision
+from nexus.feedback.contracts import AUTHORITY_FLAG_KEYS, DeveloperFeedbackDecision
 
 
 class JsonlEventLogStore:
@@ -82,8 +82,28 @@ class DeveloperFeedbackDecisionStore:
         }
         if set(obj) != allowed or obj.get("decision") not in {"KEEP", "REVISE", "REJECT", "INVESTIGATE"}:
             raise ValueError("invalid decision fields")
-        if not isinstance(obj.get("authority_flags"), dict) or any(obj["authority_flags"].values()):
+        flags = obj.get("authority_flags")
+        if (
+            not isinstance(flags, dict)
+            or set(flags) != AUTHORITY_FLAG_KEYS
+            or any(type(value) is not bool for value in flags.values())
+            or any(flags.values())
+        ):
             raise ValueError("invalid authority flags")
+        if (
+            not isinstance(obj.get("task_id"), str)
+            or not isinstance(obj.get("decision_id"), str)
+            or not isinstance(obj.get("reason_codes"), list)
+            or not all(isinstance(value, str) for value in obj["reason_codes"])
+            or not isinstance(obj.get("evidence_refs"), list)
+            or not all(isinstance(value, str) for value in obj["evidence_refs"])
+            or not isinstance(obj.get("request_digest"), str)
+            or not isinstance(obj.get("sequence"), int)
+            or isinstance(obj.get("sequence"), bool)
+            or not isinstance(obj.get("parent_digest"), str)
+            or not isinstance(obj.get("record_digest"), str)
+        ):
+            raise ValueError("invalid decision field types")
         return obj
 
     def _scan(self) -> Tuple[list[Dict[str, Any]], str, int]:

@@ -1,3 +1,4 @@
+import fcntl
 import threading
 from pathlib import Path
 
@@ -59,6 +60,17 @@ def test_stale_tail_and_concurrent_append(tmp_path: Path):
     for t in threads:
         t.join()
     assert sorted(results) == [2, 3, 4, 5]
+
+
+def test_lock_timeout_under_contention(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    with open(store.lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            with pytest.raises(TimeoutError, match="lock timeout"):
+                store.append(decision(), lock_timeout=0.02)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def test_typed_emitter_notifies_after_commit_and_generic_is_reserved(tmp_path: Path):
