@@ -7,14 +7,15 @@ All statistics are descriptive only; no statistical significance claimed.
 All scoring functions require an explicit private_context_path — the public
 run directory alone is never sufficient for unblinding alias→case_id bindings.
 """
+import math
 import statistics
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from nexus.research.epistemic_benchmark.contracts import (
     BenchmarkArm,
     BenchmarkDecision,
-    OracleClass,
     DefectSeverity,
+    OracleClass,
 )
 from nexus.research.epistemic_benchmark.corpus import (
     get_all_oracles,
@@ -23,9 +24,7 @@ from nexus.research.epistemic_benchmark.corpus import (
 from nexus.research.epistemic_benchmark.packets import (
     get_alias_to_case_map,
     load_private_scoring_context,
-    load_public_run_manifest,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -152,10 +151,9 @@ def compute_arm_metrics(
     cost_total = 0.0
     cost_present = False
 
-    evidence_valid_num = 0
-    evidence_valid_den = 0
+    case_metrics: Dict[str, Dict[str, Optional[float]]] = {}
 
-    for case_id in all_case_ids:
+    for case_id in sorted(all_case_ids):
         oracle = _get_oracle_by_case(case_id)
         if oracle is None:
             continue
@@ -165,6 +163,11 @@ def compute_arm_metrics(
 
         case_obs_list = obs_by_case.get(case_id, [])
 
+        case_successes = []
+        case_durations = []
+        case_costs = []
+        case_appropriate_abstentions = []
+
         for obs in case_obs_list:
             decision = obs.get("decision", "")
             confidence = obs.get("confidence")
@@ -173,8 +176,14 @@ def compute_arm_metrics(
 
             # Decision accuracy
             if decision in {e.value for e in BenchmarkDecision}:
-                correct += (1 if decision == oracle_decision else 0)
+                is_correct = 1 if decision == oracle_decision else 0
+                correct += is_correct
                 total_scored += 1
+                case_successes.append(float(is_correct))
+                if oracle_class == OracleClass.INDETERMINATE.value:
+                    case_appropriate_abstentions.append(
+                        1.0 if decision == BenchmarkDecision.BLOCK.value else 0.0
+                    )
 
             # False acceptance (DEFECTIVE + ACCEPT)
             if oracle_class == OracleClass.DEFECTIVE.value and decision == BenchmarkDecision.ACCEPT.value:
@@ -224,6 +233,7 @@ def compute_arm_metrics(
             dur = execution.get("duration_seconds")
             if dur is not None and not isinstance(dur, bool) and isinstance(dur, (int, float)) and dur >= 0:
                 durations.append(float(dur))
+                case_durations.append(float(dur))
 
             # Tokens
             it = execution.get("input_tokens")
@@ -238,6 +248,8 @@ def compute_arm_metrics(
             if cost is not None:
                 cost_total += cost
                 cost_present = True
+                if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
+                    case_costs.append(float(cost))
 
         # Decision agreement (for cases with multiple observations)
         if len(case_obs_list) > 1:
@@ -247,6 +259,17 @@ def compute_arm_metrics(
             max_count = max(counts.values()) if counts else 0
             total_count = len(decisions_this_case)
             agreement_scores.append(max_count / total_count if total_count else 0)
+
+        case_metrics[case_id] = {
+            "success": float(all(case_successes)) if case_successes else None,
+            "latency": round(statistics.median(case_durations), 6) if case_durations else None,
+            "cost": round(sum(case_costs), 6) if case_costs else None,
+            "appropriate_abstention": (
+                round(sum(case_appropriate_abstentions) / len(case_appropriate_abstentions), 6)
+                if case_appropriate_abstentions
+                else None
+            ),
+        }
 
     # Denominators for rates
     total_defective_obs = sum(
@@ -322,6 +345,9 @@ def compute_arm_metrics(
         "_assigned_cases": case_count,
         "_observed_cases": len(observed_cases),
         "_missing_cases": case_count - len(observed_cases),
+        "_observed_case_ids": sorted(observed_cases),
+        "_missing_case_ids": sorted(set(all_case_ids) - observed_cases),
+        "_case_metrics": {case_id: case_metrics[case_id] for case_id in sorted(observed_cases)},
     }
 
 
@@ -340,37 +366,204 @@ def compute_paired_comparison(
     Compare two arms descriptively. All deltas are arm_b - arm_a.
     Positive delta does NOT imply improvement.
     """
-    def _delta(key: str) -> Optional[float]:
-        a = arm_a_metrics.get(key)
-        b = arm_b_metrics.get(key)
-        if a is None or b is None:
+    def _case_ids(metrics: Dict[str, Any]) -> Set[str]:
+        raw_ids = metrics.get("_observed_case_ids")
+        if not isinstance(raw_ids, (list, tuple, set)):
+            raise ValueError("PAIRED_CASE_IDENTITIES_REQUIRED")
+        ids = list(raw_ids)
+        if not all(isinstance(case_id, str) and case_id for case_id in ids):
+            raise ValueError("PAIRED_CASE_ID_INVALID")
+        if len(ids) != len(set(ids)):
+            raise ValueError("PAIRED_CASE_IDENTITIES_COLLISION")
+        return set(ids)
+
+    ids_a = _case_ids(arm_a_metrics)
+    ids_b = _case_ids(arm_b_metrics)
+    def _validated_case_metrics(
+        metrics: Dict[str, Any], ids: Set[str], arm_label: str
+    ) -> Dict[str, Dict[str, Any]]:
+        raw_case_metrics = metrics.get("_case_metrics")
+        if not isinstance(raw_case_metrics, dict):
+            raise ValueError("PAIRED_CASE_METRICS_REQUIRED")
+        if set(raw_case_metrics) != ids:
+            raise ValueError("PAIRED_CASE_METRICS_IDENTITIES_MISMATCH")
+        for case_id in sorted(ids):
+            if not isinstance(raw_case_metrics[case_id], dict):
+                raise ValueError(
+                    f"PAIRED_CASE_METRICS_INVALID: arm={arm_label} case={case_id}"
+                )
+        return raw_case_metrics
+
+    case_metrics_a = _validated_case_metrics(arm_a_metrics, ids_a, "a")
+    case_metrics_b = _validated_case_metrics(arm_b_metrics, ids_b, "b")
+
+    paired_ids = sorted(ids_a & ids_b)
+    unpaired_a = sorted(ids_a - ids_b)
+    unpaired_b = sorted(ids_b - ids_a)
+
+    disclaimer = (
+        "Observed deltas are descriptive only. "
+        "This benchmark does not establish statistical significance "
+        "or general research-quality improvement."
+    )
+    if not paired_ids:
+        return {
+            "comparison": f"{arm_b_name} vs {arm_a_name}",
+            "pairing_status": "NO_EXACT_INTERSECTION",
+            "paired_case_count": 0,
+            "paired_denominator": None,
+            "arm_a_unpaired_case_count": len(unpaired_a),
+            "arm_b_unpaired_case_count": len(unpaired_b),
+            "paired_missingness": {
+                "success": 0,
+                "latency": 0,
+                "cost": 0,
+                "intervention": 0,
+                "appropriate_abstention": 0,
+            },
+            "paired_metric_denominators": {
+                "success": 0,
+                "latency": 0,
+                "cost": 0,
+                "intervention": 0,
+                "appropriate_abstention": 0,
+            },
+            "success_delta": None,
+            "latency_delta_seconds": None,
+            "cost_delta_usd": None,
+            "intervention_delta": None,
+            "decision_accuracy_delta": None,
+            "false_acceptance_delta": None,
+            "appropriate_abstention_delta": None,
+            "defect_recall_delta": None,
+            "median_duration_delta_seconds": None,
+            "median_cost_delta_usd": None,
+            "disclaimer": disclaimer,
+        }
+
+    def _metric_value(
+        metric: str, value: Any, arm_label: str, case_id: str
+    ) -> Optional[float]:
+        if value is None:
             return None
-        return round(b - a, 6)
+        if metric == "success":
+            if isinstance(value, bool):
+                return float(value)
+            if not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"PAIRED_CASE_SUCCESS_VALUE_INVALID: arm={arm_label} case={case_id}"
+                )
+            try:
+                normalized = float(value)
+            except (OverflowError, ValueError):
+                normalized = math.nan
+            if not math.isfinite(normalized) or normalized not in (0.0, 1.0):
+                raise ValueError(
+                    f"PAIRED_CASE_SUCCESS_VALUE_INVALID: arm={arm_label} case={case_id}"
+                )
+            return normalized
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(
+                "PAIRED_CASE_METRIC_VALUE_INVALID: "
+                f"arm={arm_label} case={case_id} metric={metric}"
+            )
+        try:
+            normalized = float(value)
+        except (OverflowError, ValueError):
+            normalized = math.nan
+        if not math.isfinite(normalized):
+            raise ValueError(
+                "PAIRED_CASE_METRIC_VALUE_NONFINITE: "
+                f"arm={arm_label} case={case_id} metric={metric}"
+            )
+        if metric in {"latency", "cost"} and normalized < 0:
+            raise ValueError(
+                "PAIRED_CASE_METRIC_VALUE_INVALID: "
+                f"arm={arm_label} case={case_id} metric={metric}"
+            )
+        if metric == "appropriate_abstention" and not 0.0 <= normalized <= 1.0:
+            raise ValueError(
+                "PAIRED_CASE_METRIC_VALUE_INVALID: "
+                f"arm={arm_label} case={case_id} metric={metric}"
+            )
+        return normalized
 
-    obs_a = sum(
-        1 for _ in range(arm_a_metrics.get("_observed_cases", 0))
-    )
+    def _paired_delta(
+        metric: str, *, use_median: bool = False
+    ) -> Tuple[Optional[float], int, int]:
+        values_a = []
+        values_b = []
+        missing = 0
+        for case_id in paired_ids:
+            value_a = _metric_value(
+                metric, case_metrics_a[case_id].get(metric), "a", case_id
+            )
+            value_b = _metric_value(
+                metric, case_metrics_b[case_id].get(metric), "b", case_id
+            )
+            missing += int(value_a is None) + int(value_b is None)
+            if value_a is None or value_b is None:
+                continue
+            values_a.append(float(value_a))
+            values_b.append(float(value_b))
+        usable_denominator = len(values_a)
+        if not usable_denominator:
+            return None, missing, 0
+        if use_median:
+            delta = statistics.median(
+                value_b - value_a
+                for value_a, value_b in zip(values_a, values_b)
+            )
+        else:
+            aggregate_a = sum(values_a) / len(values_a)
+            aggregate_b = sum(values_b) / len(values_b)
+            delta = aggregate_b - aggregate_a
+        return round(delta, 6), missing, usable_denominator
 
-    # Paired cases = cases with observations in BOTH arms
-    paired_count = min(
-        arm_a_metrics.get("_observed_cases", 0),
-        arm_b_metrics.get("_observed_cases", 0),
+    success_delta, success_missing, success_denominator = _paired_delta("success")
+    latency_delta, latency_missing, latency_denominator = _paired_delta(
+        "latency", use_median=True
     )
+    cost_delta, cost_missing, cost_denominator = _paired_delta("cost")
+    abstention_delta, abstention_missing, abstention_denominator = _paired_delta(
+        "appropriate_abstention"
+    )
+    intervention_delta = None
+    intervention_missing = len(paired_ids)
+    intervention_denominator = 0
 
     return {
         "comparison": f"{arm_b_name} vs {arm_a_name}",
-        "paired_case_count": paired_count,
-        "decision_accuracy_delta": _delta("decision_accuracy"),
-        "false_acceptance_delta": _delta("false_acceptance_rate"),
-        "appropriate_abstention_delta": _delta("appropriate_abstention_rate"),
-        "defect_recall_delta": _delta("defect_detection_recall"),
-        "median_duration_delta_seconds": _delta("median_duration_seconds"),
-        "median_cost_delta_usd": _delta("total_cost_usd"),
-        "disclaimer": (
-            "Observed deltas are descriptive only. "
-            "This benchmark does not establish statistical significance "
-            "or general research-quality improvement."
-        ),
+        "pairing_status": "PAIRED",
+        "paired_case_count": len(paired_ids),
+        "paired_denominator": len(paired_ids),
+        "arm_a_unpaired_case_count": len(unpaired_a),
+        "arm_b_unpaired_case_count": len(unpaired_b),
+        "paired_missingness": {
+            "success": success_missing,
+            "latency": latency_missing,
+            "cost": cost_missing,
+            "intervention": intervention_missing,
+            "appropriate_abstention": abstention_missing,
+        },
+        "paired_metric_denominators": {
+            "success": success_denominator,
+            "latency": latency_denominator,
+            "cost": cost_denominator,
+            "intervention": intervention_denominator,
+            "appropriate_abstention": abstention_denominator,
+        },
+        "success_delta": success_delta,
+        "latency_delta_seconds": latency_delta,
+        "cost_delta_usd": cost_delta,
+        "intervention_delta": intervention_delta,
+        "decision_accuracy_delta": success_delta,
+        "false_acceptance_delta": None,
+        "appropriate_abstention_delta": abstention_delta,
+        "defect_recall_delta": None,
+        "median_duration_delta_seconds": latency_delta,
+        "median_cost_delta_usd": cost_delta,
+        "disclaimer": disclaimer,
     }
 
 
