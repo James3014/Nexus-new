@@ -3,7 +3,7 @@
 - issue: #121
 - task_id: github-issue-121-model-workforce-impact-map
 - status: ACTIVE
-- base_sha: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
+- base_sha: c7e60f4c6798554e51cbc322ebfaf89e2c5cc346
 - authority_watermarks: 5252569113, 5252926064
 - worker: codex_luna
 - provider: codex

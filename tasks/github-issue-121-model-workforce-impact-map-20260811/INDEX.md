@@ -4,7 +4,7 @@
 - issue: #121
 - authority: Owner issue comments 5252569113 and 5252926064; direct Owner authorization 2026-08-11
 - objective: Map the model workforce policy to its exact executable contract tests
-- base_sha: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
+- base_sha: c7e60f4c6798554e51cbc322ebfaf89e2c5cc346
 - status: ACTIVE
 - frontier: 01-map-model-workforce-policy.md
 - completed_cards: []
