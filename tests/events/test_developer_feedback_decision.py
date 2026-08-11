@@ -1,6 +1,7 @@
 import fcntl
 import hashlib
 import multiprocessing
+import os
 import threading
 from pathlib import Path
 
@@ -17,7 +18,9 @@ from nexus.feedback.contracts import (
 
 
 def decision(i="d1", **kwargs):
-    return DeveloperFeedbackDecision(task_id="task-1", decision_id=i, decision=FeedbackDecision.KEEP, **kwargs)
+    return DeveloperFeedbackDecision(
+        task_id="task-1", decision_id=i, decision=FeedbackDecision.KEEP, **kwargs
+    )
 
 
 def _hold_decision_lock(path: str, acquired, release) -> None:
@@ -60,7 +63,9 @@ def test_corruption_and_tamper_fail_closed(tmp_path: Path):
     store = DeveloperFeedbackDecisionStore(tmp_path)
     store.append(decision())
     path = store.path
-    path.write_text(path.read_text().replace('"decision":"KEEP"', '"decision":"REVISE"'), encoding="utf-8")
+    path.write_text(
+        path.read_text().replace('"decision":"KEEP"', '"decision":"REVISE"'), encoding="utf-8"
+    )
     with pytest.raises(ValueError):
         store.read_recent()
 
@@ -83,8 +88,10 @@ def test_stale_tail_and_concurrent_append(tmp_path: Path):
     with pytest.raises(ValueError, match="stale"):
         store.append(decision("d2"), expected_tail="0" * 64)
     results = []
+
     def run(i):
         results.append(store.append(decision(f"d{i}"))["sequence"])
+
     threads = [threading.Thread(target=run, args=(i,)) for i in range(2, 6)]
     for t in threads:
         t.start()
@@ -128,10 +135,113 @@ def test_typed_emitter_notifies_after_commit_and_generic_is_reserved(tmp_path: P
 
 
 def test_deterministic_directive_mapping():
-    assert DeveloperFeedbackDecision.from_directive(
-        task_id="task-1", decision_id="d2", directive=FeedbackDirective([], [], False)
-    ).decision is FeedbackDecision.KEEP
-    assert DeveloperFeedbackDecision.from_directive(
-        task_id="task-1", decision_id="d3",
-        directive=FeedbackDirective([FailurePattern("P_FAIL", "ignored", 0.95)], [], False),
-    ).decision is FeedbackDecision.REJECT
+    assert (
+        DeveloperFeedbackDecision.from_directive(
+            task_id="task-1", decision_id="d2", directive=FeedbackDirective([], [], False)
+        ).decision
+        is FeedbackDecision.KEEP
+    )
+    assert (
+        DeveloperFeedbackDecision.from_directive(
+            task_id="task-1",
+            decision_id="d3",
+            directive=FeedbackDirective([FailurePattern("P_FAIL", "ignored", 0.95)], [], False),
+        ).decision
+        is FeedbackDecision.REJECT
+    )
+
+
+@pytest.mark.parametrize(
+    ("directive", "expected"),
+    [
+        (FeedbackDirective([], [], False), FeedbackDecision.KEEP),
+        (FeedbackDirective([], [], True), FeedbackDecision.REVISE),
+        (
+            FeedbackDirective([FailurePattern("P_FAIL", "ignored", 0.95)], [], False),
+            FeedbackDecision.REJECT,
+        ),
+        (
+            FeedbackDirective([FailurePattern("P_WARN", "ignored", 0.2)], [], False),
+            FeedbackDecision.INVESTIGATE,
+        ),
+        (
+            FeedbackDirective([FailurePattern("P_WARN", "ignored", 0.2)], [], True),
+            FeedbackDecision.REVISE,
+        ),
+        (
+            FeedbackDirective([FailurePattern("P_FAIL", "ignored", 0.99)], [], False),
+            FeedbackDecision.REJECT,
+        ),
+    ],
+)
+def test_all_six_directive_mapping_cases(directive, expected):
+    assert (
+        DeveloperFeedbackDecision.from_directive(
+            task_id="task-1", decision_id="mapping", directive=directive
+        ).decision
+        is expected
+    )
+
+
+def test_invalid_combinations_and_schema_fail_closed():
+    with pytest.raises(ValueError):
+        DeveloperFeedbackDecision(task_id="task-1", decision_id="d", decision="KEEP", schema="v2")
+    with pytest.raises(ValueError):
+        decision(
+            authority_flags=(
+                ("approval", False),
+                ("approval", False),
+                ("route", False),
+                ("production", False),
+            )
+        )
+
+
+def test_unsupported_fcntl_fails_closed(tmp_path: Path, monkeypatch):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    monkeypatch.setattr(fcntl, "flock", lambda *args: (_ for _ in ()).throw(OSError("unsupported")))
+    with pytest.raises(OSError, match="unsupported"):
+        store.append(decision())
+
+
+def test_fsync_uncertainty_does_not_claim_success(tmp_path: Path, monkeypatch):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    monkeypatch.setattr(os, "fsync", lambda *_: (_ for _ in ()).throw(OSError("fsync")))
+    with pytest.raises(OSError, match="fsync"):
+        store.append(decision())
+
+
+def _subprocess_append(root: str, decision_id: str, queue) -> None:
+    store = DeveloperFeedbackDecisionStore(Path(root))
+    queue.put(store.append(decision(decision_id))["sequence"])
+
+
+def test_subprocess_same_and_different_task_contention(tmp_path: Path):
+    queue = multiprocessing.Queue()
+    processes = [
+        multiprocessing.Process(target=_subprocess_append, args=(str(tmp_path), f"d{i}", queue))
+        for i in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=5)
+    assert sorted(queue.get(timeout=1) for _ in processes) == [1, 2]
+
+
+def test_observer_failure_is_post_commit(tmp_path: Path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.subscribe(
+        "developer_feedback_decision", lambda _: (_ for _ in ()).throw(RuntimeError("observer"))
+    )
+    NexusEventBus.set_remote_broadcaster(lambda *_: (_ for _ in ()).throw(RuntimeError("remote")))
+    record = NexusEventBus.emit_developer_feedback_decision(decision("observer"))
+    assert DeveloperFeedbackDecisionStore(tmp_path).read_recent() == [record]
+
+
+def test_record_ceiling_fails_closed(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    store.MAX_RECORDS = 1
+    store.append(decision())
+    with pytest.raises(ValueError, match="ceiling"):
+        store.append(decision("d2"))

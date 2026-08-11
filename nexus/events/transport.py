@@ -172,14 +172,18 @@ class NexusEventBus:
         )
 
     @classmethod
-    def emit_learning_decision(cls, *, task_id: str, action: str, reasons: List[str] | None = None) -> None:
+    def emit_learning_decision(
+        cls, *, task_id: str, action: str, reasons: List[str] | None = None
+    ) -> None:
         cls.publish(
             "learning_decision",
             {"task_id": task_id, "action": action, "reasons": list(reasons or [])},
         )
 
     @classmethod
-    def emit_evidence_accepted(cls, *, task_id: str, evidence_id: str, evidence_type: str = "") -> None:
+    def emit_evidence_accepted(
+        cls, *, task_id: str, evidence_id: str, evidence_type: str = ""
+    ) -> None:
         cls.publish(
             "evidence_accepted",
             {"task_id": task_id, "evidence_id": evidence_id, "evidence_type": evidence_type},
@@ -230,7 +234,9 @@ class NexusEventBus:
             return []
 
     @classmethod
-    def audit_event_contracts(cls, limit: int = 100, *, fail_on_raw: bool = False, raw_policy: str | None = None) -> Dict[str, Any]:
+    def audit_event_contracts(
+        cls, limit: int = 100, *, fail_on_raw: bool = False, raw_policy: str | None = None
+    ) -> Dict[str, Any]:
         """Report raw-vs-semantic event usage during the migration window."""
         if raw_policy is None:
             raw_policy = "block" if fail_on_raw else "warn"

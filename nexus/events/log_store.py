@@ -49,6 +49,7 @@ class JsonlEventLogStore:
 
 class DeveloperFeedbackDecisionStore:
     """Fail-closed append-only POSIX JSONL store for typed feedback decisions."""
+
     MAX_RECORDS = 10_000
     MAX_BYTES = 8 * 1024 * 1024
 
@@ -79,15 +80,29 @@ class DeveloperFeedbackDecisionStore:
                     raise ValueError("duplicate JSON key")
                 out[key] = value
             return out
+
         obj = json.loads(line, object_pairs_hook=pairs)
         if not isinstance(obj, dict) or obj.get("schema") != "nexus.developer_feedback_decision.v1":
             raise ValueError("invalid decision record")
         allowed = {
-            "schema", "task_id", "decision_id", "decision", "reason_codes",
-            "evidence_refs", "request_digest", "authority_flags", "sequence",
-            "parent_digest", "record_digest",
+            "schema",
+            "task_id",
+            "decision_id",
+            "decision",
+            "reason_codes",
+            "evidence_refs",
+            "request_digest",
+            "authority_flags",
+            "sequence",
+            "parent_digest",
+            "record_digest",
         }
-        if set(obj) != allowed or obj.get("decision") not in {"KEEP", "REVISE", "REJECT", "INVESTIGATE"}:
+        if set(obj) != allowed or obj.get("decision") not in {
+            "KEEP",
+            "REVISE",
+            "REJECT",
+            "INVESTIGATE",
+        }:
             raise ValueError("invalid decision fields")
         flags = obj.get("authority_flags")
         if (
@@ -130,10 +145,12 @@ class DeveloperFeedbackDecisionStore:
         if len(raw) > self.MAX_BYTES or not raw.endswith(b"\n"):
             raise ValueError("corrupt decision stream")
         records = []
-        parent = "0" * 64
+        task_tails: Dict[str, Tuple[int, str]] = {}
         for line in raw.splitlines():
             record = self._parse(line.decode("utf-8"))
-            if record.get("parent_digest") != parent or record.get("sequence") != len(records) + 1:
+            task_id = record.get("task_id")
+            sequence, parent = task_tails.get(task_id, (0, "0" * 64))
+            if record.get("parent_digest") != parent or record.get("sequence") != sequence + 1:
                 raise ValueError("broken decision chain")
             expected = record.get("record_digest")
             unsigned = dict(record)
@@ -141,13 +158,19 @@ class DeveloperFeedbackDecisionStore:
             digest = hashlib.sha256(self._canonical(unsigned)).hexdigest()
             if expected != digest:
                 raise ValueError("tampered decision record")
-            parent = digest
+            task_tails[task_id] = (sequence + 1, digest)
             records.append(record)
         if len(records) > self.MAX_RECORDS:
             raise ValueError("decision stream ceiling exceeded")
-        return records, parent, len(raw)
+        return records, (records[-1].get("record_digest") if records else "0" * 64), len(raw)
 
-    def append(self, decision: DeveloperFeedbackDecision, *, expected_tail: Optional[str] = None, lock_timeout: float = 5.0) -> Dict[str, Any]:
+    def append(
+        self,
+        decision: DeveloperFeedbackDecision,
+        *,
+        expected_tail: Optional[str] = None,
+        lock_timeout: float = 5.0,
+    ) -> Dict[str, Any]:
         if not self.path or not self.lock_path:
             raise RuntimeError("store is not configured")
         with self._lock, open(self.lock_path, "a+", encoding="utf-8") as lock:
@@ -161,18 +184,23 @@ class DeveloperFeedbackDecisionStore:
                         raise TimeoutError("decision stream lock timeout")
                     time.sleep(0.01)
             try:
-                records, tail, size = self._scan()
+                records, _, size = self._scan()
+                task_records = [row for row in records if row.get("task_id") == decision.task_id]
+                sequence = len(task_records) + 1
+                tail = task_records[-1]["record_digest"] if task_records else "0" * 64
                 if expected_tail is not None and expected_tail != tail:
                     raise ValueError("stale expected tail")
                 for old in records:
                     if old.get("decision_id") == decision.decision_id:
-                        candidate = decision.to_record(sequence=old["sequence"], parent_digest=old["parent_digest"])
+                        candidate = decision.to_record(
+                            sequence=old["sequence"], parent_digest=old["parent_digest"]
+                        )
                         old_unsigned = dict(old)
                         old_unsigned.pop("record_digest", None)
                         if self._canonical(candidate) == self._canonical(old_unsigned):
                             return old
                         raise ValueError("idempotency conflict")
-                record = decision.to_record(sequence=len(records) + 1, parent_digest=tail)
+                record = decision.to_record(sequence=sequence, parent_digest=tail)
                 record["record_digest"] = hashlib.sha256(self._canonical(record)).hexdigest()
                 encoded = self._canonical(record) + b"\n"
                 if size + len(encoded) > self.MAX_BYTES or len(records) >= self.MAX_RECORDS:

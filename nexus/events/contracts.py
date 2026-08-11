@@ -22,6 +22,7 @@ PHASE_OBSERVER_HOOKS = frozenset(
 @dataclass(frozen=True)
 class NexusEvent:
     """不可變的系統事件"""
+
     event_id: str
     task_id: str
     phase: str
@@ -34,9 +35,11 @@ class NexusEvent:
         return asdict(self)
 
 
-def build_lifecycle_hook_event(*, task_id: str, phase: str, hook: str, payload: Dict[str, Any] | None = None) -> NexusEvent:
+def build_lifecycle_hook_event(
+    *, task_id: str, phase: str, hook: str, payload: Dict[str, Any] | None = None
+) -> NexusEvent:
     return NexusEvent(
-        event_id=f"evt_{hook}_{phase}_{int(time.time()*1000)}",
+        event_id=f"evt_{hook}_{phase}_{int(time.time() * 1000)}",
         task_id=task_id,
         phase=phase,
         event_type="lifecycle_hook",
@@ -44,9 +47,11 @@ def build_lifecycle_hook_event(*, task_id: str, phase: str, hook: str, payload: 
     )
 
 
-def build_phase_transition_event(*, task_id: str, phase: str, transition: str, payload: Dict[str, Any] | None = None) -> NexusEvent:
+def build_phase_transition_event(
+    *, task_id: str, phase: str, transition: str, payload: Dict[str, Any] | None = None
+) -> NexusEvent:
     return NexusEvent(
-        event_id=f"evt_{transition}_{phase}_{int(time.time()*1000)}",
+        event_id=f"evt_{transition}_{phase}_{int(time.time() * 1000)}",
         task_id=task_id,
         phase=phase,
         event_type="phase_transition",
