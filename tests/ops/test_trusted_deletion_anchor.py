@@ -225,6 +225,218 @@ def test_workflow_is_three_job_isolated_anchor():
                 assert step["with"]["persist-credentials"] is False
 
 
+def _gitlink_metadata_steps(workflow: dict[str, object]) -> dict[str, dict[str, object]]:
+    steps = {}
+    for job_name in ("trusted-controller", "trusted-verifier"):
+        matching = [
+            step
+            for step in workflow["jobs"][job_name]["steps"]  # type: ignore[index]
+            if step.get("name") == "Install gitlink metadata for checkout post-cleanup"
+        ]
+        assert len(matching) == 1
+        steps[job_name] = matching[0]
+    return steps
+
+
+def test_trusted_checkout_teardown_metadata_is_last_and_executor_free():
+    workflow = yaml.safe_load(
+        (Path(__file__).parents[2] / ".github/workflows/trusted-deletion-anchor.yml").read_text()
+    )
+    metadata_steps = _gitlink_metadata_steps(workflow)
+    for job_name, step in metadata_steps.items():
+        assert step["if"] == "always()"
+        assert workflow["jobs"][job_name]["steps"][-1] is step  # type: ignore[index]
+        run = step["run"]
+        assert "git ls-files --stage -z" in run
+        assert "git config --file .gitmodules" in run
+        assert "gitlink_path=\"${index_entry#*$'\\t'}\"" in run
+        assert 'git config --file .gitmodules "submodule.${gitlink_path}.url" .' in run
+        assert "git submodule" not in run
+        assert "://" not in run
+        assert all(
+            forbidden not in run
+            for forbidden in (
+                "git fetch",
+                "git clone",
+                "git init",
+                "git update-index",
+                "git checkout",
+                "git cat-file",
+                "git show",
+                "git archive",
+                "git read-tree",
+            )
+        )
+
+    executor = workflow["jobs"]["unprivileged-executor"]
+    assert not any(
+        step.get("name") == "Install gitlink metadata for checkout post-cleanup"
+        for step in executor["steps"]
+    )
+
+
+def test_gitlink_metadata_step_handles_real_gitlink_partial_metadata_and_hostile_path():
+    workflow = yaml.safe_load(
+        (Path(__file__).parents[2] / ".github/workflows/trusted-deletion-anchor.yml").read_text()
+    )
+    run = _gitlink_metadata_steps(workflow)["trusted-controller"]["run"]
+    with TemporaryDirectory(prefix="trusted-anchor-gitlink-") as directory:
+        repo = Path(directory)
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        _run_git(repo, "config", "user.email", "test@example.invalid")
+        _run_git(repo, "config", "user.name", "trusted-anchor-test")
+        marker = repo / "marker"
+        marker.write_text("marker\n", encoding="utf-8")
+        _run_git(repo, "add", "marker")
+        _run_git(repo, "commit", "-m", "base")
+        gitlink_path = "-hostile path"
+        _run_git(
+            repo,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{_run_git(repo, 'rev-parse', 'HEAD')},{gitlink_path}",
+        )
+        # A URL-only entry is deliberately incomplete and must be replaced locally.
+        _run_git(
+            repo,
+            "config",
+            "--file",
+            ".gitmodules",
+            f"submodule.{gitlink_path}.url",
+            "https://evil.invalid",
+        )
+        subprocess.run(["bash", "-euo", "pipefail", "-c", run], cwd=repo, check=True)
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.path")
+            == gitlink_path
+        )
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.url")
+            == "."
+        )
+
+
+def test_gitlink_metadata_step_handles_real_gitlink_without_gitmodules():
+    workflow = yaml.safe_load(
+        (Path(__file__).parents[2] / ".github/workflows/trusted-deletion-anchor.yml").read_text()
+    )
+    run = _gitlink_metadata_steps(workflow)["trusted-controller"]["run"]
+    with TemporaryDirectory(prefix="trusted-anchor-gitlink-no-metadata-") as directory:
+        repo = Path(directory)
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        _run_git(repo, "config", "user.email", "test@example.invalid")
+        _run_git(repo, "config", "user.name", "trusted-anchor-test")
+        marker = repo / "marker"
+        marker.write_text("marker\n", encoding="utf-8")
+        _run_git(repo, "add", "marker")
+        _run_git(repo, "commit", "-m", "base")
+        gitlink_path = "nested/real gitlink"
+        _run_git(
+            repo,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{_run_git(repo, 'rev-parse', 'HEAD')},{gitlink_path}",
+        )
+        assert not (repo / ".gitmodules").exists()
+
+        subprocess.run(["bash", "-euo", "pipefail", "-c", run], cwd=repo, check=True)
+
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.path")
+            == gitlink_path
+        )
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.url")
+            == "."
+        )
+
+
+def test_gitlink_metadata_step_does_not_execute_shell_metacharacters_in_path():
+    workflow = yaml.safe_load(
+        (Path(__file__).parents[2] / ".github/workflows/trusted-deletion-anchor.yml").read_text()
+    )
+    run = _gitlink_metadata_steps(workflow)["trusted-controller"]["run"]
+    with TemporaryDirectory(prefix="trusted-anchor-gitlink-metachar-") as directory:
+        repo = Path(directory)
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        _run_git(repo, "config", "user.email", "test@example.invalid")
+        _run_git(repo, "config", "user.name", "trusted-anchor-test")
+        _run_git(repo, "commit", "--allow-empty", "-m", "base")
+        marker = repo / "path-was-executed"
+        gitlink_path = "nested/$(touch path-was-executed); path with spaces"
+        _run_git(
+            repo,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{_run_git(repo, 'rev-parse', 'HEAD')},{gitlink_path}",
+        )
+
+        subprocess.run(["bash", "-euo", "pipefail", "-c", run], cwd=repo, check=True)
+
+        assert not marker.exists()
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.path")
+            == gitlink_path
+        )
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.url")
+            == "."
+        )
+
+
+def test_gitlink_metadata_step_preserves_complete_path_and_url_metadata():
+    workflow = yaml.safe_load(
+        (Path(__file__).parents[2] / ".github/workflows/trusted-deletion-anchor.yml").read_text()
+    )
+    run = _gitlink_metadata_steps(workflow)["trusted-controller"]["run"]
+    with TemporaryDirectory(prefix="trusted-anchor-gitlink-complete-metadata-") as directory:
+        repo = Path(directory)
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        _run_git(repo, "config", "user.email", "test@example.invalid")
+        _run_git(repo, "config", "user.name", "trusted-anchor-test")
+        _run_git(repo, "commit", "--allow-empty", "-m", "base")
+        gitlink_path = "nested/safe path"
+        original_path = "existing/safe metadata path"
+        original_url = "https://trusted.example.invalid/existing.git"
+        _run_git(
+            repo,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{_run_git(repo, 'rev-parse', 'HEAD')},{gitlink_path}",
+        )
+        _run_git(
+            repo,
+            "config",
+            "--file",
+            ".gitmodules",
+            f"submodule.{gitlink_path}.path",
+            original_path,
+        )
+        _run_git(
+            repo,
+            "config",
+            "--file",
+            ".gitmodules",
+            f"submodule.{gitlink_path}.url",
+            original_url,
+        )
+
+        subprocess.run(["bash", "-euo", "pipefail", "-c", run], cwd=repo, check=True)
+
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.path")
+            == original_path
+        )
+        assert (
+            _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.url")
+            == original_url
+        )
+
+
 def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anchor():
     with TemporaryDirectory(prefix="trusted-anchor-e2e-") as directory:
         root = Path(directory)

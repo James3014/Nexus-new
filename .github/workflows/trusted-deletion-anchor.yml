@@ -55,6 +55,23 @@ jobs:
           path: ${{ runner.temp }}/trusted-anchor/
           if-no-files-found: error
           retention-days: 7
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            path_value="$(git config --file .gitmodules --get "submodule.${gitlink_path}.path" 2>/dev/null || true)"
+            url_value="$(git config --file .gitmodules --get "submodule.${gitlink_path}.url" 2>/dev/null || true)"
+            if [ -z "$path_value" ] || [ -z "$url_value" ]; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
 
   unprivileged-executor:
     name: Unprivileged executor (bundle only)
@@ -143,3 +160,20 @@ jobs:
             --expected-pull-request-number "$EXPECTED_PULL_REQUEST_NUMBER" \
             --expected-base-sha "$EXPECTED_BASE_SHA" \
             --expected-head-sha "$EXPECTED_HEAD_SHA"
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            path_value="$(git config --file .gitmodules --get "submodule.${gitlink_path}.path" 2>/dev/null || true)"
+            url_value="$(git config --file .gitmodules --get "submodule.${gitlink_path}.url" 2>/dev/null || true)"
+            if [ -z "$path_value" ] || [ -z "$url_value" ]; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
