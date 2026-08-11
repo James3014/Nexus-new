@@ -10,6 +10,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,6 +20,7 @@ import yaml
 
 import scripts.ops.trusted_deletion_anchor as trusted_anchor
 from scripts.ops.trusted_deletion_anchor import (
+    REQUIRED_EVIDENCE_KEYS,
     SCHEMA_VERSION,
     _json,
     build_manifest,
@@ -493,6 +496,85 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
             ).returncode
             != 0
         )
+
+
+def _executor_archive_bundle(root: Path, unsafe_member: tarfile.TarInfo) -> Path:
+    bundle = root / "bundle"
+    bundle.mkdir()
+    test_name = "tests/ops/test_pr_impact_gate.py"
+    test_data = b"def test_archive_bootstrap():\n    assert True\n"
+    with tarfile.open(bundle / "source.tar", "w") as archive:
+        test_member = tarfile.TarInfo(test_name)
+        test_member.size = len(test_data)
+        archive.addfile(test_member, fileobj=BytesIO(test_data))
+        unsafe_data = BytesIO(b"x" * unsafe_member.size) if unsafe_member.isreg() else None
+        archive.addfile(unsafe_member, fileobj=unsafe_data)
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "test_inventory": [test_name],
+        **{
+            key: "0" * 64
+            for key in REQUIRED_EVIDENCE_KEYS
+            if key not in {"schema_version", "executor", "node_ids"}
+        },
+        "node_ids": [],
+    }
+    (bundle / "manifest.json").write_bytes(_json(manifest))
+    return bundle
+
+
+@pytest.mark.parametrize("target", ["/tmp/issue104-absolute-link", "../../issue104-outside-link"])
+def test_executor_skips_only_external_links_and_runs_safe_tests(target: str, tmp_path: Path):
+    link = tarfile.TarInfo(".antigravitycli/irrelevant.json")
+    link.type = tarfile.SYMTYPE
+    link.linkname = target
+    bundle = _executor_archive_bundle(tmp_path, link)
+    source = bundle / "source"
+    non_git_cwd = tmp_path / "non-git-cwd"
+    non_git_cwd.mkdir()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/ops/trusted_deletion_anchor.py"),
+            "executor",
+            "--bundle-dir",
+            str(bundle),
+        ],
+        cwd=non_git_cwd,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert (source / "tests/ops/test_pr_impact_gate.py").is_file()
+    assert not (source / ".antigravitycli").exists()
+    assert json.loads((bundle / "raw-evidence.json").read_text())["status"] == "COMPLETE"
+
+
+@pytest.mark.parametrize("member_type", ["outside-path", "device"])
+def test_executor_keeps_other_unsafe_archive_forms_fail_closed(member_type: str, tmp_path: Path):
+    member = tarfile.TarInfo("../outside.txt" if member_type == "outside-path" else "device")
+    if member_type == "outside-path":
+        member.size = len(b"must not extract")
+    else:
+        member.type = tarfile.CHRTYPE
+        member.devmajor = 1
+        member.devminor = 3
+    bundle = _executor_archive_bundle(tmp_path, member)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/ops/trusted_deletion_anchor.py"),
+            "executor",
+            "--bundle-dir",
+            str(bundle),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not (bundle / "outside.txt").exists()
+    assert not (bundle / "source" / "device").exists()
 
 
 def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
