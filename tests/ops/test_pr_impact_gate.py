@@ -40,6 +40,14 @@ def _run(
     test_inventory_tree = "d" * 40
     plan_digest = "1" * 64
     verifier_digest = "2" * 64
+    node_ids = sorted(
+        set(failures)
+        | {
+            "tests.test_contract::test_existing_debt",
+            "tests.test_contract::test_new_regression",
+        }
+    )
+    passed_node_ids = sorted(set(node_ids) - set(failures))
     return PytestRunResult(
         exit_code=exit_code,
         status=status,
@@ -63,7 +71,16 @@ def _run(
             test_inventory_tree=test_inventory_tree,
             plan_digest=plan_digest,
             verifier_digest=verifier_digest,
+            collection_count=len(node_ids),
+            node_ids=node_ids,
+            passed_node_ids=passed_node_ids,
+            failed_node_ids=sorted(set(failures)),
+            terminal_status=status,
         ),
+        node_ids=node_ids,
+        collection_count=len(node_ids),
+        passed_node_ids=passed_node_ids,
+        failed_node_ids=sorted(set(failures)),
     )
 
 
@@ -572,6 +589,72 @@ def test_metadata_node_digest_and_terminal_status_drift_is_impact_unknown():
     assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
     head = replace(base, terminal_status="CI_BOOTSTRAP_DEFECT")
     assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_tampered_passed_node_partition_cannot_classify_pass():
+    node = "tests.test_contract::test_one"
+    base = replace(
+        _run(0, [], revision="base"),
+        collection_count=1,
+        node_ids=[node],
+        passed_node_ids=[node],
+        terminal_status="COMPLETE",
+    )
+    head = replace(
+        _run(0, [], revision="head"),
+        collection_count=1,
+        node_ids=[node],
+        passed_node_ids=[],
+        terminal_status="COMPLETE",
+    )
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda run, node: replace(run, passed_node_ids=[]),
+        lambda run, node: replace(run, failed_node_ids=[node], failures=[node]),
+        lambda run, node: replace(run, collection_count=2),
+        lambda run, node: replace(
+            run,
+            provenance_digest=compute_test_provenance_digest(
+                revision=run.revision,
+                source_tree=run.source_tree,
+                test_inventory_tree=run.test_inventory_tree,
+                plan_digest=run.plan_digest,
+                verifier_digest=run.verifier_digest,
+                collection_count=run.collection_count,
+                node_ids=run.node_ids,
+                passed_node_ids=run.passed_node_ids,
+                failed_node_ids=run.failed_node_ids,
+                error_node_ids=run.error_node_ids,
+                skipped_node_ids=run.skipped_node_ids,
+                terminal_status=run.terminal_status,
+            )[:-1]
+            + "0",
+        ),
+    ],
+)
+def test_outcome_partition_and_digest_tampering_fail_closed(tamper):
+    node = "tests.test_contract::test_one"
+    base = replace(
+        _run(0, [], revision="base"),
+        collection_count=1,
+        node_ids=[node],
+        passed_node_ids=[node],
+        failed_node_ids=[],
+        terminal_status="COMPLETE",
+    )
+    head = replace(
+        _run(0, [], revision="head"),
+        collection_count=1,
+        node_ids=[node],
+        passed_node_ids=[node],
+        failed_node_ids=[],
+        terminal_status="COMPLETE",
+    )
+    assert classify_regression(base, tamper(head, node)).classification == "IMPACT_UNKNOWN"
 
 
 def test_raw_diff_parser_consumes_every_record_and_rejects_hidden_tail_evidence():

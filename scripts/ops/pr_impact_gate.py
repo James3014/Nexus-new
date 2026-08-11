@@ -118,6 +118,7 @@ class PytestRunResult:
     passed_node_ids: list[str] = field(default_factory=list)
     error_node_ids: list[str] = field(default_factory=list)
     skipped_node_ids: list[str] = field(default_factory=list)
+    failed_node_ids: list[str] = field(default_factory=list)
     terminal_status: str = ""
     provenance_digest: str = ""
 
@@ -411,6 +412,13 @@ def compute_test_provenance_digest(
     test_inventory_tree: str,
     plan_digest: str,
     verifier_digest: str,
+    collection_count: int = 0,
+    node_ids: list[str] | None = None,
+    passed_node_ids: list[str] | None = None,
+    failed_node_ids: list[str] | None = None,
+    error_node_ids: list[str] | None = None,
+    skipped_node_ids: list[str] | None = None,
+    terminal_status: str = "",
 ) -> str:
     for value, label in (
         (revision, "revision"),
@@ -427,6 +435,13 @@ def compute_test_provenance_digest(
             "source_tree": source_tree,
             "test_inventory_tree": test_inventory_tree,
             "verifier_digest": verifier_digest,
+            "collection_count": collection_count,
+            "node_ids": sorted(node_ids or []),
+            "passed_node_ids": sorted(passed_node_ids or []),
+            "failed_node_ids": sorted(failed_node_ids or []),
+            "error_node_ids": sorted(error_node_ids or []),
+            "skipped_node_ids": sorted(skipped_node_ids or []),
+            "terminal_status": terminal_status,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -633,6 +648,11 @@ def parse_junit_metadata(path: Path) -> dict[str, Any]:
         "collection_count": len(nodes),
         "node_ids": sorted(nodes),
         "passed_node_ids": sorted(passed),
+        "failed_node_ids": sorted(
+            node
+            for node in nodes
+            if node not in passed and node not in errors and node not in skipped
+        ),
         "error_node_ids": sorted(errors),
         "skipped_node_ids": sorted(skipped),
     }
@@ -649,6 +669,30 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
 
 
 def _valid_test_provenance(result: PytestRunResult) -> bool:
+    partitions = (
+        result.passed_node_ids,
+        result.failed_node_ids,
+        result.error_node_ids,
+        result.skipped_node_ids,
+    )
+    node_ids = list(result.node_ids)
+    if (
+        result.collection_count < 0
+        or len(node_ids) != result.collection_count
+        or len(set(node_ids)) != len(node_ids)
+        or any(len(items) != len(set(items)) for items in partitions)
+        or any(set(items) - set(node_ids) for items in partitions)
+        or sum(len(items) for items in partitions) != result.collection_count
+        or set().union(*partitions) != set(node_ids)
+        or any(
+            set(left) & set(right)
+            for index, left in enumerate(partitions)
+            for right in partitions[index + 1 :]
+        )
+        or sorted(result.failures)
+        != sorted(set(result.failed_node_ids) | set(result.error_node_ids))
+    ):
+        return False
     try:
         expected = compute_test_provenance_digest(
             revision=result.revision,
@@ -656,6 +700,13 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
             test_inventory_tree=result.test_inventory_tree,
             plan_digest=result.plan_digest,
             verifier_digest=result.verifier_digest,
+            collection_count=result.collection_count,
+            node_ids=result.node_ids,
+            passed_node_ids=result.passed_node_ids,
+            failed_node_ids=result.failed_node_ids,
+            error_node_ids=result.error_node_ids,
+            skipped_node_ids=result.skipped_node_ids,
+            terminal_status=result.terminal_status,
         )
     except ValueError:
         return False
@@ -827,6 +878,7 @@ def run_pytest_plan(
                     test_inventory_tree=test_inventory_tree,
                     plan_digest=plan_digest,
                     verifier_digest=verifier_digest,
+                    terminal_status="IMPACT_UNKNOWN",
                 )
         except ValueError as exc:
             provenance_failure = str(exc)
@@ -908,7 +960,14 @@ def run_pytest_plan(
             bound_source_tree=expected_source_tree,
             bound_test_inventory_tree=expected_test_inventory_tree,
             terminal_status="COMPLETE",
-            provenance_digest=provenance_digest,
+            provenance_digest=compute_test_provenance_digest(
+                revision=revision,
+                source_tree=source_tree,
+                test_inventory_tree=test_inventory_tree,
+                plan_digest=plan_digest,
+                verifier_digest=verifier_digest,
+                terminal_status="COMPLETE",
+            ),
         )
         result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
         return 0
@@ -948,10 +1007,24 @@ def run_pytest_plan(
         collection_count=int(metadata.get("collection_count", 0)),
         node_ids=list(metadata.get("node_ids", [])),
         passed_node_ids=list(metadata.get("passed_node_ids", [])),
+        failed_node_ids=list(metadata.get("failed_node_ids", [])),
         error_node_ids=list(metadata.get("error_node_ids", [])),
         skipped_node_ids=list(metadata.get("skipped_node_ids", [])),
         terminal_status=status,
-        provenance_digest=provenance_digest,
+        provenance_digest=compute_test_provenance_digest(
+            revision=revision,
+            source_tree=source_tree,
+            test_inventory_tree=test_inventory_tree,
+            plan_digest=plan_digest,
+            verifier_digest=verifier_digest,
+            collection_count=int(metadata.get("collection_count", 0)),
+            node_ids=list(metadata.get("node_ids", [])),
+            passed_node_ids=list(metadata.get("passed_node_ids", [])),
+            failed_node_ids=list(metadata.get("failed_node_ids", [])),
+            error_node_ids=list(metadata.get("error_node_ids", [])),
+            skipped_node_ids=list(metadata.get("skipped_node_ids", [])),
+            terminal_status=status,
+        ),
     )
     result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
     return 0 if status == "COMPLETE" else completed.returncode or 2
@@ -982,6 +1055,7 @@ def _load_run_result(path: Path) -> PytestRunResult:
         collection_count=int(payload.get("collection_count", 0)),
         node_ids=[str(item) for item in payload.get("node_ids", [])],
         passed_node_ids=[str(item) for item in payload.get("passed_node_ids", [])],
+        failed_node_ids=[str(item) for item in payload.get("failed_node_ids", [])],
         error_node_ids=[str(item) for item in payload.get("error_node_ids", [])],
         skipped_node_ids=[str(item) for item in payload.get("skipped_node_ids", [])],
         terminal_status=str(payload.get("terminal_status", "")),
