@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import Counter
 
 import pytest
@@ -120,6 +121,15 @@ def test_manifest_identity_is_frozen_against_caller_mutation():
     snapshots["git_main"] = "b" * 40
     thresholds["ba_min_avoided_actions"] = 999.0
     assert manifest.manifest_sha256 == before_hash
+    assert manifest.to_dict() == before
+
+
+def test_manifest_private_storage_cannot_mutate_frozen_snapshot():
+    manifest = make_manifest()
+    before = manifest.to_dict()
+    stored_copy = json.loads(manifest._frozen_body_json)
+    stored_copy["repository_source_snapshots"]["git_main"] = "b" * 40
+    stored_copy["meaningful_improvement_thresholds"]["ba_min_avoided_actions"] = 999.0
     assert manifest.to_dict() == before
 
 
