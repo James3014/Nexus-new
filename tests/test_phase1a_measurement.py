@@ -6,10 +6,10 @@ from nexus.research.epistemic_benchmark.phase1a_contracts import Phase1AArm
 from nexus.research.epistemic_benchmark.phase1a_measurement import (
     ActionEvent,
     ActionKind,
+    EpistemicType,
     EvidenceObservation,
     EvidenceProducerPhase,
     EvidenceRef,
-    EpistemicType,
     FrozenTargetOracle,
     TrajectoryPhase,
     ValidationState,
@@ -17,6 +17,10 @@ from nexus.research.epistemic_benchmark.phase1a_measurement import (
     compute_phase1a_metrics,
     compute_phase1a_recomputation,
     validate_trajectory,
+)
+from nexus.services.verified_assist_contract import (
+    build_verified_assist_packet,
+    record_packet_consumption,
 )
 
 
@@ -38,9 +42,7 @@ def make_observation(
         evidence_refs = (EvidenceRef("src-1", "a" * 64, physical=True),)
     if derivation_lineage is None:
         derivation_lineage = (
-            ("OBS-parent",)
-            if epistemic_type == EpistemicType.INFERRED
-            else ()
+            ("OBS-parent",) if epistemic_type == EpistemicType.INFERRED else ()
         )
     if validator_evidence_refs is None:
         validator_evidence_refs = (
@@ -88,11 +90,8 @@ def make_event(
 ) -> ActionEvent:
     if payload is None:
         payload = {"target": target}
-    provider = ""
-    model = ""
-    if kind == ActionKind.PROVIDER_CALL:
-        provider = "online-provider"
-        model = "online-model"
+    provider = "online-provider" if kind == ActionKind.PROVIDER_CALL else ""
+    model = "online-model" if kind == ActionKind.PROVIDER_CALL else ""
     return ActionEvent(
         experiment_id=experiment_id,
         manifest_id=manifest_id,
@@ -108,10 +107,8 @@ def make_event(
         normalized_target=target,
         action_kind=kind,
         signature_payload=payload,
-        evidence_refs=(),
         provider=provider,
         model=model,
-        status="OK",
         retry_count=retry_count,
         started_at_ms=sequence * 10 if started_at_ms is None else started_at_ms,
         duration_ms=duration_ms,
@@ -121,13 +118,29 @@ def make_event(
     )
 
 
+def make_consumed_observation_packet(observation_set):
+    packet = build_verified_assist_packet(
+        task_id=observation_set.task_id,
+        producer="deterministic",
+        target_files=("phase1a-evidence.json",),
+        semantic_assertions=(observation_set.vap_identity_marker,),
+        bounded_diagnosis="phase1a_admissible_observation_set",
+    )
+    fragment = packet.compact_injection()
+    consumption = record_packet_consumption(
+        packet,
+        injected_prompt_fragment=fragment,
+        expected_packet_hash=packet.packet_hash,
+        final_prompt=fragment,
+    )
+    return packet, consumption
+
+
 def test_observed_requires_physical_evidence_with_source_hash():
     with pytest.raises(ValueError, match="OBSERVED requires physical evidence"):
         make_observation(evidence_refs=())
-
     with pytest.raises(ValueError, match="must be a lowercase SHA-256"):
         EvidenceRef("src-bad", "bad", physical=True)
-
     with pytest.raises(ValueError, match="must be physical"):
         make_observation(
             evidence_refs=(EvidenceRef("src-1", "a" * 64, physical=False),)
@@ -140,7 +153,6 @@ def test_inferred_requires_derivation_lineage():
             epistemic_type=EpistemicType.INFERRED,
             derivation_lineage=(),
         )
-
     inferred = make_observation(epistemic_type=EpistemicType.INFERRED)
     assert inferred.derivation_lineage == ("OBS-parent",)
 
@@ -148,7 +160,6 @@ def test_inferred_requires_derivation_lineage():
 def test_admissible_requires_validator_evidence_and_independence():
     with pytest.raises(ValueError, match="requires validator evidence"):
         make_observation(validator_evidence_refs=())
-
     with pytest.raises(ValueError, match="producer/verifier independence"):
         make_observation(independent=False)
 
@@ -168,7 +179,6 @@ def test_observation_authority_claims_fail_closed():
 def test_local_evidence_is_arm_c_only():
     with pytest.raises(ValueError, match="allowed only in Arm C"):
         make_observation(producer_phase=EvidenceProducerPhase.LOCAL)
-
     local_obs = make_observation(
         arm=Phase1AArm.C,
         producer_phase=EvidenceProducerPhase.LOCAL,
@@ -184,7 +194,6 @@ def test_only_admissible_observations_enter_handoff():
     )
     with pytest.raises(ValueError, match="only ADMISSIBLE"):
         build_admissible_observation_set([rejected])
-
     admissible = make_observation()
     handoff = build_admissible_observation_set([admissible]).provider_safe_handoff()
     assert set(handoff) == {
@@ -210,7 +219,6 @@ def test_observation_set_identity_is_order_deterministic_and_substitution_sensit
         == reverse.admissible_observation_set_sha256
     )
     assert forward.observation_ids == reverse.observation_ids
-
     substituted = build_admissible_observation_set(
         [obs1, make_observation(claim="substituted")]
     )
@@ -224,7 +232,6 @@ def test_observation_set_rejects_duplicate_and_identity_drift():
     obs = make_observation()
     with pytest.raises(ValueError, match="duplicate observation identity"):
         build_admissible_observation_set([obs, obs])
-
     other_task = make_observation(task_id="other-task", claim="other")
     with pytest.raises(ValueError, match="task/arm identity drift"):
         build_admissible_observation_set([obs, other_task])
@@ -232,10 +239,17 @@ def test_observation_set_rejects_duplicate_and_identity_drift():
 
 def test_nested_unordered_signature_input_fails_closed():
     with pytest.raises(ValueError, match="unordered or invalid"):
-        make_event(
-            0,
-            payload={"nested": {"tools": {"read", "search"}}},
-        )
+        make_event(0, payload={"nested": {"tools": {"read", "search"}}})
+
+
+def test_signature_identity_is_frozen_against_post_construction_mutation():
+    payload = {"nested": {"target": "before"}}
+    event = make_event(0, payload=payload)
+    signature_before = event.action_signature
+    event_hash_before = event.event_sha256
+    payload["nested"]["target"] = "after"
+    assert event.action_signature == signature_before
+    assert event.event_sha256 == event_hash_before
 
 
 def test_fuzzy_signature_cannot_be_decision_bearing():
@@ -248,7 +262,6 @@ def test_trajectory_rejects_duplicate_and_non_monotonic_sequence():
     duplicate = make_event(0, target="file:b.py")
     with pytest.raises(ValueError, match="strictly increasing"):
         validate_trajectory([first, duplicate])
-
     later = make_event(2)
     earlier = make_event(1, target="file:c.py")
     with pytest.raises(ValueError, match="strictly increasing"):
@@ -257,17 +270,13 @@ def test_trajectory_rejects_duplicate_and_non_monotonic_sequence():
 
 def test_trajectory_rejects_task_arm_and_run_identity_drift():
     first = make_event(0)
-    task_drift = make_event(1, task_id="other-task")
-    with pytest.raises(ValueError, match="trajectory identity drift"):
-        validate_trajectory([first, task_drift])
-
-    arm_drift = make_event(1, arm=Phase1AArm.B)
-    with pytest.raises(ValueError, match="trajectory identity drift"):
-        validate_trajectory([first, arm_drift])
-
-    run_drift = make_event(1, run_id="other-run")
-    with pytest.raises(ValueError, match="trajectory identity drift"):
-        validate_trajectory([first, run_drift])
+    for drifted in (
+        make_event(1, task_id="other-task"),
+        make_event(1, arm=Phase1AArm.B),
+        make_event(1, run_id="other-run"),
+    ):
+        with pytest.raises(ValueError, match="trajectory identity drift"):
+            validate_trajectory([first, drifted])
 
 
 def test_trajectory_hash_is_replay_deterministic():
@@ -372,11 +381,9 @@ def _build_recomputation_triplet():
 def test_recomputation_formulas_use_conservative_multiset_matching():
     arm_a, arm_b, arm_c = _build_recomputation_triplet()
     result = compute_phase1a_recomputation(arm_a, arm_b, arm_c)
-
     assert result.ba.potential_total == 2
     assert result.ba.recomputed_total == 1
     assert result.ba.avoided_total == 1
-
     assert result.cb.potential_total == 2
     assert result.cb.recomputed_total == 1
     assert result.cb.avoided_total == 1
@@ -385,22 +392,18 @@ def test_recomputation_formulas_use_conservative_multiset_matching():
 def test_extra_prework_absent_from_baseline_gets_zero_credit():
     arm_a, arm_b, arm_c = _build_recomputation_triplet()
     result = compute_phase1a_recomputation(arm_a, arm_b, arm_c)
-
     ba_extra = next(
         row
         for row in result.ba.per_signature
         if row.baseline_count == 0 and row.validated_prework_count > 0
     )
-    assert ba_extra.potential == 0
-    assert ba_extra.avoided == 0
-
     cb_extra = next(
         row
         for row in result.cb.per_signature
         if row.baseline_count == 0 and row.validated_prework_count > 0
     )
-    assert cb_extra.potential == 0
-    assert cb_extra.avoided == 0
+    assert (ba_extra.potential, ba_extra.avoided) == (0, 0)
+    assert (cb_extra.potential, cb_extra.avoided) == (0, 0)
 
 
 def test_unvalidated_prework_cannot_create_recomputation_credit():
@@ -429,7 +432,7 @@ def test_unvalidated_prework_cannot_create_recomputation_credit():
 
 
 def test_recomputation_rejects_triplet_measurement_identity_drift():
-    arm_a, arm_b, arm_c = _build_recomputation_triplet()
+    arm_a, _, arm_c = _build_recomputation_triplet()
     drifted_b = validate_trajectory(
         [
             make_event(
@@ -444,7 +447,7 @@ def test_recomputation_rejects_triplet_measurement_identity_drift():
         compute_phase1a_recomputation(arm_a, drifted_b, arm_c)
 
 
-def test_evidence_utilization_requires_exact_physical_consumption_binding():
+def test_evidence_utilization_requires_existing_vap_physical_proof_authority():
     obs1 = make_observation(claim="claim-1")
     obs2 = make_observation(
         claim="claim-2",
@@ -454,7 +457,6 @@ def test_evidence_utilization_requires_exact_physical_consumption_binding():
     trajectory = validate_trajectory(
         [make_event(0, arm=Phase1AArm.B, run_id="run-b")]
     )
-
     absent = compute_phase1a_metrics(
         trajectory,
         observation_set=obs_set,
@@ -465,35 +467,68 @@ def test_evidence_utilization_requires_exact_physical_consumption_binding():
     assert absent["evidence_reverification_rate"] == 0.5
     assert absent["contradictory_evidence_rate"] == 0.5
 
+    packet, consumption = make_consumed_observation_packet(obs_set)
     consumed = compute_phase1a_metrics(
         trajectory,
         observation_set=obs_set,
-        consumed_observation_set_sha256=(
-            obs_set.admissible_observation_set_sha256
-        ),
-        physical_consumption_proof_sha256="d" * 64,
+        verified_assist_packet=packet,
+        verified_assist_consumption=consumption,
     )
     assert consumed["evidence_utilization_rate"] == 1.0
 
-    with pytest.raises(ValueError, match="substitution detected"):
-        compute_phase1a_metrics(
-            trajectory,
-            observation_set=obs_set,
-            consumed_observation_set_sha256="0" * 64,
-            physical_consumption_proof_sha256="d" * 64,
-        )
 
-
-def test_physical_consumption_proof_without_set_identity_fails_closed():
+def test_consumption_marker_substitution_and_proof_tamper_fail_closed():
     obs_set = build_admissible_observation_set([make_observation()])
     trajectory = validate_trajectory(
         [make_event(0, arm=Phase1AArm.B, run_id="run-b")]
     )
-    with pytest.raises(ValueError, match="lacks set identity"):
+    wrong_marker_packet = build_verified_assist_packet(
+        task_id=obs_set.task_id,
+        producer="deterministic",
+        target_files=("phase1a-evidence.json",),
+        semantic_assertions=(
+            "admissible_observation_set_sha256=" + "0" * 64,
+        ),
+        bounded_diagnosis="phase1a_admissible_observation_set",
+    )
+    wrong_fragment = wrong_marker_packet.compact_injection()
+    wrong_consumption = record_packet_consumption(
+        wrong_marker_packet,
+        injected_prompt_fragment=wrong_fragment,
+        expected_packet_hash=wrong_marker_packet.packet_hash,
+        final_prompt=wrong_fragment,
+    )
+    with pytest.raises(ValueError, match="observation_set_identity_not_bound"):
         compute_phase1a_metrics(
             trajectory,
             observation_set=obs_set,
-            physical_consumption_proof_sha256="e" * 64,
+            verified_assist_packet=wrong_marker_packet,
+            verified_assist_consumption=wrong_consumption,
+        )
+
+    packet, consumption = make_consumed_observation_packet(obs_set)
+    tampered = consumption.to_dict()
+    tampered["consumption_proof"] = "0" * 64
+    with pytest.raises(ValueError, match="vap_credit_denied"):
+        compute_phase1a_metrics(
+            trajectory,
+            observation_set=obs_set,
+            verified_assist_packet=packet,
+            verified_assist_consumption=tampered,
+        )
+
+
+def test_packet_and_consumption_must_be_supplied_together():
+    obs_set = build_admissible_observation_set([make_observation()])
+    trajectory = validate_trajectory(
+        [make_event(0, arm=Phase1AArm.B, run_id="run-b")]
+    )
+    packet, _ = make_consumed_observation_packet(obs_set)
+    with pytest.raises(ValueError, match="supplied together"):
+        compute_phase1a_metrics(
+            trajectory,
+            observation_set=obs_set,
+            verified_assist_packet=packet,
         )
 
 
@@ -504,9 +539,9 @@ def test_time_to_first_correct_target_requires_independent_frozen_oracle():
             make_event(1, target="correct-target", started_at_ms=250),
         ]
     )
-    without_oracle = compute_phase1a_metrics(trajectory)
-    assert without_oracle["time_to_first_correct_target_seconds"] is None
-
+    assert compute_phase1a_metrics(trajectory)[
+        "time_to_first_correct_target_seconds"
+    ] is None
     oracle = FrozenTargetOracle(
         oracle_id="oracle-1",
         oracle_sha256="f" * 64,
@@ -518,7 +553,6 @@ def test_time_to_first_correct_target_requires_independent_frozen_oracle():
         frozen_target_oracle=oracle,
     )
     assert with_oracle["time_to_first_correct_target_seconds"] == 0.15
-
     with pytest.raises(ValueError, match="explicitly independent"):
         FrozenTargetOracle(
             oracle_id="oracle-bad",
