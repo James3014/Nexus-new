@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -157,10 +158,22 @@ def _git_logging_path(root: Path) -> tuple[str, Path]:
     argv_log = root / "git-argv.bin"
     wrapper = bin_dir / "git"
     wrapper.write_text(
-        '#!/bin/sh\nprintf "%s\\0" "$@" >> "$ARGV_LOG"\nexec "$REAL_GIT" "$@"\n',
+        '#!/bin/sh\nprintf "%s\\0" "$@" >> "$ARGV_LOG"\n'
+        'if [ "${GIT_CONFIG_COUNT:-}" = 1 ]; then\n'
+        '  test "${GIT_CONFIG_KEY_0:-}" = http.extraheader || exit 96\n'
+        '  test "${GIT_CONFIG_VALUE_0:-}" = "Authorization: basic $EXPECTED_BASIC" || exit 97\n'
+        '  printf basic-ok >> "$AUTH_LOG"\n'
+        "fi\n"
+        'exec "$REAL_GIT" "$@"\n',
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
+    python_wrapper = bin_dir / "python"
+    python_wrapper.write_text(
+        '#!/bin/sh\nexec "$REAL_PYTHON" "$@"\n',
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
     return (
         f"{bin_dir}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
         argv_log,
@@ -175,10 +188,13 @@ def _acquisition_environment(
     event["pull_request"]["base"]["sha"] = workflow_sha  # type: ignore[index]
     event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
     path, argv_log = _git_logging_path(run_root)
+    token_bytes = f"x-access-token:{token}".encode()
+    encoded = base64.b64encode(token_bytes).decode()
     return {
         **os.environ,
         "ARGV_LOG": str(argv_log),
         "REAL_GIT": shutil.which("git") or "git",
+        "REAL_PYTHON": sys.executable,
         "PATH": path,
         "RUNNER_TEMP": str(run_root),
         "EVENT_JSON": json.dumps(event),
@@ -189,6 +205,8 @@ def _acquisition_environment(
         "REPOSITORY": event["repository"]["full_name"],
         "DEFAULT_BRANCH": event["repository"]["default_branch"],
         "TRUSTED_TOKEN": token,
+        "EXPECTED_BASIC": encoded,
+        "AUTH_LOG": str(run_root / "auth.log"),
     }
 
 
@@ -492,7 +510,11 @@ def test_trusted_source_identity_and_token_isolation_are_fail_closed():
     text = WORKFLOW.read_text().lower()
     assert "https://github.com/$repository.git" in text
     assert "git_config_key_0=http.extraheader" in text
-    assert 'git_config_value_0="authorization: bearer $trusted_token"' in text
+    assert 'git_config_value_0="authorization: basic $basic_auth"' in text
+    assert text.count("printf 'x-access-token:%s' \"$trusted_token\" | base64 | tr -d '\\n'") == 2
+    assert 'test -n "$basic_auth"' in text
+    assert "tr -cd '\\n'" in text
+    assert "authorization: bearer" not in text
     assert "persist-credentials" not in text
     assert "credential.helper" not in text
     assert "github.token" in text
@@ -558,6 +580,7 @@ def test_no_checkout_acquisition_shell_executes_only_exact_trusted_blob(
     run_root = tmp_path / f"run-{job_name}"
     run_root.mkdir()
     token = "token-must-not-be-argv"
+    encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     completed = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", _local_acquisition_run(job_name, origin)],
         env=_acquisition_environment(run_root, workflow_sha, head_sha, token=token),
@@ -567,7 +590,10 @@ def test_no_checkout_acquisition_shell_executes_only_exact_trusted_blob(
     assert completed.returncode == 0, completed.stderr
     assert token not in completed.stdout
     assert token not in completed.stderr
-    assert token.encode() not in (run_root / "git-argv.bin").read_bytes()
+    argv = (run_root / "git-argv.bin").read_bytes()
+    assert token.encode() not in argv
+    assert encoded.encode() not in argv
+    assert (run_root / "auth.log").read_text().startswith("basic-ok")
     assert not marker.exists()
     assert not (run_root / "hostile-path-executed").exists()
     prefix = "trusted-controller" if job_name == "trusted-controller" else "trusted-verifier"
@@ -577,6 +603,10 @@ def test_no_checkout_acquisition_shell_executes_only_exact_trusted_blob(
     assert re.search(r"(?m)^blob=[0-9a-f]{40}$", receipt)
     assert re.search(r"(?m)^sha256=[0-9a-f]{64}$", receipt)
     assert token not in receipt
+    assert encoded not in receipt
+    config = (run_root / f"{prefix}.git/config").read_text()
+    assert token not in config
+    assert encoded not in config
     if job_name == "trusted-controller":
         assert (run_root / "trusted-anchor/manifest.json").is_file()
 
