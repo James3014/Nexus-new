@@ -208,9 +208,14 @@ def test_deterministic_fingerprint_under_mapping_key_order_changes():
 
     spec_a = make_valid_identity(arm=Phase1AArm.A, tool_surface={"b": 2, "a": 1})
     spec_b = make_valid_identity(arm=Phase1AArm.B, tool_surface={"a": 1, "b": 2})
-    spec_c = make_valid_identity(arm=Phase1AArm.C, tool_surface={"a": 1, "b": 2}, local_provider_called=True)
+    spec_c = make_valid_identity(
+        arm=Phase1AArm.C, tool_surface={"a": 1, "b": 2}, local_provider_called=True
+    )
 
-    assert compute_triplet_comparability_fingerprint(spec_a, spec_b, spec_c) == spec_a.triplet_fingerprint()
+    assert (
+        compute_triplet_comparability_fingerprint(spec_a, spec_b, spec_c)
+        == spec_a.triplet_fingerprint()
+    )
 
 
 def test_empty_identity_variants_fail_closed():
