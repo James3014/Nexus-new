@@ -2,32 +2,36 @@
 Tests for Epistemic Workflow Benchmark v0 — Report Builder and Verifier.
 Covers all 15 required test cases (Section 28 of spec).
 """
+
+import copy
 import json
 import os
-import tempfile
+import re
 
 import pytest
 
 from nexus.research.epistemic_benchmark.contracts import (
     CLAIM_CEILING_TEXT,
-    REQUIRED_LIMITATIONS,
     FORBIDDEN_REPORT_WORDS,
+    REQUIRED_LIMITATIONS,
     compute_canonical_sha256,
 )
+from nexus.research.epistemic_benchmark.metrics import _build_alias_to_case_private
 from nexus.research.epistemic_benchmark.observations import (
     build_synthetic_observation,
     import_observation,
     load_observation_inventory,
 )
-from nexus.research.epistemic_benchmark.packets import prepare_benchmark_run, load_public_run_manifest
-from nexus.research.epistemic_benchmark.metrics import _build_alias_to_case_private
+from nexus.research.epistemic_benchmark.packets import (
+    load_public_run_manifest,
+    prepare_benchmark_run,
+)
 from nexus.research.epistemic_benchmark.report import (
     build_benchmark_report,
     render_benchmark_markdown,
     verify_benchmark_report,
     write_benchmark_report,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixture: run dir with observations
@@ -54,6 +58,7 @@ def report_run(tmp_path_factory):
     alias_to_case = _build_alias_to_case_private(private_ctx)
 
     from nexus.research.epistemic_benchmark.corpus import get_all_oracles
+
     oracles = {o["case_id"]: o for o in get_all_oracles()}
 
     def _arm_of(alias):
@@ -171,8 +176,7 @@ def test_limitations_present(report_run):
     lims_str = " ".join(lims).lower()
     for req_lim in REQUIRED_LIMITATIONS:
         assert req_lim.lower() in lims_str, (
-            f"Required limitation not found: {req_lim!r}\n"
-            f"Actual limitations: {lims}"
+            f"Required limitation not found: {req_lim!r}\nActual limitations: {lims}"
         )
 
 
@@ -228,9 +232,7 @@ def test_no_statistical_significance(report_run):
     report_str = json.dumps(report)
     for fw in FORBIDDEN_REPORT_WORDS:
         if fw.lower() not in ("winner", "proven better", "production ready"):
-            assert fw.lower() not in report_str.lower(), (
-                f"Forbidden word found in report: {fw!r}"
-            )
+            assert fw.lower() not in report_str.lower(), f"Forbidden word found in report: {fw!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +260,273 @@ def test_count_tamper_recomputed_hash_rejected(report_run):
 
     valid, errors = verify_benchmark_report(tampered, run_dir, private_context_path=priv_path)
     assert not valid, "Verifier must catch count tampering even after hash recompute"
-    assert any("TAMPER" in e or "COUNT" in e or "MISMATCH" in e for e in errors)
+    assert any(
+        "TAMPER" in e or "COUNT" in e or "MISMATCH" in e or "PROJECTION" in e for e in errors
+    )
+
+
+def test_claim_projection_tamper_recomputed_hash_rejected(report_run):
+    """Every claim-bearing arm projection must be rebuilt, not just a few metrics."""
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    tampered = copy.deepcopy(report)
+    tampered["arms"]["standard_review"]["median_duration_seconds"] = 999.0
+    tampered["report_sha256"] = compute_canonical_sha256({
+        k: v for k, v in tampered.items() if k != "report_sha256"
+    })
+
+    valid, errors = verify_benchmark_report(tampered, run_dir, private_context_path=priv_path)
+    assert not valid
+    assert any("PROJECTION" in error for error in errors)
+
+
+def test_comparison_projection_tamper_recomputed_hash_rejected(report_run):
+    """Paired comparison fields are claim-bearing and must be compared completely."""
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    tampered = copy.deepcopy(report)
+    tampered["comparisons"][0]["paired_case_count"] = 0
+    tampered["report_sha256"] = compute_canonical_sha256({
+        k: v for k, v in tampered.items() if k != "report_sha256"
+    })
+
+    valid, errors = verify_benchmark_report(tampered, run_dir, private_context_path=priv_path)
+    assert not valid
+    assert any("PROJECTION" in error for error in errors)
+
+
+def test_packet_and_manifest_hash_resynchronization_rejected(report_run):
+    """Changing packet semantics plus every exposed commitment must still fail."""
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+
+    packet_path = next(
+        os.path.join(root, name)
+        for root, _, names in os.walk(os.path.join(run_dir, "packets"))
+        for name in names
+        if name.endswith(".json")
+    )
+    manifest_path = os.path.join(run_dir, "manifest.json")
+    with open(packet_path) as f:
+        original_packet = json.load(f)
+    with open(manifest_path) as f:
+        original_manifest = json.load(f)
+    with open(priv_path) as f:
+        original_private = json.load(f)
+    original_observations = []
+
+    try:
+        packet = copy.deepcopy(original_packet)
+        packet["common_materials"]["task_contract"] += " semantically changed"
+        packet["common_materials_sha256"] = compute_canonical_sha256({
+            "task_contract": packet["common_materials"]["task_contract"],
+            "candidate_summary": packet["common_materials"]["candidate_summary"],
+            "materials": packet["common_materials"]["materials"],
+            "available_evidence_refs": packet["common_materials"]["available_evidence_refs"],
+            "response_contract": packet["response_contract"],
+        })
+        packet["packet_sha256"] = compute_canonical_sha256({
+            k: v for k, v in packet.items() if k != "packet_sha256"
+        })
+        with open(packet_path, "w") as f:
+            json.dump(packet, f)
+
+        for root, _, names in os.walk(os.path.join(run_dir, "observations")):
+            for name in names:
+                if not name.endswith(".json"):
+                    continue
+                path = os.path.join(root, name)
+                with open(path) as f:
+                    candidate = json.load(f)
+                if candidate.get("packet_sha256") != original_packet["packet_sha256"]:
+                    continue
+                original_observations.append((path, copy.deepcopy(candidate)))
+                candidate["packet_sha256"] = packet["packet_sha256"]
+                candidate["observation_sha256"] = compute_canonical_sha256({
+                    k: v for k, v in candidate.items() if k != "observation_sha256"
+                })
+                with open(path, "w") as f:
+                    json.dump(candidate, f)
+
+        manifest = copy.deepcopy(original_manifest)
+        entry = next(
+            item
+            for item in manifest["packets"]
+            if item["packet_sha256"] == original_packet["packet_sha256"]
+        )
+        entry["packet_sha256"] = packet["packet_sha256"]
+        entry["common_materials_sha256"] = packet["common_materials_sha256"]
+        manifest["run_manifest_sha256"] = compute_canonical_sha256({
+            k: v for k, v in manifest.items() if k != "run_manifest_sha256"
+        })
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f)
+
+        private_ctx = copy.deepcopy(original_private)
+        private_ctx["public_manifest_sha256"] = manifest["run_manifest_sha256"]
+        private_ctx["private_context_sha256"] = compute_canonical_sha256({
+            k: v for k, v in private_ctx.items() if k != "private_context_sha256"
+        })
+        with open(priv_path, "w") as f:
+            json.dump(private_ctx, f)
+
+        valid, errors = verify_benchmark_report(report, run_dir, private_context_path=priv_path)
+        assert not valid
+        assert any("BINDING" in error or "PROJECTION" in error for error in errors)
+    finally:
+        with open(packet_path, "w") as f:
+            json.dump(original_packet, f)
+        with open(manifest_path, "w") as f:
+            json.dump(original_manifest, f)
+        with open(priv_path, "w") as f:
+            json.dump(original_private, f)
+        for path, restored in original_observations:
+            with open(path, "w") as f:
+                json.dump(restored, f)
+
+
+def test_observation_rationale_hash_resynchronization_rejected(report_run):
+    """A valid observation's non-metric rationale is claim-bearing state."""
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    observation_path = next(
+        os.path.join(root, name)
+        for root, _, names in os.walk(os.path.join(run_dir, "observations"))
+        for name in names
+        if name.endswith(".json")
+    )
+    with open(observation_path) as f:
+        observation = json.load(f)
+    original = copy.deepcopy(observation)
+    try:
+        observation["rationale_summary"] = "tampered rationale"
+        observation["observation_sha256"] = compute_canonical_sha256({
+            k: v for k, v in observation.items() if k != "observation_sha256"
+        })
+        with open(observation_path, "w") as f:
+            json.dump(observation, f)
+
+        valid, errors = verify_benchmark_report(report, run_dir, private_context_path=priv_path)
+        assert not valid
+        assert any("BINDING" in error or "PROJECTION" in error for error in errors)
+    finally:
+        with open(observation_path, "w") as f:
+            json.dump(original, f)
+
+
+def test_private_context_failure_surface_is_bounded(report_run, tmp_path):
+    """Private-context failures must not expose private CASE aliases."""
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    with open(priv_path) as f:
+        private_ctx = json.load(f)
+    private_ctx["alias_bindings"][0]["case_id"] = "EBR-PRIVATE-SUBSTITUTED"
+    private_ctx["private_context_sha256"] = compute_canonical_sha256({
+        k: v for k, v in private_ctx.items() if k != "private_context_sha256"
+    })
+    substituted_path = tmp_path / "substituted_private_context.json"
+    with open(substituted_path, "w") as f:
+        json.dump(private_ctx, f)
+
+    valid, errors = verify_benchmark_report(
+        report, run_dir, private_context_path=str(substituted_path)
+    )
+    assert not valid
+    assert len(errors) <= 4
+    assert all("CASE-" not in error for error in errors)
+
+
+def _assert_fixed_bounded_reasons(
+    report,
+    run_dir,
+    private_context_path,
+    *,
+    forbidden_fragments,
+):
+    first = verify_benchmark_report(report, run_dir, private_context_path=private_context_path)
+    second = verify_benchmark_report(report, run_dir, private_context_path=private_context_path)
+    assert first == second
+    valid, reasons = first
+    assert not valid
+    assert 1 <= len(reasons) <= 8
+    assert all(re.fullmatch(r"[A-Z][A-Z0-9_]*", reason) for reason in reasons)
+    joined = " ".join(reasons).lower()
+    for fragment in forbidden_fragments:
+        assert fragment.lower() not in joined
+
+
+def test_extra_key_error_surface_is_fixed_and_non_reflective(report_run):
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    report["CASE-SECRET"] = {"case_id": "EBR-PRIVATE-SECRET"}
+    report["report_sha256"] = compute_canonical_sha256({
+        k: v for k, v in report.items() if k != "report_sha256"
+    })
+
+    _assert_fixed_bounded_reasons(
+        report,
+        run_dir,
+        priv_path,
+        forbidden_fragments=("CASE-", "CASE-SECRET", "EBR-PRIVATE-SECRET"),
+    )
+
+
+def test_malicious_schema_error_surface_is_fixed_and_non_reflective(report_run):
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    report["schema"] = "CASE-SECRET EBR-PRIVATE-SECRET secret-key payload"
+    report["report_sha256"] = compute_canonical_sha256({
+        k: v for k, v in report.items() if k != "report_sha256"
+    })
+
+    _assert_fixed_bounded_reasons(
+        report,
+        run_dir,
+        priv_path,
+        forbidden_fragments=("CASE-", "EBR-PRIVATE-SECRET", "secret-key", "payload"),
+    )
+
+
+def test_private_alias_list_error_surface_is_fixed_and_deterministic(report_run, tmp_path):
+    run_dir = report_run["run_dir"]
+    priv_path = report_run["priv_path"]
+    report = build_benchmark_report(run_dir, private_context_path=priv_path)
+    with open(priv_path) as f:
+        private_ctx = json.load(f)
+    private_ctx["alias_bindings"] = [
+        {
+            "arm": "standard_review",
+            "case_alias": "CASE-SECRET",
+            "case_id": "EBR-PRIVATE-SECRET",
+            "secret-key": "secret-value",
+        }
+    ]
+    private_ctx["private_context_sha256"] = compute_canonical_sha256({
+        k: v for k, v in private_ctx.items() if k != "private_context_sha256"
+    })
+    substituted_path = tmp_path / "hostile_private_context.json"
+    with open(substituted_path, "w") as f:
+        json.dump(private_ctx, f)
+
+    _assert_fixed_bounded_reasons(
+        report,
+        run_dir,
+        str(substituted_path),
+        forbidden_fragments=(
+            "CASE-",
+            "CASE-SECRET",
+            "EBR-PRIVATE-SECRET",
+            "secret-key",
+            "secret-value",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -272,13 +540,17 @@ def test_observation_tamper_detected(report_run, tmp_path):
     priv_path = report_run["priv_path"]
     report = build_benchmark_report(run_dir, private_context_path=priv_path)
 
-    # Verify passes on original
+    observation_path = next(
+        os.path.join(root, name)
+        for root, _, names in os.walk(os.path.join(run_dir, "observations"))
+        for name in names
+        if name.endswith(".json")
+    )
+    os.unlink(observation_path)
+
     valid, errors = verify_benchmark_report(report, run_dir, private_context_path=priv_path)
-    # Accept either pass or pre-existing hash mismatch; main thing is logic runs
-    # (Some test environments rerun this and already have observation changes)
-    # The key test is that verify_benchmark_report runs without exception
-    assert isinstance(valid, bool)
-    assert isinstance(errors, list)
+    assert not valid
+    assert errors
 
 
 # ---------------------------------------------------------------------------
@@ -297,9 +569,11 @@ def test_packet_structure(report_run):
             with open(os.path.join(arm_dir, fname)) as f:
                 pkt = json.load(f)
             pkt_str = json.dumps(pkt)
-            assert "oracle" not in pkt_str.lower() or "epistemic_structure" in pkt_str.lower() or arm == "epistemic_workflow", (
-                f"Oracle content found in {arm}/{fname}"
-            )
+            assert (
+                "oracle" not in pkt_str.lower()
+                or "epistemic_structure" in pkt_str.lower()
+                or arm == "epistemic_workflow"
+            ), f"Oracle content found in {arm}/{fname}"
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +677,9 @@ def test_existing_outputs_survive_failure(report_run, tmp_path):
     # Original outputs should still be intact
     with open(json_out) as f:
         loaded = json.load(f)
-    assert loaded["report_sha256"] == original_sha, "Original JSON should be preserved after write failure"
+    assert loaded["report_sha256"] == original_sha, (
+        "Original JSON should be preserved after write failure"
+    )
 
 
 # ---------------------------------------------------------------------------
