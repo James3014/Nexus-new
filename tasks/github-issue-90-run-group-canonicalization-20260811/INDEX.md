@@ -4,7 +4,7 @@ owner: James Chen
 status: active
 campaign_id: github-issue-90-run-group-canonicalization-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/90
-baseline_main: 0b97df90b
+baseline_main: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
 ordered_cards:
   - 01-run-group-canonicalization.md
 current_frontier: 01-run-group-canonicalization.md

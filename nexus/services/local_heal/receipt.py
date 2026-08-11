@@ -293,6 +293,7 @@ def _classify_env_failure(ctx: Any, reason: str) -> str:
 
 
 def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_group: str = "") -> dict[str, Any]:
+    run_group = canonical_run_group(run_group)
     final_patch = str(getattr(ctx, "final_patch", "") or "")
     evaluation_report = str(getattr(ctx, "evaluation_report", "") or "")
     visible_passed = "[FAIL]" not in evaluation_report if evaluation_report else bool(getattr(ctx, "solve_eligible", False))

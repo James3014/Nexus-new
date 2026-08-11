@@ -147,3 +147,27 @@ def test_canonical_run_group_preserves_distinct_valid_identities(tmp_path):
         ctx, reports_root=tmp_path / "reports", run_group="group-b"
     )
     assert first.parent != second.parent
+
+
+def test_build_repair_receipt_rejects_unsafe_run_group_before_receipt(tmp_path):
+    ctx = HealContext(
+        instance_id="astropy__astropy-13033",
+        repo_dir=tmp_path,
+        problem_statement="run-group construction validation",
+    )
+    with pytest.raises(ValueError):
+        from nexus.services.local_heal.receipt import build_repair_receipt
+
+        build_repair_receipt(ctx, run_group="../escape")
+
+
+def test_build_repair_receipt_canonicalizes_valid_run_group(tmp_path):
+    ctx = HealContext(
+        instance_id="astropy__astropy-13033",
+        repo_dir=tmp_path,
+        problem_statement="run-group construction validation",
+    )
+    from nexus.services.local_heal.receipt import build_repair_receipt
+
+    receipt = build_repair_receipt(ctx, run_group="build-group")
+    assert receipt["run_group"] == "build-group"
