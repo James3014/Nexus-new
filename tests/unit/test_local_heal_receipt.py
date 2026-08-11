@@ -99,7 +99,9 @@ def test_write_repair_receipt_records_resolved_python_command(tmp_path):
         failure_reason="VERIFICATION_FAILED",
     )
 
-    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group="python-d")
+    receipt_path = write_repair_receipt(
+        ctx, reports_root=tmp_path / "reports", run_group="python-d"
+    )
 
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert payload["commands"] == ["/opt/python3.9 reproduce_bug.py"]
@@ -140,12 +142,8 @@ def test_canonical_run_group_preserves_distinct_valid_identities(tmp_path):
         repo_dir=tmp_path,
         problem_statement="run-group validation",
     )
-    first = write_repair_receipt(
-        ctx, reports_root=tmp_path / "reports", run_group="group-a"
-    )
-    second = write_repair_receipt(
-        ctx, reports_root=tmp_path / "reports", run_group="group-b"
-    )
+    first = write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group="group-a")
+    second = write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group="group-b")
     assert first.parent != second.parent
 
 
