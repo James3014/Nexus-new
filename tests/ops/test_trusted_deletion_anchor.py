@@ -90,6 +90,7 @@ def _evidence(manifest: dict[str, object]) -> dict[str, object]:
         "head_sha": manifest["head_sha"],
         "base_tree": manifest["base_tree"],
         "head_tree": manifest["head_tree"],
+        "test_tree": manifest["test_tree"],
         "bundle_sha256": manifest["bundle_sha256"],
         "raw_diff_sha256": manifest["raw_diff_sha256"],
         "test_inventory_sha256": manifest["test_inventory_sha256"],
@@ -132,6 +133,7 @@ def _verify(manifest: dict[str, object], evidence: dict[str, object], **override
         recomputed_uv_lock=overrides.get("uv_lock", b""),
         recomputed_base_tree=overrides.get("base_tree", manifest["base_tree"]),
         recomputed_head_tree=overrides.get("head_tree", manifest["head_tree"]),
+        recomputed_test_tree=overrides.get("test_tree", manifest["test_tree"]),
     )
 
 
@@ -151,8 +153,10 @@ def _synthetic_runtime(
         "site-packages/pytest/__init__.py": b"",
         "site-packages/pytest/__main__.py": (
             b"import json,sys\n"
+            b"import os\n"
             b"from pathlib import Path\n"
             b"Path('.selected-tests.json').write_text(json.dumps(sys.argv[1:]))\n"
+            b"Path('.executor-env.json').write_text(json.dumps(sorted(os.environ)))\n"
         ),
         "site-packages/pytest_asyncio.py": b"",
         "site-packages/pytest_timeout.py": b"",
@@ -440,6 +444,16 @@ def test_non_git_isolated_python_reproduces_missing_pytest(tmp_path: Path):
     assert "No module named pytest" in completed.stderr
 
 
+def test_extracted_source_without_bootstrap_reproduces_missing_git_head(tmp_path: Path):
+    source = tmp_path / "extracted-source"
+    source.mkdir()
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source, capture_output=True, text=True
+    )
+    assert completed.returncode == 128
+    assert "not a git repository" in completed.stderr
+
+
 @pytest.mark.parametrize(
     ("override", "value"),
     [
@@ -607,10 +621,40 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
             ],
             check=True,
         )
+        assert _run_git(bundle / "source", "rev-parse", "HEAD") == head_sha
+        assert _run_git(bundle / "source", "rev-parse", "HEAD^") == base_sha
+        assert _run_git(bundle / "source", "rev-parse", "HEAD^{tree}") == manifest["head_tree"]
+        assert _run_git(bundle / "source", "rev-parse", "HEAD:tests") == _run_git(
+            checkout, "rev-parse", f"{head_sha}:tests"
+        )
+        assert (bundle / "source/tests/ops/test_pr_impact_gate.py").read_text() == (
+            "def test_anchor_path():\n    assert 1 + 1 == 2\n"
+        )
         assert json.loads((bundle / "source/.selected-tests.json").read_text()) == [
             "tests/ops/test_pr_impact_gate.py",
             "-q",
         ]
+        executor_environment = set(json.loads((bundle / "source/.executor-env.json").read_text()))
+        allowed_environment = {
+            "CI",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "PATH",
+            "PIP_NO_INDEX",
+            "PYTHONNOUSERSITE",
+            "PYTHONPATH",
+            "TMPDIR",
+            "UV_OFFLINE",
+            "__CF_USER_TEXT_ENCODING",
+        }
+        assert executor_environment <= allowed_environment
+        assert not any(
+            word in key.upper()
+            for key in executor_environment
+            for word in ("TOKEN", "SECRET", "CREDENTIAL", "GITHUB", "ACTIONS")
+        )
         expected = [
             "--expected-workflow-ref",
             event["workflow_ref"],
@@ -691,6 +735,56 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         )
 
 
+def _synthetic_git_bundle(root: Path) -> tuple[bytes, dict[str, object], str, str, str]:
+    repo = root / "executor-git-source"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "executor-git-test")
+    test_path = repo / "tests/ops/test_pr_impact_gate.py"
+    test_path.parent.mkdir(parents=True)
+    test_path.write_text("def test_fixture():\n    assert True\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+    (repo / "uv.lock").write_text("version = 1\nrevision = 3\n")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "base")
+    base_sha = _run_git(repo, "rev-parse", "HEAD")
+    test_path.write_text("def test_archive_bootstrap():\n    assert True\n")
+    _run_git(repo, "commit", "-am", "head")
+    head_sha = _run_git(repo, "rev-parse", "HEAD")
+    for ref, revision in (
+        (trusted_anchor.BASE_REF, base_sha),
+        (trusted_anchor.HEAD_REF, head_sha),
+        (trusted_anchor.WORKFLOW_REF, base_sha),
+    ):
+        _run_git(repo, "update-ref", ref, revision)
+    path = root / "synthetic-git.bundle"
+    subprocess.run(
+        [
+            "git",
+            "bundle",
+            "create",
+            str(path),
+            trusted_anchor.BASE_REF,
+            trusted_anchor.HEAD_REF,
+            trusted_anchor.WORKFLOW_REF,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    event = _event()
+    event["workflow_sha"] = base_sha
+    event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
+    event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+    return (
+        path.read_bytes(),
+        event,
+        _run_git(repo, "rev-parse", f"{base_sha}^{{tree}}"),
+        _run_git(repo, "rev-parse", f"{head_sha}^{{tree}}"),
+        _run_git(repo, "rev-parse", f"{head_sha}:tests"),
+    )
+
+
 def _executor_archive_bundle(
     root: Path, unsafe_member: tarfile.TarInfo, *, runtime_probe: dict[str, str] | None = None
 ) -> Path:
@@ -708,16 +802,22 @@ def _executor_archive_bundle(
     requirements = (runtime_dir / "requirements.txt").read_bytes()
     runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
     runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
+    git_bundle, event, base_tree, head_tree, test_tree = _synthetic_git_bundle(root)
     manifest = build_manifest(
-        _event(),
+        event,
         raw_diff=b"",
         test_inventory=[test_name],
         source_archive=(bundle / "source.tar").read_bytes(),
+        git_bundle=git_bundle,
         requirements=requirements,
         runtime_archive=runtime_archive,
         runtime_metadata=runtime_metadata,
         runtime_identity=json.loads(runtime_metadata),
+        base_tree=base_tree,
+        head_tree=head_tree,
+        test_tree=test_tree,
     )
+    (bundle / "git-objects.bundle").write_bytes(git_bundle)
     for name in trusted_anchor.RUNTIME_FILENAMES:
         (bundle / name).write_bytes((runtime_dir / name).read_bytes())
     (bundle / "manifest.json").write_bytes(_json(manifest))
@@ -767,6 +867,84 @@ def test_executor_rejects_runtime_abi_mismatch(tmp_path: Path):
     )
     assert completed.returncode != 0
     assert "offline runtime identity mismatch" in completed.stderr
+    assert not (bundle / "raw-evidence.json").exists()
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "git-digest",
+        "malformed-bound-git",
+        "substituted-base",
+        "substituted-head",
+        "substituted-workflow",
+        "wrong-tree",
+        "wrong-test-tree",
+        "bound-source-test-drift",
+        "source-digest",
+    ],
+)
+def test_executor_git_context_tamper_fails_closed(tamper: str, tmp_path: Path):
+    link = tarfile.TarInfo(".antigravitycli/irrelevant.json")
+    link.type = tarfile.SYMTYPE
+    link.linkname = "/tmp/ignored"
+    bundle = _executor_archive_bundle(tmp_path, link)
+    manifest_path = bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if tamper == "git-digest":
+        (bundle / "git-objects.bundle").write_bytes(
+            (bundle / "git-objects.bundle").read_bytes() + b"tamper"
+        )
+    elif tamper == "malformed-bound-git":
+        malformed = b"not a Git bundle"
+        (bundle / "git-objects.bundle").write_bytes(malformed)
+        manifest["git_bundle_sha256"] = hashlib.sha256(malformed).hexdigest()
+        manifest_path.write_bytes(_json(manifest))
+    elif tamper == "substituted-head":
+        manifest["head_sha"] = "f" * 40
+        manifest_path.write_bytes(_json(manifest))
+    elif tamper == "substituted-base":
+        manifest["base_sha"] = "f" * 40
+        manifest_path.write_bytes(_json(manifest))
+    elif tamper == "substituted-workflow":
+        manifest["workflow_identity"]["workflow_sha"] = "f" * 40
+        manifest_path.write_bytes(_json(manifest))
+    elif tamper == "wrong-tree":
+        manifest["head_tree"] = "0" * 40
+        manifest_path.write_bytes(_json(manifest))
+    elif tamper == "wrong-test-tree":
+        manifest["test_tree"] = "0" * 40
+        manifest_path.write_bytes(_json(manifest))
+    elif tamper == "bound-source-test-drift":
+        original = tarfile.open(bundle / "source.tar")
+        stream = BytesIO()
+        with original, tarfile.open(fileobj=stream, mode="w") as rewritten:
+            for member in original.getmembers():
+                payload = original.extractfile(member) if member.isfile() else None
+                if member.name == "tests/ops/test_pr_impact_gate.py":
+                    data = b"def test_tampered():\n    assert True\n"
+                    member.size = len(data)
+                    payload = BytesIO(data)
+                rewritten.addfile(member, payload)
+        archive = stream.getvalue()
+        (bundle / "source.tar").write_bytes(archive)
+        manifest["source_archive_sha256"] = hashlib.sha256(archive).hexdigest()
+        manifest_path.write_bytes(_json(manifest))
+    else:
+        (bundle / "source.tar").write_bytes((bundle / "source.tar").read_bytes() + b"tamper")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/ops/trusted_deletion_anchor.py"),
+            "executor",
+            "--bundle-dir",
+            str(bundle),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
     assert not (bundle / "raw-evidence.json").exists()
 
 
