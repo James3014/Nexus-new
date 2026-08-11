@@ -1,10 +1,11 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: BLOCKED_OWNER_GATE
 task_id: github-issue-7-m3-b-independent-acceptance
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
+owner_gate: M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE
 AUTO_CHAIN: false
 worker_may_commit: false
 worker_may_approve: false
@@ -13,6 +14,10 @@ worker_may_push: false
 ---
 
 # M3-B Independent Exact-Candidate Acceptance
+
+Current frontier, blocked on the Owner gate: implementation starts only after
+Owner approval of the M3-B autonomy-conditional acceptance receipt/approval
+gate (`M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE`).
 
 ## Objective
 
