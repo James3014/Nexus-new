@@ -12,18 +12,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import platform
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "trusted-deletion-anchor.v1"
+SCHEMA_VERSION = "trusted-deletion-anchor.v2"
+RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v1"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
 BASE_REF = "refs/trusted-anchor/base"
 HEAD_REF = "refs/trusted-anchor/head"
+WORKFLOW_REF = "refs/trusted-anchor/workflow"
+RUNTIME_FILENAMES = ("runtime.tar", "runtime-metadata.json", "requirements.txt")
+PYTEST_PLUGINS = ["pytest", "pytest_asyncio", "pytest_timeout"]
+UV_VERSION = "uv 0.9.2"
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -39,6 +48,12 @@ REQUIRED_EVIDENCE_KEYS = {
     "node_ids",
     "source_archive_sha256",
     "git_bundle_sha256",
+    "pyproject_sha256",
+    "uv_lock_sha256",
+    "requirements_sha256",
+    "runtime_archive_sha256",
+    "runtime_metadata_sha256",
+    "runtime_identity",
     "executor",
 }
 
@@ -53,6 +68,149 @@ def _sha(value: bytes) -> str:
 
 def _git_object_id(value: bytes) -> str:
     return hashlib.sha1(value).hexdigest()
+
+
+def _runtime_probe() -> dict[str, str]:
+    return {
+        "implementation": platform.python_implementation(),
+        "python_version": platform.python_version(),
+        "cache_tag": sys.implementation.cache_tag or "",
+        "soabi": sysconfig.get_config_var("SOABI") or "",
+        "platform": sysconfig.get_platform(),
+        "machine": platform.machine(),
+        "system": platform.system(),
+    }
+
+
+def _runtime_subprocess_env(home: Path) -> dict[str, str]:
+    home.mkdir(parents=True, exist_ok=True)
+    environment = {
+        "HOME": str(home),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "TMPDIR": os.environ.get("RUNNER_TEMP", tempfile.gettempdir()),
+        "UV_KEYRING_PROVIDER": "disabled",
+        "UV_NO_CACHE": "1",
+        "UV_PYTHON_DOWNLOADS": "never",
+    }
+    for key in ("SSL_CERT_FILE", "SSL_CERT_DIR"):
+        if os.environ.get(key):
+            environment[key] = os.environ[key]
+    return environment
+
+
+def _archive_runtime(site_packages: Path) -> bytes:
+    if not site_packages.is_dir():
+        raise ValueError("runtime site-packages is missing")
+    stream = BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        root = tarfile.TarInfo("site-packages")
+        root.type = tarfile.DIRTYPE
+        root.mode = 0o755
+        root.mtime = 0
+        archive.addfile(root)
+        for path in sorted(site_packages.rglob("*"), key=lambda item: item.as_posix()):
+            if path.is_symlink() or (not path.is_dir() and not path.is_file()):
+                raise ValueError("runtime contains unsupported filesystem entry")
+            relative = path.relative_to(site_packages).as_posix()
+            member = tarfile.TarInfo(f"site-packages/{relative}")
+            member.uid = member.gid = 0
+            member.uname = member.gname = ""
+            member.mtime = 0
+            if path.is_dir():
+                member.type = tarfile.DIRTYPE
+                member.mode = 0o755
+                archive.addfile(member)
+            else:
+                member.size = path.stat().st_size
+                member.mode = 0o644
+                with path.open("rb") as source:
+                    archive.addfile(member, source)
+    return stream.getvalue()
+
+
+def _build_runtime(args: argparse.Namespace) -> None:
+    repo = Path(args.repo_root)
+    workflow_sha = _exact_sha(args.workflow_sha, "workflow_sha")
+    for revision_path in ("pyproject.toml", "uv.lock"):
+        _git(repo, "cat-file", "-e", f"{workflow_sha}:{revision_path}")
+    pyproject = _git(repo, "show", f"{workflow_sha}:pyproject.toml", binary=True)
+    uv_lock = _git(repo, "show", f"{workflow_sha}:uv.lock", binary=True)
+    assert isinstance(pyproject, bytes) and isinstance(uv_lock, bytes)
+    output = Path(args.output_dir)
+    output.mkdir(parents=True, exist_ok=False)
+    with tempfile.TemporaryDirectory(prefix="trusted-runtime-build-") as directory:
+        build_root = Path(directory)
+        contract = build_root / "contract"
+        contract.mkdir()
+        (contract / "pyproject.toml").write_bytes(pyproject)
+        (contract / "uv.lock").write_bytes(uv_lock)
+        requirements_path = build_root / "requirements.txt"
+        environment = _runtime_subprocess_env(build_root / "home")
+        subprocess.run(
+            [
+                args.uv_executable,
+                "export",
+                "--frozen",
+                "--no-default-groups",
+                "--group",
+                "dev",
+                "--no-emit-project",
+                "--no-emit-workspace",
+                "--no-emit-local",
+                "--output-file",
+                str(requirements_path),
+            ],
+            cwd=contract,
+            env=environment,
+            check=True,
+            capture_output=True,
+        )
+        requirements = requirements_path.read_bytes()
+        site_packages = build_root / "site-packages"
+        subprocess.run(
+            [
+                args.uv_executable,
+                "pip",
+                "install",
+                "--target",
+                str(site_packages),
+                "--require-hashes",
+                "--only-binary",
+                ":all:",
+                "--no-cache",
+                "--no-python-downloads",
+                "--python",
+                sys.executable,
+                "--requirements",
+                str(requirements_path),
+            ],
+            cwd=contract,
+            env=environment,
+            check=True,
+            capture_output=True,
+        )
+        uv_version = subprocess.run(
+            [args.uv_executable, "--version"],
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if uv_version != UV_VERSION:
+            raise ValueError("runtime builder identity mismatch")
+        runtime_archive = _archive_runtime(site_packages)
+    metadata = {
+        "schema_version": RUNTIME_SCHEMA_VERSION,
+        "runtime_probe": _runtime_probe(),
+        "builder": {"uv_version": uv_version},
+        "pyproject_sha256": _sha(pyproject),
+        "uv_lock_sha256": _sha(uv_lock),
+        "requirements_sha256": _sha(requirements),
+        "pytest_plugins": PYTEST_PLUGINS,
+    }
+    (output / "runtime.tar").write_bytes(runtime_archive)
+    (output / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
+    (output / "requirements.txt").write_bytes(requirements)
 
 
 def _exact_sha(value: Any, label: str) -> str:
@@ -109,6 +267,12 @@ def build_manifest(
     test_inventory: list[str],
     source_archive: bytes,
     git_bundle: bytes = b"",
+    pyproject: bytes = b"",
+    uv_lock: bytes = b"",
+    requirements: bytes = b"",
+    runtime_archive: bytes = b"",
+    runtime_metadata: bytes = b"{}",
+    runtime_identity: dict[str, Any] | None = None,
     base_tree: str | None = None,
     head_tree: str | None = None,
 ) -> dict[str, Any]:
@@ -140,9 +304,22 @@ def build_manifest(
         "node_ids": node_ids,
         "source_archive_sha256": _sha(source_archive),
         "git_bundle_sha256": _sha(git_bundle),
+        "pyproject_sha256": _sha(pyproject),
+        "uv_lock_sha256": _sha(uv_lock),
+        "requirements_sha256": _sha(requirements),
+        "runtime_archive_sha256": _sha(runtime_archive),
+        "runtime_metadata_sha256": _sha(runtime_metadata),
+        "runtime_identity": runtime_identity or {},
     }
     unsigned = (
-        _json(manifest) + source_archive + raw_diff + _json(sorted(test_inventory)) + git_bundle
+        _json(manifest)
+        + source_archive
+        + raw_diff
+        + _json(sorted(test_inventory))
+        + git_bundle
+        + requirements
+        + runtime_archive
+        + runtime_metadata
     )
     manifest["bundle_sha256"] = _sha(unsigned)
     return manifest
@@ -156,6 +333,11 @@ def verify_evidence(
     raw_diff: bytes | None = None,
     test_inventory: list[str] | None = None,
     git_bundle: bytes | None = None,
+    requirements: bytes | None = None,
+    runtime_archive: bytes | None = None,
+    runtime_metadata: bytes | None = None,
+    recomputed_pyproject: bytes | None = None,
+    recomputed_uv_lock: bytes | None = None,
     recomputed_base_tree: str | None = None,
     recomputed_head_tree: str | None = None,
 ) -> str:
@@ -190,6 +372,12 @@ def verify_evidence(
             "test_inventory_sha256",
             "source_archive_sha256",
             "git_bundle_sha256",
+            "pyproject_sha256",
+            "uv_lock_sha256",
+            "requirements_sha256",
+            "runtime_archive_sha256",
+            "runtime_metadata_sha256",
+            "runtime_identity",
             "node_ids",
         ):
             if evidence[key] != manifest[key]:
@@ -199,11 +387,44 @@ def verify_evidence(
             raise ValueError("executor result is not successful")
         if executor.get("selected_tests") != manifest["test_inventory"]:
             raise ValueError("test selection mismatch")
+        if executor.get("pytest_plugins") != PYTEST_PLUGINS:
+            raise ValueError("pytest plugin identity mismatch")
+        if executor.get("runtime_probe") != manifest["runtime_identity"].get("runtime_probe"):
+            raise ValueError("executor runtime identity mismatch")
         if source_archive is not None:
             if _sha(source_archive) != manifest["source_archive_sha256"]:
                 raise ValueError("source archive digest mismatch")
         if git_bundle is not None and _sha(git_bundle) != manifest["git_bundle_sha256"]:
             raise ValueError("Git object bundle digest mismatch")
+        if requirements is not None and _sha(requirements) != manifest["requirements_sha256"]:
+            raise ValueError("requirements digest mismatch")
+        if (
+            runtime_archive is not None
+            and _sha(runtime_archive) != manifest["runtime_archive_sha256"]
+        ):
+            raise ValueError("runtime archive digest mismatch")
+        if runtime_metadata is not None:
+            if _sha(runtime_metadata) != manifest["runtime_metadata_sha256"]:
+                raise ValueError("runtime metadata digest mismatch")
+            metadata = json.loads(runtime_metadata)
+            if metadata != manifest["runtime_identity"]:
+                raise ValueError("runtime identity mismatch")
+            if (
+                metadata.get("schema_version") != RUNTIME_SCHEMA_VERSION
+                or metadata.get("pytest_plugins") != PYTEST_PLUGINS
+                or metadata.get("builder") != {"uv_version": UV_VERSION}
+            ):
+                raise ValueError("runtime contract mismatch")
+        if (
+            recomputed_pyproject is not None
+            and _sha(recomputed_pyproject) != manifest["pyproject_sha256"]
+        ):
+            raise ValueError("trusted pyproject digest mismatch")
+        if (
+            recomputed_uv_lock is not None
+            and _sha(recomputed_uv_lock) != manifest["uv_lock_sha256"]
+        ):
+            raise ValueError("trusted lock digest mismatch")
         if raw_diff is not None and _sha(raw_diff) != manifest["raw_diff_sha256"]:
             raise ValueError("raw diff digest mismatch")
         if test_inventory is not None:
@@ -215,6 +436,9 @@ def verify_evidence(
             and raw_diff is not None
             and test_inventory is not None
             and git_bundle is not None
+            and requirements is not None
+            and runtime_archive is not None
+            and runtime_metadata is not None
         ):
             unsigned = dict(manifest)
             unsigned.pop("bundle_sha256", None)
@@ -224,6 +448,9 @@ def verify_evidence(
                 + raw_diff
                 + _json(sorted(test_inventory))
                 + git_bundle
+                + requirements
+                + runtime_archive
+                + runtime_metadata
             )
             if expected_bundle != manifest["bundle_sha256"]:
                 raise ValueError("bundle digest mismatch")
@@ -237,20 +464,26 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
-def _create_git_bundle(repo: Path, output: Path, base_sha: str, head_sha: str) -> bytes:
+def _create_git_bundle(
+    repo: Path, output: Path, base_sha: str, head_sha: str, workflow_sha: str
+) -> bytes:
     """Bundle verified commits through fixed refs in an ephemeral bare clone."""
 
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-bundle-") as directory:
         ephemeral = Path(directory) / "repo.git"
         subprocess.run(["git", "init", "--bare", str(ephemeral)], check=True, capture_output=True)
-        _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha)
-        for ref, revision in ((BASE_REF, base_sha), (HEAD_REF, head_sha)):
+        _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha, workflow_sha)
+        for ref, revision in (
+            (BASE_REF, base_sha),
+            (HEAD_REF, head_sha),
+            (WORKFLOW_REF, workflow_sha),
+        ):
             _git(ephemeral, "cat-file", "-e", f"{revision}^{{commit}}")
             _git(ephemeral, "update-ref", ref, revision)
             if _git(ephemeral, "rev-parse", f"{ref}^{{commit}}") != revision:
                 raise ValueError(f"failed to bind {ref}")
         subprocess.run(
-            ["git", "bundle", "create", str(output), BASE_REF, HEAD_REF],
+            ["git", "bundle", "create", str(output), BASE_REF, HEAD_REF, WORKFLOW_REF],
             cwd=ephemeral,
             check=True,
             capture_output=True,
@@ -271,6 +504,7 @@ def _controller(args: argparse.Namespace) -> None:
     repo = Path(args.repo_root)
     base_sha = _exact_sha(_event_value(event, "pull_request", "base", "sha"), "base_sha")
     head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
+    workflow_sha = _exact_sha(event.get("workflow_sha"), "workflow_sha")
     _git(repo, "fetch", "--no-tags", "--unshallow", "origin", base_sha, head_sha)
     if _git(repo, "rev-parse", "--is-shallow-repository") != "false":
         raise ValueError("controller repository remains shallow")
@@ -296,7 +530,35 @@ def _controller(args: argparse.Namespace) -> None:
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     git_bundle_path = output / "git-objects.bundle"
-    git_bundle = _create_git_bundle(repo, git_bundle_path, base_sha, head_sha)
+    runtime_dir = Path(args.runtime_dir)
+    if not runtime_dir.is_dir() or any(
+        not (runtime_dir / name).is_file() for name in RUNTIME_FILENAMES
+    ):
+        raise ValueError("runtime bundle is incomplete")
+    pyproject = _git(repo, "show", f"{workflow_sha}:pyproject.toml", binary=True)
+    uv_lock = _git(repo, "show", f"{workflow_sha}:uv.lock", binary=True)
+    head_pyproject = _git(repo, "show", f"{head_sha}:pyproject.toml", binary=True)
+    head_uv_lock = _git(repo, "show", f"{head_sha}:uv.lock", binary=True)
+    assert all(
+        isinstance(value, bytes) for value in (pyproject, uv_lock, head_pyproject, head_uv_lock)
+    )
+    if head_pyproject != pyproject or head_uv_lock != uv_lock:
+        raise ValueError("PR dependency contract drifts from trusted default")
+    requirements = (runtime_dir / "requirements.txt").read_bytes()
+    runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
+    runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
+    runtime_identity = json.loads(runtime_metadata)
+    if (
+        runtime_identity.get("schema_version") != RUNTIME_SCHEMA_VERSION
+        or runtime_identity.get("pyproject_sha256") != _sha(pyproject)
+        or runtime_identity.get("uv_lock_sha256") != _sha(uv_lock)
+        or runtime_identity.get("requirements_sha256") != _sha(requirements)
+        or runtime_identity.get("runtime_probe") != _runtime_probe()
+        or runtime_identity.get("pytest_plugins") != PYTEST_PLUGINS
+        or runtime_identity.get("builder") != {"uv_version": UV_VERSION}
+    ):
+        raise ValueError("runtime metadata does not match trusted contract")
+    git_bundle = _create_git_bundle(repo, git_bundle_path, base_sha, head_sha, workflow_sha)
     manifest = build_manifest(
         event,
         raw_diff=raw_diff,
@@ -305,11 +567,19 @@ def _controller(args: argparse.Namespace) -> None:
         base_tree=trees["base"],
         head_tree=trees["head"],
         git_bundle=git_bundle,
+        pyproject=pyproject,
+        uv_lock=uv_lock,
+        requirements=requirements,
+        runtime_archive=runtime_archive,
+        runtime_metadata=runtime_metadata,
+        runtime_identity=runtime_identity,
     )
     (output / "source.tar").write_bytes(source_archive)
     (output / "raw-diff.bin").write_bytes(raw_diff)
     (output / "test-inventory.json").write_bytes(_json(selected) + b"\n")
     (output / "manifest.json").write_bytes(_json(manifest) + b"\n")
+    for name in RUNTIME_FILENAMES:
+        (output / name).write_bytes((runtime_dir / name).read_bytes())
     (output / "external-anchor.json").write_bytes(
         _json({
             "schema_version": SCHEMA_VERSION,
@@ -330,8 +600,55 @@ def _executor(args: argparse.Namespace) -> None:
     source.mkdir()
     with tarfile.open(bundle / "source.tar") as archive:
         archive.extractall(source, filter=_executor_archive_filter)
+    requirements = (bundle / "requirements.txt").read_bytes()
+    runtime_archive = (bundle / "runtime.tar").read_bytes()
+    runtime_metadata_bytes = (bundle / "runtime-metadata.json").read_bytes()
+    runtime_metadata = json.loads(runtime_metadata_bytes)
+    if (
+        _sha(requirements) != manifest.get("requirements_sha256")
+        or _sha(runtime_archive) != manifest.get("runtime_archive_sha256")
+        or _sha(runtime_metadata_bytes) != manifest.get("runtime_metadata_sha256")
+        or runtime_metadata != manifest.get("runtime_identity")
+        or runtime_metadata.get("runtime_probe") != _runtime_probe()
+        or runtime_metadata.get("pytest_plugins") != PYTEST_PLUGINS
+        or runtime_metadata.get("builder") != {"uv_version": UV_VERSION}
+    ):
+        raise ValueError("offline runtime identity mismatch")
+    runtime = bundle / "runtime"
+    runtime.mkdir()
+    with tarfile.open(fileobj=BytesIO(runtime_archive)) as archive:
+        archive.extractall(runtime, filter="data")
+    site_packages = (runtime / "site-packages").resolve()
+    if not site_packages.is_dir():
+        raise ValueError("offline runtime site-packages is missing")
+    environment = dict(os.environ)
+    environment.update({
+        "PIP_NO_INDEX": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONPATH": str(site_packages),
+        "UV_OFFLINE": "1",
+    })
+    plugin_probe = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "import json,pytest,pytest_asyncio,pytest_timeout; "
+            "print(json.dumps([pytest.__file__,pytest_asyncio.__file__,pytest_timeout.__file__]))",
+        ],
+        cwd=source,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    plugin_paths = json.loads(plugin_probe.stdout)
+    if any(not Path(path).resolve().is_relative_to(site_packages) for path in plugin_paths):
+        raise ValueError("pytest plugin resolved outside offline runtime")
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", *manifest["test_inventory"], "-q"], cwd=source
+        [sys.executable, "-S", "-m", "pytest", *manifest["test_inventory"], "-q"],
+        cwd=source,
+        env=environment,
     )
     evidence = {key: manifest[key] for key in REQUIRED_EVIDENCE_KEYS if key != "executor"}
     evidence["schema_version"] = SCHEMA_VERSION
@@ -339,6 +656,8 @@ def _executor(args: argparse.Namespace) -> None:
     evidence["executor"] = {
         "exit_code": result.returncode,
         "selected_tests": manifest["test_inventory"],
+        "pytest_plugins": PYTEST_PLUGINS,
+        "runtime_probe": _runtime_probe(),
     }
     (bundle / "raw-evidence.json").write_bytes(_json(evidence) + b"\n")
     raise SystemExit(result.returncode)
@@ -401,7 +720,11 @@ def _verifier(args: argparse.Namespace) -> None:
             check=True,
             capture_output=True,
         )
-        for ref, revision in ((BASE_REF, manifest["base_sha"]), (HEAD_REF, manifest["head_sha"])):
+        for ref, revision in (
+            (BASE_REF, manifest["base_sha"]),
+            (HEAD_REF, manifest["head_sha"]),
+            (WORKFLOW_REF, args.expected_workflow_sha),
+        ):
             _git(git_repo, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
             if (
                 _git(git_repo, "show-ref", "--verify", f"refs/{ref.removeprefix('refs/')}").split()[
@@ -443,6 +766,18 @@ def _verifier(args: argparse.Namespace) -> None:
         ]
         if recomputed_selected != sorted(selected_inventory):
             raise SystemExit(1)
+        trusted_pyproject = _git(
+            git_repo, "show", f"{args.expected_workflow_sha}:pyproject.toml", binary=True
+        )
+        trusted_uv_lock = _git(
+            git_repo, "show", f"{args.expected_workflow_sha}:uv.lock", binary=True
+        )
+        head_pyproject = _git(
+            git_repo, "show", f"{manifest['head_sha']}:pyproject.toml", binary=True
+        )
+        head_uv_lock = _git(git_repo, "show", f"{manifest['head_sha']}:uv.lock", binary=True)
+        if head_pyproject != trusted_pyproject or head_uv_lock != trusted_uv_lock:
+            raise SystemExit(1)
     status = verify_evidence(
         manifest,
         evidence,
@@ -450,6 +785,11 @@ def _verifier(args: argparse.Namespace) -> None:
         raw_diff=(bundle / "raw-diff.bin").read_bytes(),
         test_inventory=json.loads((bundle / "test-inventory.json").read_text(encoding="utf-8")),
         git_bundle=git_bundle,
+        requirements=(bundle / "requirements.txt").read_bytes(),
+        runtime_archive=(bundle / "runtime.tar").read_bytes(),
+        runtime_metadata=(bundle / "runtime-metadata.json").read_bytes(),
+        recomputed_pyproject=trusted_pyproject,
+        recomputed_uv_lock=trusted_uv_lock,
         recomputed_base_tree=recomputed_base_tree,
         recomputed_head_tree=recomputed_head_tree,
     )
@@ -465,7 +805,14 @@ def main() -> None:
     controller.add_argument("--event-json", required=True)
     controller.add_argument("--repo-root", required=True)
     controller.add_argument("--output-dir", required=True)
+    controller.add_argument("--runtime-dir", required=True)
     controller.set_defaults(function=_controller)
+    runtime_builder = subparsers.add_parser("runtime-builder")
+    runtime_builder.add_argument("--repo-root", required=True)
+    runtime_builder.add_argument("--workflow-sha", required=True)
+    runtime_builder.add_argument("--uv-executable", required=True)
+    runtime_builder.add_argument("--output-dir", required=True)
+    runtime_builder.set_defaults(function=_build_runtime)
     executor = subparsers.add_parser("executor")
     executor.add_argument("--bundle-dir", required=True)
     executor.set_defaults(function=_executor)

@@ -20,7 +20,6 @@ import yaml
 
 import scripts.ops.trusted_deletion_anchor as trusted_anchor
 from scripts.ops.trusted_deletion_anchor import (
-    REQUIRED_EVIDENCE_KEYS,
     SCHEMA_VERSION,
     _json,
     build_manifest,
@@ -60,17 +59,29 @@ def _event() -> dict[str, object]:
 
 
 def _manifest() -> dict[str, object]:
+    runtime_identity = {
+        "schema_version": trusted_anchor.RUNTIME_SCHEMA_VERSION,
+        "runtime_probe": trusted_anchor._runtime_probe(),
+        "builder": {"uv_version": trusted_anchor.UV_VERSION},
+        "pyproject_sha256": hashlib.sha256(b"").hexdigest(),
+        "uv_lock_sha256": hashlib.sha256(b"").hexdigest(),
+        "requirements_sha256": hashlib.sha256(b"").hexdigest(),
+        "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+    }
+    runtime_metadata = _json(runtime_identity) + b"\n"
     return build_manifest(
         _event(),
         raw_diff=b":100644 100644 abcdef1 abcdef2 M\tfile.py\0",
         test_inventory=["tests/ops/test_pr_impact_gate.py"],
         source_archive=b"trusted archive",
         git_bundle=b"git bundle",
+        runtime_metadata=runtime_metadata,
+        runtime_identity=runtime_identity,
     )
 
 
 def _evidence(manifest: dict[str, object]) -> dict[str, object]:
-    return {
+    evidence = {
         "schema_version": SCHEMA_VERSION,
         "status": "COMPLETE",
         "workflow_identity": manifest["workflow_identity"],
@@ -85,8 +96,23 @@ def _evidence(manifest: dict[str, object]) -> dict[str, object]:
         "node_ids": manifest["node_ids"],
         "source_archive_sha256": manifest["source_archive_sha256"],
         "git_bundle_sha256": manifest["git_bundle_sha256"],
-        "executor": {"exit_code": 0, "selected_tests": manifest["test_inventory"]},
+        "executor": {
+            "exit_code": 0,
+            "selected_tests": manifest["test_inventory"],
+            "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+            "runtime_probe": manifest["runtime_identity"].get("runtime_probe"),
+        },
     }
+    for key in (
+        "pyproject_sha256",
+        "uv_lock_sha256",
+        "requirements_sha256",
+        "runtime_archive_sha256",
+        "runtime_metadata_sha256",
+        "runtime_identity",
+    ):
+        evidence[key] = manifest[key]
+    return evidence
 
 
 def _verify(manifest: dict[str, object], evidence: dict[str, object], **overrides: object) -> str:
@@ -97,6 +123,13 @@ def _verify(manifest: dict[str, object], evidence: dict[str, object], **override
         raw_diff=overrides.get("raw_diff", b":100644 100644 abcdef1 abcdef2 M\tfile.py\0"),
         test_inventory=overrides.get("test_inventory", ["tests/ops/test_pr_impact_gate.py"]),
         git_bundle=overrides.get("git_bundle", b"git bundle"),
+        requirements=overrides.get("requirements", b""),
+        runtime_archive=overrides.get("runtime_archive", b""),
+        runtime_metadata=overrides.get(
+            "runtime_metadata", _json(manifest["runtime_identity"]) + b"\n"
+        ),
+        recomputed_pyproject=overrides.get("pyproject", b""),
+        recomputed_uv_lock=overrides.get("uv_lock", b""),
         recomputed_base_tree=overrides.get("base_tree", manifest["base_tree"]),
         recomputed_head_tree=overrides.get("head_tree", manifest["head_tree"]),
     )
@@ -106,6 +139,44 @@ def _run_git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def _synthetic_runtime(
+    root: Path, *, pyproject: bytes = b"", uv_lock: bytes = b"", probe: dict[str, str] | None = None
+) -> Path:
+    runtime_dir = root / "runtime-artifact"
+    runtime_dir.mkdir()
+    requirements = b"synthetic locked runtime\n"
+    files = {
+        "site-packages/pytest/__init__.py": b"",
+        "site-packages/pytest/__main__.py": (
+            b"import json,sys\n"
+            b"from pathlib import Path\n"
+            b"Path('.selected-tests.json').write_text(json.dumps(sys.argv[1:]))\n"
+        ),
+        "site-packages/pytest_asyncio.py": b"",
+        "site-packages/pytest_timeout.py": b"",
+    }
+    stream = BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        for name, data in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            member.mode = 0o644
+            archive.addfile(member, BytesIO(data))
+    metadata = {
+        "schema_version": trusted_anchor.RUNTIME_SCHEMA_VERSION,
+        "runtime_probe": probe or trusted_anchor._runtime_probe(),
+        "builder": {"uv_version": trusted_anchor.UV_VERSION},
+        "pyproject_sha256": hashlib.sha256(pyproject).hexdigest(),
+        "uv_lock_sha256": hashlib.sha256(uv_lock).hexdigest(),
+        "requirements_sha256": hashlib.sha256(requirements).hexdigest(),
+        "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+    }
+    (runtime_dir / "runtime.tar").write_bytes(stream.getvalue())
+    (runtime_dir / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
+    (runtime_dir / "requirements.txt").write_bytes(requirements)
+    return runtime_dir
 
 
 def _trusted_origin(
@@ -135,6 +206,8 @@ def _trusted_origin(
     test_path = source / "tests/ops/test_pr_impact_gate.py"
     test_path.parent.mkdir(parents=True)
     test_path.write_text("def test_fixture():\n    assert True\n", encoding="utf-8")
+    (source / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+    (source / "uv.lock").write_text("version = 1\nrevision = 3\n")
     hostile_path = source / "scripts/ops/$(touch hostile-path-executed)"
     hostile_path.write_text("data only\n", encoding="utf-8")
     _run_git(source, "add", ".")
@@ -199,6 +272,11 @@ def _acquisition_environment(
     event["pull_request"]["base"]["sha"] = workflow_sha  # type: ignore[index]
     event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
     path, argv_log = _git_logging_path(run_root)
+    _synthetic_runtime(
+        run_root,
+        pyproject=b"[project]\nname='fixture'\nversion='0'\n",
+        uv_lock=b"version = 1\nrevision = 3\n",
+    )
     token_bytes = f"x-access-token:{token}".encode()
     encoded = base64.b64encode(token_bytes).decode()
     return {
@@ -228,7 +306,11 @@ def _local_acquisition_run(job_name: str, origin: Path) -> str:
         else "Acquire exact trusted verifier source"
     )
     run = _named_step(job_name, step_name)["run"]
-    return run.replace('"https://github.com/$REPOSITORY.git"', shlex.quote(str(origin)))
+    run = run.replace('"https://github.com/$REPOSITORY.git"', shlex.quote(str(origin)))
+    return run.replace(
+        'python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"',
+        'cp -R "$RUNNER_TEMP/runtime-artifact" "$runtime_dir"',
+    )
 
 
 def _job_block(text: str, job_name: str, next_job_name: str) -> str:
@@ -342,6 +424,102 @@ def test_recomputed_artifact_digest_rejects_replay():
     )
 
 
+def test_non_git_isolated_python_reproduces_missing_pytest(tmp_path: Path):
+    source = tmp_path / "extracted-source"
+    source.mkdir()
+    (source / "test_sample.py").write_text("def test_sample():\n    assert True\n")
+    non_git_cwd = tmp_path / "non-git-cwd"
+    non_git_cwd.mkdir()
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-m", "pytest", str(source / "test_sample.py")],
+        cwd=non_git_cwd,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "No module named pytest" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("override", "value"),
+    [
+        ("requirements", b"tampered requirements"),
+        ("runtime_archive", b"tampered runtime"),
+        ("runtime_metadata", b'{"tampered":true}'),
+        ("pyproject", b"tampered project"),
+        ("uv_lock", b"tampered lock"),
+    ],
+)
+def test_runtime_or_dependency_contract_tamper_fails_closed(override: str, value: bytes):
+    manifest = _manifest()
+    assert _verify(manifest, _evidence(manifest), **{override: value}) == "IMPACT_UNKNOWN"
+
+
+def test_verifier_does_not_substitute_its_runner_runtime_for_executor_identity(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    monkeypatch.setattr(trusted_anchor, "_runtime_probe", lambda: {"different": "verifier"})
+    assert _verify(manifest, evidence) == "PASS"
+
+
+def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: Path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "runtime-builder-test")
+    (repo / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+    (repo / "uv.lock").write_text("version = 1\nrevision = 3\n")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "runtime contract")
+    workflow_sha = _run_git(repo, "rev-parse", "HEAD")
+    fake_uv = tmp_path / "uv"
+    log = tmp_path / "uv.log"
+    fake_uv.write_text(
+        f"#!{sys.executable}\n"
+        "import json,os,sys\n"
+        "from pathlib import Path\n"
+        "args=sys.argv[1:]\n"
+        f"with Path({str(log)!r}).open('a') as f: f.write(json.dumps(args)+'\\n')\n"
+        "if args == ['--version']:\n print('uv 0.9.2'); raise SystemExit\n"
+        "if args[0] == 'export':\n"
+        " Path(args[args.index('--output-file')+1]).write_text('pytest==9 --hash=sha256:abc\\n'); raise SystemExit\n"
+        "if args[:2] == ['pip','install']:\n"
+        " target=Path(args[args.index('--target')+1]); (target/'pytest').mkdir(parents=True)\n"
+        " (target/'pytest/__init__.py').write_text(''); (target/'pytest/__main__.py').write_text('')\n"
+        " (target/'pytest_asyncio.py').write_text(''); (target/'pytest_timeout.py').write_text('')\n"
+        " raise SystemExit\n"
+        "raise SystemExit(2)\n"
+    )
+    fake_uv.chmod(0o755)
+    output = tmp_path / "built-runtime"
+    trusted_anchor._build_runtime(
+        argparse.Namespace(
+            repo_root=str(repo),
+            workflow_sha=workflow_sha,
+            uv_executable=str(fake_uv),
+            output_dir=str(output),
+        )
+    )
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    export = next(call for call in calls if call and call[0] == "export")
+    install = next(call for call in calls if call[:2] == ["pip", "install"])
+    assert {
+        "--frozen",
+        "--no-default-groups",
+        "--group",
+        "dev",
+        "--no-emit-project",
+        "--no-emit-workspace",
+        "--no-emit-local",
+    } <= set(export)
+    assert {"--require-hashes", "--only-binary", "--no-cache", "--no-python-downloads"} <= set(
+        install
+    )
+    assert all((output / name).is_file() for name in trusted_anchor.RUNTIME_FILENAMES)
+
+
 def test_controller_executor_verifier_path_from_non_repository_cwd():
     with TemporaryDirectory(prefix="trusted-anchor-e2e-") as directory:
         root = Path(directory)
@@ -357,7 +535,9 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         test_path = checkout / "tests/ops/test_pr_impact_gate.py"
         test_path.parent.mkdir(parents=True)
         test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
-        _run_git(checkout, "add", "tests/ops/test_pr_impact_gate.py")
+        (checkout / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+        (checkout / "uv.lock").write_text("version = 1\nrevision = 3\n")
+        _run_git(checkout, "add", ".")
         _run_git(checkout, "commit", "-m", "base")
         base_sha = _run_git(checkout, "rev-parse", "HEAD")
         test_path.write_text("def test_anchor_path():\n    assert 1 + 1 == 2\n", encoding="utf-8")
@@ -370,6 +550,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         _run_git(controller_repo, "remote", "add", "origin", str(origin))
         _run_git(controller_repo, "fetch", "--no-tags", "--depth=1", "origin", base_sha)
         event = _event()
+        event["workflow_sha"] = base_sha
         event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
         event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
         event_path = root / "event.json"
@@ -377,6 +558,11 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         bundle = root / "bundle"
         non_repository_cwd = root / "non-repository-cwd"
         non_repository_cwd.mkdir()
+        runtime_dir = _synthetic_runtime(
+            root,
+            pyproject=(checkout / "pyproject.toml").read_bytes(),
+            uv_lock=(checkout / "uv.lock").read_bytes(),
+        )
         verifier_script = ROOT / "scripts/ops/trusted_deletion_anchor.py"
         subprocess.run(
             [
@@ -389,6 +575,8 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
                 str(controller_repo),
                 "--output-dir",
                 str(bundle),
+                "--runtime-dir",
+                str(runtime_dir),
             ],
             check=True,
             cwd=non_repository_cwd,
@@ -405,6 +593,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         for ref, revision in (
             ("refs/trusted-anchor/base", base_sha),
             ("refs/trusted-anchor/head", head_sha),
+            ("refs/trusted-anchor/workflow", base_sha),
         ):
             _run_git(clone, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
             assert _run_git(clone, "rev-parse", f"{ref}^{{commit}}") == revision
@@ -418,6 +607,10 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
             ],
             check=True,
         )
+        assert json.loads((bundle / "source/.selected-tests.json").read_text()) == [
+            "tests/ops/test_pr_impact_gate.py",
+            "-q",
+        ]
         expected = [
             "--expected-workflow-ref",
             event["workflow_ref"],
@@ -498,7 +691,9 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         )
 
 
-def _executor_archive_bundle(root: Path, unsafe_member: tarfile.TarInfo) -> Path:
+def _executor_archive_bundle(
+    root: Path, unsafe_member: tarfile.TarInfo, *, runtime_probe: dict[str, str] | None = None
+) -> Path:
     bundle = root / "bundle"
     bundle.mkdir()
     test_name = "tests/ops/test_pr_impact_gate.py"
@@ -509,18 +704,70 @@ def _executor_archive_bundle(root: Path, unsafe_member: tarfile.TarInfo) -> Path
         archive.addfile(test_member, fileobj=BytesIO(test_data))
         unsafe_data = BytesIO(b"x" * unsafe_member.size) if unsafe_member.isreg() else None
         archive.addfile(unsafe_member, fileobj=unsafe_data)
-    manifest = {
-        "schema_version": SCHEMA_VERSION,
-        "test_inventory": [test_name],
-        **{
-            key: "0" * 64
-            for key in REQUIRED_EVIDENCE_KEYS
-            if key not in {"schema_version", "executor", "node_ids"}
-        },
-        "node_ids": [],
-    }
+    runtime_dir = _synthetic_runtime(root, probe=runtime_probe)
+    requirements = (runtime_dir / "requirements.txt").read_bytes()
+    runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
+    runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
+    manifest = build_manifest(
+        _event(),
+        raw_diff=b"",
+        test_inventory=[test_name],
+        source_archive=(bundle / "source.tar").read_bytes(),
+        requirements=requirements,
+        runtime_archive=runtime_archive,
+        runtime_metadata=runtime_metadata,
+        runtime_identity=json.loads(runtime_metadata),
+    )
+    for name in trusted_anchor.RUNTIME_FILENAMES:
+        (bundle / name).write_bytes((runtime_dir / name).read_bytes())
     (bundle / "manifest.json").write_bytes(_json(manifest))
     return bundle
+
+
+def test_missing_runtime_artifact_cannot_emit_complete_evidence(tmp_path: Path):
+    link = tarfile.TarInfo(".antigravitycli/irrelevant.json")
+    link.type = tarfile.SYMTYPE
+    link.linkname = "/tmp/ignored"
+    bundle = _executor_archive_bundle(tmp_path, link)
+    (bundle / "runtime.tar").unlink()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/ops/trusted_deletion_anchor.py"),
+            "executor",
+            "--bundle-dir",
+            str(bundle),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert not (bundle / "raw-evidence.json").exists()
+
+
+def test_executor_rejects_runtime_abi_mismatch(tmp_path: Path):
+    probe = trusted_anchor._runtime_probe()
+    probe["soabi"] = "incompatible-abi"
+    link = tarfile.TarInfo(".antigravitycli/irrelevant.json")
+    link.type = tarfile.SYMTYPE
+    link.linkname = "/tmp/ignored"
+    bundle = _executor_archive_bundle(tmp_path, link, runtime_probe=probe)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/ops/trusted_deletion_anchor.py"),
+            "executor",
+            "--bundle-dir",
+            str(bundle),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "offline runtime identity mismatch" in completed.stderr
+    assert not (bundle / "raw-evidence.json").exists()
 
 
 @pytest.mark.parametrize("target", ["/tmp/issue104-absolute-link", "../../issue104-outside-link"])
@@ -590,7 +837,9 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
         test_path = source / "tests/ops/test_pr_impact_gate.py"
         test_path.parent.mkdir(parents=True)
         test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
-        _run_git(source, "add", "tests/ops/test_pr_impact_gate.py")
+        (source / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+        (source / "uv.lock").write_text("version = 1\nrevision = 3\n")
+        _run_git(source, "add", ".")
         _run_git(source, "commit", "-m", "base")
         base_sha = _run_git(source, "rev-parse", "HEAD")
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
@@ -646,6 +895,11 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
         event_path = root / "event.json"
         event_path.write_bytes(_json(event))
         bundle = root / "bundle"
+        runtime_dir = _synthetic_runtime(
+            root,
+            pyproject=(source / "pyproject.toml").read_bytes(),
+            uv_lock=(source / "uv.lock").read_bytes(),
+        )
         subprocess.run(
             [
                 sys.executable,
@@ -657,6 +911,8 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
                 str(controller_repo),
                 "--output-dir",
                 str(bundle),
+                "--runtime-dir",
+                str(runtime_dir),
             ],
             check=True,
         )
@@ -669,6 +925,7 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
         for ref, revision in (
             ("refs/trusted-anchor/base", base_sha),
             ("refs/trusted-anchor/head", head_sha),
+            ("refs/trusted-anchor/workflow", base_sha),
         ):
             _run_git(verifier_repo, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
             assert _run_git(verifier_repo, "rev-parse", f"{ref}^{{commit}}") == revision
@@ -703,6 +960,10 @@ def test_workflow_is_three_job_isolated_anchor():
         "contents": "read",
         "actions": "read",
     }
+    assert {job["runs-on"] for job in workflow["jobs"].values()} == {"ubuntu-24.04"}
+    runtime_builder = _named_step("trusted-controller", "Acquire fixed trusted runtime builder")
+    assert runtime_builder["uses"] == "astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff"
+    assert runtime_builder["with"] == {"version": "0.9.2", "enable-cache": False}
     for job in workflow["jobs"].values():
         for step in job["steps"]:
             assert "actions/checkout@" not in step.get("uses", "")
@@ -717,22 +978,30 @@ def test_workflow_is_three_job_isolated_anchor():
         for step in workflow["jobs"]["trusted-verifier"]["steps"]
         if step.get("name") == "Verify fixed schema and recomputed digests"
     )
+    assert (
+        "runtime-builder"
+        in _named_step("trusted-controller", "Acquire and execute exact trusted controller source")[
+            "run"
+        ]
+    )
 
 
-def test_executor_workflow_block_is_byte_equivalent_to_setup_baseline():
-    baseline = subprocess.run(
-        [
-            "git",
-            "show",
-            "49c1495d2bc131831d388acb77f098f02c3feb64:.github/workflows/trusted-deletion-anchor.yml",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert _job_block(
-        WORKFLOW.read_text(), "unprivileged-executor", "trusted-verifier"
-    ) == _job_block(baseline, "unprivileged-executor", "trusted-verifier")
+def test_executor_workflow_has_no_runtime_provisioning_or_authority():
+    workflow = _workflow()
+    executor = workflow["jobs"]["unprivileged-executor"]
+    assert executor["runs-on"] == "ubuntu-24.04"
+    assert executor["permissions"] == {}
+    text = json.dumps(executor).lower()
+    for forbidden in (
+        "setup-python",
+        "setup-uv",
+        "pip install",
+        "uv sync",
+        "actions/cache",
+        "github.token",
+        "secrets",
+    ):
+        assert forbidden not in text
 
 
 def test_trusted_jobs_use_bare_exact_sha_and_allowlisted_regular_blob():
@@ -783,7 +1052,12 @@ def test_trusted_source_identity_and_token_isolation_are_fail_closed():
             index for index, line in enumerate(cleanup_lines) if line.startswith("test ! -e")
         ]
         assert prove_indexes and remove_index < min(prove_indexes)
-        acquisition = steps[0]["run"]
+        acquisition = _named_step(
+            job_name,
+            "Acquire and execute exact trusted controller source"
+            if job_name == "trusted-controller"
+            else "Acquire exact trusted verifier source",
+        )["run"]
         assert "trap cleanup_on_exit EXIT" in acquisition
         assert "trap 'exit 130' INT" in acquisition
         assert "trap 'exit 143' TERM" in acquisition
@@ -818,6 +1092,25 @@ def test_cleanup_shell_deletes_lock_and_credential_residue_before_proving_absenc
     assert completed.returncode == 0, completed.stderr
     assert not bare_repo.exists()
     assert not trusted_dir.exists()
+
+
+def test_executor_cleanup_removes_only_extracted_material(tmp_path: Path):
+    bundle = tmp_path / "trusted-anchor"
+    (bundle / "source").mkdir(parents=True)
+    (bundle / "runtime").mkdir()
+    evidence = bundle / "raw-evidence.json"
+    evidence.write_text('{"status":"COMPLETE"}\n')
+    cleanup = _named_step("unprivileged-executor", "Cleanup unprivileged executor material")
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", cleanup["run"]],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not (bundle / "source").exists()
+    assert not (bundle / "runtime").exists()
+    assert evidence.is_file()
 
 
 @pytest.mark.parametrize("job_name", ["trusted-controller", "trusted-verifier"])
