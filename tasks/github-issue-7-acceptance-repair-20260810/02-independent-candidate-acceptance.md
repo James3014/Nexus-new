@@ -15,10 +15,10 @@ pr_head: d2a3bfa8b6ed3fd28015565680a84cdf7c826768
 merge_commit: 9121cd2cf83e959db763bbb578a60f861b0855fb
 merge_date: 2026-08-11
 AUTO_CHAIN: false
-worker_may_commit: true
+worker_may_commit: false
 worker_may_approve: false
 worker_may_integrate: false
-worker_may_push: true
+worker_may_push: false
 ---
 
 # M3-B Independent Exact-Candidate Acceptance
@@ -28,6 +28,10 @@ receipt/approval gate (`M3_B_CAMPAIGN_REBIND_AND_OWNER_GATE`) in the active
 Codex thread on 2026-08-11. This grant authorizes only this card's bounded
 Candidate implementation; it does not authorize approval, integration, merge,
 activation, or public claims.
+
+The historical ACTIVE card permitted its scoped Candidate commit and branch
+push. This COMPLETED reconciliation closes those worker permissions; it grants
+no authority to M3-C or any successor card.
 
 ## Objective
 

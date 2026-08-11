@@ -57,5 +57,6 @@ Current frontier is M3-C (`03-bounded-repair-attempts.md`) with
 `BLOCKED_OWNER_GATE`; no M3-C implementation is authorized until its separate
 Owner gate is granted.
 
-`AUTO_CHAIN=false`; scoped worker mutation, commit, and issue-branch push are
-allowed by the active card. Approval, integration, and merge remain separate.
+`AUTO_CHAIN=false`; the active M3-C frontier is blocked, and worker mutation,
+commit, approval, integration, merge, and issue-branch push remain unauthorized
+until its separate Owner gate is granted.
