@@ -383,6 +383,7 @@ def _verifier(args: argparse.Namespace) -> None:
         subprocess.run(["git", "init", "--bare", str(git_repo)], check=True, capture_output=True)
         subprocess.run(
             ["git", "bundle", "verify", str(bundle / "git-objects.bundle")],
+            cwd=git_repo,
             check=True,
             capture_output=True,
         )
