@@ -103,6 +103,10 @@
 | docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | refactor_start_evidence_contract |
 | nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | lesson_writeback_contract |
 | nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | governance_changelog_contract |
+| scripts/brain_de_entropy.py | tests/core/test_context_hub_strict_deps.py, tests/core/test_context_budget_sources.py, tests/core/test_context_text_store.py | active | high | context_hub_behavioral_contract |
+| scripts/core/migration_validator.py | tests/core/test_migration_validator_contract.py | active | high | migration_validator_contract |
+| scripts/core/drclaw_diagnosis.py | tests/benchmark/test_drclaw_diagnosis_contract.py | active | high | drclaw_diagnosis_contract |
+| muse_nexus.egg-info/SOURCES.txt | tests/ops/test_source_inventory_integrity.py | active | high | source_inventory_integrity_contract |
 ## Candidate Legacy Tests
 | 檔案 | 理由 |
 | :--- | :--- |
