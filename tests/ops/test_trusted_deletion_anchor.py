@@ -162,7 +162,7 @@ def _git_logging_path(root: Path) -> tuple[str, Path]:
         'if [ "${GIT_CONFIG_COUNT:-}" = 1 ]; then\n'
         '  test "${GIT_CONFIG_KEY_0:-}" = http.extraheader || exit 96\n'
         '  test "${GIT_CONFIG_VALUE_0:-}" = "Authorization: basic $EXPECTED_BASIC" || exit 97\n'
-        '  printf basic-ok >> "$AUTH_LOG"\n'
+        '  printf "%s\\n" git-basic-ok >> "$AUTH_LOG"\n'
         "fi\n"
         'exec "$REAL_GIT" "$@"\n',
         encoding="utf-8",
@@ -170,7 +170,13 @@ def _git_logging_path(root: Path) -> tuple[str, Path]:
     wrapper.chmod(0o755)
     python_wrapper = bin_dir / "python"
     python_wrapper.write_text(
-        '#!/bin/sh\nexec "$REAL_PYTHON" "$@"\n',
+        "#!/bin/sh\n"
+        'if [ "${GIT_CONFIG_COUNT:-}" = 1 ]; then\n'
+        '  test "${GIT_CONFIG_KEY_0:-}" = http.extraheader || exit 98\n'
+        '  test "${GIT_CONFIG_VALUE_0:-}" = "Authorization: basic $EXPECTED_BASIC" || exit 99\n'
+        '  printf "%s\\n" python-basic-ok >> "$AUTH_LOG"\n'
+        "fi\n"
+        'exec "$REAL_PYTHON" "$@"\n',
         encoding="utf-8",
     )
     python_wrapper.chmod(0o755)
@@ -590,10 +596,19 @@ def test_no_checkout_acquisition_shell_executes_only_exact_trusted_blob(
     assert completed.returncode == 0, completed.stderr
     assert token not in completed.stdout
     assert token not in completed.stderr
+    assert encoded not in completed.stdout
+    assert encoded not in completed.stderr
     argv = (run_root / "git-argv.bin").read_bytes()
     assert token.encode() not in argv
     assert encoded.encode() not in argv
-    assert (run_root / "auth.log").read_text().startswith("basic-ok")
+    auth_log = (run_root / "auth.log").read_text()
+    assert token not in auth_log
+    assert encoded not in auth_log
+    assert "git-basic-ok" in auth_log.splitlines()
+    if job_name == "trusted-controller":
+        assert "python-basic-ok" in auth_log.splitlines()
+    else:
+        assert "python-basic-ok" not in auth_log.splitlines()
     assert not marker.exists()
     assert not (run_root / "hostile-path-executed").exists()
     prefix = "trusted-controller" if job_name == "trusted-controller" else "trusted-verifier"
