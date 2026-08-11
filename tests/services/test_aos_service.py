@@ -56,9 +56,7 @@ def test_aos_status_uses_service_env_prober_and_preserves_result(
     ]
     if flag == "aos_full":
         expected_lines.append("🟢 P4 Swarm Fortress: 0 POLLUTION")
-    assert output == "\n".join(expected_lines) + "\n" + json.dumps(
-        EXPECTED_STATUS, indent=2
-    ) + "\n"
+    assert output == "\n".join(expected_lines) + "\n" + json.dumps(EXPECTED_STATUS, indent=2) + "\n"
 
 
 def test_aos_status_defaults_preserve_result_without_aos_dependencies(
@@ -69,9 +67,7 @@ def test_aos_status_defaults_preserve_result_without_aos_dependencies(
     def fail_constructor(*args, **kwargs):
         raise AssertionError("AOS dependencies should not be constructed")
 
-    monkeypatch.setattr(
-        "nexus.core.engine.nexus_transaction.TransactionManager", fail_constructor
-    )
+    monkeypatch.setattr("nexus.core.engine.nexus_transaction.TransactionManager", fail_constructor)
     monkeypatch.setattr("nexus.services.nexus_probe.EnvProber", fail_constructor)
 
     assert AosService(Path(tmp_path)).get_status() == EXPECTED_STATUS
