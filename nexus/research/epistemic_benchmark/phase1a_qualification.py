@@ -172,9 +172,7 @@ class Phase1AFrozenManifest:
             "pairing_rule_hash": self.pairing_rule_hash,
             "execution_order_rule_id": self.execution_order_rule_id,
             "execution_order_seed": self.execution_order_seed,
-            "meaningful_improvement_thresholds": dict(
-                self.meaningful_improvement_thresholds
-            ),
+            "meaningful_improvement_thresholds": dict(self.meaningful_improvement_thresholds),
             "report_schema_verifier_hash": self.report_schema_verifier_hash,
             "required_issue29_evidence_identity": self.required_issue29_evidence_identity,
             "manifest_version": self.manifest_version,
@@ -241,9 +239,7 @@ def assign_counterbalanced_orders(
     assignments = tuple(
         OrderAssignment(
             task_id=task_id,
-            permutation=SIX_ARM_PERMUTATIONS[
-                (offset + index) % len(SIX_ARM_PERMUTATIONS)
-            ],
+            permutation=SIX_ARM_PERMUTATIONS[(offset + index) % len(SIX_ARM_PERMUTATIONS)],
         )
         for index, task_id in enumerate(ordered)
     )
@@ -427,6 +423,8 @@ def evaluate_preformal_readiness(
 def _validate_task_ids(name: str, values: Any) -> tuple[str, ...]:
     if not isinstance(values, tuple):
         raise ValueError(f"{name} must be a tuple")
+    if not values:
+        raise ValueError(f"{name} must be non-empty")
     normalized: list[str] = []
     seen: set[str] = set()
     for value in values:
