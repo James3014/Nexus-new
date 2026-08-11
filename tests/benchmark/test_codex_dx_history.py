@@ -52,12 +52,10 @@ def test_complete_schema_and_denominator_accounting():
 
 
 def test_partial_pagination_duplicate_and_transport_states():
-    adapter = Adapter(
-        [
-            {"items": [{"id": "a"}], "next_cursor": "x"},
-            {"items": [{"id": "a"}], "next_cursor": None},
-        ]
-    )
+    adapter = Adapter([
+        {"items": [{"id": "a"}], "next_cursor": "x"},
+        {"items": [{"id": "a"}], "next_cursor": None},
+    ])
     receipt = collect_history(adapter, source="github", cutoff="cutoff")
     assert receipt["status"] == "partial"
     assert receipt["transport_gap"] == "duplicate_item"
