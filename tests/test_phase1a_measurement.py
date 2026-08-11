@@ -41,14 +41,10 @@ def make_observation(
     if evidence_refs is None:
         evidence_refs = (EvidenceRef("src-1", "a" * 64, physical=True),)
     if derivation_lineage is None:
-        derivation_lineage = (
-            ("OBS-parent",) if epistemic_type == EpistemicType.INFERRED else ()
-        )
+        derivation_lineage = ("OBS-parent",) if epistemic_type == EpistemicType.INFERRED else ()
     if validator_evidence_refs is None:
         validator_evidence_refs = (
-            ("VAL-1",)
-            if validation_state == ValidationState.ADMISSIBLE
-            else ()
+            ("VAL-1",) if validation_state == ValidationState.ADMISSIBLE else ()
         )
     return EvidenceObservation(
         task_id=task_id,
@@ -142,9 +138,7 @@ def test_observed_requires_physical_evidence_with_source_hash():
     with pytest.raises(ValueError, match="must be a lowercase SHA-256"):
         EvidenceRef("src-bad", "bad", physical=True)
     with pytest.raises(ValueError, match="must be physical"):
-        make_observation(
-            evidence_refs=(EvidenceRef("src-1", "a" * 64, physical=False),)
-        )
+        make_observation(evidence_refs=(EvidenceRef("src-1", "a" * 64, physical=False),))
 
 
 def test_inferred_requires_derivation_lineage():
@@ -214,17 +208,11 @@ def test_observation_set_identity_is_order_deterministic_and_substitution_sensit
     )
     forward = build_admissible_observation_set([obs1, obs2])
     reverse = build_admissible_observation_set([obs2, obs1])
-    assert (
-        forward.admissible_observation_set_sha256
-        == reverse.admissible_observation_set_sha256
-    )
+    assert forward.admissible_observation_set_sha256 == reverse.admissible_observation_set_sha256
     assert forward.observation_ids == reverse.observation_ids
-    substituted = build_admissible_observation_set(
-        [obs1, make_observation(claim="substituted")]
-    )
+    substituted = build_admissible_observation_set([obs1, make_observation(claim="substituted")])
     assert (
-        forward.admissible_observation_set_sha256
-        != substituted.admissible_observation_set_sha256
+        forward.admissible_observation_set_sha256 != substituted.admissible_observation_set_sha256
     )
 
 
@@ -407,25 +395,19 @@ def test_extra_prework_absent_from_baseline_gets_zero_credit():
 
 
 def test_unvalidated_prework_cannot_create_recomputation_credit():
-    arm_a = validate_trajectory(
-        [make_event(0, arm=Phase1AArm.A, target="x", run_id="run-a")]
-    )
-    arm_b = validate_trajectory(
-        [
-            make_event(
-                0,
-                arm=Phase1AArm.B,
-                phase=TrajectoryPhase.DETERMINISTIC_PREWORK,
-                target="x",
-                run_id="run-b",
-                validation_refs=(),
-            ),
-            make_event(1, arm=Phase1AArm.B, target="x", run_id="run-b"),
-        ]
-    )
-    arm_c = validate_trajectory(
-        [make_event(0, arm=Phase1AArm.C, target="x", run_id="run-c")]
-    )
+    arm_a = validate_trajectory([make_event(0, arm=Phase1AArm.A, target="x", run_id="run-a")])
+    arm_b = validate_trajectory([
+        make_event(
+            0,
+            arm=Phase1AArm.B,
+            phase=TrajectoryPhase.DETERMINISTIC_PREWORK,
+            target="x",
+            run_id="run-b",
+            validation_refs=(),
+        ),
+        make_event(1, arm=Phase1AArm.B, target="x", run_id="run-b"),
+    ])
+    arm_c = validate_trajectory([make_event(0, arm=Phase1AArm.C, target="x", run_id="run-c")])
     result = compute_phase1a_recomputation(arm_a, arm_b, arm_c)
     assert result.ba.potential_total == 0
     assert result.ba.avoided_total == 0
@@ -433,16 +415,14 @@ def test_unvalidated_prework_cannot_create_recomputation_credit():
 
 def test_recomputation_rejects_triplet_measurement_identity_drift():
     arm_a, _, arm_c = _build_recomputation_triplet()
-    drifted_b = validate_trajectory(
-        [
-            make_event(
-                0,
-                arm=Phase1AArm.B,
-                task_id="other-task",
-                run_id="run-b2",
-            )
-        ]
-    )
+    drifted_b = validate_trajectory([
+        make_event(
+            0,
+            arm=Phase1AArm.B,
+            task_id="other-task",
+            run_id="run-b2",
+        )
+    ])
     with pytest.raises(ValueError, match="A/B measurement identity drift"):
         compute_phase1a_recomputation(arm_a, drifted_b, arm_c)
 
@@ -454,9 +434,7 @@ def test_evidence_utilization_requires_existing_vap_physical_proof_authority():
         evidence_refs=(EvidenceRef("src-2", "c" * 64, physical=True),),
     )
     obs_set = build_admissible_observation_set([obs1, obs2])
-    trajectory = validate_trajectory(
-        [make_event(0, arm=Phase1AArm.B, run_id="run-b")]
-    )
+    trajectory = validate_trajectory([make_event(0, arm=Phase1AArm.B, run_id="run-b")])
     absent = compute_phase1a_metrics(
         trajectory,
         observation_set=obs_set,
@@ -479,16 +457,12 @@ def test_evidence_utilization_requires_existing_vap_physical_proof_authority():
 
 def test_consumption_marker_substitution_and_proof_tamper_fail_closed():
     obs_set = build_admissible_observation_set([make_observation()])
-    trajectory = validate_trajectory(
-        [make_event(0, arm=Phase1AArm.B, run_id="run-b")]
-    )
+    trajectory = validate_trajectory([make_event(0, arm=Phase1AArm.B, run_id="run-b")])
     wrong_marker_packet = build_verified_assist_packet(
         task_id=obs_set.task_id,
         producer="deterministic",
         target_files=("phase1a-evidence.json",),
-        semantic_assertions=(
-            "admissible_observation_set_sha256=" + "0" * 64,
-        ),
+        semantic_assertions=("admissible_observation_set_sha256=" + "0" * 64,),
         bounded_diagnosis="phase1a_admissible_observation_set",
     )
     wrong_fragment = wrong_marker_packet.compact_injection()
@@ -520,9 +494,7 @@ def test_consumption_marker_substitution_and_proof_tamper_fail_closed():
 
 def test_packet_and_consumption_must_be_supplied_together():
     obs_set = build_admissible_observation_set([make_observation()])
-    trajectory = validate_trajectory(
-        [make_event(0, arm=Phase1AArm.B, run_id="run-b")]
-    )
+    trajectory = validate_trajectory([make_event(0, arm=Phase1AArm.B, run_id="run-b")])
     packet, _ = make_consumed_observation_packet(obs_set)
     with pytest.raises(ValueError, match="supplied together"):
         compute_phase1a_metrics(
@@ -533,15 +505,11 @@ def test_packet_and_consumption_must_be_supplied_together():
 
 
 def test_time_to_first_correct_target_requires_independent_frozen_oracle():
-    trajectory = validate_trajectory(
-        [
-            make_event(0, target="start", started_at_ms=100),
-            make_event(1, target="correct-target", started_at_ms=250),
-        ]
-    )
-    assert compute_phase1a_metrics(trajectory)[
-        "time_to_first_correct_target_seconds"
-    ] is None
+    trajectory = validate_trajectory([
+        make_event(0, target="start", started_at_ms=100),
+        make_event(1, target="correct-target", started_at_ms=250),
+    ])
+    assert compute_phase1a_metrics(trajectory)["time_to_first_correct_target_seconds"] is None
     oracle = FrozenTargetOracle(
         oracle_id="oracle-1",
         oracle_sha256="f" * 64,
@@ -563,31 +531,29 @@ def test_time_to_first_correct_target_requires_independent_frozen_oracle():
 
 
 def test_required_metric_families_are_deterministically_projected():
-    trajectory = validate_trajectory(
-        [
-            make_event(0, target="read", kind=ActionKind.FILE_READ),
-            make_event(1, target="read", kind=ActionKind.FILE_READ),
-            make_event(2, target="search", kind=ActionKind.SEARCH),
-            make_event(3, target="search", kind=ActionKind.SEARCH),
-            make_event(4, target="test", kind=ActionKind.TEST),
-            make_event(5, target="test", kind=ActionKind.TEST),
-            make_event(
-                6,
-                target="provider",
-                kind=ActionKind.PROVIDER_CALL,
-                retry_count=2,
-                duration_ms=50,
-                uncached_input_tokens=123,
-            ),
-            make_event(
-                7,
-                phase=TrajectoryPhase.FINAL_VERIFIER,
-                kind=ActionKind.VERIFICATION,
-                target="final-verifier",
-                duration_ms=200,
-            ),
-        ]
-    )
+    trajectory = validate_trajectory([
+        make_event(0, target="read", kind=ActionKind.FILE_READ),
+        make_event(1, target="read", kind=ActionKind.FILE_READ),
+        make_event(2, target="search", kind=ActionKind.SEARCH),
+        make_event(3, target="search", kind=ActionKind.SEARCH),
+        make_event(4, target="test", kind=ActionKind.TEST),
+        make_event(5, target="test", kind=ActionKind.TEST),
+        make_event(
+            6,
+            target="provider",
+            kind=ActionKind.PROVIDER_CALL,
+            retry_count=2,
+            duration_ms=50,
+            uncached_input_tokens=123,
+        ),
+        make_event(
+            7,
+            phase=TrajectoryPhase.FINAL_VERIFIER,
+            kind=ActionKind.VERIFICATION,
+            target="final-verifier",
+            duration_ms=200,
+        ),
+    ])
     metrics = compute_phase1a_metrics(trajectory)
     assert metrics["online_tool_action_count"] == 6
     assert metrics["repeated_file_reads"] == 1
