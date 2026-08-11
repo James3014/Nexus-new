@@ -28,6 +28,11 @@ def _run(
     status: str = "COMPLETE",
     *,
     revision: str = "base",
+    selected_targets: list[str] | None = None,
+    executed_targets: list[str] | None = None,
+    missing_targets: list[str] | None = None,
+    unexpected_missing_targets: list[str] | None = None,
+    impact_class: str = "SCOPED_IMPLEMENTATION",
 ) -> PytestRunResult:
     if revision == "base":
         revision = "a" * 40
@@ -40,6 +45,12 @@ def _run(
     test_inventory_tree = "d" * 40
     plan_digest = "1" * 64
     verifier_digest = "2" * 64
+    selected_targets = selected_targets or ["tests/test_contract.py"]
+    executed_targets = (
+        selected_targets if executed_targets is None else executed_targets
+    )
+    missing_targets = missing_targets or []
+    unexpected_missing_targets = unexpected_missing_targets or []
     node_ids = sorted(
         set(failures)
         | {
@@ -56,9 +67,11 @@ def _run(
         stdout_path="stdout.log",
         revision=revision,
         plan_digest=plan_digest,
-        selected_targets=["tests/test_contract.py"],
-        executed_targets=["tests/test_contract.py"],
-        impact_class="SCOPED_IMPLEMENTATION",
+        selected_targets=selected_targets,
+        executed_targets=executed_targets,
+        missing_targets=missing_targets,
+        impact_class=impact_class,
+        unexpected_missing_targets=unexpected_missing_targets,
         verifier_digest=verifier_digest,
         source_tree=source_tree,
         test_inventory_tree=test_inventory_tree,
@@ -76,6 +89,14 @@ def _run(
             passed_node_ids=passed_node_ids,
             failed_node_ids=sorted(set(failures)),
             terminal_status=status,
+            exit_code=exit_code,
+            status=status,
+            failures=failures,
+            executed_targets=executed_targets,
+            selected_targets=selected_targets,
+            unexpected_missing_targets=unexpected_missing_targets,
+            impact_class=impact_class,
+            missing_targets=missing_targets,
         ),
         node_ids=node_ids,
         collection_count=len(node_ids),
@@ -345,6 +366,46 @@ def test_unexpected_missing_base_target_fails_closed():
 
     assert result.classification == "IMPACT_UNKNOWN"
     assert result.blocking is True
+
+
+@pytest.mark.parametrize(
+    ("label", "tamper"),
+    [
+        ("unexpected omission", lambda run: replace(run, unexpected_missing_targets=[])),
+        ("missing omission", lambda run: replace(run, missing_targets=[])),
+        (
+            "target overlap",
+            lambda run: replace(run, executed_targets=["tests/missing.py"]),
+        ),
+        (
+            "target membership substitution",
+            lambda run: replace(run, selected_targets=["tests/other.py"]),
+        ),
+        ("outcome count", lambda run: replace(run, collection_count=3)),
+        ("outcome membership", lambda run: replace(run, passed_node_ids=[])),
+        ("status", lambda run: replace(run, status="IMPACT_UNKNOWN")),
+        ("exit", lambda run: replace(run, exit_code=1)),
+        (
+            "failure membership",
+            lambda run: replace(run, failures=["tests.test_contract::test_new_regression"]),
+        ),
+    ],
+)
+def test_decision_field_tampering_omission_overlap_count_membership_fails_closed(
+    label, tamper
+):
+    base = _run(
+        0,
+        [],
+        revision="base",
+        selected_targets=["tests/missing.py"],
+        executed_targets=[],
+        missing_targets=["tests/missing.py"],
+        unexpected_missing_targets=["tests/missing.py"],
+    )
+    head = _run(0, [], revision="head")
+
+    assert classify_regression(tamper(base), head).classification == "IMPACT_UNKNOWN", label
 
 
 def test_unrecognized_execution_status_fails_closed():
@@ -631,6 +692,14 @@ def test_tampered_passed_node_partition_cannot_classify_pass():
                 error_node_ids=run.error_node_ids,
                 skipped_node_ids=run.skipped_node_ids,
                 terminal_status=run.terminal_status,
+                exit_code=run.exit_code,
+                status=run.status,
+                failures=run.failures,
+                executed_targets=run.executed_targets,
+                missing_targets=run.missing_targets,
+                selected_targets=run.selected_targets,
+                unexpected_missing_targets=run.unexpected_missing_targets,
+                impact_class=run.impact_class,
             )[:-1]
             + "0",
         ),

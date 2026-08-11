@@ -419,6 +419,14 @@ def compute_test_provenance_digest(
     error_node_ids: list[str] | None = None,
     skipped_node_ids: list[str] | None = None,
     terminal_status: str = "",
+    exit_code: int = 0,
+    status: str = "",
+    failures: list[str] | None = None,
+    executed_targets: list[str] | None = None,
+    missing_targets: list[str] | None = None,
+    selected_targets: list[str] | None = None,
+    unexpected_missing_targets: list[str] | None = None,
+    impact_class: str = "",
 ) -> str:
     for value, label in (
         (revision, "revision"),
@@ -442,6 +450,14 @@ def compute_test_provenance_digest(
             "error_node_ids": sorted(error_node_ids or []),
             "skipped_node_ids": sorted(skipped_node_ids or []),
             "terminal_status": terminal_status,
+            "exit_code": exit_code,
+            "status": status,
+            "failures": list(failures or []),
+            "executed_targets": list(executed_targets or []),
+            "missing_targets": list(missing_targets or []),
+            "selected_targets": list(selected_targets or []),
+            "unexpected_missing_targets": list(unexpected_missing_targets or []),
+            "impact_class": impact_class,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -676,8 +692,23 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
         result.skipped_node_ids,
     )
     node_ids = list(result.node_ids)
+    target_fields = (
+        result.selected_targets,
+        result.executed_targets,
+        result.missing_targets,
+        result.unexpected_missing_targets,
+    )
     if (
-        result.collection_count < 0
+        result.status not in {"COMPLETE", "CI_BOOTSTRAP_DEFECT", "IMPACT_UNKNOWN"}
+        or result.terminal_status != result.status
+        or not result.impact_class
+        or any(len(items) != len(set(items)) for items in target_fields)
+        or set(result.executed_targets) & set(result.missing_targets)
+        or set(result.executed_targets) | set(result.missing_targets)
+        != set(result.selected_targets)
+        or not set(result.unexpected_missing_targets) <= set(result.missing_targets)
+        or len(result.failures) != len(set(result.failures))
+        or result.collection_count < 0
         or len(node_ids) != result.collection_count
         or len(set(node_ids)) != len(node_ids)
         or any(len(items) != len(set(items)) for items in partitions)
@@ -691,6 +722,14 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
         )
         or sorted(result.failures)
         != sorted(set(result.failed_node_ids) | set(result.error_node_ids))
+        or (
+            result.status == "COMPLETE"
+            and (
+                result.exit_code not in {0, 1}
+                or (result.exit_code == 0 and result.failures)
+                or (result.exit_code == 1 and not result.failures)
+            )
+        )
     ):
         return False
     try:
@@ -707,6 +746,14 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
             error_node_ids=result.error_node_ids,
             skipped_node_ids=result.skipped_node_ids,
             terminal_status=result.terminal_status,
+            exit_code=result.exit_code,
+            status=result.status,
+            failures=result.failures,
+            executed_targets=result.executed_targets,
+            missing_targets=result.missing_targets,
+            selected_targets=result.selected_targets,
+            unexpected_missing_targets=result.unexpected_missing_targets,
+            impact_class=result.impact_class,
         )
     except ValueError:
         return False
@@ -871,15 +918,6 @@ def run_pytest_plan(
                 or test_inventory_tree != expected_test_inventory_tree
             ):
                 provenance_failure = "run trees drifted from the immutable plan binding"
-            else:
-                provenance_digest = compute_test_provenance_digest(
-                    revision=revision,
-                    source_tree=source_tree,
-                    test_inventory_tree=test_inventory_tree,
-                    plan_digest=plan_digest,
-                    verifier_digest=verifier_digest,
-                    terminal_status="IMPACT_UNKNOWN",
-                )
         except ValueError as exc:
             provenance_failure = str(exc)
     unexpected_missing = [
@@ -967,6 +1005,13 @@ def run_pytest_plan(
                 plan_digest=plan_digest,
                 verifier_digest=verifier_digest,
                 terminal_status="COMPLETE",
+                exit_code=0,
+                status="COMPLETE",
+                executed_targets=[],
+                missing_targets=missing_targets,
+                selected_targets=targets,
+                unexpected_missing_targets=unexpected_missing,
+                impact_class=impact_class,
             ),
         )
         result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
@@ -1024,6 +1069,14 @@ def run_pytest_plan(
             error_node_ids=list(metadata.get("error_node_ids", [])),
             skipped_node_ids=list(metadata.get("skipped_node_ids", [])),
             terminal_status=status,
+            exit_code=completed.returncode,
+            status=status,
+            failures=failures,
+            executed_targets=existing_targets,
+            missing_targets=missing_targets,
+            selected_targets=targets,
+            unexpected_missing_targets=unexpected_missing,
+            impact_class=impact_class,
         ),
     )
     result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
