@@ -1,18 +1,11 @@
 {
-  "description": "Nexus Benchmark CI Smoke Test — 5 cases covering diverse Python repos",
-  "version": "1.0",
-  "task_ids": [
-    "django__django-11133",
-    "sympy__sympy-14024",
-    "sphinx-doc__sphinx-8282",
-    "matplotlib__matplotlib-23562",
-    "django__django-16379"
-  ],
-  "justification": {
-    "django__django-11133": "Core ORM query regression — high signal, deterministic",
-    "sympy__sympy-14024": "Math computation correctness — tests symbolic reasoning",
-    "sphinx-doc__sphinx-8282": "Documentation build logic — covers text transformation",
-    "matplotlib__matplotlib-23562": "Plotting geometry — good for patch & test coverage",
-    "django__django-16379": "HTTP response header handling — common backend bug pattern"
-  }
+  "description": "Provider-free deterministic fixture smoke cases",
+  "version": "2.0",
+  "cases": [
+    {"task_id": "codex-dx-parser", "fixture_kind": "codex_dx_parser", "verifier": "pytest_hidden", "patch": "deterministic"},
+    {"task_id": "codex-dx-dedupe", "fixture_kind": "codex_dx_dedupe", "verifier": "pytest_hidden", "patch": "deterministic"},
+    {"task_id": "codex-dx-redact", "fixture_kind": "codex_dx_redact", "verifier": "pytest_hidden", "patch": "deterministic"},
+    {"task_id": "codex-dx-budget", "fixture_kind": "codex_dx_budget", "verifier": "pytest_hidden", "patch": "deterministic"},
+    {"task_id": "codex-dx-gate", "fixture_kind": "codex_dx_gate", "verifier": "pytest_hidden", "patch": "deterministic"}
+  ]
 }

@@ -1,39 +1,53 @@
-# Nexus v28.3.0 Autonomic Governance
+# Nexus
 
-Nexus is a high-performance orchestration layer for autonomous AI development. It wraps Large Language Models in a verifiable audit trail and self-healing execution pipelines to ensure engineering reliability.
+Nexus is a verification-oriented orchestration layer for auditable software
+development. This repository's developer contract is deliberately split into
+portable core checks, optional provider checks, and bounded test commands.
 
-## 🏟️ Overview
+## Quick start
 
-Nexus manages the full **P-X-D-R-A-C** lifecycle (Plan, Execute, Diagnose, Research, Audit, Crystallize) to transform raw model outputs into auditable software artifacts.
-
-### 🛡️ Current Verified Gates
-- **Pytest Collect (P0)**: Automated discovery of 4246 test items.
-- **Enterprise Audit (P1)**: Machine-verifiable isolation and hallucination checks (`nexus status`).
-- **PR-Safe Lint (P1)**: Quality enforcement on changed files via Ruff.
-
-## 🏆 Core Capabilities (Beta)
-
-- **Verifiable Audit Trails**: Decisions and tool calls are recorded in structured JSONL receipts.
-- **Self-Healing Pipelines**: Automated diagnosis of execution failures with policy-based retry.
-- **Governance Gates**: Multiple layers of validation to prevent regressions (governance gates; some are conceptual or beta).
-
-## 🚀 Quick Start
+Create the pinned Python 3.12 environment and install the locked dependencies
+first. This is the only bootstrap step required for a fresh checkout:
 
 ```bash
-# 1. Align environment
-bash scripts/ops/_nexus_preflight.sh
+# Python 3.12 pin; locked, provider-free dependency bootstrap
+UV_CACHE_DIR=/tmp/nexus-uv-cache uv sync --frozen --all-groups
 
-# 2. Verify system status and run baseline audit
-uv run nexus status
-
-# 3. Execute an autonomous task
-uv run nexus run --task "your task description"
+# Core preflight, including repo_doctor and the CLI help smoke
+bash scripts/ops/test_repo.sh environment
 ```
 
-## 🗺️ Navigation
+The core checks are secrets-free and do not require a provider CLI. The
+preflight uses the project environment created by `uv sync`.
 
-- **[Project Index (docs/INDEX.md)](docs/INDEX.md)**: Architecture and roadmap.
-- **[Testing Runbook (docs/testing/test_runbook.md)](docs/testing/test_runbook.md)**: CI gates and local verification.
-- **[Module Inventory (docs/arch/module-inventory.md)](docs/arch/module-inventory.md)**: Generated audit of 85+ packages.
+Provider readiness is a separate, optional lane. To report provider tool and
+variable presence (values remain redacted), opt in explicitly:
 
-Current Maturity: **Beta**. Suitable for verification-oriented R&D teams.
+```bash
+NEXUS_PREFLIGHT_PROVIDER=1 bash scripts/ops/test_repo.sh environment
+```
+
+## Test command matrix
+
+Use the repository-owned wrapper instead of ad-hoc full-suite commands:
+
+```bash
+bash scripts/ops/test_repo.sh fast                 # curated fast checks
+bash scripts/ops/test_repo.sh changed <paths...>   # impacted tests
+bash scripts/ops/test_repo.sh lint [files...]      # Ruff checks
+bash scripts/ops/test_repo.sh fixture              # deterministic five-case smoke
+bash scripts/ops/test_repo.sh full --confirm-full  # explicit full-suite escalation
+```
+
+The fixture mode is a local, provider-free smoke only; it does not establish a
+live model, release, or production claim.
+
+## Navigation
+
+- [Contributing](CONTRIBUTING.md)
+- [Testing runbook](docs/testing/test_runbook.md)
+- [Bounded Codex context index](configs/codex_task_context_index.json)
+- [OpenWiki quickstart](openwiki/quickstart.md) (derived, non-authoritative)
+
+Repository and agent authority remains in `AGENTS.md`. Route, lifecycle, and
+approval authority are not created by README or OpenWiki content.

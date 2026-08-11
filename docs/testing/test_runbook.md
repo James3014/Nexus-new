@@ -1,63 +1,58 @@
-# Nexus Testing Runbook
+# Nexus testing runbook
 
-This runbook defines the validation gates and CI procedures for Nexus.
+This runbook describes the current, repository-owned verification commands.
+Use the wrapper so core setup, focused tests, and full-suite escalation remain
+distinct.
 
-## 🛡️ CI Validation Gates
-
-### 1. Pytest Collect Gate (P0)
-Ensures that all tests are discoverable and there are no syntax or import errors in the test suite.
-- **Command**: `uv run pytest tests/ --collect-only -q`
-- **When**: Pre-commit, CI.
-
-### 2. Lint Gate (P1)
-Enforces code style and catches logic errors in changed files.
-- **Modes**:
-  - **PR-safe**: Compares against `origin/main`. Used in Pull Requests.
-  - **Commit-safe**: Compares against `HEAD~1`. Used in direct pushes.
-- **Filter**: `--diff-filter=ACMR` (only active/modified files, excludes deleted).
-- **Command**: `uv run ruff check <files>`
-
-### 3. Pytest Execution Gate (P1)
-Runs the test suite with fail-fast mode enabled.
-- **Command**: `uv run pytest tests/ -x -v --timeout=300`
-- **Artifacts**: Produces `pytest-stdout.log` and `pytest-report.xml` on failure.
-
----
-
-## 🛠️ Local Verification Recipes
-
-### Wiki CI, Release, and Operational Gate
-
-Run the same blocking gate locally and before release:
+## Environment and provider lanes
 
 ```bash
-uv run python scripts/ops/wiki_ci_release_gate.py --check --output-dir .nexus/reports/wiki-governance
+bash scripts/ops/test_repo.sh environment
 ```
 
-The command emits a commit-bound receipt and evidence file. Critical artifact,
-identity, authority, coverage, current-link, freshness, and Knowledge Agent
-runtime failures return non-zero. Governed legacy or intentional placeholder
-debt is reported as warning data and cannot turn a blocked critical gate into a
-pass.
+This runs the secrets-free `repo_doctor` core checks and the CLI help smoke.
+Provider tools and variables are optional and are only reported when requested:
 
-### Workflow YAML Check
-Before pushing changes to `.github/workflows/`, verify YAML syntax:
 ```bash
-# Using actionlint if available
-actionlint .github/workflows/*.yml
+NEXUS_PREFLIGHT_PROVIDER=1 bash scripts/ops/test_repo.sh environment
 ```
 
-### Full Pre-delivery Smoke
+The core verdict does not imply provider authentication or production readiness.
+
+## Command matrix
+
+| Mode | Command | Scope |
+| --- | --- | --- |
+| Fast | `bash scripts/ops/test_repo.sh fast` | Curated fast checks |
+| Changed | `bash scripts/ops/test_repo.sh changed <paths...>` | Tests selected for changed paths |
+| Lint | `bash scripts/ops/test_repo.sh lint [files...]` | Ruff on explicit files (default is the command-contract test) |
+| Fixture | `bash scripts/ops/test_repo.sh fixture` | Exactly five deterministic provider-free smoke cases |
+| Full | `bash scripts/ops/test_repo.sh full --confirm-full` | Fail-fast full suite; explicit escalation required |
+
+For a direct focused test after bootstrap, use the project interpreter with a
+concrete test path:
+
 ```bash
-uv lock --check
-uv run pytest tests/ --collect-only -q
-# Check current commit diff for lint
-uv run ruff check $(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py')
+.venv/bin/python -m pytest -q <exact-test-path>
 ```
 
----
+Do not use an unbounded test invocation as a repository contract.
 
-## ⚠️ Forbidden Actions
-- **Direct Push to main**: Avoid using workflows that automatically commit to `main`. Use artifacts instead.
-- **Staging `.tmp_build`**: This directory is for internal build state and must never be committed.
-- **Build-time Model Downloads**: Docker builds must remain lightweight; models should be provided at runtime.
+## Required checks for documentation or command changes
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/ops/validate_codex_context_index.py configs/codex_task_context_index.json
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/ops/test_codex_task_context_index.py tests/ops/test_repo_test_commands.py tests/ops/test_repo_doctor.py
+git diff --check
+```
+
+The context index is `non_authoritative_bounded_retrieval`; it cannot choose a
+route, provider, model, worker, or lifecycle state. Its validator caps each
+task class at four context files and 16,000 bytes, and caps the index at 8,000
+bytes.
+
+## Deterministic smoke boundary
+
+The fixture smoke uses `scripts/ci/run_swebench_subset.py --mode smoke` and
+`scripts/ci/smoke_cases.json`. It validates five local fixture/verifier pairs
+and is intentionally separate from live provider or release evidence.

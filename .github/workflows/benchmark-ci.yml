@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Benchmark mode: smoke (5 cases) | lite (100 cases)"
+        description: "Deterministic fixture smoke benchmark (5 cases)"
         required: false
         default: "smoke"
 
@@ -28,10 +28,10 @@ jobs:
           fetch-depth: 0
 
       # ── 2. Python Environment ─────────────────────────────────
-      - name: "Set up Python 3.11"
+      - name: "Set up Python 3.12"
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: "Install uv"
         uses: astral-sh/setup-uv@v3
@@ -40,24 +40,17 @@ jobs:
 
       - name: "Install Nexus Dependencies"
         run: |
-          uv sync --no-dev
+          uv sync --frozen --all-groups
 
-      # ── 3. Docker Ready Check ─────────────────────────────────
-      - name: "Check Docker Availability"
-        run: |
-          docker info && echo "DOCKER_AVAILABLE=true" >> $GITHUB_ENV || echo "DOCKER_AVAILABLE=false" >> $GITHUB_ENV
-
-      # ── 4. Run Benchmark ──────────────────────────────────────
+      # ── 3. Run Benchmark ──────────────────────────────────────
       - name: "Execute Benchmark Subset"
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           MODE="${{ github.event.inputs.mode || 'smoke' }}"
           echo "🚀 Running benchmark mode: $MODE"
           uv run python scripts/ci/run_swebench_subset.py \
             --mode "$MODE" \
-            --output ci_benchmark_results.jsonl
+            --output ci_benchmark_results.jsonl \
+            --timeout 30
 
       # ── 5. Generate Report ─────────────────────────────────────
       - name: "Generate Report & Update Step Summary"

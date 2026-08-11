@@ -174,6 +174,10 @@ Load the smallest authoritative surface that matches the task:
 - LocalHeal or another nested subsystem: read its nearest nested `AGENTS.md`.
 - Ordinary repository reads use targeted retrieval from the relevant lesson,
   ADR, report, or test; never full-corpus scanning by default.
+- Codex task orientation uses `configs/codex_task_context_index.json`
+  through its fail-closed validator. It is a non-authoritative bounded retrieval
+  map: it cannot select routes, providers, models, lifecycle states, or workers.
+  Use only the entry for the task class; missing or invalid entries block.
 - Broad repository orientation: when `openwiki/quickstart.md` exists, it may be used as a `derived_non_authoritative` navigation index to locate candidate subsystems, paths, symbols, entrypoints, workflows, and tests. Verify every operational, wiring, runtime, authority, or current-state claim against current source, tests, or bound runtime evidence before relying on it. OpenWiki absence, staleness, nondeterministic page layout, or disagreement never overrides current source and never blocks direct source inspection.
 
 ## Authority invariants

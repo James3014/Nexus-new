@@ -1,0 +1,51 @@
+{
+  "schema_version": "codex-task-context-index-v1",
+  "authority": "non_authoritative_bounded_retrieval",
+  "task_classes": [
+    {
+      "id": "dx-orientation-v1",
+      "task_class": "orientation",
+      "authority_path": "AGENTS.md",
+      "context_paths": ["AGENTS.md", "pyproject.toml"],
+      "test": {"cwd": "TARGET_ROOT", "argv": ["python3", "scripts/bench/codex_dx_benchmark.py", "validate", "configs/benchmarks/codex_dx_before_v1.json"]},
+      "fixture_policy": {"kind": "recorded_fixture", "network": false, "secrets": false},
+      "forbidden_scope": [".env", ".git", ".nexus"]
+    },
+    {
+      "id": "dx-setup-v1",
+      "task_class": "setup",
+      "authority_path": "scripts/ops/_nexus_preflight.sh",
+      "context_paths": ["scripts/ops/_nexus_preflight.sh", ".env.template", "pyproject.toml"],
+      "test": {"cwd": "TARGET_ROOT", "argv": ["python3", "-m", "pytest", "-q", "tests/ops/test_nexus_benchmark_preflight.py"]},
+      "fixture_policy": {"kind": "clean_cache", "network": false, "secrets": false},
+      "forbidden_scope": [".env", ".git", ".nexus"]
+    },
+    {
+      "id": "dx-focused-test-v1",
+      "task_class": "focused_test",
+      "authority_path": "tests/benchmark/test_fixture_materialization.py",
+      "context_paths": ["tests/benchmark/test_fixture_materialization.py"],
+      "test": {"cwd": "TARGET_ROOT", "argv": ["python3", "-m", "pytest", "-q", "tests/benchmark/test_fixture_materialization.py"]},
+      "fixture_policy": {"kind": "local_fixture_only", "network": false, "secrets": false},
+      "forbidden_scope": [".env", ".git", ".nexus"]
+    },
+    {
+      "id": "dx-bounded-change-v1",
+      "task_class": "bounded_change",
+      "authority_path": "docs/agents/TASK_EXECUTION_CONTRACT.md",
+      "context_paths": ["AGENTS.md", "docs/agents/TASK_EXECUTION_CONTRACT.md"],
+      "test": {"cwd": "TARGET_ROOT", "argv": ["git", "diff", "--check"]},
+      "fixture_policy": {"kind": "no_mutation", "network": false, "secrets": false},
+      "forbidden_scope": [".env", ".git", ".nexus"]
+    },
+    {
+      "id": "dx-verification-v1",
+      "task_class": "verification",
+      "authority_path": "docs/testing/test_runbook.md",
+      "context_paths": ["docs/testing/test_runbook.md"],
+      "test": {"cwd": "TARGET_ROOT", "argv": ["python3", "-m", "pytest", "-q", "tests/benchmark/test_codex_dx_benchmark.py"]},
+      "fixture_policy": {"kind": "local_fixture_only", "network": false, "secrets": false},
+      "forbidden_scope": [".env", ".git", ".nexus"]
+    }
+  ]
+}

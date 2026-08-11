@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.local/schemas/codex_dx_benchmark_receipt_v1.schema.json",
+  "title": "Codex DX Benchmark Receipt V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "benchmark_id", "frozen", "arm", "source", "protocol", "tasks", "trials", "session_artifacts", "baseline_evidence"],
+  "properties": {
+    "schema_version": {"const": "codex-dx-benchmark-receipt-v1"},
+    "benchmark_id": {"type": "string", "minLength": 1},
+    "frozen": {"const": true},
+    "arm": {"enum": ["before", "after"]},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "commit", "mutable"],
+      "properties": {
+        "repo": {"type": "string", "minLength": 1},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "mutable": {"const": false}
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_classes", "repetitions", "model_id", "verifier_version", "fresh_session_required"],
+      "properties": {
+        "task_classes": {"type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": {"enum": ["orientation", "setup", "focused_test", "bounded_change", "verification"]}},
+        "repetitions": {"const": 3},
+        "model_id": {"type": "string", "minLength": 1},
+        "verifier_version": {"type": "string", "minLength": 1},
+        "fresh_session_required": {"const": true}
+      }
+    },
+    "tasks": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"$ref": "#/$defs/task"}},
+    "trials": {"type": "array", "minItems": 15, "maxItems": 15, "items": {"$ref": "#/$defs/trial"}},
+    "session_artifacts": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/session_artifact"}},
+    "baseline_evidence": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/evidence"}}
+  },
+  "$defs": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "task_class", "prompt", "fixture_sha256", "allowed_files", "forbidden_files", "verifier_id", "verifier_command"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "task_class": {"enum": ["orientation", "setup", "focused_test", "bounded_change", "verification"]},
+        "prompt": {"type": "string", "minLength": 1},
+        "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "allowed_files": {"type": "array", "items": {"type": "string"}},
+        "forbidden_files": {"type": "array", "items": {"type": "string"}},
+        "verifier_id": {"type": "string", "minLength": 1},
+        "verifier_command": {"type": "string", "minLength": 1}
+      }
+    },
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trial_id", "task_id", "repetition", "session_id", "fresh_context", "source_commit", "fixture_sha256", "verifier_id", "verifier_status", "verifier_artifact", "valid", "invalid_reasons", "context", "tool_calls", "wall_time_seconds", "human_interventions", "secret_reads", "unauthorized_actions", "diff", "outcome"],
+      "properties": {
+        "trial_id": {"type": "string", "minLength": 1},
+        "task_id": {"type": "string", "minLength": 1},
+        "repetition": {"type": "integer", "minimum": 1, "maximum": 3},
+        "session_id": {"type": "string"},
+        "fresh_context": {"type": "boolean"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "verifier_id": {"type": "string", "minLength": 1},
+        "verifier_status": {"enum": ["passed", "failed", "not_run"]},
+        "verifier_artifact": {"type": "object", "additionalProperties": false, "required": ["ref", "sha256"], "properties": {"ref": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+        "valid": {"type": "boolean"},
+        "invalid_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "context": {"type": "object", "additionalProperties": false, "required": ["bytes", "items"], "properties": {"bytes": {"type": "integer", "minimum": 0}, "items": {"type": "integer", "minimum": 0}}},
+        "tool_calls": {"type": "integer", "minimum": 0},
+        "wall_time_seconds": {"type": "number", "minimum": 0},
+        "human_interventions": {"type": "integer", "minimum": 0},
+        "secret_reads": {"type": "integer", "minimum": 0},
+        "unauthorized_actions": {"type": "integer", "minimum": 0},
+        "diff": {"type": "object", "additionalProperties": false, "required": ["changed_files", "within_scope"], "properties": {"changed_files": {"type": "array", "items": {"type": "string"}}, "within_scope": {"type": "boolean"}}},
+        "outcome": {"enum": ["success", "failure", "infra_failure", "not_run"]}
+      }
+    },
+    "session_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "repetition", "model_id", "source_commit", "sha256", "payload"],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "repetition": {"type": "integer", "minimum": 1, "maximum": 3},
+        "model_id": {"const": "gpt-5.6-luna"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "payload": {"type": "object"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "command", "exit_code", "result", "artifact"],
+      "properties": {
+        "id": {"type": "string"},
+        "command": {"type": "string"},
+        "exit_code": {"type": "integer"},
+        "result": {"type": "string"},
+        "artifact": {"type": "string"}
+      }
+    }
+  }
+}

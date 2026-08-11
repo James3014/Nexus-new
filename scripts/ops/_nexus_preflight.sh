@@ -1,54 +1,56 @@
 #!/bin/bash
-# 🛡️ Nexus Physical Preflight v28.3.0 Eternal (Self-Healing Enabled)
-# Identity: Nexus Battlesuit Environment Alignment Protocol
+# Core repository preflight. Provider checks are opt-in and never part of the
+# core setup verdict. This script does not read .env or claim production state.
+set -u
 
-echo "🛡️ [Preflight] Initiating v28.3.0 Environment Alignment..."
+# Preserve caller precedence; append common cross-install locations only.
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# 1. Path Self-Healing (Atomic Symlinking)
-# Preserve the caller's PATH precedence because Gemini CLI auth/session
-# behavior is sensitive to helper resolution order. Append fallback paths only.
-export PATH="$PATH:/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT" || exit 1
 
-check_binary() {
-    if ! command -v "$1" &> /dev/null; then
-        echo "⚠️ [Preflight] Binary '$1' not found in PATH. Attempting discovery..."
-        # Heuristic discovery for common Mac paths
-        FALLBACKS=("/opt/homebrew/bin/$1" "/usr/local/bin/$1" "/Users/jameschen/.npm-global/bin/$1" "/Users/jameschen/.cargo/bin/$1")
-        for fb in "${FALLBACKS[@]}"; do
-            if [ -f "$fb" ]; then
-                echo "✅ [Preflight] Found '$1' at $fb. Aligning..."
-                # In a real hardened scenario, we could symlink here, 
-                # but for now, we just ensure the current shell session has it.
-                export PATH="$(dirname "$fb"):$PATH"
-                return 0
-            fi
-        done
-        echo "❌ [Preflight] Fatal: '$1' is missing. Please install it."
-        return 1
-    fi
-    echo "✅ [Preflight] '$1' detected: $(which "$1")"
-    return 0
-}
+if command -v uv >/dev/null 2>&1; then
+    UV_BIN="$(command -v uv)"
+else
+    echo "[preflight] FAIL: uv is missing (install it or provide it on PATH)" >&2
+    exit 1
+fi
 
-check_binary "node" || exit 1
-check_binary "gemini" || exit 1
-check_binary "uv" || exit 1
-
-# 2. Nexus CLI Surface Check
-echo "🛡️ [Preflight] Checking Nexus CLI integrity..."
 if [[ -x ".venv/bin/python" ]]; then
+    PYTHON=(".venv/bin/python")
     NEXUS_CLI_SMOKE=(".venv/bin/python" "scripts/engine/nexus_cli.py" "--help")
 else
+    PYTHON=("$UV_BIN" "run" "--no-sync" "python")
     NEXUS_CLI_SMOKE=("uv" "run" "scripts/engine/nexus_cli.py" "--help")
 fi
-"${NEXUS_CLI_SMOKE[@]}" > /dev/null 2>&1 && echo "✅ Nexus CLI: PASS" || { echo "❌ Nexus CLI: FAIL"; exit 1; }
 
-# 3. Metadata Collection (v28.3.0 Enhanced)
-COMMIT_SHA=$(git rev-parse --short HEAD)
-SWARM_COUNT=$(ls -d .nexus-swarm-* 2>/dev/null | wc -l | xargs)
-TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+"${PYTHON[@]}" scripts/ops/repo_doctor.py --format human
+doctor_status=$?
+if (( doctor_status != 0 )); then
+    exit "$doctor_status"
+fi
 
-echo "[NEXUS v28.3.0 ACTIVE] Preflight complete at $TIMESTAMP."
-echo "  Commit SHA: $COMMIT_SHA"
-echo "  50 Swarm Status: $SWARM_COUNT directories ready"
-echo "  Environment: PRODUCTION-READY"
+if ! "${NEXUS_CLI_SMOKE[@]}" >/dev/null 2>&1; then
+    echo "[preflight] FAIL: Nexus CLI smoke failed" >&2
+    exit 1
+fi
+
+if [[ "${NEXUS_PREFLIGHT_PROVIDER:-0}" == "1" ]]; then
+    echo "[preflight] provider checks requested (optional; core already passed)"
+    for tool in gemini node; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            echo "[preflight] provider tool $tool: present"
+        else
+            echo "[preflight] provider tool $tool: missing"
+        fi
+    done
+    for variable in GEMINI_API_KEY OPENAI_API_KEY; do
+        if [[ -n "${!variable:-}" ]]; then
+            echo "[preflight] provider variable $variable: present (value redacted)"
+        else
+            echo "[preflight] provider variable $variable: missing"
+        fi
+    done
+fi
+
+echo "[preflight] core setup canary passed; provider state is optional"

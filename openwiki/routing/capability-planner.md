@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Capability Planner & Routing Authority
-description: Deep dive into CapabilityPlanner and HybridRouteDecision, the sole Nexus route authority governing capability graph composition.
+description: Deep dive into CapabilityPlanner, the sole Nexus route authority, and its HybridRouteDecision projection.
 tags: [routing, capability-planner, hybrid-route, authority]
 openwiki:
   roles: [architecture, domain]
@@ -9,8 +9,8 @@ openwiki:
   source_paths: [nexus/engine/capability_planner.py, nexus/contracts/hybrid_route.py, nexus/services/mainchain_route_freeze.py]
   symbols: [CapabilityPlanner, HybridRouteDecision, CapabilityPlan, MAINCHAIN_AUTHORITY]
   test_paths: [tests/test_lite_route_oracle.py, tests/test_route_optimization.py]
-  invariants: [CapabilityPlanner and HybridRouteDecision remain sole Nexus route authority. OpenWiki has zero route authority.]
-  validation_commands: [pytest tests/test_lite_route_oracle.py -q]
+  invariants: [CapabilityPlanner remains the sole Nexus route authority. HybridRouteDecision is its derived projection. OpenWiki has zero route authority.]
+  validation_commands: [.venv/bin/python -m pytest -q tests/test_lite_route_oracle.py]
 ---
 
 # Capability Planner & Routing Authority
@@ -83,7 +83,7 @@ runtime_surfaces:
   - MCP_GATEWAY
   - LOCAL_RUNTIME
 authority_roles:
-  - ROUTE_AUTHORITY
+  - DERIVED_ROUTE_PROJECTION
 evidence_basis:
   - nexus/contracts/hybrid_route.py:HybridRouteDecision
 claim_ceiling: Immutable payload contract capturing CapabilityPlanner selection state and route features.
@@ -112,7 +112,7 @@ To register a new capability node in the `CapabilityPlanner` execution graph:
 2. **Bind to Registry**: Map the node name to its invoker in `nexus/services/capability_registry.py`.
 3. **Register Invoker**: Implement the node execution hook in `[UnifiedRuntime](../architecture/overview.md)`.
 4. **Unit Validation**: Add test coverage verifying that `CapabilityPlanner.plan()` correctly sets node status (`required`, `optional`, `conditional`).
-5. **Run Checks**: Run `pytest tests/test_lite_route_oracle.py -q` to ensure no route regression.
+5. **Run Checks**: Run `.venv/bin/python -m pytest -q tests/test_lite_route_oracle.py` to ensure no route regression.
 
 ---
 
