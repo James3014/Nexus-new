@@ -4,7 +4,7 @@ owner: James Chen
 status: active
 campaign_id: github-issue-150-skill-descriptor-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/150
-baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
+baseline_main: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
 ordered_cards:
   - 01-skill-descriptor-impact-map.md
 current_frontier: 01-skill-descriptor-impact-map.md
