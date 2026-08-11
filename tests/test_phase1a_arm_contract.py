@@ -50,15 +50,20 @@ def test_exact_arm_semantics_are_physically_encoded():
     sem_b = make_valid_identity(arm=Phase1AArm.B).treatment_semantics()
     sem_c = make_valid_identity(arm=Phase1AArm.C, local_provider_called=True).treatment_semantics()
 
-    assert sem_a.nexus_baseline is True
+    assert sem_a.is_baseline_arm is True
     assert sem_a.deterministic_evidence_mediation is False
     assert sem_a.bounded_local_semantic_exploration is False
-    assert sem_b.nexus_baseline is False
+    assert sem_b.is_baseline_arm is False
     assert sem_b.deterministic_evidence_mediation is True
     assert sem_b.bounded_local_semantic_exploration is False
-    assert sem_c.nexus_baseline is False
+    assert sem_c.is_baseline_arm is False
     assert sem_c.deterministic_evidence_mediation is True
     assert sem_c.bounded_local_semantic_exploration is True
+    assert (
+        sem_a.uses_nexus_baseline_substrate
+        and sem_b.uses_nexus_baseline_substrate
+        and sem_c.uses_nexus_baseline_substrate
+    )
     assert sem_a.online_required and sem_b.online_required and sem_c.online_required
     assert (
         sem_a.independent_final_verifier_required
@@ -95,6 +100,14 @@ def test_task_identity_drift_isolated():
     assert not res.is_comparable
     assert res.status == ComparabilityStatus.NON_COMPARABLE
     assert res.reasons == (ComparabilityReason.TASK_IDENTITY_DRIFT,)
+
+
+def test_task_contract_drift_isolated():
+    spec1 = make_valid_identity(task_contract_hash="1" * 64)
+    spec2 = make_valid_identity(task_contract_hash="2" * 64)
+    res = compare_arm_identities(spec1, spec2)
+    assert not res.is_comparable
+    assert res.reasons == (ComparabilityReason.TASK_CONTRACT_DRIFT,)
 
 
 def test_source_corpus_identity_drift_isolated():
