@@ -399,6 +399,7 @@ def test_gitlink_metadata_step_preserves_complete_path_and_url_metadata():
         _run_git(repo, "config", "user.name", "trusted-anchor-test")
         _run_git(repo, "commit", "--allow-empty", "-m", "base")
         gitlink_path = "nested/safe path"
+        original_path = "existing/safe metadata path"
         original_url = "https://trusted.example.invalid/existing.git"
         _run_git(
             repo,
@@ -413,7 +414,7 @@ def test_gitlink_metadata_step_preserves_complete_path_and_url_metadata():
             "--file",
             ".gitmodules",
             f"submodule.{gitlink_path}.path",
-            gitlink_path,
+            original_path,
         )
         _run_git(
             repo,
@@ -428,7 +429,7 @@ def test_gitlink_metadata_step_preserves_complete_path_and_url_metadata():
 
         assert (
             _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.path")
-            == gitlink_path
+            == original_path
         )
         assert (
             _run_git(repo, "config", "--file", ".gitmodules", f"submodule.{gitlink_path}.url")
