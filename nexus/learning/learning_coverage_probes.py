@@ -121,9 +121,7 @@ def _memory_signal(
         ):
             _memory_error(f"{arm_name} receipt binding invalid")
         artifact_handle = receipt.get("artifact_handle")
-        if not isinstance(artifact_handle, str) or not _ARTIFACT_HANDLE.fullmatch(
-            artifact_handle
-        ):
+        if not isinstance(artifact_handle, str) or not _ARTIFACT_HANDLE.fullmatch(artifact_handle):
             _memory_error(f"{arm_name} artifact handle invalid")
         try:
             artifact = resolve_evidence_handle(
@@ -140,7 +138,10 @@ def _memory_signal(
             "artifact_handle": artifact_handle,
             "verifier_status": status,
         }
-    if normalized_arms["memory_off"]["artifact_handle"] == normalized_arms["memory_on"]["artifact_handle"]:
+    if (
+        normalized_arms["memory_off"]["artifact_handle"]
+        == normalized_arms["memory_on"]["artifact_handle"]
+    ):
         _memory_error("arm artifact evidence must be distinct")
     return {
         "status": "paired_eligibility_observed",
@@ -245,12 +246,8 @@ def _validate_observational_probes(
             {
                 "task_id": signal.get("task_id"),
                 "task_fingerprint": signal.get("task_fingerprint"),
-                "memory_off": {
-                    "receipt_handle": off_signal.get("receipt_handle")
-                },
-                "memory_on": {
-                    "receipt_handle": on_signal.get("receipt_handle")
-                },
+                "memory_off": {"receipt_handle": off_signal.get("receipt_handle")},
+                "memory_on": {"receipt_handle": on_signal.get("receipt_handle")},
             },
             evidence_resolver=evidence_resolver,
             expected_task_id=contract["task_id"],

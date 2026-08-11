@@ -38,9 +38,7 @@ def _store_digest(store):
     entries = [
         (
             handle,
-            hashlib.sha256(
-                value if isinstance(value, bytes) else _canonical(value)
-            ).hexdigest(),
+            hashlib.sha256(value if isinstance(value, bytes) else _canonical(value)).hexdigest(),
         )
         for handle, value in sorted(store.items())
     ]
@@ -221,15 +219,9 @@ def test_probe_wfps_must_equal_validated_contract_evidence():
         lambda pair, store: store.__setitem__(
             pair["memory_on"]["receipt_handle"], b"tampered receipt bytes"
         ),
-        lambda pair, store: _replace_arm_receipt(
-            pair, store, "memory_on", arm="memory_off"
-        ),
-        lambda pair, store: _replace_arm_receipt(
-            pair, store, "memory_on", verifier_status="fail"
-        ),
-        lambda pair, store: _replace_arm_receipt(
-            pair, store, "memory_on", task_id="other-task"
-        ),
+        lambda pair, store: _replace_arm_receipt(pair, store, "memory_on", arm="memory_off"),
+        lambda pair, store: _replace_arm_receipt(pair, store, "memory_on", verifier_status="fail"),
+        lambda pair, store: _replace_arm_receipt(pair, store, "memory_on", task_id="other-task"),
         lambda pair, store: _replace_arm_receipt(
             pair,
             store,
@@ -269,11 +261,14 @@ def test_universal_receipts_cannot_fabricate_all_taxonomy_probes():
         )
 
 
-@pytest.mark.parametrize("tamper", [
-    lambda p: p["probes"].append(deepcopy(p["probes"][0])),
-    lambda p: p["probes"].__setitem__(0, {**p["probes"][0], "observational_only": False}),
-    lambda p: p.__setitem__("memory_uplift_signal", "uplift_verified"),
-])
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda p: p["probes"].append(deepcopy(p["probes"][0])),
+        lambda p: p["probes"].__setitem__(0, {**p["probes"][0], "observational_only": False}),
+        lambda p: p.__setitem__("memory_uplift_signal", "uplift_verified"),
+    ],
+)
 def test_probe_tampering_fails_closed(tamper):
     contract, store = _observed_contract()
     probes = build_observational_probes(contract, evidence_resolver=store)

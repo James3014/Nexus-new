@@ -32,7 +32,9 @@ def test_contract_is_exactly_one_deterministic_row_per_live_taxonomy_capability(
     assert contract == again
     assert len(contract["rows"]) == len(CAPABILITY_TAXONOMY)
     assert {"W", "F", "P", "S"} <= set(contract["rows"][0]["evidence_levels"])
-    assert contract["claim_ceiling"] == "DETERMINISTIC_EXACT_SOURCE_TAXONOMY_EVIDENCE_CLASSIFICATION"
+    assert (
+        contract["claim_ceiling"] == "DETERMINISTIC_EXACT_SOURCE_TAXONOMY_EVIDENCE_CLASSIFICATION"
+    )
 
 
 def test_missingness_is_explicit_and_unknown_evidence_cannot_be_fabricated_as_zero():
@@ -147,7 +149,9 @@ def test_forged_bounded_looking_source_handle_is_not_an_evidence_authority():
         lambda c: c["rows"].append(deepcopy(c["rows"][0])),
         lambda c: c["rows"].__setitem__(0, {**c["rows"][0], "capability": "forged"}),
         lambda c: c["rows"].__setitem__(0, {**c["rows"][0], "evidence_levels": {"W": "bogus"}}),
-        lambda c: c["rows"].__setitem__(0, {**c["rows"][0], "source_handles": ["free text\nnot a handle"]}),
+        lambda c: c["rows"].__setitem__(
+            0, {**c["rows"][0], "source_handles": ["free text\nnot a handle"]}
+        ),
         lambda c: c["rows"][0].__setitem__("evidence_note", "trust me"),
     ],
 )

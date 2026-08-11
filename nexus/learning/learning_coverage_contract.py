@@ -132,7 +132,9 @@ def _source_binding() -> dict[str, str]:
         "source_path": "nexus/contracts/learning_experience.py",
         "source_symbol": "CAPABILITY_TAXONOMY",
         "source_revision": hashlib.sha256(source.read_bytes()).hexdigest(),
-        "taxonomy_sha256": hashlib.sha256(_taxonomy_payload(CAPABILITY_TAXONOMY).encode()).hexdigest(),
+        "taxonomy_sha256": hashlib.sha256(
+            _taxonomy_payload(CAPABILITY_TAXONOMY).encode()
+        ).hexdigest(),
     }
 
 
@@ -346,7 +348,9 @@ def _validate_coverage_contract(
             _fail("row malformed")
         capability = row["capability"]
         meta = CAPABILITY_TAXONOMY[capability]
-        if row.get("category") != meta["category"] or tuple(row.get("phases", ())) != tuple(meta["phases"]):
+        if row.get("category") != meta["category"] or tuple(row.get("phases", ())) != tuple(
+            meta["phases"]
+        ):
             _fail("source taxonomy mismatch")
         if row.get("taxonomy_source_handle") != _taxonomy_handle(capability):
             _fail("source taxonomy handle mismatch")
@@ -355,7 +359,11 @@ def _validate_coverage_contract(
         if any(not isinstance(row.get(field), (bool, type(None))) for field in _BOOL_FIELDS):
             _fail("boolean evidence malformed")
         levels = row.get("evidence_levels")
-        if not isinstance(levels, Mapping) or set(levels) != {"W", "F", "P", "S"} or any(level not in _LEVELS for level in levels.values()):
+        if (
+            not isinstance(levels, Mapping)
+            or set(levels) != {"W", "F", "P", "S"}
+            or any(level not in _LEVELS for level in levels.values())
+        ):
             _fail("evidence level malformed")
         handles = row.get("source_handles")
         if not isinstance(handles, list) or handles != sorted(set(handles)):
@@ -397,7 +405,10 @@ def _validate_coverage_contract(
         if (
             not isinstance(missingness, list)
             or missingness != sorted(set(missingness))
-            or any(not isinstance(item, str) or not _MISSINGNESS.fullmatch(item) for item in missingness)
+            or any(
+                not isinstance(item, str) or not _MISSINGNESS.fullmatch(item)
+                for item in missingness
+            )
         ):
             _fail("missingness malformed")
         if row["invoked"] is True and row["selected"] is not True:
