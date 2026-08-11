@@ -13,6 +13,7 @@ jobs:
       manifest_sha256: ${{ steps.external-anchor.outputs.manifest_sha256 }}
       external_anchor_sha256: ${{ steps.external-anchor.outputs.external_anchor_sha256 }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:

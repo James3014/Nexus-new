@@ -307,6 +307,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         root = Path(directory)
         origin = root / "origin.git"
         checkout = root / "checkout"
+        controller_repo = root / "controller.git"
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
         subprocess.run(
             ["git", "clone", str(origin), str(checkout)], check=True, capture_output=True
@@ -323,6 +324,11 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
         _run_git(checkout, "commit", "-am", "head")
         head_sha = _run_git(checkout, "rev-parse", "HEAD")
         _run_git(checkout, "push", "origin", "HEAD:main")
+        subprocess.run(
+            ["git", "init", "--bare", str(controller_repo)], check=True, capture_output=True
+        )
+        _run_git(controller_repo, "remote", "add", "origin", str(origin))
+        _run_git(controller_repo, "fetch", "--no-tags", "--depth=1", "origin", base_sha)
         event = _event()
         event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
         event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
@@ -337,7 +343,7 @@ def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anc
                 "--event-json",
                 str(event_path),
                 "--repo-root",
-                str(checkout),
+                str(controller_repo),
                 "--output-dir",
                 str(bundle),
             ],
@@ -450,8 +456,8 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
         root = Path(directory)
         source = root / "source"
         origin = root / "origin.git"
-        shallow = root / "shallow"
-        controller_repo = root / "controller-repo"
+        controller_repo = root / "controller.git"
+        verifier_repo = root / "verifier.git"
         subprocess.run(["git", "init", str(source)], check=True, capture_output=True)
         _run_git(source, "config", "user.email", "test@example.invalid")
         _run_git(source, "config", "user.name", "trusted-anchor-shallow-test")
@@ -473,50 +479,42 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
         _run_git(source, "switch", "main")
         _run_git(source, "merge", "--no-ff", feature_sha, "-m", "merge head")
         head_sha = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "push", "origin", f"{head_sha}:refs/heads/merge-head")
 
         subprocess.run(
-            ["git", "clone", "--branch", "main", f"file://{origin}", str(shallow)],
-            check=True,
-            capture_output=True,
+            ["git", "init", "--bare", str(controller_repo)], check=True, capture_output=True
         )
-        _run_git(source, "push", "origin", f"{head_sha}:refs/heads/merge-head")
+        _run_git(controller_repo, "remote", "add", "origin", str(origin))
         subprocess.run(
-            ["git", "-C", str(shallow), "fetch", "--no-tags", "--depth=1", "origin", head_sha],
-            check=True,
-            capture_output=True,
-        )
-        shallow_feature = subprocess.run(
-            ["git", "-C", str(shallow), "cat-file", "-e", f"{feature_sha}^{{commit}}"],
-            capture_output=True,
-        )
-        assert shallow_feature.returncode != 0
-        shallow_bundle = subprocess.run(
             [
                 "git",
                 "-C",
-                str(shallow),
-                "bundle",
-                "create",
-                str(root / "shallow.bundle"),
+                str(controller_repo),
+                "fetch",
+                "--no-tags",
+                "--depth=1",
+                "origin",
                 base_sha,
-                head_sha,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        assert _run_git(controller_repo, "rev-parse", "--is-shallow-repository") == "true"
+        missing_merge_parent = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(controller_repo),
+                "cat-file",
+                "-e",
+                f"{feature_sha}^{{commit}}",
             ],
             capture_output=True,
         )
-        boundary = subprocess.run(
-            ["git", "-C", str(shallow), "rev-list", "--boundary", base_sha, head_sha],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.splitlines()
-        assert shallow_bundle.returncode != 0 or any(line.startswith("-") for line in boundary)
-        subprocess.run(
-            ["git", "clone", "--branch", "main", f"file://{origin}", str(controller_repo)],
-            check=True,
-            capture_output=True,
-        )
+        assert missing_merge_parent.returncode != 0
 
         event = _event()
+        event["workflow_sha"] = base_sha
         event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
         event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
         event_path = root / "event.json"
@@ -536,19 +534,31 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
             ],
             check=True,
         )
+        assert _run_git(controller_repo, "rev-parse", "--is-shallow-repository") == "false"
         assert _run_git(controller_repo, "cat-file", "-e", f"{base_sha}^{{commit}}") == ""
         assert _run_git(controller_repo, "cat-file", "-e", f"{head_sha}^{{commit}}") == ""
-        clone = root / "bundle-clone.git"
-        subprocess.run(["git", "init", "--bare", str(clone)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "init", "--bare", str(verifier_repo)], check=True, capture_output=True
+        )
         for ref, revision in (
             ("refs/trusted-anchor/base", base_sha),
             ("refs/trusted-anchor/head", head_sha),
         ):
-            _run_git(clone, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
-            assert _run_git(clone, "rev-parse", f"{ref}^{{commit}}") == revision
-            assert _run_git(clone, "rev-parse", f"{ref}^{{tree}}") == _run_git(
+            _run_git(verifier_repo, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
+            assert _run_git(verifier_repo, "rev-parse", f"{ref}^{{commit}}") == revision
+            assert _run_git(verifier_repo, "rev-parse", f"{ref}^{{tree}}") == _run_git(
                 controller_repo, "rev-parse", f"{revision}^{{tree}}"
             )
+        head_with_parents = next(
+            line
+            for line in _run_git(
+                verifier_repo, "rev-list", "--parents", "refs/trusted-anchor/head"
+            ).splitlines()
+            if line.startswith(head_sha)
+        ).split()
+        assert head_with_parents[0] == head_sha
+        assert set(head_with_parents[1:]) == {base_sha, feature_sha}
+        _run_git(verifier_repo, "merge-base", "--is-ancestor", base_sha, head_sha)
 
 
 def test_workflow_is_three_job_isolated_anchor():
@@ -563,6 +573,8 @@ def test_workflow_is_three_job_isolated_anchor():
     }
     assert workflow["jobs"]["unprivileged-executor"]["permissions"] == {}
     assert workflow["jobs"]["trusted-controller"]["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["trusted-controller"]["timeout-minutes"] == 10
+    assert "timeout-minutes" not in workflow["jobs"]["unprivileged-executor"]
     assert workflow["jobs"]["trusted-verifier"]["permissions"] == {
         "contents": "read",
         "actions": "read",

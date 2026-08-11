@@ -266,7 +266,9 @@ def _controller(args: argparse.Namespace) -> None:
     repo = Path(args.repo_root)
     base_sha = _exact_sha(_event_value(event, "pull_request", "base", "sha"), "base_sha")
     head_sha = _exact_sha(_event_value(event, "pull_request", "head", "sha"), "head_sha")
-    _git(repo, "fetch", "--no-tags", "origin", base_sha, head_sha)
+    _git(repo, "fetch", "--no-tags", "--unshallow", "origin", base_sha, head_sha)
+    if _git(repo, "rev-parse", "--is-shallow-repository") != "false":
+        raise ValueError("controller repository remains shallow")
     for revision in (base_sha, head_sha):
         _git(repo, "cat-file", "-e", f"{revision}^{{commit}}")
     raw_diff = _git(repo, "diff", "--raw", "-z", "--no-renames", base_sha, head_sha, binary=True)
