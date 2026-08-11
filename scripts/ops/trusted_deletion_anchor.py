@@ -257,7 +257,12 @@ def _create_git_bundle(repo: Path, output: Path, base_sha: str, head_sha: str) -
         )
         if not output.is_file() or output.stat().st_size == 0:
             raise ValueError("Git object bundle is empty")
-        subprocess.run(["git", "bundle", "verify", str(output)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "bundle", "verify", str(output)],
+            cwd=ephemeral,
+            check=True,
+            capture_output=True,
+        )
     return output.read_bytes()
 
 

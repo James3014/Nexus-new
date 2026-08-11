@@ -378,7 +378,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         subprocess.run(
             [
                 sys.executable,
-                "scripts/ops/trusted_deletion_anchor.py",
+                str(verifier_script),
                 "controller",
                 "--event-json",
                 str(event_path),
@@ -388,6 +388,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
                 str(bundle),
             ],
             check=True,
+            cwd=non_repository_cwd,
         )
         manifest = json.loads((bundle / "manifest.json").read_text())
         anchor = json.loads((bundle / "external-anchor.json").read_text())
