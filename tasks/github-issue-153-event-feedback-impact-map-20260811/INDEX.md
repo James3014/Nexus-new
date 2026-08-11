@@ -4,7 +4,7 @@ owner: James Chen
 status: active
 campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
-baseline_main: 70fd467ab0d29f4373616a5e98d85b014efcd4de
+baseline_main: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
 current_frontier: 01-event-feedback-impact-map.md
 frontier_status: ACTIVE
 AUTO_CHAIN: false
