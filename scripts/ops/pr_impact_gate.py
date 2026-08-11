@@ -6,14 +6,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 ROOT = Path(__file__).resolve().parents[2]
+_TRUSTED_GIT_EXECUTABLE = (
+    str(Path(executable).resolve()) if (executable := shutil.which("git")) else ""
+)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -63,6 +68,10 @@ CI_MACHINERY_TARGETS = (
     "tests/ops/test_ci_gate_report_trust_audit.py",
 )
 
+EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
+_UNKNOWN = "IMPACT_UNKNOWN"
+_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+
 
 @dataclass(frozen=True)
 class ImpactPlan:
@@ -79,6 +88,10 @@ class ImpactPlan:
     changed_python_paths: list[str]
     reasons: list[str]
     unmatched_paths: list[str]
+    source_tree: str = ""
+    test_inventory_tree: str = ""
+    base_source_tree: str = ""
+    base_test_inventory_tree: str = ""
 
 
 @dataclass(frozen=True)
@@ -96,6 +109,17 @@ class PytestRunResult:
     impact_class: str = ""
     unexpected_missing_targets: list[str] = field(default_factory=list)
     verifier_digest: str = ""
+    source_tree: str = ""
+    test_inventory_tree: str = ""
+    bound_source_tree: str = ""
+    bound_test_inventory_tree: str = ""
+    collection_count: int = 0
+    node_ids: list[str] = field(default_factory=list)
+    passed_node_ids: list[str] = field(default_factory=list)
+    error_node_ids: list[str] = field(default_factory=list)
+    skipped_node_ids: list[str] = field(default_factory=list)
+    terminal_status: str = ""
+    provenance_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,6 +133,237 @@ class RegressionClassification:
     reason: str
 
 
+def _exact_sha(value: str, label: str) -> None:
+    if not isinstance(value, str) or not _FULL_SHA.fullmatch(value):
+        raise ValueError(f"{label} must be a full lowercase immutable SHA")
+
+
+def _exact_digest(value: str, label: str) -> None:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError(f"{label} must be a full lowercase SHA-256 digest")
+
+
+def _run_trusted_git(
+    root: Path,
+    args: list[str],
+    *,
+    text: bool,
+) -> subprocess.CompletedProcess[Any]:
+    if not _TRUSTED_GIT_EXECUTABLE or not root.is_dir():
+        empty = "" if text else b""
+        return subprocess.CompletedProcess(args, 127, stdout=empty, stderr=empty)
+    return subprocess.run(
+        [_TRUSTED_GIT_EXECUTABLE, *args],
+        cwd=root,
+        text=text,
+        capture_output=True,
+        check=False,
+    )
+
+
+def parse_raw_diff_z(stream: bytes) -> list[dict[str, str]]:
+    """Parse one strict ``git diff --raw -z --no-renames`` byte stream.
+
+    Git emits alternating metadata and path fields terminated by NUL.  We do
+    not accept rename scores, non-deletion records, or incomplete field pairs.
+    """
+    if not isinstance(stream, bytes) or not stream or not stream.endswith(b"\0"):
+        raise ValueError("raw diff stream is missing its NUL terminator")
+    records = stream[:-1].split(b"\0")
+    if len(records) % 2:
+        raise ValueError("raw diff stream has a truncated metadata/path pair")
+    parsed: list[dict[str, str]] = []
+    seen: set[str] = set()
+    pairs = []
+    for index in range(0, len(records), 2):
+        metadata, raw_path = records[index : index + 2]
+        pairs.append((metadata, raw_path))
+    for metadata, raw_path in pairs:
+        try:
+            metadata_text = metadata.decode("ascii")
+            path = raw_path.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("raw diff contains non-text metadata/path") from exc
+        fields = metadata_text.split()
+        if len(fields) != 5 or not fields[0].startswith(":"):
+            raise ValueError("raw diff metadata is malformed")
+        old_mode, new_mode, old_sha, new_sha, status = fields
+        old_mode = old_mode[1:]
+        if (
+            len(old_mode) != 6
+            or len(new_mode) != 6
+            or not re.fullmatch(r"[0-7]{12}", old_mode + new_mode)
+        ):
+            raise ValueError("raw diff mode is malformed")
+        if not all(re.fullmatch(r"[0-9a-f]{7,64}", value) for value in (old_sha, new_sha)):
+            raise ValueError("raw diff object id is malformed")
+        if status != "D" or not path or path.startswith("/") or "\x00" in path:
+            raise ValueError("stream is not deletion-only exact evidence")
+        if path in seen:
+            raise ValueError("raw diff contains a duplicate path")
+        seen.add(path)
+        parsed.append({
+            "old_mode": old_mode,
+            "new_mode": new_mode,
+            "old_sha": old_sha,
+            "new_sha": new_sha,
+            "status": status,
+            "path": path,
+        })
+    if not parsed:
+        raise ValueError("raw diff stream is empty")
+    return parsed
+
+
+def compute_orphan_evidence_digest(path: str, base_tree: str) -> str:
+    """Return the digest of the small, recomputable orphan evidence tuple."""
+    _exact_sha(base_tree, "base_tree")
+    payload = json.dumps(
+        {"base_tree": base_tree, "orphan": True, "path": path},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _unknown_exact_git_result(reasons: list[str]) -> dict[str, Any]:
+    return {
+        "status": _UNKNOWN,
+        "claim": _UNKNOWN,
+        "blocking": True,
+        "reasons": sorted(set(reasons)),
+        "candidate_commit_allowed": False,
+        "public_claim_allowed": False,
+        "merge_authority": False,
+        "consumers": [],
+    }
+
+
+def verify_exact_git_deletion_evidence(
+    *,
+    base_sha: str,
+    target_sha: str,
+    base_tree: str,
+    target_tree: str,
+    test_inventory_tree: str,
+    raw_stream_a: bytes | None = None,
+    raw_stream_b: bytes | None = None,
+    allowed_deletion_manifest: Iterable[str] | None = None,
+    orphan_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+    dynamic_caller_universe_known: bool = False,
+    root: Path | None = None,
+) -> dict[str, Any]:
+    """Recompute and classify a complete exact-endpoint Git diff."""
+    reasons: list[str] = []
+    try:
+        for value, label in (
+            (base_sha, "base_sha"),
+            (target_sha, "target_sha"),
+            (base_tree, "base_tree"),
+            (target_tree, "target_tree"),
+            (test_inventory_tree, "test_inventory_tree"),
+        ):
+            _exact_sha(value, label)
+    except ValueError as exc:
+        return _unknown_exact_git_result([str(exc)])
+
+    if base_sha == target_sha or base_tree == target_tree:
+        reasons.append("base and target are not distinct immutable endpoints")
+    computed_stream_a = b""
+    computed_stream_b = b""
+    if root is None:
+        reasons.append("trusted Git root is required")
+    else:
+        try:
+            recomputed_base_tree, _ = _git_revision_trees(root, base_sha)
+            recomputed_target_tree, recomputed_test_tree = _git_revision_trees(root, target_sha)
+            if recomputed_base_tree != base_tree:
+                reasons.append("base_tree does not match exact Git endpoint")
+            if recomputed_target_tree != target_tree:
+                reasons.append("target_tree does not match exact Git endpoint")
+            if recomputed_test_tree != test_inventory_tree:
+                reasons.append("test inventory tree does not match exact target tree")
+        except ValueError as exc:
+            reasons.append(str(exc))
+        streams = [
+            _run_trusted_git(
+                root,
+                ["diff", "--raw", "-z", "--no-renames", base_sha, target_sha],
+                text=False,
+            )
+            for _ in range(2)
+        ]
+        if any(item.returncode != 0 for item in streams):
+            reasons.append("complete exact Git raw diff could not be produced")
+        else:
+            computed_stream_a = streams[0].stdout
+            computed_stream_b = streams[1].stdout
+            if computed_stream_a != computed_stream_b:
+                reasons.append("independently recomputed complete Git diffs diverge")
+
+    if raw_stream_a is None or raw_stream_b is None:
+        reasons.append("two supplied complete raw evidence streams are required")
+    else:
+        if raw_stream_a != raw_stream_b:
+            reasons.append("supplied raw evidence streams diverge")
+        if computed_stream_a and raw_stream_a != computed_stream_a:
+            reasons.append("supplied raw evidence identity does not match complete Git diff")
+        if computed_stream_b and raw_stream_b != computed_stream_b:
+            reasons.append("supplied raw evidence identity does not match complete Git diff")
+
+    try:
+        supplied_first = parse_raw_diff_z(raw_stream_a or b"")
+        supplied_second = parse_raw_diff_z(raw_stream_b or b"")
+    except ValueError as exc:
+        reasons.append(str(exc))
+        supplied_first, supplied_second = [], []
+    if supplied_first and supplied_second and supplied_first != supplied_second:
+        reasons.append("independent raw diff streams diverge")
+    try:
+        recomputed = parse_raw_diff_z(computed_stream_a)
+    except ValueError as exc:
+        reasons.append(str(exc))
+        recomputed = []
+    paths = [entry["path"] for entry in recomputed]
+    manifest = list(allowed_deletion_manifest or [])
+    if not manifest or len(manifest) != len(set(manifest)) or set(manifest) != set(paths):
+        reasons.append("allowed deletion manifest is missing, stale, duplicated, or drifting")
+    evidence = orphan_evidence or {}
+    if set(evidence) != set(paths):
+        reasons.append("orphan evidence does not cover exactly every deletion path")
+    for path in paths:
+        item = evidence.get(path, {})
+        expected_digest = compute_orphan_evidence_digest(path, base_tree)
+        if (
+            item.get("orphan") is not True
+            or item.get("base_tree") != base_tree
+            or item.get("source_revision") != base_sha
+            or item.get("evidence_digest") != expected_digest
+        ):
+            reasons.append(f"orphan evidence is missing or tampered for {path}")
+    if not dynamic_caller_universe_known:
+        reasons.append("dynamic caller universe is unknown")
+    if reasons:
+        return _unknown_exact_git_result(reasons)
+    return {
+        "status": EXACT_GIT_EVIDENCE_ONLY,
+        "claim": EXACT_GIT_EVIDENCE_ONLY,
+        "blocking": False,
+        "reasons": [],
+        "deletions": paths,
+        "base_sha": base_sha,
+        "target_sha": target_sha,
+        "base_tree": base_tree,
+        "target_tree": target_tree,
+        "test_inventory_tree": test_inventory_tree,
+        "raw_stream_sha256": hashlib.sha256(computed_stream_a).hexdigest(),
+        "candidate_commit_allowed": False,
+        "public_claim_allowed": False,
+        "merge_authority": False,
+        "consumers": [],
+    }
+
+
 def _unique_existing(targets: Iterable[str], *, root: Path = ROOT) -> list[str]:
     selected: list[str] = []
     for target in targets:
@@ -116,6 +371,67 @@ def _unique_existing(targets: Iterable[str], *, root: Path = ROOT) -> list[str]:
         if (root / path_part).exists() and target not in selected:
             selected.append(target)
     return selected
+
+
+def _git_revision_trees(root: Path, revision: str) -> tuple[str, str]:
+    _exact_sha(revision, "revision")
+    commit = _run_trusted_git(
+        root,
+        ["rev-parse", f"{revision}^{{commit}}"],
+        text=True,
+    )
+    source = _run_trusted_git(
+        root,
+        ["rev-parse", f"{revision}^{{tree}}"],
+        text=True,
+    )
+    inventory = _run_trusted_git(
+        root,
+        ["rev-parse", f"{revision}:tests"],
+        text=True,
+    )
+    if (
+        commit.returncode != 0
+        or commit.stdout.strip() != revision
+        or source.returncode != 0
+        or inventory.returncode != 0
+    ):
+        raise ValueError("revision trees cannot be resolved from the immutable commit")
+    source_tree = source.stdout.strip()
+    test_inventory_tree = inventory.stdout.strip()
+    _exact_sha(source_tree, "source_tree")
+    _exact_sha(test_inventory_tree, "test_inventory_tree")
+    return source_tree, test_inventory_tree
+
+
+def compute_test_provenance_digest(
+    *,
+    revision: str,
+    source_tree: str,
+    test_inventory_tree: str,
+    plan_digest: str,
+    verifier_digest: str,
+) -> str:
+    for value, label in (
+        (revision, "revision"),
+        (source_tree, "source_tree"),
+        (test_inventory_tree, "test_inventory_tree"),
+    ):
+        _exact_sha(value, label)
+    _exact_digest(plan_digest, "plan_digest")
+    _exact_digest(verifier_digest, "verifier_digest")
+    payload = json.dumps(
+        {
+            "plan_digest": plan_digest,
+            "revision": revision,
+            "source_tree": source_tree,
+            "test_inventory_tree": test_inventory_tree,
+            "verifier_digest": verifier_digest,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _is_docs_or_governance(path: str) -> bool:
@@ -133,9 +449,20 @@ def build_impact_plan(
     head_sha: str = "",
     root: Path = ROOT,
 ) -> ImpactPlan:
-    normalized = sorted(
-        {path.strip().replace("\\", "/").strip("/") for path in changed_paths if path.strip()}
-    )
+    source_tree = ""
+    test_inventory_tree = ""
+    base_source_tree = ""
+    base_test_inventory_tree = ""
+    provenance_error = ""
+    if base_sha or head_sha:
+        try:
+            base_source_tree, base_test_inventory_tree = _git_revision_trees(root, base_sha)
+            source_tree, test_inventory_tree = _git_revision_trees(root, head_sha)
+        except ValueError as exc:
+            provenance_error = str(exc)
+    normalized = sorted({
+        path.strip().replace("\\", "/").strip("/") for path in changed_paths if path.strip()
+    })
     if not normalized:
         return ImpactPlan(
             base_sha=base_sha,
@@ -149,8 +476,15 @@ def build_impact_plan(
             wiki_required=False,
             workflow_validation_required=True,
             changed_python_paths=[],
-            reasons=["empty exact-base diff is not a valid PR impact packet"],
+            reasons=[
+                "empty exact-base diff is not a valid PR impact packet",
+                *([provenance_error] if provenance_error else []),
+            ],
             unmatched_paths=[],
+            source_tree=source_tree,
+            test_inventory_tree=test_inventory_tree,
+            base_source_tree=base_source_tree,
+            base_test_inventory_tree=base_test_inventory_tree,
         )
 
     docs_only = all(_is_docs_or_governance(path) for path in normalized)
@@ -224,6 +558,13 @@ def build_impact_plan(
         targets = _unique_existing(MANDATORY_TIER2_TARGETS, root=root)
         reasons.append("production Python change had no mapped tests")
 
+    if provenance_error:
+        impact_class = "IMPACT_UNKNOWN"
+        tier = 2
+        confidence = 0.0
+        targets = _unique_existing([*targets, *MANDATORY_TIER2_TARGETS], root=root)
+        reasons.append(provenance_error)
+
     pytest_required = bool(targets)
     if not pytest_required and not docs_only:
         impact_class = "IMPACT_UNKNOWN"
@@ -246,6 +587,10 @@ def build_impact_plan(
         changed_python_paths=changed_python,
         reasons=reasons,
         unmatched_paths=unknown_unmatched,
+        source_tree=source_tree,
+        test_inventory_tree=test_inventory_tree,
+        base_source_tree=base_source_tree,
+        base_test_inventory_tree=base_test_inventory_tree,
     )
 
 
@@ -265,6 +610,64 @@ def parse_junit_failures(path: Path) -> list[str]:
     return sorted(failures)
 
 
+def parse_junit_metadata(path: Path) -> dict[str, Any]:
+    root = ET.parse(path).getroot()
+    nodes: list[str] = []
+    passed: list[str] = []
+    errors: list[str] = []
+    skipped: list[str] = []
+    for case in root.iter("testcase"):
+        classname = case.attrib.get("classname", "").strip()
+        name = case.attrib.get("name", "").strip()
+        node = f"{classname}::{name}" if classname else name
+        if not node or node in nodes:
+            continue
+        nodes.append(node)
+        if case.find("skipped") is not None:
+            skipped.append(node)
+        elif case.find("error") is not None:
+            errors.append(node)
+        elif case.find("failure") is None:
+            passed.append(node)
+    return {
+        "collection_count": len(nodes),
+        "node_ids": sorted(nodes),
+        "passed_node_ids": sorted(passed),
+        "error_node_ids": sorted(errors),
+        "skipped_node_ids": sorted(skipped),
+    }
+
+
+def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
+    fields = (
+        "collection_count",
+        "node_ids",
+    )
+    if not any(getattr(base, field) or getattr(head, field) for field in fields):
+        return False
+    return any(getattr(base, field) != getattr(head, field) for field in fields)
+
+
+def _valid_test_provenance(result: PytestRunResult) -> bool:
+    try:
+        expected = compute_test_provenance_digest(
+            revision=result.revision,
+            source_tree=result.source_tree,
+            test_inventory_tree=result.test_inventory_tree,
+            plan_digest=result.plan_digest,
+            verifier_digest=result.verifier_digest,
+        )
+    except ValueError:
+        return False
+    return (
+        bool(result.provenance_digest)
+        and result.provenance_digest == expected
+        and result.source_tree == result.bound_source_tree
+        and result.test_inventory_tree == result.bound_test_inventory_tree
+        and result.terminal_status == result.status
+    )
+
+
 def classify_regression(base: PytestRunResult, head: PytestRunResult) -> RegressionClassification:
     base_failures = sorted(set(base.failures))
     head_failures = sorted(set(head.failures))
@@ -281,6 +684,10 @@ def classify_regression(base: PytestRunResult, head: PytestRunResult) -> Regress
         or bool(base.unexpected_missing_targets)
         or not base.verifier_digest
         or base.verifier_digest != head.verifier_digest
+        or not _valid_test_provenance(base)
+        or not _valid_test_provenance(head)
+        or base.revision == head.revision
+        or _metadata_mismatch(base, head)
         or base.status not in {"COMPLETE", "CI_BOOTSTRAP_DEFECT", "IMPACT_UNKNOWN"}
         or head.status not in {"COMPLETE", "CI_BOOTSTRAP_DEFECT", "IMPACT_UNKNOWN"}
         or (
@@ -390,6 +797,39 @@ def run_pytest_plan(
     missing_targets = [target for target in targets if target not in existing_targets]
     changed_paths = {str(path) for path in plan.get("changed_paths", [])}
     base_revision = str(plan.get("base_sha", ""))
+    head_revision = str(plan.get("head_sha", ""))
+    expected_source_tree = ""
+    expected_test_inventory_tree = ""
+    provenance_failure = ""
+    if revision == base_revision:
+        expected_source_tree = str(plan.get("base_source_tree", ""))
+        expected_test_inventory_tree = str(plan.get("base_test_inventory_tree", ""))
+    elif revision == head_revision:
+        expected_source_tree = str(plan.get("source_tree", ""))
+        expected_test_inventory_tree = str(plan.get("test_inventory_tree", ""))
+    else:
+        provenance_failure = "run revision is not an exact plan endpoint"
+    source_tree = ""
+    test_inventory_tree = ""
+    provenance_digest = ""
+    if not provenance_failure:
+        try:
+            source_tree, test_inventory_tree = _git_revision_trees(cwd, revision)
+            if (
+                source_tree != expected_source_tree
+                or test_inventory_tree != expected_test_inventory_tree
+            ):
+                provenance_failure = "run trees drifted from the immutable plan binding"
+            else:
+                provenance_digest = compute_test_provenance_digest(
+                    revision=revision,
+                    source_tree=source_tree,
+                    test_inventory_tree=test_inventory_tree,
+                    plan_digest=plan_digest,
+                    verifier_digest=verifier_digest,
+                )
+        except ValueError as exc:
+            provenance_failure = str(exc)
     unexpected_missing = [
         target
         for target in missing_targets
@@ -399,6 +839,29 @@ def run_pytest_plan(
             and target.split("::", 1)[0].startswith("tests/")
         )
     ]
+    if provenance_failure:
+        stdout_path.write_text(provenance_failure + "\n", encoding="utf-8")
+        result = PytestRunResult(
+            5,
+            "IMPACT_UNKNOWN",
+            [],
+            str(junit_path),
+            str(stdout_path),
+            revision=revision,
+            plan_digest=plan_digest,
+            selected_targets=targets,
+            impact_class="IMPACT_UNKNOWN",
+            unexpected_missing_targets=unexpected_missing,
+            verifier_digest=verifier_digest,
+            source_tree=source_tree,
+            test_inventory_tree=test_inventory_tree,
+            bound_source_tree=expected_source_tree,
+            bound_test_inventory_tree=expected_test_inventory_tree,
+            terminal_status="IMPACT_UNKNOWN",
+            provenance_digest=provenance_digest,
+        )
+        result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+        return 5
     if not targets:
         result = PytestRunResult(
             5,
@@ -412,6 +875,12 @@ def run_pytest_plan(
             impact_class=impact_class,
             unexpected_missing_targets=unexpected_missing,
             verifier_digest=verifier_digest,
+            source_tree=source_tree,
+            test_inventory_tree=test_inventory_tree,
+            bound_source_tree=expected_source_tree,
+            bound_test_inventory_tree=expected_test_inventory_tree,
+            terminal_status="IMPACT_UNKNOWN",
+            provenance_digest=provenance_digest,
         )
         result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
         return 5
@@ -434,6 +903,12 @@ def run_pytest_plan(
             impact_class=impact_class,
             unexpected_missing_targets=unexpected_missing,
             verifier_digest=verifier_digest,
+            source_tree=source_tree,
+            test_inventory_tree=test_inventory_tree,
+            bound_source_tree=expected_source_tree,
+            bound_test_inventory_tree=expected_test_inventory_tree,
+            terminal_status="COMPLETE",
+            provenance_digest=provenance_digest,
         )
         result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
         return 0
@@ -447,8 +922,10 @@ def run_pytest_plan(
     )
     try:
         failures = parse_junit_failures(junit_path) if status == "COMPLETE" else []
+        metadata = parse_junit_metadata(junit_path) if status == "COMPLETE" else {}
     except (ET.ParseError, OSError):
         failures = []
+        metadata = {}
         status = "CI_BOOTSTRAP_DEFECT"
     result = PytestRunResult(
         completed.returncode,
@@ -464,6 +941,17 @@ def run_pytest_plan(
         impact_class=impact_class,
         unexpected_missing_targets=unexpected_missing,
         verifier_digest=verifier_digest,
+        source_tree=source_tree,
+        test_inventory_tree=test_inventory_tree,
+        bound_source_tree=expected_source_tree,
+        bound_test_inventory_tree=expected_test_inventory_tree,
+        collection_count=int(metadata.get("collection_count", 0)),
+        node_ids=list(metadata.get("node_ids", [])),
+        passed_node_ids=list(metadata.get("passed_node_ids", [])),
+        error_node_ids=list(metadata.get("error_node_ids", [])),
+        skipped_node_ids=list(metadata.get("skipped_node_ids", [])),
+        terminal_status=status,
+        provenance_digest=provenance_digest,
     )
     result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
     return 0 if status == "COMPLETE" else completed.returncode or 2
@@ -487,6 +975,17 @@ def _load_run_result(path: Path) -> PytestRunResult:
             str(item) for item in payload.get("unexpected_missing_targets", [])
         ],
         verifier_digest=str(payload.get("verifier_digest", "")),
+        source_tree=str(payload.get("source_tree", "")),
+        test_inventory_tree=str(payload.get("test_inventory_tree", "")),
+        bound_source_tree=str(payload.get("bound_source_tree", "")),
+        bound_test_inventory_tree=str(payload.get("bound_test_inventory_tree", "")),
+        collection_count=int(payload.get("collection_count", 0)),
+        node_ids=[str(item) for item in payload.get("node_ids", [])],
+        passed_node_ids=[str(item) for item in payload.get("passed_node_ids", [])],
+        error_node_ids=[str(item) for item in payload.get("error_node_ids", [])],
+        skipped_node_ids=[str(item) for item in payload.get("skipped_node_ids", [])],
+        terminal_status=str(payload.get("terminal_status", "")),
+        provenance_digest=str(payload.get("provenance_digest", "")),
     )
 
 
