@@ -75,6 +75,15 @@ class DeveloperFeedbackDecisionStore:
         obj = json.loads(line, object_pairs_hook=pairs)
         if not isinstance(obj, dict) or obj.get("schema") != "nexus.developer_feedback_decision.v1":
             raise ValueError("invalid decision record")
+        allowed = {
+            "schema", "task_id", "decision_id", "decision", "reason_codes",
+            "evidence_refs", "request_digest", "authority_flags", "sequence",
+            "parent_digest", "record_digest",
+        }
+        if set(obj) != allowed or obj.get("decision") not in {"KEEP", "REVISE", "REJECT", "INVESTIGATE"}:
+            raise ValueError("invalid decision fields")
+        if not isinstance(obj.get("authority_flags"), dict) or any(obj["authority_flags"].values()):
+            raise ValueError("invalid authority flags")
         return obj
 
     def _scan(self) -> Tuple[list[Dict[str, Any]], str, int]:
