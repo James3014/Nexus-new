@@ -1,7 +1,12 @@
 import json
 
+import pytest
+
 from nexus.services.local_heal.pipeline import HealContext
-from nexus.services.local_heal.receipt import write_repair_receipt
+from nexus.services.local_heal.receipt import (
+    canonical_run_group,
+    write_repair_receipt,
+)
 
 
 def test_write_repair_receipt_records_gate_and_evidence(tmp_path):
@@ -20,7 +25,12 @@ def test_write_repair_receipt_records_gate_and_evidence(tmp_path):
         model_decisions=[{"phase": "patch", "model": "qwen2.5-coder:14b", "timeout_seconds": 180}],
     )
 
-    receipt_path = write_repair_receipt(ctx, model_name="qwen2.5-coder:14b", reports_root=tmp_path / "reports")
+    receipt_path = write_repair_receipt(
+        ctx,
+        model_name="qwen2.5-coder:14b",
+        reports_root=tmp_path / "reports",
+        run_group="baseline-a",
+    )
 
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert payload["schema"] == "nexus.local_heal.repair_receipt.v1"
@@ -45,7 +55,7 @@ def test_write_repair_receipt_does_not_infer_reproduced_from_evidence(tmp_path):
         failure_reason="REPRO_NOT_REPRODUCED",
     )
 
-    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports")
+    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group="repro-b")
 
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert payload["reproduced"] is False
@@ -69,7 +79,7 @@ def test_write_repair_receipt_records_env_resolution(tmp_path):
         },
     )
 
-    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports")
+    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group="env-c")
 
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert payload["failure_reason"] == "ASTROPY_VERSION_PARITY_MISSING"
@@ -89,7 +99,51 @@ def test_write_repair_receipt_records_resolved_python_command(tmp_path):
         failure_reason="VERIFICATION_FAILED",
     )
 
-    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports")
+    receipt_path = write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group="python-d")
 
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert payload["commands"] == ["/opt/python3.9 reproduce_bug.py"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "   ",
+        ".",
+        "..",
+        "../escape",
+        "nested/group",
+        "nested\\group",
+        "bad\nvalue",
+        "bad..value",
+    ],
+)
+def test_canonical_run_group_rejects_unsafe_values_before_writes(tmp_path, value):
+    ctx = HealContext(
+        instance_id="astropy__astropy-13033",
+        repo_dir=tmp_path,
+        problem_statement="run-group validation",
+    )
+    with pytest.raises(ValueError):
+        write_repair_receipt(ctx, reports_root=tmp_path / "reports", run_group=value)
+    assert not (tmp_path / "reports").exists()
+
+
+def test_canonical_run_group_preserves_distinct_valid_identities(tmp_path):
+    assert canonical_run_group("group-a") == "group-a"
+    assert canonical_run_group("group_b.2") == "group_b.2"
+
+    ctx = HealContext(
+        instance_id="astropy__astropy-13033",
+        repo_dir=tmp_path,
+        problem_statement="run-group validation",
+    )
+    first = write_repair_receipt(
+        ctx, reports_root=tmp_path / "reports", run_group="group-a"
+    )
+    second = write_repair_receipt(
+        ctx, reports_root=tmp_path / "reports", run_group="group-b"
+    )
+    assert first.parent != second.parent

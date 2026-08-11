@@ -742,6 +742,18 @@ def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_
     return receipt
 
 
+_RUN_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def canonical_run_group(value: Any) -> str:
+    """Validate a run-group identity before it can reach receipt paths."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("run_group must be a non-empty identifier")
+    if value in {".", ".."} or ".." in value or not _RUN_GROUP_PATTERN.fullmatch(value):
+        raise ValueError("run_group contains unsafe path or identity syntax")
+    return value
+
+
 def write_repair_receipt(
     ctx: Any,
     *,
@@ -749,9 +761,9 @@ def write_repair_receipt(
     reports_root: Path | None = None,
     run_group: str = "",
 ) -> Path:
+    run_group = canonical_run_group(run_group)
     report_dir_name = _safe_instance_id(getattr(ctx, "instance_id", ""))
-    if run_group:
-        report_dir_name = f"{report_dir_name}__{run_group}"
+    report_dir_name = f"{report_dir_name}__{run_group}"
     # Production default: workspace .nexus/reports/local_heal (or NEXUS_ARMOR_ARTIFACT_ROOT).
     # Never fall back to OS ephemeral temp for decision receipts.
     # Explicit reports_root remains injectable for tests/operators (may be a temp fixture).
