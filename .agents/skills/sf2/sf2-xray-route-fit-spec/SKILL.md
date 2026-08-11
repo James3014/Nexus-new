@@ -1,3 +1,9 @@
+---
+name: sf2-xray-route-fit-spec
+description: Candidate-only route-fit specification for xray.
+runtime_eligible: false
+---
+
 # SF2 xray Route Fit Spec
 
 Purpose: candidate-only route-fit skill for `xray`.
