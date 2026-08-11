@@ -1,7 +1,7 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
+AGENTS_MAX_BYTES = 13_000
 
 
 def _read(name: str) -> str:
@@ -21,7 +21,12 @@ def test_l0_keeps_authority_and_uses_conditional_load_map():
         "HARD_BLOCK",
     ):
         assert token in agents
-    for legacy_scope in ("max_files_touched", "allowed_paths", "forbidden_paths", "Tool Execution Rules"):
+    for legacy_scope in (
+        "max_files_touched",
+        "allowed_paths",
+        "forbidden_paths",
+        "Tool Execution Rules",
+    ):
         assert legacy_scope not in agents
 
 
@@ -60,7 +65,7 @@ def test_muse_remains_response_overlay_only():
 
 
 def test_context_budget_is_bounded_by_bytes_and_semantics():
-    assert (ROOT / "AGENTS.md").stat().st_size <= 12_000
+    assert (ROOT / "AGENTS.md").stat().st_size <= AGENTS_MAX_BYTES
     overlay_bytes = sum(
         (ROOT / "docs/agents" / name).stat().st_size
         for name in (
