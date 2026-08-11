@@ -51,8 +51,19 @@ def test_loader_fails_closed_on_invalid_schema(tmp_path: Path) -> None:
             "route_authority": "CapabilityPlanner",
             "last_verified": "2026-07-29",
             "states": ["PROVEN_MAINCHAIN"],
-            "workers": {"w1": {"provider": "p", "model": "m", "state": "PROVEN_MAINCHAIN", "availability": "AVAILABLE", "roles": ["r"]}},
-            "routing": {"blocked_or_disabled_models_must_not_be_selected": True, "experiment_only_models_require_explicit_authorization": True},
+            "workers": {
+                "w1": {
+                    "provider": "p",
+                    "model": "m",
+                    "state": "PROVEN_MAINCHAIN",
+                    "availability": "AVAILABLE",
+                    "roles": ["r"],
+                }
+            },
+            "routing": {
+                "blocked_or_disabled_models_must_not_be_selected": True,
+                "experiment_only_models_require_explicit_authorization": True,
+            },
             "context_policy": {},
         }),
         encoding="utf-8",
@@ -72,8 +83,19 @@ def test_loader_fails_closed_when_last_verified_is_in_future(tmp_path: Path) -> 
             "route_authority": "CapabilityPlanner",
             "last_verified": future_date,
             "states": ["PROVEN_MAINCHAIN"],
-            "workers": {"w1": {"provider": "p", "model": "m", "state": "PROVEN_MAINCHAIN", "availability": "AVAILABLE", "roles": ["r"]}},
-            "routing": {"blocked_or_disabled_models_must_not_be_selected": True, "experiment_only_models_require_explicit_authorization": True},
+            "workers": {
+                "w1": {
+                    "provider": "p",
+                    "model": "m",
+                    "state": "PROVEN_MAINCHAIN",
+                    "availability": "AVAILABLE",
+                    "roles": ["r"],
+                }
+            },
+            "routing": {
+                "blocked_or_disabled_models_must_not_be_selected": True,
+                "experiment_only_models_require_explicit_authorization": True,
+            },
             "context_policy": {},
         }),
         encoding="utf-8",
@@ -93,10 +115,25 @@ def test_loader_fails_closed_on_duplicate_provider_model_identity(tmp_path: Path
             "last_verified": "2026-07-29",
             "states": ["PROVEN_MAINCHAIN"],
             "workers": {
-                "w1": {"provider": "p1", "model": "m1", "state": "PROVEN_MAINCHAIN", "availability": "AVAILABLE", "roles": ["r"]},
-                "w2": {"provider": "p1", "model": "m1", "state": "PROVEN_MAINCHAIN", "availability": "AVAILABLE", "roles": ["r"]},
+                "w1": {
+                    "provider": "p1",
+                    "model": "m1",
+                    "state": "PROVEN_MAINCHAIN",
+                    "availability": "AVAILABLE",
+                    "roles": ["r"],
+                },
+                "w2": {
+                    "provider": "p1",
+                    "model": "m1",
+                    "state": "PROVEN_MAINCHAIN",
+                    "availability": "AVAILABLE",
+                    "roles": ["r"],
+                },
             },
-            "routing": {"blocked_or_disabled_models_must_not_be_selected": True, "experiment_only_models_require_explicit_authorization": True},
+            "routing": {
+                "blocked_or_disabled_models_must_not_be_selected": True,
+                "experiment_only_models_require_explicit_authorization": True,
+            },
             "context_policy": {},
         }),
         encoding="utf-8",
@@ -125,7 +162,12 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
         autonomy="L2",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],  # type: ignore[arg-type]
     )
     dec1 = loader.admit(req1, snapshot)
     assert dec1.decision == AdmissionDecision.ALLOW
@@ -139,7 +181,12 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
         autonomy="L2",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],  # type: ignore[arg-type]
     )
     dec2 = loader.admit(req2, snapshot)
     assert dec2.decision == AdmissionDecision.ALLOW
@@ -154,7 +201,12 @@ def test_admission_blocks_missing_route_authorization() -> None:
         autonomy="L2",
         context="nexus_bounded",
         route_authorized=False,
-        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.BLOCK
@@ -185,7 +237,6 @@ def test_admission_blocks_non_admissible_states_and_unavailability() -> None:
     )
     dec_laguna = loader.admit(req_laguna)
     assert dec_laguna.decision == AdmissionDecision.BLOCK
-
 
 
 def _codex_request(provided_controls: list[str]) -> WorkforceAdmissionRequest:
@@ -233,7 +284,9 @@ def test_admission_blocks_missing_required_controls() -> None:
         autonomy="L2",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["task_card"],  # missing allowed_files, mandatory_commands, independent_verification  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card"
+        ],  # missing allowed_files, mandatory_commands, independent_verification  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.BLOCK
@@ -242,7 +295,23 @@ def test_admission_blocks_missing_required_controls() -> None:
 
 
 def _deepseek_request(**overrides: object) -> WorkforceAdmissionRequest:
-    values: dict[str, object] = {"requested_worker_id": "opencode_deepseek_v4_flash", "provider": "opencode", "model": "opencode/deepseek-v4-flash-free", "role": "bounded_candidate_generation", "autonomy": "L1", "context": "nexus_bounded", "route_authorized": True, "provided_controls": ["isolated_directory", "bounded_context", "json_event_receipt", "parser", "focused_tests", "verifier"]}
+    values: dict[str, object] = {
+        "requested_worker_id": "opencode_deepseek_v4_flash",
+        "provider": "opencode",
+        "model": "opencode/deepseek-v4-flash-free",
+        "role": "bounded_candidate_generation",
+        "autonomy": "L1",
+        "context": "nexus_bounded",
+        "route_authorized": True,
+        "provided_controls": [
+            "isolated_directory",
+            "bounded_context",
+            "json_event_receipt",
+            "parser",
+            "focused_tests",
+            "verifier",
+        ],
+    }
     values.update(overrides)
     return WorkforceAdmissionRequest(**values)  # type: ignore[arg-type]
 
@@ -260,7 +329,17 @@ def test_owner_approved_deepseek_candidate_admission_is_generic_and_fail_closed(
     l15 = loader.admit(_deepseek_request(role="independent_review", autonomy="L1.5"))
     assert l15.decision == AdmissionDecision.BLOCK
     assert any("Invalid requested autonomy level" in reason for reason in l15.decision_reasons)
-    missing_control = loader.admit(_deepseek_request(provided_controls=["isolated_directory", "bounded_context", "json_event_receipt", "parser", "focused_tests"]))
+    missing_control = loader.admit(
+        _deepseek_request(
+            provided_controls=[
+                "isolated_directory",
+                "bounded_context",
+                "json_event_receipt",
+                "parser",
+                "focused_tests",
+            ]
+        )
+    )
     assert missing_control.decision == AdmissionDecision.BLOCK
     assert missing_control.missing_controls == ("verifier",)
     wrong_model = loader.admit(_deepseek_request(model="opencode/not-deepseek-v4-flash-free"))
@@ -277,7 +356,12 @@ def test_admission_escalates_role_mismatch() -> None:
         autonomy="L2",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.ESCALATE
@@ -293,7 +377,12 @@ def test_admission_escalates_autonomy_exceeding_ceiling() -> None:
         autonomy="L2+",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.ESCALATE
@@ -309,7 +398,13 @@ def test_admission_escalates_local_nexus_full_and_regression() -> None:
         autonomy="L1",
         context="nexus_full",
         route_authorized=True,
-        provided_controls=["small_scope", "parser", "compile", "focused_tests", "reversible_application"],  # type: ignore[arg-type]
+        provided_controls=[
+            "small_scope",
+            "parser",
+            "compile",
+            "focused_tests",
+            "reversible_application",
+        ],  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.ESCALATE
@@ -326,7 +421,14 @@ def test_admission_escalates_physical_mutation_conflicts() -> None:
         context="nexus_bounded",
         mutation_requested=True,
         route_authorized=True,
-        provided_controls=["isolated_directory", "bounded_context", "json_event_receipt", "parser", "focused_tests", "verifier"],  # type: ignore[arg-type]
+        provided_controls=[
+            "isolated_directory",
+            "bounded_context",
+            "json_event_receipt",
+            "parser",
+            "focused_tests",
+            "verifier",
+        ],  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.ESCALATE
@@ -347,7 +449,9 @@ def test_experiment_only_requires_explicit_authorization() -> None:
     )
     dec_no_auth = loader.admit(req_no_auth)
     assert dec_no_auth.decision == AdmissionDecision.BLOCK
-    assert any("requires explicit experiment authorization" in r for r in dec_no_auth.decision_reasons)
+    assert any(
+        "requires explicit experiment authorization" in r for r in dec_no_auth.decision_reasons
+    )
 
     # With explicit authorization -> ALLOW
     req_auth = WorkforceAdmissionRequest(
@@ -362,7 +466,9 @@ def test_experiment_only_requires_explicit_authorization() -> None:
     assert dec_auth.decision == AdmissionDecision.ALLOW
 
 
-def test_loader_default_policy_path_resolves_outside_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_loader_default_policy_path_resolves_outside_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.chdir(tmp_path)
     loader = WorkforcePolicyLoader()
     snapshot = loader.load()
@@ -378,7 +484,12 @@ def test_admission_blocks_invalid_request_schema_without_resolving_worker() -> N
         autonomy="L2",
         context="nexus_bounded",
         route_authorized=True,
-        provided_controls=["task_card", "allowed_files", "mandatory_commands", "independent_verification"],  # type: ignore[arg-type]
+        provided_controls=[
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],  # type: ignore[arg-type]
     )
     dec = loader.admit(req)
     assert dec.decision == AdmissionDecision.BLOCK

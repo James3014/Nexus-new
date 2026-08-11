@@ -53,8 +53,12 @@ def test_initial_uniform_matrix_covers_all_enrolled_models() -> None:
     assert matrix["latest_snapshot"]["all_enrolled_models_attempted"] is True
     assert matrix["result_authority"] == "nexus/config/model_workforce.yaml"
     assert matrix["composite_task"]["verifier_assertions"] == 11
-    assert matrix["latest_snapshot"]["summary_report"] == str(SUMMARY_REPORT_PATH.relative_to(REPO_ROOT))
-    assert matrix["latest_snapshot"]["machine_summary"] == str(SUMMARY_JSON_PATH.relative_to(REPO_ROOT))
+    assert matrix["latest_snapshot"]["summary_report"] == str(
+        SUMMARY_REPORT_PATH.relative_to(REPO_ROOT)
+    )
+    assert matrix["latest_snapshot"]["machine_summary"] == str(
+        SUMMARY_JSON_PATH.relative_to(REPO_ROOT)
+    )
     assert SUMMARY_REPORT_PATH.is_file()
     assert SUMMARY_JSON_PATH.is_file()
 
@@ -119,7 +123,14 @@ def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound
     assert {"parser", "focused_tests", "verifier"} <= set(worker["requires"])
     assert "second_repetition" not in worker["requires"]
     assert "physical_patch_suite" not in worker["requires"]
-    assert {"route_authority", "direct_workspace_mutation", "production_ready_judgment", "approval", "integration", "push"} <= set(worker["forbidden_actions"])
+    assert {
+        "route_authority",
+        "direct_workspace_mutation",
+        "production_ready_judgment",
+        "approval",
+        "integration",
+        "push",
+    } <= set(worker["forbidden_actions"])
     evidence = worker["requalification_evidence"]
     assert evidence["date"] == "2026-08-11"
     assert evidence["repetitions"] == 2
@@ -127,9 +138,18 @@ def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound
     assert evidence["model"] == "opencode/deepseek-v4-flash-free"
     assert evidence["opencode_version"] == "1.17.20"
     assert evidence["provider_model_revision"] == "UNRESOLVED"
-    assert evidence["arm_results"] == {"R2": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"}, "R3": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"}}
-    assert evidence["result_json_sha256"] == {"R2": "2493c49e2e9caa1b5a39f3839807d655cd78f8f12c8854058032b3e0d602471a", "R3": "b52e4ee5cc6e15a4cf452d8373bbe16fa6ce8837386dca8a9c70bf94c05065e8"}
-    assert evidence["physical_patch_evidence"] == {"PR_84_merge_sha": "c304e7d98f62f615f7ca44c2ab4451dff9e780e3", "PR_85_merge_sha": "8f7c75ca08a6c88fad9b791f254d38d79ad8bf29"}
+    assert evidence["arm_results"] == {
+        "R2": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"},
+        "R3": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"},
+    }
+    assert evidence["result_json_sha256"] == {
+        "R2": "2493c49e2e9caa1b5a39f3839807d655cd78f8f12c8854058032b3e0d602471a",
+        "R3": "b52e4ee5cc6e15a4cf452d8373bbe16fa6ce8837386dca8a9c70bf94c05065e8",
+    }
+    assert evidence["physical_patch_evidence"] == {
+        "PR_84_merge_sha": "c304e7d98f62f615f7ca44c2ab4451dff9e780e3",
+        "PR_85_merge_sha": "8f7c75ca08a6c88fad9b791f254d38d79ad8bf29",
+    }
     assert evidence["role_recommendation"] == "bounded_code_candidate"
     assert evidence["autonomy_ceiling"] == "L1"
     assert evidence["public_claim"] is False
