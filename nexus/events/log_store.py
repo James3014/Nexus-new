@@ -142,7 +142,7 @@ class DeveloperFeedbackDecisionStore:
         if not self.path or not self.path.exists() or self.path.stat().st_size == 0:
             return [], "0" * 64, 0
         raw = self.path.read_bytes()
-        if len(raw) > self.MAX_BYTES or not raw.endswith(b"\n"):
+        if len(raw) > self.MAX_BYTES or not raw.endswith(b"\n") or not raw.strip():
             raise ValueError("corrupt decision stream")
         records = []
         task_tails: Dict[str, Tuple[int, str]] = {}

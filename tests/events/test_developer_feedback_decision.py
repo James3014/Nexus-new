@@ -70,6 +70,41 @@ def test_corruption_and_tamper_fail_closed(tmp_path: Path):
         store.read_recent()
 
 
+@pytest.mark.parametrize("payload", [b"\n", b"null\n", b'{"schema":"x"\n'])
+def test_blank_non_object_and_partial_final_corruption_fail_closed(tmp_path: Path, payload: bytes):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    store.configure(tmp_path)
+    store.path.write_bytes(payload)
+    with pytest.raises(ValueError):
+        store.read_recent()
+
+
+def test_duplicate_key_and_middle_corruption_fail_closed(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    store.append(decision())
+    store.append(decision("d2"))
+    lines = store.path.read_bytes().splitlines()
+    duplicate = lines[0].replace(
+        b'"schema":', b'"schema":"nexus.developer_feedback_decision.v1","schema":', 1
+    )
+    store.path.write_bytes(duplicate + b"\n" + lines[1] + b"\n")
+    with pytest.raises(ValueError):
+        store.read_recent()
+
+
+def test_sequence_and_parent_digest_tamper_fail_closed(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    first = store.append(decision())
+    second = store.append(decision("d2"))
+    second["sequence"] = 99
+    unsigned = dict(second)
+    unsigned.pop("record_digest")
+    second["record_digest"] = hashlib.sha256(store._canonical(unsigned)).hexdigest()
+    store.path.write_bytes(store._canonical(first) + b"\n" + store._canonical(second) + b"\n")
+    with pytest.raises(ValueError, match="broken|tampered"):
+        store.read_recent()
+
+
 def test_forged_valid_digest_malformed_token_fails_closed(tmp_path: Path):
     store = DeveloperFeedbackDecisionStore(tmp_path)
     record = store.append(decision())
