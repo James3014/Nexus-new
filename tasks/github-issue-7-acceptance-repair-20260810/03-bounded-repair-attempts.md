@@ -1,10 +1,13 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: BLOCKED_OWNER_GATE
 task_id: github-issue-7-m3-c-bounded-repair
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
+owner_gate: M3_C_CAMPAIGN_REBIND_AND_OWNER_GATE
+owner_gate_status: REQUIRED
+baseline_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
 AUTO_CHAIN: false
 worker_may_commit: false
 worker_may_approve: false
@@ -13,6 +16,10 @@ worker_may_push: false
 ---
 
 # M3-C Bounded Repair Attempts and Physical Ceilings
+
+Implementation is blocked pending the separate Owner gate
+`M3_C_CAMPAIGN_REBIND_AND_OWNER_GATE`. M3-B is physically complete, but this
+metadata reconciliation does not authorize M3-C product mutation.
 
 ## Objective
 

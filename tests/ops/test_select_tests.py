@@ -126,6 +126,47 @@ def test_select_targets_prefers_most_specific_prefix_and_deduplicates_targets():
     ]
 
 
+def test_skill_descriptors_select_artifact_catalog_and_trust_contracts(tmp_path):
+    rules = load_impact_rules()
+    expected = [
+        "tests/ops/test_skill_file_contract.py",
+        "tests/learning/test_skill_catalog.py",
+        "tests/learning/test_skill_schema.py",
+        "tests/ops/test_ci_gate_report_trust_audit.py",
+        "tests/services/test_policy_gate.py",
+    ]
+
+    for path in (
+        ".agents/skills/example/SKILL.md",
+        ".agents/skills/example/agents/openai.yaml",
+    ):
+        details = select_target_details(
+            [path],
+            rules,
+            index_path=tmp_path / "missing-index.json",
+            stats_path=tmp_path / "missing-stats.json",
+            history_path=tmp_path / "missing-history.jsonl",
+        )
+        assert details.targets == expected
+        assert details.risk == "high"
+        assert details.fallback_used is False
+        assert details.unmatched_paths == []
+        assert details.risk_reasons == ["skill_artifact_contract_and_catalog_governance"]
+
+
+def test_unrelated_agents_path_remains_fail_closed_fallback(tmp_path):
+    details = select_target_details(
+        [".agents/other/config.yaml"],
+        load_impact_rules(),
+        index_path=tmp_path / "missing-index.json",
+        stats_path=tmp_path / "missing-stats.json",
+        history_path=tmp_path / "missing-history.jsonl",
+    )
+
+    assert details.fallback_used is True
+    assert details.unmatched_paths == [".agents/other/config.yaml"]
+
+
 def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
     rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high", "core_contract")]
 
@@ -209,6 +250,30 @@ def test_default_impact_map_covers_new_learning_modules_without_shadowing_specif
 
     assert unknown_details.fallback_used is True
     assert "tests/learning" not in unknown_details.targets
+
+
+def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp_path):
+    rules = load_impact_rules()
+    workforce_rule = next(
+        rule for rule in rules if rule.code_path == "nexus/config/model_workforce.yaml"
+    )
+    details = select_target_details(
+        ["nexus/config/model_workforce.yaml"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/contracts/test_model_workforce_policy.py",
+        "tests/services/test_model_workforce_policy_loader.py",
+    ]
+    assert workforce_rule.risk_reason == "workforce_policy_contract"
+    assert details.risk == "medium"
+    assert details.high_risk_escalated is False
+    assert details.fallback_used is False
+    assert details.unmatched_paths == []
 
 
 def test_select_targets_uses_fallback_when_no_paths_match():
