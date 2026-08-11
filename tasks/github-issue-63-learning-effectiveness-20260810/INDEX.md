@@ -18,4 +18,3 @@ AUTO_CHAIN: false
 Implement only the deterministic, observational E1 scorecard replay contract.
 Runtime producer wiring, automatic adaptation, and causal uplift claims are not
 part of this campaign.
-
