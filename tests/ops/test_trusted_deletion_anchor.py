@@ -77,8 +77,28 @@ def test_valid_fixed_schema_evidence_is_accepted():
             raw_diff=raw_diff,
             test_inventory=inventory,
             git_bundle=bundle,
+            recomputed_base_tree=manifest["base_tree"],
+            recomputed_head_tree=manifest["head_tree"],
         )
         == "PASS"
+    )
+
+
+def test_supplied_trees_cannot_override_immutable_commit_trees():
+    manifest = _manifest()
+    source, raw_diff, inventory = _artifacts()
+    assert (
+        verify_evidence(
+            manifest,
+            _evidence(manifest),
+            source_archive=source,
+            raw_diff=raw_diff,
+            test_inventory=inventory,
+            git_bundle=b"git bundle",
+            recomputed_base_tree="e" * 40,
+            recomputed_head_tree="f" * 40,
+        )
+        == "IMPACT_UNKNOWN"
     )
 
 

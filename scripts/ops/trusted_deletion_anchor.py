@@ -149,6 +149,8 @@ def verify_evidence(
     raw_diff: bytes | None = None,
     test_inventory: list[str] | None = None,
     git_bundle: bytes | None = None,
+    recomputed_base_tree: str | None = None,
+    recomputed_head_tree: str | None = None,
 ) -> str:
     """Validate only recomputable evidence; every ambiguity is unknown."""
 
@@ -163,6 +165,13 @@ def verify_evidence(
         for key in ("base_sha", "head_sha", "base_tree", "head_tree"):
             if evidence[key] != manifest[key]:
                 raise ValueError(f"{key} mismatch")
+        if (
+            recomputed_base_tree is None
+            or recomputed_head_tree is None
+            or recomputed_base_tree != manifest["base_tree"]
+            or recomputed_head_tree != manifest["head_tree"]
+        ):
+            raise ValueError("trees do not match immutable base/head commits")
         if (
             evidence["run_id"] != manifest["run_id"]
             or evidence["workflow_identity"] != manifest["workflow_identity"]
@@ -312,6 +321,8 @@ def _verifier(args: argparse.Namespace) -> None:
         )
         if recomputed_diff != (bundle / "raw-diff.bin").read_bytes():
             raise SystemExit(1)
+        recomputed_base_tree = _git(git_repo, "rev-parse", f"{manifest['base_sha']}^{{tree}}")
+        recomputed_head_tree = _git(git_repo, "rev-parse", f"{manifest['head_sha']}^{{tree}}")
         recomputed_inventory = _git(
             git_repo,
             "ls-tree",
@@ -336,6 +347,8 @@ def _verifier(args: argparse.Namespace) -> None:
         raw_diff=(bundle / "raw-diff.bin").read_bytes(),
         test_inventory=json.loads((bundle / "test-inventory.json").read_text(encoding="utf-8")),
         git_bundle=git_bundle,
+        recomputed_base_tree=recomputed_base_tree,
+        recomputed_head_tree=recomputed_head_tree,
     )
     print(json.dumps({"status": status, "claim_ceiling": "BOOTSTRAP_ANCHOR_ONLY"}, sort_keys=True))
     if status != "PASS":
