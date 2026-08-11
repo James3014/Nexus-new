@@ -1,12 +1,11 @@
-import click
-import json
-import time
-import subprocess
-import sys
 from pathlib import Path
+
+import click
+
+from nexus.engine.canonical_task_seam import build_legacy_cli_service
 from nexus.services.aos_service import AosService
 from nexus.services.audit_service import AuditService, SwarmWaveService
-from nexus.engine.canonical_task_seam import build_legacy_cli_service
+
 
 class CliCommandsService:
     """
@@ -47,8 +46,12 @@ class CliCommandsService:
         return "PASS"
 
     def heartbeat(self, test: bool):
-        from nexus.core.ops.nexus_heartbeat import run_heartbeat
-        return run_heartbeat(self.repo_root, test=test)
+        from scripts.ops.paperclip import PaperclipDaemon
+
+        daemon = PaperclipDaemon(self.repo_root / ".nexus" / "heartbeats")
+        if test:
+            return daemon.scan_once()
+        return daemon.monitor()
 
     def reach(self, url: str, tier: int = 1):
         from nexus.core.ucc_reach import UCCReach
