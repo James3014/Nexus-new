@@ -10,6 +10,7 @@ from nexus.contracts.workforce_admission import AdmissionDecision, WorkforceAdmi
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import (
     RuntimeWorkforceAdmissionResult,
+    _decision_dict,
     evaluate_runtime_workforce_admission,
 )
 
@@ -68,7 +69,7 @@ class CountingLoader:
         self.snapshot = self.real.load()
         return self.snapshot
 
-    def admit(self, request, snapshot):
+    def admit(self, request, snapshot) -> WorkforceAdmissionDecision | dict[str, object]:
         self.admit_calls.append((request, snapshot))
         if self.admit_error:
             raise self.admit_error
@@ -345,3 +346,80 @@ def test_demand_id_and_requested_identity_change_hash():
         loader2,
     )
     assert first.records[0].binding_hash != second.records[0].binding_hash
+
+
+def test_decision_dict_rejects_forged_raw_mapping_values_fail_closed():
+    forged = [
+        "FORGED",
+        "allow",
+        "",
+        None,
+        0,
+        True,
+        [],
+        {"decision": "ALLOW"},
+    ]
+    for value in forged:
+        with pytest.raises(ValueError, match="invalid decision value"):
+            _decision_dict({"decision": value})
+
+
+def test_decision_dict_accepts_only_canonical_decision_values():
+    for member in (AdmissionDecision.ALLOW, AdmissionDecision.BLOCK, AdmissionDecision.ESCALATE):
+        result = _decision_dict({"decision": member.value})
+        assert result["decision"] == member.value
+    enum_result = _decision_dict({"decision": AdmissionDecision.ESCALATE})
+    assert enum_result["decision"] == "ESCALATE"
+
+
+class ForgedDecisionLoader(CountingLoader):
+    def __init__(self, decision_value: object):
+        super().__init__()
+        self.decision_value = decision_value
+
+    def admit(self, request, snapshot) -> dict[str, object]:
+        self.admit_calls.append((request, snapshot))
+        return {"decision": self.decision_value, "resolved_worker_id": "forged"}
+
+
+@pytest.mark.parametrize(
+    "forged_value",
+    [
+        "FORGED",
+        "allow",
+        None,
+        0,
+        {"nested": "object"},
+    ],
+)
+def test_forged_raw_mapping_decision_is_synthetic_block_and_never_raises(forged_value):
+    loader = ForgedDecisionLoader(forged_value)
+    result = evaluate_runtime_workforce_admission(
+        demands(demand()),
+        {"local": {"worker_id": "local_coder_7b"}},
+        loader,
+    )
+    assert len(loader.admit_calls) == 1
+    assert result.overall_decision == AdmissionDecision.BLOCK
+    assert result.records[0].decision["decision"] == "BLOCK"
+    assert "Admission failed" in result.records[0].decision["decision_reasons"][0]
+
+
+def test_valid_raw_mapping_decision_still_serializes_canonically():
+    class RawLoader(CountingLoader):
+        def admit(self, request, snapshot) -> dict[str, object]:
+            self.admit_calls.append((request, snapshot))
+            return {
+                "decision": "ALLOW",
+                "resolved_worker_id": "local_coder_7b",
+                "resolved_provider": "ollama",
+                "resolved_model": "qwen2.5-coder:7b-instruct",
+            }
+
+    result = evaluate_runtime_workforce_admission(
+        demands(demand()),
+        {"local": {"worker_id": "local_coder_7b"}},
+        RawLoader(),
+    )
+    assert result.overall_decision == AdmissionDecision.ALLOW
+    assert result.records[0].decision["decision"] == "ALLOW"

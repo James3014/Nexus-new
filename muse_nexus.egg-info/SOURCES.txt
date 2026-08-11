@@ -381,14 +381,12 @@ scripts/core/brain_b_indexer.py
 scripts/core/brain_b_reality_check.py
 scripts/core/brain_search_v3.py
 scripts/core/context_hub.py
-scripts/core/drclaw_diagnosis.py
 scripts/core/factory_router.py
 scripts/core/gemini_handoff.py
 scripts/core/guard_executor.py
 scripts/core/idea_decomposer.py
 scripts/core/llm_client.py
 scripts/core/migration_safety_validator.py
-scripts/core/migration_validator.py
 scripts/core/morning_report.py
 scripts/core/night_batch_contracts.py
 scripts/core/parallel_spawner.py

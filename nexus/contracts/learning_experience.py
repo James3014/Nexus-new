@@ -186,6 +186,45 @@ def build_runtime_learning_closure(
     return episode
 
 
+def canonical_episode_identity(
+    *,
+    task_id: str,
+    attempt_id: str = "",
+    action_id: str = "",
+    source: str = "unknown",
+    idempotency_key: str = "",
+) -> tuple[str, str]:
+    """Resolve the canonical (idempotency_key, episode_id) pair for a payload.
+
+    An explicit, non-blank producer idempotency_key is preserved verbatim;
+    otherwise the identity falls back to task_id:attempt_id:action_id:source.
+    The episode_id is always ``lep:`` plus the first 24 hex characters of
+    SHA-256(identity). Builders and validators must use this one helper so the
+    two mutable identity fields cannot be independently tampered without the
+    recomputed digest changing.
+    """
+    task = str(task_id or "unknown")
+    attempt = str(attempt_id or "")
+    action = str(action_id or "")
+    producer = str(source or "unknown")
+    key = str(idempotency_key or "")
+    identity = key if key.strip() else f"{task}:{attempt}:{action}:{producer}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    return identity, f"lep:{digest}"
+
+
+_HEX_24 = frozenset("0123456789abcdef")
+
+
+def _is_canonical_episode_id(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and value.startswith("lep:")
+        and len(value) == 4 + 24
+        and all(char in _HEX_24 for char in value[4:])
+    )
+
+
 def build_nexus_learning_episode(
     *,
     task_id: str,
@@ -208,8 +247,13 @@ def build_nexus_learning_episode(
     attempt = str(attempt_id or "")
     action = str(action_id or "")
     producer = str(source or "unknown")
-    identity = idempotency_key or f"{task}:{attempt}:{action}:{producer}"
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    identity, episode_id = canonical_episode_identity(
+        task_id=task,
+        attempt_id=attempt,
+        action_id=action,
+        source=producer,
+        idempotency_key=idempotency_key,
+    )
     evidence = dict(terminal_evidence or {})
     phase = [dict(item) for item in phase_receipts if isinstance(item, dict)]
     raw_receipts = [dict(item) for item in receipts if isinstance(item, dict)]
@@ -241,7 +285,7 @@ def build_nexus_learning_episode(
     episode = {
         "schema": NEXUS_LEARNING_EPISODE_SCHEMA,
         "source_schema": NEXUS_LEARNING_EPISODE_SCHEMA,
-        "episode_id": f"lep:{digest}",
+        "episode_id": episode_id,
         "idempotency_key": identity,
         "task_id": task,
         "attempt_id": attempt,
@@ -273,6 +317,21 @@ def validate_nexus_learning_episode(episode: dict[str, Any]) -> None:
         raise ValueError("NEXUS_LEARNING_EPISODE_SCHEMA_INVALID")
     if episode.get("auto_replay_allowed") is not False:
         raise ValueError("NEXUS_LEARNING_EPISODE_AUTO_REPLAY_FORBIDDEN")
+    stored_key = episode.get("idempotency_key")
+    if not isinstance(stored_key, str) or not stored_key.strip():
+        raise ValueError("NEXUS_LEARNING_EPISODE_EMPTY_IDEMPOTENCY_KEY")
+    stored_id = episode.get("episode_id")
+    if not _is_canonical_episode_id(stored_id):
+        raise ValueError("NEXUS_LEARNING_EPISODE_MALFORMED_EPISODE_ID")
+    _, expected_id = canonical_episode_identity(
+        task_id=str(episode.get("task_id") or "unknown"),
+        attempt_id=str(episode.get("attempt_id") or ""),
+        action_id=str(episode.get("action_id") or ""),
+        source=str(episode.get("producer") or "unknown"),
+        idempotency_key=stored_key,
+    )
+    if stored_id != expected_id:
+        raise ValueError("NEXUS_LEARNING_EPISODE_IDENTITY_MISMATCH")
     stages = episode.get("stages") or {}
     if stages.get("outcome_uplift_observed") and not stages.get("outcome_measured"):
         raise ValueError("NEXUS_LEARNING_EPISODE_UPLIFT_WITHOUT_OUTCOME")
