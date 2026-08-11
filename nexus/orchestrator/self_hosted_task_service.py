@@ -46,6 +46,12 @@ from nexus.executors.worker_contract import (
     resolve_attempt,
 )
 from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.acceptance_loop import (
+    CandidateAcceptanceRequest,
+    CandidateAcceptanceResult,
+    IndependentReviewReceipt,
+    reduce_candidate_acceptance,
+)
 from nexus.orchestrator.autonomy_policy import (
     AutonomySubmissionBinding,
     project_autonomy_submission,
@@ -5944,6 +5950,31 @@ class SelfHostedTaskService:
         except OSError as exc:
             return "UNREADABLE", f"unable to walk target worktree: {exc}"
         return digest.hexdigest(), None
+
+    @staticmethod
+    def evaluate_candidate_acceptance(
+        request: CandidateAcceptanceRequest | Mapping[str, Any],
+        review: IndependentReviewReceipt | Mapping[str, Any],
+        *,
+        verified_repair_evidence: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate independent evidence without mutating lifecycle state."""
+        request_obj = (
+            request
+            if isinstance(request, CandidateAcceptanceRequest)
+            else CandidateAcceptanceRequest(**dict(request))
+        )
+        review_obj = (
+            review
+            if isinstance(review, IndependentReviewReceipt)
+            else IndependentReviewReceipt(**dict(review))
+        )
+        result: CandidateAcceptanceResult = reduce_candidate_acceptance(
+            request_obj,
+            review_obj,
+            verified_repair_evidence=verified_repair_evidence,
+        )
+        return result.to_dict()
 
     def verify_task(self, task_id: str) -> dict[str, Any]:
         """Read-only verification of a self-hosted task.
