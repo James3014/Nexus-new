@@ -23,7 +23,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "trusted-deletion-anchor.v2"
+SCHEMA_VERSION = "trusted-deletion-anchor.v3"
 RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v1"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
@@ -42,6 +42,7 @@ REQUIRED_EVIDENCE_KEYS = {
     "head_sha",
     "base_tree",
     "head_tree",
+    "test_tree",
     "bundle_sha256",
     "raw_diff_sha256",
     "test_inventory_sha256",
@@ -275,6 +276,7 @@ def build_manifest(
     runtime_identity: dict[str, Any] | None = None,
     base_tree: str | None = None,
     head_tree: str | None = None,
+    test_tree: str | None = None,
 ) -> dict[str, Any]:
     """Create the controller's immutable, hash-bound manifest."""
 
@@ -288,6 +290,7 @@ def build_manifest(
         raise ValueError("test inventory is missing or unsafe")
     base_tree = _exact_sha(base_tree or _git_object_id(base_sha.encode()), "base_tree")
     head_tree = _exact_sha(head_tree or _git_object_id(head_sha.encode()), "head_tree")
+    test_tree = _exact_sha(test_tree or _git_object_id(b"tests:" + head_sha.encode()), "test_tree")
     node_ids = sorted(_sha(path.encode()) for path in test_inventory)
     manifest: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -298,6 +301,7 @@ def build_manifest(
         "head_sha": head_sha,
         "base_tree": base_tree,
         "head_tree": head_tree,
+        "test_tree": test_tree,
         "raw_diff_sha256": _sha(raw_diff),
         "test_inventory": sorted(test_inventory),
         "test_inventory_sha256": _sha(_json(sorted(test_inventory))),
@@ -340,6 +344,7 @@ def verify_evidence(
     recomputed_uv_lock: bytes | None = None,
     recomputed_base_tree: str | None = None,
     recomputed_head_tree: str | None = None,
+    recomputed_test_tree: str | None = None,
 ) -> str:
     """Validate only recomputable evidence; every ambiguity is unknown."""
 
@@ -351,7 +356,7 @@ def verify_evidence(
         serialized = json.dumps(evidence, ensure_ascii=True, sort_keys=True).lower()
         if "ghs_" in serialized or "token" in serialized or "authorization" in serialized:
             raise ValueError("credential-bearing evidence")
-        for key in ("base_sha", "head_sha", "base_tree", "head_tree"):
+        for key in ("base_sha", "head_sha", "base_tree", "head_tree", "test_tree"):
             if evidence[key] != manifest[key]:
                 raise ValueError(f"{key} mismatch")
         if (
@@ -359,8 +364,9 @@ def verify_evidence(
             or recomputed_head_tree is None
             or recomputed_base_tree != manifest["base_tree"]
             or recomputed_head_tree != manifest["head_tree"]
+            or recomputed_test_tree != manifest["test_tree"]
         ):
-            raise ValueError("trees do not match immutable base/head commits")
+            raise ValueError("trees do not match immutable base/head/test commits")
         if (
             evidence["run_id"] != manifest["run_id"]
             or evidence["workflow_identity"] != manifest["workflow_identity"]
@@ -566,6 +572,7 @@ def _controller(args: argparse.Namespace) -> None:
         source_archive=source_archive,
         base_tree=trees["base"],
         head_tree=trees["head"],
+        test_tree=_git(repo, "rev-parse", f"{head_sha}:tests"),
         git_bundle=git_bundle,
         pyproject=pyproject,
         uv_lock=uv_lock,
@@ -596,10 +603,17 @@ def _controller(args: argparse.Namespace) -> None:
 def _executor(args: argparse.Namespace) -> None:
     bundle = Path(args.bundle_dir)
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    source_archive = (bundle / "source.tar").read_bytes()
+    git_bundle = (bundle / "git-objects.bundle").read_bytes()
+    if _sha(source_archive) != manifest.get("source_archive_sha256") or _sha(
+        git_bundle
+    ) != manifest.get("git_bundle_sha256"):
+        raise ValueError("source or Git bundle identity mismatch")
     source = bundle / "source"
     source.mkdir()
-    with tarfile.open(bundle / "source.tar") as archive:
+    with tarfile.open(fileobj=BytesIO(source_archive)) as archive:
         archive.extractall(source, filter=_executor_archive_filter)
+    _prepare_executor_git_context(bundle, source, manifest)
     requirements = (bundle / "requirements.txt").read_bytes()
     runtime_archive = (bundle / "runtime.tar").read_bytes()
     runtime_metadata_bytes = (bundle / "runtime-metadata.json").read_bytes()
@@ -621,13 +635,20 @@ def _executor(args: argparse.Namespace) -> None:
     site_packages = (runtime / "site-packages").resolve()
     if not site_packages.is_dir():
         raise ValueError("offline runtime site-packages is missing")
-    environment = dict(os.environ)
-    environment.update({
+    executor_home = runtime / "home"
+    executor_home.mkdir()
+    environment = {
+        "CI": "true",
+        "HOME": str(executor_home),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "PIP_NO_INDEX": "1",
         "PYTHONNOUSERSITE": "1",
         "PYTHONPATH": str(site_packages),
+        "TMPDIR": os.environ.get("RUNNER_TEMP", tempfile.gettempdir()),
         "UV_OFFLINE": "1",
-    })
+    }
     plugin_probe = subprocess.run(
         [
             sys.executable,
@@ -661,6 +682,73 @@ def _executor(args: argparse.Namespace) -> None:
     }
     (bundle / "raw-evidence.json").write_bytes(_json(evidence) + b"\n")
     raise SystemExit(result.returncode)
+
+
+def _prepare_executor_git_context(bundle: Path, source: Path, manifest: dict[str, Any]) -> None:
+    identity = manifest.get("workflow_identity")
+    if not isinstance(identity, dict):
+        raise ValueError("workflow identity is missing")
+    expected = (
+        (BASE_REF, _exact_sha(manifest.get("base_sha"), "base_sha")),
+        (HEAD_REF, _exact_sha(manifest.get("head_sha"), "head_sha")),
+        (WORKFLOW_REF, _exact_sha(identity.get("workflow_sha"), "workflow_sha")),
+    )
+    subprocess.run(["git", "init", "-q", str(source)], check=True, capture_output=True)
+    git_bundle = bundle / "git-objects.bundle"
+    subprocess.run(
+        ["git", "bundle", "verify", str(git_bundle)],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    for ref, revision in expected:
+        _git(source, "fetch", "--no-tags", str(git_bundle), f"{ref}:{ref}")
+        if (
+            _git(source, "show-ref", "--verify", ref).split()[0] != revision
+            or _git(source, "rev-parse", f"{ref}^{{commit}}") != revision
+        ):
+            raise ValueError(f"executor Git ref mismatch: {ref}")
+    _git(source, "update-ref", "--no-deref", "HEAD", manifest["head_sha"])
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", manifest["base_sha"], manifest["head_sha"]],
+        cwd=source,
+        capture_output=True,
+    )
+    if (
+        ancestry.returncode != 0
+        or _git(source, "rev-parse", "HEAD") != manifest["head_sha"]
+        or _git(source, "rev-parse", "HEAD^{tree}") != manifest["head_tree"]
+        or _git(source, "rev-parse", f"{BASE_REF}^{{tree}}") != manifest["base_tree"]
+        or _git(source, "rev-parse", "HEAD:tests") != manifest["test_tree"]
+        or _extracted_test_tree(source) != manifest["test_tree"]
+    ):
+        raise ValueError("executor Git identity mismatch")
+
+
+def _extracted_test_tree(source: Path) -> str:
+    with tempfile.TemporaryDirectory(prefix="trusted-anchor-index-") as directory:
+        environment = {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_INDEX_FILE": str(Path(directory) / "index"),
+            "HOME": directory,
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        subprocess.run(
+            ["git", "add", "-f", "--", "tests"],
+            cwd=source,
+            env=environment,
+            check=True,
+            capture_output=True,
+        )
+        root_tree = subprocess.run(
+            ["git", "write-tree"],
+            cwd=source,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return _git(source, "rev-parse", f"{root_tree}:tests")
 
 
 def _executor_archive_filter(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo | None:
@@ -749,6 +837,7 @@ def _verifier(args: argparse.Namespace) -> None:
             raise SystemExit(1)
         recomputed_base_tree = _git(git_repo, "rev-parse", f"{manifest['base_sha']}^{{tree}}")
         recomputed_head_tree = _git(git_repo, "rev-parse", f"{manifest['head_sha']}^{{tree}}")
+        recomputed_test_tree = _git(git_repo, "rev-parse", f"{manifest['head_sha']}:tests")
         recomputed_inventory = _git(
             git_repo,
             "ls-tree",
@@ -792,6 +881,7 @@ def _verifier(args: argparse.Namespace) -> None:
         recomputed_uv_lock=trusted_uv_lock,
         recomputed_base_tree=recomputed_base_tree,
         recomputed_head_tree=recomputed_head_tree,
+        recomputed_test_tree=recomputed_test_tree,
     )
     print(json.dumps({"status": status, "claim_ceiling": "BOOTSTRAP_ANCHOR_ONLY"}, sort_keys=True))
     if status != "PASS":
