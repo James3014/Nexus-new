@@ -41,4 +41,3 @@ Completion receipt:
 - exact-base/post-deletion regression: identical 16-failure set (zero
   regression); Ruff identical pre-existing; `git diff --check` clean
 - reached `CANDIDATE_PR_READY`
-
