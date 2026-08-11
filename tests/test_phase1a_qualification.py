@@ -240,6 +240,29 @@ def test_run_classifier_separates_semantic_failure_from_invalidity():
     )
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "semantic_success",
+        "provider_runtime_ok",
+        "fixture_ok",
+        "required_telemetry_complete",
+        "treatment_identity_ok",
+        "complete_triplet",
+        "forbidden_local_call_in_b",
+        "source_integrity_ok",
+        "report_integrity_ok",
+        "receipt_integrity_ok",
+        "manifest_identity_ok",
+    ),
+)
+@pytest.mark.parametrize("invalid_value", ("false", 1, None, []))
+def test_run_validity_evidence_rejects_non_boolean_flags(field_name, invalid_value):
+    values = {"semantic_success": True, field_name: invalid_value}
+    with pytest.raises(TypeError, match="boolean"):
+        RunValidityEvidence(**values)
+
+
 def test_formal_effect_rows_exclude_qualification_and_invalid_runs():
     manifest = make_manifest(
         qualification_task_ids=("qual-1",), formal_task_ids=("formal-1", "formal-2", "formal-3")

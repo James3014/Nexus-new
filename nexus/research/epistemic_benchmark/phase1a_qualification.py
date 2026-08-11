@@ -269,6 +269,22 @@ class RunValidityEvidence:
     receipt_integrity_ok: bool = True
     manifest_identity_ok: bool = True
 
+    def __post_init__(self) -> None:
+        for name in (
+            "semantic_success",
+            "provider_runtime_ok",
+            "fixture_ok",
+            "required_telemetry_complete",
+            "treatment_identity_ok",
+            "complete_triplet",
+            "forbidden_local_call_in_b",
+            "source_integrity_ok",
+            "report_integrity_ok",
+            "receipt_integrity_ok",
+            "manifest_identity_ok",
+        ):
+            _require_boolean(name, getattr(self, name))
+
 
 def classify_run(evidence: RunValidityEvidence) -> RunClassification:
     integrity_ok = (
@@ -506,6 +522,11 @@ def _require_sha256(name: str, value: Any) -> None:
 def _require_nonnegative_int(name: str, value: Any) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"{name} must be a non-negative integer")
+
+
+def _require_boolean(name: str, value: Any) -> None:
+    if type(value) is not bool:
+        raise TypeError(f"{name} must be a boolean")
 
 
 def _stable_hash(payload: Any) -> str:
