@@ -12,10 +12,15 @@ jobs:
     outputs:
       manifest_sha256: ${{ steps.external-anchor.outputs.manifest_sha256 }}
       external_anchor_sha256: ${{ steps.external-anchor.outputs.external_anchor_sha256 }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
+      - name: Acquire fixed trusted runtime builder
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.2"
+          enable-cache: false
       - name: Acquire and execute exact trusted controller source
         id: trusted-source
         env:
@@ -31,13 +36,15 @@ jobs:
           set -euo pipefail
           bare_repo="$RUNNER_TEMP/trusted-controller.git"
           trusted_dir="$RUNNER_TEMP/trusted-controller-source"
+          runtime_dir="$RUNNER_TEMP/trusted-runtime"
           cleanup_on_exit() {
             status=$?
             trap - EXIT INT TERM
             if [ "$status" -ne 0 ]; then
-              rm -rf -- "$bare_repo" "$trusted_dir"
+              rm -rf -- "$bare_repo" "$trusted_dir" "$runtime_dir"
               test ! -e "$bare_repo"
               test ! -e "$trusted_dir"
+              test ! -e "$runtime_dir"
             fi
             exit "$status"
           }
@@ -81,8 +88,9 @@ jobs:
           printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
           test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
           python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/anchor-event.json", "w"))'
+          python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
-            python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor"
+            python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor" --runtime-dir "$runtime_dir"
       - name: Publish fixed external anchor
         id: external-anchor
         run: |
@@ -100,15 +108,16 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          rm -rf -- "$RUNNER_TEMP/trusted-controller.git" "$RUNNER_TEMP/trusted-controller-source"
+          rm -rf -- "$RUNNER_TEMP/trusted-controller.git" "$RUNNER_TEMP/trusted-controller-source" "$RUNNER_TEMP/trusted-runtime"
           test ! -e "$RUNNER_TEMP/trusted-controller.git"
           test ! -e "$RUNNER_TEMP/trusted-controller-source"
+          test ! -e "$RUNNER_TEMP/trusted-runtime"
 
   unprivileged-executor:
     name: Unprivileged executor (bundle only)
     needs: trusted-controller
     if: needs.trusted-controller.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions: {}
     steps:
       - name: Download controller bundle
@@ -129,12 +138,19 @@ jobs:
           path: ${{ runner.temp }}/trusted-anchor/raw-evidence.json
           if-no-files-found: error
           retention-days: 7
+      - name: Cleanup unprivileged executor material
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf -- "$RUNNER_TEMP/trusted-anchor/source" "$RUNNER_TEMP/trusted-anchor/runtime"
+          test ! -e "$RUNNER_TEMP/trusted-anchor/source"
+          test ! -e "$RUNNER_TEMP/trusted-anchor/runtime"
 
   trusted-verifier:
     name: Trusted verifier (default branch)
     needs: [trusted-controller, unprivileged-executor]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
