@@ -10,7 +10,13 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from nexus.feedback.contracts import AUTHORITY_FLAG_KEYS, DeveloperFeedbackDecision
+from nexus.feedback.contracts import (
+    _CODE_RE,
+    _REF_RE,
+    AUTHORITY_FLAG_KEYS,
+    DeveloperFeedbackDecision,
+    _tokens,
+)
 
 
 class JsonlEventLogStore:
@@ -108,6 +114,13 @@ class DeveloperFeedbackDecisionStore:
             or not re.fullmatch(r"[0-9a-f]{64}", obj["record_digest"])
         ):
             raise ValueError("invalid decision field types")
+        try:
+            _tokens((obj["task_id"],), _REF_RE, "task_id")
+            _tokens((obj["decision_id"],), _REF_RE, "decision_id")
+            _tokens(obj["reason_codes"], _CODE_RE, "reason_codes")
+            _tokens(obj["evidence_refs"], _REF_RE, "evidence_refs")
+        except ValueError as exc:
+            raise ValueError("invalid decision token grammar") from exc
         return obj
 
     def _scan(self) -> Tuple[list[Dict[str, Any]], str, int]:

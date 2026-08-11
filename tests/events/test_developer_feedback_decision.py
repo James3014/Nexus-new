@@ -1,4 +1,5 @@
 import fcntl
+import hashlib
 import threading
 from pathlib import Path
 
@@ -43,6 +44,18 @@ def test_corruption_and_tamper_fail_closed(tmp_path: Path):
     path = store.path
     path.write_text(path.read_text().replace('"decision":"KEEP"', '"decision":"REVISE"'), encoding="utf-8")
     with pytest.raises(ValueError):
+        store.read_recent()
+
+
+def test_forged_valid_digest_malformed_token_fails_closed(tmp_path: Path):
+    store = DeveloperFeedbackDecisionStore(tmp_path)
+    record = store.append(decision())
+    record["task_id"] = "/private/path"
+    unsigned = dict(record)
+    unsigned.pop("record_digest")
+    record["record_digest"] = hashlib.sha256(store._canonical(unsigned)).hexdigest()
+    store.path.write_bytes(store._canonical(record) + b"\n")
+    with pytest.raises(ValueError, match="token grammar"):
         store.read_recent()
 
 
