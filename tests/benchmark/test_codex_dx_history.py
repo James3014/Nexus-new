@@ -38,9 +38,7 @@ def test_complete_schema_and_denominator_accounting():
     assert receipt["accounting"]["returned_items"] == 1
     assert receipt["accounting"]["classified_items"] == 1
     validate_history_receipt(receipt)
-    schema = json.loads(
-        Path("docs/benchmark/codex_dx_history_receipt_v1.schema.json").read_text()
-    )
+    schema = json.loads(Path("docs/benchmark/codex_dx_history_receipt_v1.schema.json").read_text())
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == set(receipt)

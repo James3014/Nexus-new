@@ -17,8 +17,7 @@ TASK_CLASSES = {"orientation", "setup", "focused_test", "bounded_change", "verif
 BENCHMARK_REPO = "James3014/Nexus-new"
 BEFORE_COMMIT = "b6601270edd95a756c4eab8c7a623006ee1b32d1"
 SCHEMA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs/benchmark/codex_dx_benchmark_receipt_v1.schema.json"
+    Path(__file__).resolve().parents[2] / "docs/benchmark/codex_dx_benchmark_receipt_v1.schema.json"
 )
 TRIAL_REQUIRED = {
     "trial_id",
@@ -151,28 +150,37 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         "session_artifacts",
         "baseline_evidence",
     }
-    _require(required <= receipt.keys(), f"missing receipt fields: {sorted(required - receipt.keys())}")
-    _require(receipt["schema_version"] == "codex-dx-benchmark-receipt-v1", "unsupported schema_version")
+    _require(
+        required <= receipt.keys(), f"missing receipt fields: {sorted(required - receipt.keys())}"
+    )
+    _require(
+        receipt["schema_version"] == "codex-dx-benchmark-receipt-v1", "unsupported schema_version"
+    )
     _require(receipt["frozen"] is True, "benchmark arm must be frozen")
     _require(receipt["arm"] in {"before", "after"}, "arm must be before or after")
 
     source = receipt["source"]
     _require(isinstance(source, dict), "source must be an object")
-    _require(isinstance(source.get("commit"), str) and len(source["commit"]) == 40, "source.commit must be a full SHA")
+    _require(
+        isinstance(source.get("commit"), str) and len(source["commit"]) == 40,
+        "source.commit must be a full SHA",
+    )
     _require(source.get("mutable") is False, "source must be immutable")
     _require(source.get("repo") == BENCHMARK_REPO, "benchmark repository identity mismatch")
     if receipt["arm"] == "before":
         _require(source["commit"] == BEFORE_COMMIT, "before arm must bind frozen b660 source")
         evidence_ids = {row["id"] for row in receipt["baseline_evidence"]}
         _require(
-            evidence_ids
-            == {"missing-benchmark-runner", "codex-task-history-transport"},
+            evidence_ids == {"missing-benchmark-runner", "codex-task-history-transport"},
             "before arm requires both frozen baseline evidence records",
         )
 
     protocol = receipt["protocol"]
     _require(protocol.get("repetitions") == 3, "protocol must freeze three repetitions")
-    _require(set(protocol.get("task_classes", [])) == TASK_CLASSES, "protocol must freeze the five task classes")
+    _require(
+        set(protocol.get("task_classes", [])) == TASK_CLASSES,
+        "protocol must freeze the five task classes",
+    )
     _require(bool(protocol.get("model_id")), "protocol.model_id is required")
     _require(bool(protocol.get("verifier_version")), "protocol.verifier_version is required")
     _require(protocol.get("fresh_session_required") is True, "fresh_session_required must be true")
@@ -212,7 +220,10 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         )
         _require(payload.get("session_model") == protocol["model_id"], "payload model mismatch")
         payload_trials = payload.get("trials")
-        _require(isinstance(payload_trials, list) and len(payload_trials) == 5, "artifact needs five trials")
+        _require(
+            isinstance(payload_trials, list) and len(payload_trials) == 5,
+            "artifact needs five trials",
+        )
         _require(
             {trial.get("task_class") for trial in payload_trials} == TASK_CLASSES,
             "artifact must cover five task classes",
@@ -223,7 +234,14 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
     _require(isinstance(tasks, list) and len(tasks) == 5, "exactly five tasks are required")
     task_by_id: dict[str, dict[str, Any]] = {}
     for task in tasks:
-        for field in ("id", "task_class", "prompt", "fixture_sha256", "verifier_id", "verifier_command"):
+        for field in (
+            "id",
+            "task_class",
+            "prompt",
+            "fixture_sha256",
+            "verifier_id",
+            "verifier_command",
+        ):
             _require(field in task, f"task missing {field}")
         _require(task["task_class"] in TASK_CLASSES, f"unknown task class {task['task_class']}")
         _require(
@@ -232,7 +250,9 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         )
         _require(task["id"] not in task_by_id, f"duplicate task id {task['id']}")
         task_by_id[task["id"]] = task
-    _require({task["task_class"] for task in tasks} == TASK_CLASSES, "tasks must cover each class once")
+    _require(
+        {task["task_class"] for task in tasks} == TASK_CLASSES, "tasks must cover each class once"
+    )
 
     trials = receipt["trials"]
     _require(isinstance(trials, list) and len(trials) == 15, "exactly 15 trials are required")
@@ -256,14 +276,30 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         _require(pair not in seen_pairs, f"duplicate task repetition {pair}")
         seen_pairs.add(pair)
         _require(trial["repetition"] in {1, 2, 3}, "repetition must be 1, 2, or 3")
-        _require(trial["source_commit"] == source["commit"], "trial source does not match arm source")
-        _require(trial["fixture_sha256"] == task["fixture_sha256"], "trial fixture does not match task")
+        _require(
+            trial["source_commit"] == source["commit"], "trial source does not match arm source"
+        )
+        _require(
+            trial["fixture_sha256"] == task["fixture_sha256"], "trial fixture does not match task"
+        )
         _require(trial["verifier_id"] == task["verifier_id"], "trial verifier does not match task")
-        _require(trial["verifier_status"] in {"passed", "failed", "not_run"}, "invalid verifier_status")
-        _require(isinstance(trial["verifier_artifact"], dict), "verifier_artifact must be an object")
+        _require(
+            trial["verifier_status"] in {"passed", "failed", "not_run"}, "invalid verifier_status"
+        )
+        _require(
+            isinstance(trial["verifier_artifact"], dict), "verifier_artifact must be an object"
+        )
         _require(isinstance(trial["context"], dict), "trial.context must be an object")
-        _require(set(trial["context"]) == {"bytes", "items"}, "context must contain only bytes and items")
-        _require(all(isinstance(trial["context"][key], int) and trial["context"][key] >= 0 for key in ("bytes", "items")), "context metrics must be non-negative integers")
+        _require(
+            set(trial["context"]) == {"bytes", "items"}, "context must contain only bytes and items"
+        )
+        _require(
+            all(
+                isinstance(trial["context"][key], int) and trial["context"][key] >= 0
+                for key in ("bytes", "items")
+            ),
+            "context metrics must be non-negative integers",
+        )
         _require(isinstance(trial["invalid_reasons"], list), "invalid_reasons must be a list")
         _require(
             isinstance(trial["diff"], dict)
@@ -284,7 +320,9 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
             )
             _require(trial["fresh_context"] is True, "valid trial requires fresh_context")
             _require(bool(trial["session_id"]), "valid trial requires session_id")
-            _require(trial["session_id"] == artifact["session_id"], "trial session artifact mismatch")
+            _require(
+                trial["session_id"] == artifact["session_id"], "trial session artifact mismatch"
+            )
             repetition_session = valid_session_by_repetition.setdefault(
                 trial["repetition"], trial["session_id"]
             )
@@ -293,7 +331,9 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
                 "all task classes in a repetition must share one fresh session",
             )
             _require(not trial["invalid_reasons"], "valid trial cannot have invalid_reasons")
-            _require(trial["verifier_status"] != "not_run", "valid trial requires verifier execution")
+            _require(
+                trial["verifier_status"] != "not_run", "valid trial requires verifier execution"
+            )
             _require(
                 bool(trial["verifier_artifact"].get("ref"))
                 and isinstance(trial["verifier_artifact"].get("sha256"), str)
@@ -302,13 +342,19 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
             )
             _require(
                 trial["verifier_artifact"]
-                == {"ref": f"inline-session:{artifact['session_id']}", "sha256": artifact["sha256"]},
+                == {
+                    "ref": f"inline-session:{artifact['session_id']}",
+                    "sha256": artifact["sha256"],
+                },
                 "trial verifier artifact does not match persisted session",
             )
             _require(
                 trial["outcome"] == payload_trial["outcome"]
                 and trial["context"]
-                == {"bytes": payload_trial["context_bytes"], "items": payload_trial["context_items"]}
+                == {
+                    "bytes": payload_trial["context_bytes"],
+                    "items": payload_trial["context_items"],
+                }
                 and trial["tool_calls"] == payload_trial["tool_calls"]
                 and trial["wall_time_seconds"] == payload_trial["wall_time_seconds"]
                 and trial["human_interventions"] == payload_trial["human_interventions"]
@@ -341,13 +387,13 @@ def validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         "invalid_trial_count": 15 - valid_count,
         "passed_trial_count": passed,
         "success_rate": passed / valid_count if valid_count else None,
-        "median_context_bytes": statistics.median(valid_context_bytes) if valid_context_bytes else None,
+        "median_context_bytes": statistics.median(valid_context_bytes)
+        if valid_context_bytes
+        else None,
         "task_class_counts": dict(sorted(class_counts.items())),
         "invalid_reason_counts": dict(sorted(invalid_reason_counts.items())),
         "observed_outcome_counts": dict(sorted(observed_outcome_counts.items())),
-        "unauthorized_action_total": sum(
-            int(trial["unauthorized_actions"]) for trial in trials
-        ),
+        "unauthorized_action_total": sum(int(trial["unauthorized_actions"]) for trial in trials),
     }
 
 
@@ -360,16 +406,31 @@ def compare_receipts(before: dict[str, Any], after: dict[str, Any]) -> dict[str,
     """Compare paired arms without allowing protocol or task drift."""
     before_aggregate = validate_receipt(before)
     after_aggregate = validate_receipt(after)
-    _require(before["arm"] == "before" and after["arm"] == "after", "compare requires before and after arms")
+    _require(
+        before["arm"] == "before" and after["arm"] == "after",
+        "compare requires before and after arms",
+    )
     _require(
         before["source"]["commit"] != after["source"]["commit"],
         "after arm must use a distinct improved source commit",
     )
     for field in ("task_classes", "repetitions", "model_id", "verifier_version"):
-        _require(before["protocol"][field] == after["protocol"][field], f"protocol mismatch: {field}")
+        _require(
+            before["protocol"][field] == after["protocol"][field], f"protocol mismatch: {field}"
+        )
     for before_task, after_task in zip(before["tasks"], after["tasks"], strict=True):
-        for field in ("id", "task_class", "prompt", "fixture_sha256", "verifier_id", "verifier_command"):
-            _require(before_task[field] == after_task[field], f"task mismatch: {before_task['id']} {field}")
+        for field in (
+            "id",
+            "task_class",
+            "prompt",
+            "fixture_sha256",
+            "verifier_id",
+            "verifier_command",
+        ):
+            _require(
+                before_task[field] == after_task[field],
+                f"task mismatch: {before_task['id']} {field}",
+            )
     before_sessions = {artifact["session_id"] for artifact in before["session_artifacts"]}
     after_sessions = {artifact["session_id"] for artifact in after["session_artifacts"]}
     _require(

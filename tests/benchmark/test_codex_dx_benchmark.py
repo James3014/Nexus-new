@@ -79,7 +79,8 @@ def _eligible_arm(receipt: dict, arm: str) -> dict:
     for trial in result["trials"]:
         artifact = artifacts[trial["repetition"]]
         payload_trial = next(
-            row for row in artifact["payload"]["trials"]
+            row
+            for row in artifact["payload"]["trials"]
             if row["task_class"] == task_class_by_id[trial["task_id"]]
         )
         trial["session_id"] = artifact["session_id"]

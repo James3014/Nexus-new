@@ -137,7 +137,13 @@ def check_core(repo_root: Path) -> list[dict[str, Any]]:
         )
     for module in CORE_MODULES:
         present = importlib.util.find_spec(module) is not None
-        checks.append(_check(f"core_dependency:{module}", present, "importable" if present else "missing_core_dependency"))
+        checks.append(
+            _check(
+                f"core_dependency:{module}",
+                present,
+                "importable" if present else "missing_core_dependency",
+            )
+        )
     return checks
 
 

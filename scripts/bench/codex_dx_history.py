@@ -67,7 +67,9 @@ def collect_history(
     _fail(max_pages > 0 and max_items > 0, "collection bounds must be positive")
     list_page: Callable[[Any], Mapping[str, Any]] | None = getattr(adapter, "list_page", None)
     read_item: Callable[[str], Mapping[str, Any]] | None = getattr(adapter, "read_item", None)
-    _fail(callable(list_page) and callable(read_item), "adapter must provide list_page and read_item")
+    _fail(
+        callable(list_page) and callable(read_item), "adapter must provide list_page and read_item"
+    )
 
     cursor: Any = None
     pages = 0
@@ -128,7 +130,10 @@ def collect_history(
             recurrence = result.get("recurrence", 1)
             interventions = result.get("human_interventions", 0)
             _fail(isinstance(recurrence, int) and recurrence >= 1, "recurrence is invalid")
-            _fail(isinstance(interventions, int) and interventions >= 0, "human_interventions is invalid")
+            _fail(
+                isinstance(interventions, int) and interventions >= 0,
+                "human_interventions is invalid",
+            )
             row["category"] = category
             row["recurrence"] = recurrence
             row["human_interventions"] = interventions
@@ -137,12 +142,17 @@ def collect_history(
             break
         next_cursor = page.get("next_cursor")
         if next_cursor is None:
-            _fail("complete" in page and page["complete"] is True, "missing pagination completion state")
+            _fail(
+                "complete" in page and page["complete"] is True,
+                "missing pagination completion state",
+            )
             break
         _fail(isinstance(next_cursor, str) and next_cursor, "pagination cursor is invalid")
         cursor = next_cursor
 
-    counts = {outcome: sum(item["outcome"] == outcome for item in items) for outcome in sorted(_OUTCOMES)}
+    counts = {
+        outcome: sum(item["outcome"] == outcome for item in items) for outcome in sorted(_OUTCOMES)
+    }
     returned = len(items)
     classified = sum(counts.values())
     accounting = {
@@ -169,7 +179,11 @@ def collect_history(
             item_ids=[item["id"] for item in items],
         ),
         "transport_gap": transport_gap,
-        "pagination": {"pages": pages, "complete": status == "complete", "cursor_hash": _hash_ids([str(cursor)] if cursor else [])},
+        "pagination": {
+            "pages": pages,
+            "complete": status == "complete",
+            "cursor_hash": _hash_ids([str(cursor)] if cursor else []),
+        },
         "items": items,
         "accounting": accounting,
         "coverage": {"claimable": status == "complete", "ceiling": "coverage-bounded taxonomy"},
@@ -179,7 +193,9 @@ def collect_history(
 def validate_history_receipt(receipt: Mapping[str, Any]) -> None:
     """Reject receipts that could imply complete zero coverage dishonestly."""
     _fail(isinstance(receipt, Mapping), "receipt must be an object")
-    _fail(receipt.get("schema_version") == "codex-dx-history-receipt-v1", "unsupported schema version")
+    _fail(
+        receipt.get("schema_version") == "codex-dx-history-receipt-v1", "unsupported schema version"
+    )
     _fail(receipt.get("status") in _STATUSES, "invalid status")
     _bounded_ref(receipt.get("source"))
     _bounded_ref(receipt.get("cutoff"))
@@ -208,10 +224,12 @@ def validate_history_receipt(receipt: Mapping[str, Any]) -> None:
         ),
         "accounting values must be nonnegative integers",
     )
-    _fail(accounting.get("returned_items") == accounting.get("classified_items"), "denominator accounting mismatch")
+    _fail(
+        accounting.get("returned_items") == accounting.get("classified_items"),
+        "denominator accounting mismatch",
+    )
     outcome_total = sum(
-        int(accounting.get(key, -1))
-        for key in ("successes", "failures", "timeouts", "unavailable")
+        int(accounting.get(key, -1)) for key in ("successes", "failures", "timeouts", "unavailable")
     )
     _fail(outcome_total == accounting.get("classified_items"), "outcome accounting mismatch")
     items = receipt.get("items")
@@ -226,7 +244,10 @@ def validate_history_receipt(receipt: Mapping[str, Any]) -> None:
         "evidence_ref",
     }
     for item in items:
-        _fail(isinstance(item, Mapping) and set(item) == required_item_keys, "history item shape is invalid")
+        _fail(
+            isinstance(item, Mapping) and set(item) == required_item_keys,
+            "history item shape is invalid",
+        )
         _bounded_ref(item["id"])
         _bounded_ref(item["evidence_ref"])
         _fail(item["outcome"] in _OUTCOMES, "history item outcome is invalid")
@@ -252,13 +273,15 @@ def validate_history_receipt(receipt: Mapping[str, Any]) -> None:
     )
     _fail(receipt["snapshot_hash"] == expected_snapshot_hash, "snapshot identity mismatch")
     expected_counts = {
-        outcome: sum(item["outcome"] == outcome for item in items)
-        for outcome in _OUTCOMES
+        outcome: sum(item["outcome"] == outcome for item in items) for outcome in _OUTCOMES
     }
     _fail(accounting["successes"] == expected_counts["success"], "success accounting mismatch")
     _fail(accounting["failures"] == expected_counts["failure"], "failure accounting mismatch")
     _fail(accounting["timeouts"] == expected_counts["timeout"], "timeout accounting mismatch")
-    _fail(accounting["unavailable"] == expected_counts["unavailable"], "unavailable accounting mismatch")
+    _fail(
+        accounting["unavailable"] == expected_counts["unavailable"],
+        "unavailable accounting mismatch",
+    )
     pagination = receipt.get("pagination")
     _fail(isinstance(pagination, Mapping), "pagination is required")
     _fail(

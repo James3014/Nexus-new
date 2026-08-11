@@ -48,13 +48,17 @@ def test_cli_emits_bounded_summary():
         check=False,
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == "VALID: 5 bounded task classes; exact commands; no broad fallback"
+    assert (
+        result.stdout.strip() == "VALID: 5 bounded task classes; exact commands; no broad fallback"
+    )
 
 
 @pytest.mark.parametrize("field", ["authority_path", "context_paths"])
 def test_missing_mapping_path_fails_closed(tmp_path, field):
     data = canonical()
-    data["task_classes"][0][field] = "does/not/exist" if field == "authority_path" else ["does/not/exist"]
+    data["task_classes"][0][field] = (
+        "does/not/exist" if field == "authority_path" else ["does/not/exist"]
+    )
     with pytest.raises(ContextIndexError, match="does not exist"):
         validate(candidate(tmp_path, data))
 
@@ -88,16 +92,12 @@ def test_unknown_decision_field_and_forbidden_overlap_fail_closed(tmp_path):
         validate(candidate(tmp_path, data))
 
     data = canonical()
-    data["task_classes"][0]["forbidden_scope"].append(
-        data["task_classes"][0]["context_paths"][0]
-    )
+    data["task_classes"][0]["forbidden_scope"].append(data["task_classes"][0]["context_paths"][0])
     with pytest.raises(ContextIndexError, match="overlaps"):
         validate(candidate(tmp_path, data))
 
     data = canonical()
-    data["task_classes"][0]["context_paths"].remove(
-        data["task_classes"][0]["authority_path"]
-    )
+    data["task_classes"][0]["context_paths"].remove(data["task_classes"][0]["authority_path"])
     with pytest.raises(ContextIndexError, match="included in context_paths"):
         validate(candidate(tmp_path, data))
 

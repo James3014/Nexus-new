@@ -10,7 +10,13 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_scripts_are_valid_and_modes_are_explicit() -> None:
-    result = run("bash", "-n", "scripts/ops/test_repo.sh", "scripts/ops/test_fast.sh", "scripts/ops/test_changed.sh")
+    result = run(
+        "bash",
+        "-n",
+        "scripts/ops/test_repo.sh",
+        "scripts/ops/test_fast.sh",
+        "scripts/ops/test_changed.sh",
+    )
     assert result.returncode == 0, result.stderr
     unsupported = run("bash", "scripts/ops/test_repo.sh", "unknown")
     assert unsupported.returncode != 0
@@ -21,7 +27,9 @@ def test_fast_prints_targets(tmp_path: Path) -> None:
     # Keep this contract test independent of a host uv cache; C3 exercises the
     # real tool in the isolated target.
     fake_uv = tmp_path / "uv"
-    fake_uv.write_text("#!/bin/sh\nshift\n[ \"$1\" = python ] && shift && set -- python3 \"$@\"\nexec \"$@\"\n")
+    fake_uv.write_text(
+        '#!/bin/sh\nshift\n[ "$1" = python ] && shift && set -- python3 "$@"\nexec "$@"\n'
+    )
     fake_uv.chmod(0o755)
     result = subprocess.run(
         ("bash", "scripts/ops/test_repo.sh", "fast"),
@@ -55,11 +63,23 @@ def test_cache_default_is_repo_local_and_explicit_value_is_preserved(tmp_path: P
     fake_uv.chmod(0o755)
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "NEXUS_TEST_FORCE_UV": "1"}
     env.pop("UV_CACHE_DIR", None)
-    result = subprocess.run(("bash", "scripts/ops/test_repo.sh", "fast"), cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run(
+        ("bash", "scripts/ops/test_repo.sh", "fast"),
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
     assert result.returncode == 0
     assert observed.read_text() == str(ROOT / ".tmp/uv-cache")
     env["UV_CACHE_DIR"] = str(tmp_path / "explicit-cache")
-    result = subprocess.run(("bash", "scripts/ops/test_repo.sh", "fast"), cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run(
+        ("bash", "scripts/ops/test_repo.sh", "fast"),
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
     assert result.returncode == 0
     assert observed.read_text() == env["UV_CACHE_DIR"]
 
@@ -89,7 +109,7 @@ def test_changed_empty_or_missing_selection_fails_closed(tmp_path: Path) -> None
     fake_uv.write_text(
         "#!/bin/sh\n"
         "shift; shift\n"
-        "case \"$1\" in\n"
+        'case "$1" in\n'
         " scripts/ops/select_tests.py) [ \"$UV_MODE\" = empty ] || printf '%s\\n' tests/nope.py ;;\n"
         "esac\n"
     )
@@ -97,7 +117,13 @@ def test_changed_empty_or_missing_selection_fails_closed(tmp_path: Path) -> None
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "NEXUS_TEST_FORCE_UV": "1"}
     for mode in ("empty", "missing"):
         env["UV_MODE"] = mode
-        result = subprocess.run(("bash", "scripts/ops/test_repo.sh", "changed", "pyproject.toml"), cwd=ROOT, env=env, text=True, capture_output=True)
+        result = subprocess.run(
+            ("bash", "scripts/ops/test_repo.sh", "changed", "pyproject.toml"),
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
         assert result.returncode != 0
 
 

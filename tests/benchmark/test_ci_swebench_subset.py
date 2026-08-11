@@ -98,9 +98,7 @@ def test_timeout_is_classified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert run_case(_case(task_id="slow"), tmp_path)["status"] == "timeout"
 
 
-def test_false_zero_exit_is_not_pass(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_false_zero_exit_is_not_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import scripts.ci.run_benchmark_case as module
 
     process = subprocess.CompletedProcess([], 0, stdout="", stderr="")
@@ -136,7 +134,9 @@ def test_smoke_uses_temp_materialization_and_leaves_repo_cases_unchanged(
     tmp_path: Path,
 ) -> None:
     repo_cases = Path(".nexus/bench_cases")
-    before = sorted(path.as_posix() for path in repo_cases.rglob("*")) if repo_cases.exists() else []
+    before = (
+        sorted(path.as_posix() for path in repo_cases.rglob("*")) if repo_cases.exists() else []
+    )
     output = tmp_path / "results.jsonl"
 
     assert main(["--mode", "smoke", "--output", str(output), "--timeout", "30"]) == 0
@@ -152,7 +152,7 @@ def test_workflow_matches_local_provider_free_command() -> None:
     assert 'python-version: "3.12"' in workflow
     assert "uv sync --frozen --all-groups" in workflow
     assert "run_swebench_subset.py" in workflow
-    assert "--mode \"$MODE\"" in workflow
+    assert '--mode "$MODE"' in workflow
     assert "GEMINI_API_KEY" not in workflow
     assert "OPENAI_API_KEY" not in workflow
     assert "docker info" not in workflow

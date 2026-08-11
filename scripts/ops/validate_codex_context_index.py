@@ -81,11 +81,7 @@ def validate_test(task_class: str, test: object) -> None:
         fail(f"{task_class}.test.argv contains a wildcard")
     if argv[0] not in COMMANDS or shutil.which(argv[0]) is None:
         fail(f"{task_class}.test executable is unavailable")
-    if any(
-        control in arg
-        for arg in argv
-        for control in (";", "&&", "||", "|", "$(")
-    ):
+    if any(control in arg for arg in argv for control in (";", "&&", "||", "|", "$(")):
         fail(f"{task_class}.test contains shell control syntax")
     for arg in argv[1:]:
         if Path(arg).is_absolute():
@@ -143,9 +139,7 @@ def validate_task(task: object, *, ids: set[str], authorities: set[str]) -> str:
     forbidden = task["forbidden_scope"]
     if not isinstance(forbidden, list) or not forbidden or len(forbidden) != len(set(forbidden)):
         fail(f"{task_class}.forbidden_scope must be a unique list")
-    forbidden_names = {
-        relative_name(item, f"{task_class}.forbidden_scope") for item in forbidden
-    }
+    forbidden_names = {relative_name(item, f"{task_class}.forbidden_scope") for item in forbidden}
     if len(forbidden_names) != len(forbidden):
         fail(f"{task_class}.forbidden_scope contains a canonical duplicate")
     retrieval_names = {authority_name, *(str(path.relative_to(ROOT)) for path in context_files)}
