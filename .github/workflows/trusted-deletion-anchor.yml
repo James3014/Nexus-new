@@ -9,13 +9,15 @@ permissions: {}
 jobs:
   trusted-controller:
     name: Trusted controller (default branch)
+    outputs:
+      manifest_sha256: ${{ steps.external-anchor.outputs.manifest_sha256 }}
+      external_anchor_sha256: ${{ steps.external-anchor.outputs.external_anchor_sha256 }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write
     steps:
       - name: Checkout trusted default branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
@@ -26,6 +28,7 @@ jobs:
           EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_SHA"
       - name: Build immutable controller bundle
+        id: build-bundle
         env:
           EVENT_JSON: ${{ toJSON(github.event) }}
           EVENT_NAME: ${{ github.event_name }}
@@ -39,8 +42,14 @@ jobs:
             --event-json "$RUNNER_TEMP/anchor-event.json" \
             --repo-root "$GITHUB_WORKSPACE" \
             --output-dir "$RUNNER_TEMP/trusted-anchor"
+      - name: Publish fixed external anchor
+        id: external-anchor
+        run: |
+          set -euo pipefail
+          echo "manifest_sha256=$(sha256sum "$RUNNER_TEMP/trusted-anchor/manifest.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "external_anchor_sha256=$(sha256sum "$RUNNER_TEMP/trusted-anchor/external-anchor.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Upload controller bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: trusted-anchor-controller-${{ github.run_id }}
           path: ${{ runner.temp }}/trusted-anchor/
@@ -55,7 +64,7 @@ jobs:
     permissions: {}
     steps:
       - name: Download controller bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: trusted-anchor-controller-${{ github.run_id }}
           path: ${{ runner.temp }}/trusted-anchor
@@ -66,7 +75,7 @@ jobs:
             --bundle-dir "$RUNNER_TEMP/trusted-anchor"
       - name: Upload fixed-schema raw evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: trusted-anchor-executor-${{ github.run_id }}
           path: ${{ runner.temp }}/trusted-anchor/raw-evidence.json
@@ -83,7 +92,7 @@ jobs:
       actions: read
     steps:
       - name: Checkout trusted default branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
@@ -94,12 +103,12 @@ jobs:
           EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_SHA"
       - name: Download controller bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: trusted-anchor-controller-${{ github.run_id }}
           path: ${{ runner.temp }}/trusted-anchor
       - name: Download executor evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: trusted-anchor-executor-${{ github.run_id }}
           path: ${{ runner.temp }}/trusted-anchor/evidence
@@ -108,6 +117,14 @@ jobs:
           EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
           EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
           EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.trusted-controller.outputs.manifest_sha256 }}
+          EXPECTED_EXTERNAL_ANCHOR_SHA256: ${{ needs.trusted-controller.outputs.external_anchor_sha256 }}
         run: |
           set -euo pipefail
           test -f "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json"
@@ -116,4 +133,13 @@ jobs:
             --bundle-dir "$RUNNER_TEMP/trusted-anchor" \
             --expected-workflow-ref "$EXPECTED_WORKFLOW_REF" \
             --expected-workflow-sha "$EXPECTED_WORKFLOW_SHA" \
-            --expected-run-id "$EXPECTED_RUN_ID"
+            --expected-run-id "$EXPECTED_RUN_ID" \
+            --verify-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" \
+            --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+            --expected-external-anchor-sha256 "$EXPECTED_EXTERNAL_ANCHOR_SHA256" \
+            --expected-event-name "$EXPECTED_EVENT_NAME" \
+            --expected-repository "$EXPECTED_REPOSITORY" \
+            --expected-default-branch "$EXPECTED_DEFAULT_BRANCH" \
+            --expected-pull-request-number "$EXPECTED_PULL_REQUEST_NUMBER" \
+            --expected-base-sha "$EXPECTED_BASE_SHA" \
+            --expected-head-sha "$EXPECTED_HEAD_SHA"

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import subprocess
+import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 import yaml
 
 from scripts.ops.trusted_deletion_anchor import (
     SCHEMA_VERSION,
+    _json,
     build_manifest,
     verify_evidence,
 )
+
+MODULE = Path(__file__).parents[2] / "scripts/ops/trusted_deletion_anchor.py"
+
+
+def _run_git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 def _event() -> dict[str, object]:
@@ -21,6 +34,7 @@ def _event() -> dict[str, object]:
         "run_id": 1240,
         "repository": {"full_name": "James3014/Nexus-new", "default_branch": "main"},
         "pull_request": {
+            "number": 125,
             "base": {"sha": "b" * 40, "ref": "main", "repo": {"full_name": "James3014/Nexus-new"}},
             "head": {"sha": "c" * 40, "repo": {"full_name": "fork/Nexus-new"}},
         },
@@ -181,6 +195,25 @@ def test_workflow_is_three_job_isolated_anchor():
     executor = workflow["jobs"]["unprivileged-executor"]
     assert executor["permissions"] == {}
     assert all("checkout" not in step.get("uses", "") for step in executor["steps"])
+    assert workflow["jobs"]["trusted-controller"]["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["trusted-verifier"]["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+    }
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            action = step.get("uses", "")
+            if action.startswith(
+                ("actions/checkout@", "actions/upload-artifact@", "actions/download-artifact@")
+            ):
+                assert len(action.split("@", 1)[1].split()[0]) == 40
+                assert action.split("@", 1)[1].split()[0].isalnum()
+    verifier_run = next(
+        step["run"]
+        for step in workflow["jobs"]["trusted-verifier"]["steps"]
+        if step.get("name") == "Verify fixed schema and recomputed digests"
+    )
+    assert '--verify-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json"' in verifier_run
     serialized = str(executor).lower()
     assert "secrets" not in serialized
     assert "cache" not in serialized
@@ -188,3 +221,109 @@ def test_workflow_is_three_job_isolated_anchor():
         for step in job["steps"]:
             if "checkout" in step.get("uses", ""):
                 assert step["with"]["persist-credentials"] is False
+
+
+def test_controller_executor_verifier_path_has_cloneable_bundle_and_external_anchor():
+    with TemporaryDirectory(prefix="trusted-anchor-e2e-") as directory:
+        root = Path(directory)
+        origin = root / "origin.git"
+        checkout = root / "checkout"
+        subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "clone", str(origin), str(checkout)], check=True, capture_output=True
+        )
+        _run_git(checkout, "config", "user.email", "test@example.invalid")
+        _run_git(checkout, "config", "user.name", "trusted-anchor-test")
+        test_path = checkout / "tests/ops/test_pr_impact_gate.py"
+        test_path.parent.mkdir(parents=True)
+        test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
+        _run_git(checkout, "add", "tests/ops/test_pr_impact_gate.py")
+        _run_git(checkout, "commit", "-m", "base")
+        base_sha = _run_git(checkout, "rev-parse", "HEAD")
+        test_path.write_text("def test_anchor_path():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+        _run_git(checkout, "commit", "-am", "head")
+        head_sha = _run_git(checkout, "rev-parse", "HEAD")
+        _run_git(checkout, "push", "origin", "HEAD:main")
+        event = _event()
+        event["workflow_sha"] = "a" * 40
+        event["pull_request"]["base"]["sha"] = base_sha  # type: ignore[index]
+        event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+        event["pull_request"]["base"]["repo"]["full_name"] = "Nexus"  # type: ignore[index]
+        event["repository"]["full_name"] = "Nexus"  # type: ignore[index]
+        event["workflow_ref"] = (
+            "Nexus/.github/workflows/trusted-deletion-anchor.yml@refs/heads/main"
+        )
+        event_path = root / "event.json"
+        event_path.write_bytes(_json(event))
+        bundle = root / "bundle"
+        subprocess.run(
+            [
+                sys.executable,
+                str(MODULE),
+                "controller",
+                "--event-json",
+                str(event_path),
+                "--repo-root",
+                str(checkout),
+                "--output-dir",
+                str(bundle),
+            ],
+            check=True,
+        )
+        manifest = json.loads((bundle / "manifest.json").read_text())
+        anchor = json.loads((bundle / "external-anchor.json").read_text())
+        assert (bundle / "git-objects.bundle").stat().st_size > 0
+        assert (
+            anchor["manifest_sha256"]
+            == hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest()
+        )
+        clone = root / "bundle-clone.git"
+        subprocess.run(["git", "init", "--bare", str(clone)], check=True, capture_output=True)
+        for ref, revision in (
+            ("refs/trusted-anchor/base", base_sha),
+            ("refs/trusted-anchor/head", head_sha),
+        ):
+            _run_git(clone, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
+            assert _run_git(clone, "rev-parse", f"{ref}^{{commit}}") == revision
+        subprocess.run(
+            [sys.executable, str(MODULE), "executor", "--bundle-dir", str(bundle)], check=True
+        )
+        expected = {
+            "--expected-workflow-ref": event["workflow_ref"],
+            "--expected-workflow-sha": event["workflow_sha"],
+            "--expected-run-id": str(event["run_id"]),
+            "--verify-evidence": str(bundle / "raw-evidence.json"),
+            "--expected-manifest-sha256": anchor["manifest_sha256"],
+            "--expected-external-anchor-sha256": hashlib.sha256(
+                (bundle / "external-anchor.json").read_bytes()
+            ).hexdigest(),
+            "--expected-event-name": event["event_name"],
+            "--expected-repository": event["repository"]["full_name"],
+            "--expected-default-branch": event["repository"]["default_branch"],
+            "--expected-pull-request-number": str(event["pull_request"]["number"]),
+            "--expected-base-sha": base_sha,
+            "--expected-head-sha": head_sha,
+        }
+        verified = subprocess.run(
+            [sys.executable, str(MODULE), "verifier", "--bundle-dir", str(bundle)]
+            + [item for pair in expected.items() for item in pair],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert '"status": "PASS"' in verified.stdout
+        tampered = dict(manifest)
+        tampered["head_sha"] = "d" * 40
+        tampered["head_tree"] = "e" * 40
+        (bundle / "manifest.json").write_bytes(_json(tampered) + b"\n")
+        anchor["manifest_sha256"] = hashlib.sha256(
+            (bundle / "manifest.json").read_bytes()
+        ).hexdigest()
+        anchor["head_sha"] = tampered["head_sha"]
+        (bundle / "external-anchor.json").write_bytes(_json(anchor) + b"\n")
+        rejected = subprocess.run(
+            [sys.executable, str(MODULE), "verifier", "--bundle-dir", str(bundle)]
+            + [item for pair in expected.items() for item in pair],
+            capture_output=True,
+        )
+        assert rejected.returncode != 0

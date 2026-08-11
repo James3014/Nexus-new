@@ -22,6 +22,8 @@ from typing import Any
 SCHEMA_VERSION = "trusted-deletion-anchor.v1"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
+BASE_REF = "refs/trusted-anchor/base"
+HEAD_REF = "refs/trusted-anchor/head"
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -86,12 +88,17 @@ def _identity(event: dict[str, Any]) -> dict[str, Any]:
     base_repo = _event_value(event, "pull_request", "base", "repo", "full_name")
     if base_repo != repository:
         raise ValueError("base repository drift")
+    pull_request_number = _event_value(event, "pull_request", "number")
+    if type(pull_request_number) is not int or pull_request_number <= 0:
+        raise ValueError("pull request number must be a positive integer")
     return {
+        "event_name": event["event_name"],
         "repository": repository,
         "default_branch": default_branch,
         "workflow_ref": workflow_ref,
         "workflow_sha": workflow_sha,
         "run_id": run_id,
+        "pull_request_number": pull_request_number,
     }
 
 
@@ -230,6 +237,30 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
+def _create_git_bundle(repo: Path, output: Path, base_sha: str, head_sha: str) -> bytes:
+    """Bundle verified commits through fixed refs in an ephemeral bare clone."""
+
+    with tempfile.TemporaryDirectory(prefix="trusted-anchor-bundle-") as directory:
+        ephemeral = Path(directory) / "repo.git"
+        subprocess.run(["git", "init", "--bare", str(ephemeral)], check=True, capture_output=True)
+        _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha)
+        for ref, revision in ((BASE_REF, base_sha), (HEAD_REF, head_sha)):
+            _git(ephemeral, "cat-file", "-e", f"{revision}^{{commit}}")
+            _git(ephemeral, "update-ref", ref, revision)
+            if _git(ephemeral, "rev-parse", f"{ref}^{{commit}}") != revision:
+                raise ValueError(f"failed to bind {ref}")
+        subprocess.run(
+            ["git", "bundle", "create", str(output), BASE_REF, HEAD_REF],
+            cwd=ephemeral,
+            check=True,
+            capture_output=True,
+        )
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ValueError("Git object bundle is empty")
+        subprocess.run(["git", "bundle", "verify", str(output)], check=True, capture_output=True)
+    return output.read_bytes()
+
+
 def _controller(args: argparse.Namespace) -> None:
     event = json.loads(Path(args.event_json).read_text(encoding="utf-8"))
     repo = Path(args.repo_root)
@@ -254,8 +285,7 @@ def _controller(args: argparse.Namespace) -> None:
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     git_bundle_path = output / "git-objects.bundle"
-    _git(repo, "bundle", "create", str(git_bundle_path), base_sha, head_sha)
-    git_bundle = git_bundle_path.read_bytes()
+    git_bundle = _create_git_bundle(repo, git_bundle_path, base_sha, head_sha)
     manifest = build_manifest(
         event,
         raw_diff=raw_diff,
@@ -269,6 +299,18 @@ def _controller(args: argparse.Namespace) -> None:
     (output / "raw-diff.bin").write_bytes(raw_diff)
     (output / "test-inventory.json").write_bytes(_json(selected) + b"\n")
     (output / "manifest.json").write_bytes(_json(manifest) + b"\n")
+    (output / "external-anchor.json").write_bytes(
+        _json(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
+                "workflow_identity": manifest["workflow_identity"],
+                "base_sha": manifest["base_sha"],
+                "head_sha": manifest["head_sha"],
+            }
+        )
+        + b"\n"
+    )
     (output / "trusted_deletion_anchor.py").write_bytes(Path(__file__).read_bytes())
 
 
@@ -296,7 +338,34 @@ def _executor(args: argparse.Namespace) -> None:
 def _verifier(args: argparse.Namespace) -> None:
     bundle = Path(args.bundle_dir)
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
-    evidence = json.loads((bundle / "raw-evidence.json").read_text(encoding="utf-8"))
+    evidence_path = Path(args.verify_evidence)
+    if evidence_path != bundle / "raw-evidence.json" or not evidence_path.is_file():
+        raise SystemExit(1)
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    manifest_bytes = (bundle / "manifest.json").read_bytes()
+    anchor_bytes = (bundle / "external-anchor.json").read_bytes()
+    expected_identity = {
+        "event_name": args.expected_event_name,
+        "repository": args.expected_repository,
+        "default_branch": args.expected_default_branch,
+        "workflow_ref": args.expected_workflow_ref,
+        "workflow_sha": _exact_sha(args.expected_workflow_sha, "workflow_sha"),
+        "run_id": args.expected_run_id,
+        "pull_request_number": args.expected_pull_request_number,
+    }
+    if (
+        _sha(manifest_bytes) != args.expected_manifest_sha256
+        or _sha(anchor_bytes) != args.expected_external_anchor_sha256
+        or anchor.get("manifest_sha256") != args.expected_manifest_sha256
+        or anchor.get("workflow_identity") != expected_identity
+        or anchor.get("base_sha") != args.expected_base_sha
+        or anchor.get("head_sha") != args.expected_head_sha
+        or manifest.get("workflow_identity") != expected_identity
+        or manifest.get("base_sha") != args.expected_base_sha
+        or manifest.get("head_sha") != args.expected_head_sha
+    ):
+        raise SystemExit(1)
     identity = manifest.get("workflow_identity")
     if not isinstance(identity, dict) or identity.get("workflow_ref") != args.expected_workflow_ref:
         raise SystemExit(1)
@@ -308,7 +377,22 @@ def _verifier(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-verify-") as directory:
         git_repo = Path(directory) / "repo.git"
         subprocess.run(["git", "init", "--bare", str(git_repo)], check=True, capture_output=True)
-        _git(git_repo, "fetch", str(bundle / "git-objects.bundle"))
+        subprocess.run(
+            ["git", "bundle", "verify", str(bundle / "git-objects.bundle")],
+            check=True,
+            capture_output=True,
+        )
+        for ref, revision in ((BASE_REF, manifest["base_sha"]), (HEAD_REF, manifest["head_sha"])):
+            _git(git_repo, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
+            if (
+                _git(git_repo, "show-ref", "--verify", f"refs/{ref.removeprefix('refs/')}").split()[
+                    0
+                ]
+                != revision
+            ):
+                raise SystemExit(1)
+            if _git(git_repo, "rev-parse", f"{ref}^{{commit}}") != revision:
+                raise SystemExit(1)
         recomputed_diff = _git(
             git_repo,
             "diff",
@@ -371,6 +455,15 @@ def main() -> None:
     verifier.add_argument("--expected-workflow-ref", required=True)
     verifier.add_argument("--expected-workflow-sha", required=True)
     verifier.add_argument("--expected-run-id", required=True, type=int)
+    verifier.add_argument("--verify-evidence", required=True)
+    verifier.add_argument("--expected-manifest-sha256", required=True)
+    verifier.add_argument("--expected-external-anchor-sha256", required=True)
+    verifier.add_argument("--expected-event-name", required=True)
+    verifier.add_argument("--expected-repository", required=True)
+    verifier.add_argument("--expected-default-branch", required=True)
+    verifier.add_argument("--expected-pull-request-number", required=True, type=int)
+    verifier.add_argument("--expected-base-sha", required=True)
+    verifier.add_argument("--expected-head-sha", required=True)
     verifier.set_defaults(function=_verifier)
     args = parser.parse_args()
     args.function(args)
