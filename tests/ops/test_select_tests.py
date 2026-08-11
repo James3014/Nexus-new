@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from scripts.ops.select_tests import (
     ImpactRule,
@@ -33,6 +34,80 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
             risk_reason="core_contract",
         )
     ]
+
+
+def test_issue153_event_feedback_rows_map_without_fallback():
+    rules = load_impact_rules()
+    details = select_target_details(
+        ["nexus/events/log_store.py", "nexus/events/transport.py", "nexus/feedback/contracts.py"],
+        rules,
+        index_path=Path("/tmp/missing-issue153-impact-index.json"),
+        history_path=Path("/tmp/missing-issue153-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/events",
+        "tests/core/test_event_bus.py",
+        "tests/architecture/test_boundaries_v4.py",
+        "tests/unit/evaluation/test_policy_delta.py",
+        "tests/unit/committee/test_data_flow_v267.py",
+        "tests/architecture/test_boundaries_v3.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.risk_reasons == [
+        "event_store_and_transport_contract",
+        "developer_feedback_contract",
+    ]
+
+
+def test_issue153_feedback_row_maps_exact_targets_without_fallback():
+    rules = load_impact_rules()
+    details = select_target_details(
+        ["nexus/feedback/contracts.py"],
+        rules,
+        index_path=Path("/tmp/missing-issue153-impact-index.json"),
+        history_path=Path("/tmp/missing-issue153-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/events",
+        "tests/unit/evaluation/test_policy_delta.py",
+        "tests/unit/committee/test_data_flow_v267.py",
+        "tests/architecture/test_boundaries_v3.py",
+        "tests/architecture/test_boundaries_v4.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.risk_reasons == ["developer_feedback_contract"]
+
+
+def test_issue153_unrelated_event_path_remains_fallback():
+    rules = load_impact_rules()
+    targets, reasons = select_targets(
+        ["nexus/events_unknown/transport.py"],
+        rules,
+        fallback_targets=("tests/ops/test_select_tests.py",),
+    )
+
+    assert targets == ["tests/ops/test_select_tests.py"]
+    assert reasons == ["nexus/events_unknown/transport.py: fallback"]
+
+
+def test_issue153_unknown_feedback_path_remains_fallback():
+    rules = load_impact_rules()
+    targets, reasons = select_targets(
+        ["nexus/feedback_unknown/foo.py"],
+        rules,
+        fallback_targets=("tests/ops/test_select_tests.py",),
+    )
+
+    assert targets == ["tests/ops/test_select_tests.py"]
+    assert reasons == ["nexus/feedback_unknown/foo.py: fallback"]
 
 
 def test_select_targets_prefers_most_specific_prefix_and_deduplicates_targets():

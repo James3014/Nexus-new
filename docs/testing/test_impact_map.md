@@ -2,6 +2,8 @@
 | 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |
 | :--- | :--- | :--- | :--- | :--- |
 | .agents/skills | tests/ops/test_skill_file_contract.py, tests/learning/test_skill_catalog.py, tests/learning/test_skill_schema.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_artifact_contract_and_catalog_governance |
+| nexus/events | tests/events, tests/core/test_event_bus.py, tests/architecture/test_boundaries_v4.py | active | high | event_store_and_transport_contract |
+| nexus/feedback | tests/events, tests/unit/evaluation/test_policy_delta.py, tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | developer_feedback_contract |
 | nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |
 | nexus/core/context_hub.py | tests/core/test_context_hub_strict_deps.py, tests/core/test_context_budget_sources.py, tests/core/test_context_text_store.py | active | high | context_hub_split_contract |
 | nexus/core/context_budget_sources.py | tests/core/test_context_budget_sources.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_budget_source_builder | active | high | context_hub_split_contract |
