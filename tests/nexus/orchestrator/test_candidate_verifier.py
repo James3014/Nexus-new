@@ -189,6 +189,10 @@ def test_candidate_verifier_produces_verified_receipt(scenario):
     assert receipt.candidate_state_hash == candidate.candidate_state_hash
     assert receipt.candidate_commit_created is False
     assert receipt.candidate_commit_allowed is True
+    assert receipt.changed_file_count == 1
+    assert receipt.changed_file_budget_passed is True
+    assert receipt.deleted_file_count == 0
+    assert receipt.deleted_file_budget_passed is True
     assert receipt.public_claim_allowed is False
     assert receipt.production_ready is False
     assert receipt.repository_contract_gate_passed is True
@@ -443,6 +447,99 @@ def test_candidate_verifier_accepts_explicit_authorized_deletion(scenario):
     assert receipt.verified is True
     assert receipt.deletion_gate_passed is True
     assert receipt.authorized_deletions == ("bounded.txt",)
+    assert receipt.deleted_file_count == 1
+    assert receipt.deleted_file_budget_passed is True
+
+
+def test_candidate_verifier_changed_file_cardinality_accepts_exact_boundary(scenario):
+    contract, lease, _, controller = scenario
+    bounded_contract = contract.model_copy(
+        update={
+            "allowed_files": ["bounded.txt", "new-a.txt"],
+            "maximum_changed_files": 2,
+        }
+    )
+    Path(lease.target_worktree, "new-a.txt").write_text("candidate\n", encoding="utf-8")
+    candidate = controller.collect_candidate(bounded_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        bounded_contract, lease, candidate
+    )
+
+    assert receipt.verified is True
+    assert receipt.changed_file_count == 2
+    assert receipt.changed_file_budget_passed is True
+
+
+def test_candidate_verifier_changed_file_cardinality_exceeded_fails_closed(scenario):
+    contract, lease, _, controller = scenario
+    bounded_contract = contract.model_copy(
+        update={
+            "allowed_files": ["bounded.txt", "new-a.txt", "new-b.txt"],
+            "maximum_changed_files": 2,
+        }
+    )
+    target = Path(lease.target_worktree)
+    target.joinpath("new-a.txt").write_text("a\n", encoding="utf-8")
+    target.joinpath("new-b.txt").write_text("b\n", encoding="utf-8")
+    candidate = controller.collect_candidate(bounded_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        bounded_contract, lease, candidate
+    )
+
+    assert receipt.verified is False
+    assert receipt.candidate_commit_allowed is False
+    assert receipt.changed_file_count == 3
+    assert receipt.changed_file_budget_passed is False
+    assert "changed_file_budget_exhausted" in receipt.failure_reasons
+
+
+def test_candidate_verifier_deleted_cap_is_independent_of_deletion_allowance(scenario):
+    contract, lease, _, controller = scenario
+    capped_contract = contract.model_copy(
+        update={
+            "authorized_deletions": ["bounded.txt"],
+            "maximum_deleted_files": 1,
+        }
+    )
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").unlink()
+    deleted_candidate = controller.collect_candidate(capped_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        capped_contract, lease, deleted_candidate
+    )
+
+    assert receipt.verified is True
+    assert receipt.deletion_gate_passed is True
+    assert receipt.deleted_file_count == 1
+    assert receipt.deleted_file_budget_passed is True
+
+
+def test_candidate_verifier_deleted_cap_exceeded_fails_closed_even_when_authorized(scenario):
+    contract, lease, _, controller = scenario
+    capped_contract = contract.model_copy(
+        update={
+            "allowed_files": ["bounded.txt", "MUSE_PROTO.md"],
+            "authorized_deletions": ["bounded.txt", "MUSE_PROTO.md"],
+            "maximum_deleted_files": 1,
+        }
+    )
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").unlink()
+    target.joinpath("MUSE_PROTO.md").unlink()
+    deleted_candidate = controller.collect_candidate(capped_contract, lease)
+
+    receipt = CandidateVerifier(controller.worktree_manager).verify(
+        capped_contract, lease, deleted_candidate
+    )
+
+    assert receipt.verified is False
+    assert receipt.deletion_gate_passed is True
+    assert receipt.deleted_file_count == 2
+    assert receipt.deleted_file_budget_passed is False
+    assert "deleted_file_budget_exhausted" in receipt.failure_reasons
 
 
 def test_authorized_deletion_contract_rejects_out_of_scope_path(scenario):

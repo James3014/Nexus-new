@@ -89,6 +89,12 @@ class SelfHostedTaskContract(BaseModel):
     provider_order: List[str] = Field(default_factory=list)
     maximum_provider_calls: int = Field(default=0, ge=0)
     maximum_replans: int = Field(default=0, ge=0)
+    # Aggregate repair ceilings.  These are task-scoped (not attempt-scoped)
+    # so retries/fallbacks cannot reset the budget.
+    maximum_attempts_per_task: int = Field(default=1, ge=1)
+    maximum_wall_time_seconds: float = Field(default=0.0, ge=0.0)
+    maximum_changed_files: int = Field(default=0, ge=0)
+    maximum_deleted_files: int = Field(default=0, ge=0)
     mutation_mode: MutationMode = MutationMode.WORKING_TREE_ONLY
     human_approval_required: bool = True
     collaboration_realm: Optional[CollaborationExecutionRealm] = None
