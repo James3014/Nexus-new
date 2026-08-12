@@ -116,7 +116,7 @@ Bind exact base/head/tree, physical diff, changed-file inventory, exact verifier
 
 ## Closure evidence
 
-G4 is closed against the exact current GitHub collaboration lineage:
+The bounded G4 implementation task is source-complete against the exact GitHub collaboration lineage:
 
 - accepted Candidate / PR #181 head: `361938f907276e065892eb64ab059d0e0bf1e9cb`;
 - accepted Candidate tree: `40bf6d1ae028335d04f08ab52f1bc51bcea1ada8`;
@@ -127,12 +127,12 @@ G4 is closed against the exact current GitHub collaboration lineage:
 - independent acceptance verified authoritative rebuild, B-A/C-B replay, invalid-run exclusion, frozen identity binding, existing VAP physical-consumption authority reuse, tamper/substitution negatives, and claim-boundary fail-close;
 - post-merge readback confirmed `phase1a_report.py` on `main@ea8c15293455575b4312b92eeeebc69daa4abbcf`.
 
-Closure classification for this bounded G4 contract: `DONE_NO_FOLLOW_UP`.
+This Task Card does not self-assert the terminal GitHub Issue disposition. Under `docs/agents/TASK_EXECUTION_CONTRACT.md`, Issue #172 must still receive a fresh revision-bound post-completion snapshot evaluated by `scripts/ops/agent_protocol_check.py` against the then-current default-branch HEAD/tree and predecessor bindings.
 
 ## Exit / next gate
 
-Maximum G4 claim: `phase1a_report_replay_tamper_substrate_implemented_and_verified`.
+Maximum implementation claim: `phase1a_report_replay_tamper_substrate_implemented_and_verified`.
 
-The serial repository-substrate lane is complete through G4. The campaign next gate is `PRE-FORMAL / BLOCKED_ON_#29` because Issue #29's exact same-task Local/World-C -> physical Online consumption -> truthful contribution evidence remains `BLOCKED_EVIDENCE` on the fresh reconciliation fence.
+The serial repository-substrate implementation lane is complete through G4. Issue-terminal/downstream readiness remains subject to the repository post-completion snapshot gate. Separately, Phase 1A formal execution remains blocked by Issue #29's exact same-task Local/World-C -> physical Online consumption -> truthful contribution evidence and the final PRE-FORMAL freeze/readiness gate.
 
-G5 remains absent / unauthorized. No qualification/formal experiment, runtime integration, route/approval/release authority, production/public claim, or causal benefit is implied by this closure.
+G5 remains absent / unauthorized. No qualification/formal experiment, runtime integration, route/approval/release authority, production/public claim, or causal benefit is implied by this Task Card closure.
