@@ -183,3 +183,10 @@ def test_audit_service_dispatch_uses_physical_acceptance_owner():
 
     assert "scripts.ops.nexus_acceptance_check" in source
     assert "nexus.core.ops" not in source
+
+
+def test_orphan_release_facades_are_not_exposed():
+    from nexus.services.cli_commands_service import CliCommandsService
+
+    assert not hasattr(AuditService, "run_release")
+    assert not hasattr(CliCommandsService, "release")
