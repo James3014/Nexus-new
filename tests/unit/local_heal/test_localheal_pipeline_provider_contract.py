@@ -4,6 +4,7 @@ Verifies that the provider wrapper correctly handles both:
 1. OllamaLLMClient signature: generate_fn(system_prompt, user_prompt, model=...)
 2. LocalModelProviderRequest signature: generate_fn(request_object)
 """
+
 from __future__ import annotations
 
 import os
@@ -30,15 +31,25 @@ def _build_injected_provider(output_text: str = "def fixed():\n    return 42"):
             model_name=req.model_name,
             output_text=output_text,
         )
+
     return InjectedLocalModelProvider(generate_fn)
 
 
 class TestProviderContractSmokeB71:
     """B7.1: Provider contract verification."""
 
-    def test_provider_wrapper_accepts_ollama_llm_client_signature(self):
+    @staticmethod
+    def _configure_ephemeral_workspace(monkeypatch, tmp_path) -> str:
+        """Give mocked pipelines an isolated, explicitly admitted test root."""
+        monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+        monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "armor"))
+        return str(tmp_path)
+
+    def test_provider_wrapper_accepts_ollama_llm_client_signature(self, monkeypatch, tmp_path):
         """_provider_generate accepts (system_prompt, user_prompt) from OllamaLLMClient."""
         from nexus.services.local_heal.pipeline import HealPipeline
+
+        source_root = self._configure_ephemeral_workspace(monkeypatch, tmp_path)
 
         pipeline_run_mock = MagicMock()
         mock_ctx = MagicMock()
@@ -64,7 +75,7 @@ class TestProviderContractSmokeB71:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b71_sig",
-                    source_root="/tmp",
+                    source_root=source_root,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -83,9 +94,11 @@ class TestProviderContractSmokeB71:
                 # Pipeline was called
                 pipeline_run_mock.assert_called_once()
 
-    def test_provider_wrapper_passes_model_name_from_signal_snapshot(self):
+    def test_provider_wrapper_passes_model_name_from_signal_snapshot(self, monkeypatch, tmp_path):
         """model_name propagates from signal_snapshot.executor_model."""
         from nexus.services.local_heal.pipeline import HealPipeline
+
+        source_root = self._configure_ephemeral_workspace(monkeypatch, tmp_path)
 
         pipeline_run_mock = MagicMock()
         mock_ctx = MagicMock()
@@ -100,7 +113,7 @@ class TestProviderContractSmokeB71:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b71_model",
-                    source_root="/tmp",
+                    source_root=source_root,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -148,22 +161,30 @@ class TestProviderContractSmokeB71:
             model_name="",
         )
 
-        with patch.dict(os.environ, {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1", "NEXUS_LOCAL_MODEL_PROVIDER": "ollama"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1", "NEXUS_LOCAL_MODEL_PROVIDER": "ollama"},
+            clear=False,
+        ):
             resp = provider.generate(req)
             assert resp.error == "model_name_missing"
 
-    def test_pipeline_bridge_distinguishes_provider_errors(self):
+    def test_pipeline_bridge_distinguishes_provider_errors(self, monkeypatch, tmp_path):
         """Pipeline failure_reason distinguishes provider errors."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
-        pipeline_run_mock = MagicMock(side_effect=RuntimeError("MODEL_PROVIDER_ERROR: provider_not_configured"))
+        source_root = self._configure_ephemeral_workspace(monkeypatch, tmp_path)
+
+        pipeline_run_mock = MagicMock(
+            side_effect=RuntimeError("MODEL_PROVIDER_ERROR: provider_not_configured")
+        )
         provider = _build_injected_provider()
 
         with patch.object(HealPipeline, "__init__", return_value=None):
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b71_error",
-                    source_root="/tmp",
+                    source_root=source_root,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
