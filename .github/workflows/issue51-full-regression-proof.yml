@@ -1,0 +1,172 @@
+name: Issue 51 Exact Revision Full Regression Proof
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-base-head-full-regression:
+    name: Issue 51 exact base/head full regression proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BASE_SHA: bdcc427f6249406079c85f9725b3af6cd62ab1f1
+      HEAD_SHA: a5ea6ad464fc49e0a0938862a24049f88ab502eb
+    steps:
+      - name: Checkout verifier branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Materialize exact revisions
+        id: roots
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          base_dir=$(mktemp -d /tmp/nexus51-base.XXXXXX)
+          head_dir=$(mktemp -d /tmp/nexus51-head.XXXXXX)
+          git worktree add --detach "$base_dir" "$BASE_SHA"
+          git worktree add --detach "$head_dir" "$HEAD_SHA"
+          test "$(git -C "$base_dir" rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C "$head_dir" rev-parse HEAD)" = "$HEAD_SHA"
+          echo "base=$base_dir" >> "$GITHUB_OUTPUT"
+          echo "head=$head_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Install exact-base dependencies
+        env:
+          BASE_DIR: ${{ steps.roots.outputs.base }}
+        run: |
+          set -euo pipefail
+          UV_PROJECT_ENVIRONMENT="$BASE_DIR/.venv" uv sync --directory "$BASE_DIR" --frozen --all-groups --all-extras
+
+      - name: Install exact-head dependencies
+        env:
+          HEAD_DIR: ${{ steps.roots.outputs.head }}
+        run: |
+          set -euo pipefail
+          UV_PROJECT_ENVIRONMENT="$HEAD_DIR/.venv" uv sync --directory "$HEAD_DIR" --frozen --all-groups --all-extras
+
+      - name: Run full suite on exact base
+        env:
+          BASE_DIR: ${{ steps.roots.outputs.base }}
+        run: |
+          set +e
+          "$BASE_DIR/.venv/bin/python" -m pytest "$BASE_DIR/tests" -q --timeout=300 --junitxml="$RUNNER_TEMP/base.xml" > "$RUNNER_TEMP/base.log" 2>&1
+          status=$?
+          echo "$status" > "$RUNNER_TEMP/base.exit"
+          exit 0
+
+      - name: Run full suite on exact head
+        env:
+          HEAD_DIR: ${{ steps.roots.outputs.head }}
+        run: |
+          set +e
+          "$HEAD_DIR/.venv/bin/python" -m pytest "$HEAD_DIR/tests" -q --timeout=300 --junitxml="$RUNNER_TEMP/head.xml" > "$RUNNER_TEMP/head.log" 2>&1
+          status=$?
+          echo "$status" > "$RUNNER_TEMP/head.exit"
+          exit 0
+
+      - name: Compare exact full-regression identities
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+
+          def load(name):
+              tree = ET.parse(root / f"{name}.xml")
+              rows = {}
+              for case in tree.iter("testcase"):
+                  key = (case.get("classname", ""), case.get("name", ""))
+                  if case.find("failure") is not None:
+                      status = "failed"
+                  elif case.find("error") is not None:
+                      status = "error"
+                  elif case.find("skipped") is not None:
+                      status = "skipped"
+                  else:
+                      status = "passed"
+                  if key in rows:
+                      raise SystemExit(f"duplicate testcase identity: {key!r}")
+                  rows[key] = status
+              return rows
+
+          base = load("base")
+          head = load("head")
+          base_bad = {k: v for k, v in base.items() if v in {"failed", "error"}}
+          head_bad = {k: v for k, v in head.items() if v in {"failed", "error"}}
+          new_bad = sorted((k, v) for k, v in head_bad.items() if k not in base_bad)
+          missing = sorted(set(base) - set(head))
+          added = sorted(set(head) - set(base))
+          changed_bad = sorted(
+              (k, base_bad.get(k), head_bad.get(k))
+              for k in set(base_bad) & set(head_bad)
+              if base_bad[k] != head_bad[k]
+          )
+          def counts(rows):
+              values = list(rows.values())
+              return {s: values.count(s) for s in ("passed", "failed", "error", "skipped")}
+          report = {
+              "schema": "nexus.issue51.full_regression_proof.v1",
+              "base_sha": os.environ["BASE_SHA"],
+              "head_sha": os.environ["HEAD_SHA"],
+              "base_exit": int((root / "base.exit").read_text().strip()),
+              "head_exit": int((root / "head.exit").read_text().strip()),
+              "base_counts": counts(base),
+              "head_counts": counts(head),
+              "base_case_count": len(base),
+              "head_case_count": len(head),
+              "new_bad": new_bad,
+              "missing_testcases": missing,
+              "added_testcases": added,
+              "changed_bad_status": changed_bad,
+              "status": "PASS" if not new_bad and not missing and not added and not changed_bad else "FAIL",
+          }
+          (root / "issue51-full-regression.json").write_text(json.dumps(report, indent=2, sort_keys=True))
+          print(json.dumps(report, indent=2, sort_keys=True))
+          if report["status"] != "PASS":
+              raise SystemExit(1)
+          PY
+
+      - name: Archive exact regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue51-full-regression-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/base.xml
+            ${{ runner.temp }}/head.xml
+            ${{ runner.temp }}/base.log
+            ${{ runner.temp }}/head.log
+            ${{ runner.temp }}/base.exit
+            ${{ runner.temp }}/head.exit
+            ${{ runner.temp }}/issue51-full-regression.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove exact worktrees
+        if: always()
+        env:
+          BASE_DIR: ${{ steps.roots.outputs.base }}
+          HEAD_DIR: ${{ steps.roots.outputs.head }}
+        run: |
+          set -euo pipefail
+          git worktree remove --force "$BASE_DIR" || true
+          git worktree remove --force "$HEAD_DIR" || true
