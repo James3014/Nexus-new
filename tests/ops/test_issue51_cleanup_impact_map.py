@@ -109,7 +109,7 @@ def test_issue51_combined_cleanup_paths_are_explicit_and_high_risk() -> None:
     }.issubset(details.targets)
 
 
-def test_unrelated_unknown_committee_and_env_paths_remain_fail_closed_fallback() -> None:
+def test_unrelated_unknown_env_path_remains_fail_closed_fallback() -> None:
     for path in ("nexus/committee/new_runtime.py", "nexus/env/new_runtime.py"):
         details = _details([path])
         assert details.fallback_used is True
