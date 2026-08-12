@@ -41,12 +41,14 @@ GENERATOR_VERSION = "stdlib-random-v1"
 def _frozen_runtime():
     old = {name: os.environ.get(name) for name in ENV_NAMES}
     values = {name: "0" for name in ENV_NAMES}
-    values.update({
-        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "frozen-test-model",
-        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "frozen-test-provider",
-        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "single_local_model",
-        "NEXUS_PROTOCOL_MODE": "test",
-    })
+    values.update(
+        {
+            "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "frozen-test-model",
+            "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "frozen-test-provider",
+            "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "single_local_model",
+            "NEXUS_PROTOCOL_MODE": "test",
+        }
+    )
     os.environ.update(values)
     try:
         yield
@@ -247,4 +249,15 @@ def test_coverage_counters_cover_required_authority_branches():
 
 
 def test_pilot_is_cwd_bound_to_repository_root():
-    assert Path.cwd().joinpath("nexus").is_dir()
+    repository_root = Path(__file__).resolve().parents[2]
+    original_cwd = Path.cwd()
+    before_entries = {path.relative_to(repository_root) for path in repository_root.rglob("*")}
+    try:
+        os.chdir(repository_root)
+        assert Path.cwd() == repository_root
+        assert Path.cwd().joinpath("nexus").is_dir()
+    finally:
+        os.chdir(original_cwd)
+    after_entries = {path.relative_to(repository_root) for path in repository_root.rglob("*")}
+    assert Path.cwd() == original_cwd
+    assert after_entries == before_entries
