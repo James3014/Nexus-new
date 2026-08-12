@@ -73,8 +73,12 @@ def build_world_c_canonical_patch_projection(
     reconstructed from bytes on disk.  Every identity/hash mismatch fails
     closed before a projection is returned.
     """
-    source = Path(source_root).expanduser().resolve()
-    workspace = Path(workspace_root).expanduser().resolve()
+    source_input = Path(source_root).expanduser()
+    workspace_input = Path(workspace_root).expanduser()
+    if source_input.is_symlink() or workspace_input.is_symlink():
+        raise ValueError("verified roots must not be symlinks")
+    source = source_input.resolve()
+    workspace = workspace_input.resolve()
     if source == workspace:
         raise ValueError("source and workspace roots must be distinct")
     if not isinstance(relative_path, str) or not relative_path.strip():
@@ -161,12 +165,10 @@ def _stage_output_evidence(op: Any, stage: str) -> tuple[bool, str]:
         for item in getattr(op, "localized_files", []) or []:
             path = str(getattr(item, "path", "") or "")
             content = str(getattr(item, "content", "") or "")
-            files.append(
-                {
-                    "path": path,
-                    "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-                }
-            )
+            files.append({
+                "path": path,
+                "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            })
         payload = {"localized_files": files}
         present = bool(files and all(item["path"] for item in files))
     elif stage == "patch_synthesis":
@@ -250,21 +252,19 @@ def build_world_c_receipt(ctx: Any) -> dict[str, Any]:
             and stage_attempts[-1].get("success") is True
             and stage_attempts[-1].get("output_evidence_present") is True
         )
-        stages.append(
-            {
-                "name": stage_name,
-                "invoked": bool(stage_attempts),
-                "completed": completed,
-                "final_success": final_success,
-                "attempt_count": len(stage_attempts),
-                "attempts": stage_attempts,
-                "evidence_refs": [
-                    str(item.get("evidence_hash"))
-                    for item in stage_attempts
-                    if item.get("evidence_hash")
-                ],
-            }
-        )
+        stages.append({
+            "name": stage_name,
+            "invoked": bool(stage_attempts),
+            "completed": completed,
+            "final_success": final_success,
+            "attempt_count": len(stage_attempts),
+            "attempts": stage_attempts,
+            "evidence_refs": [
+                str(item.get("evidence_hash"))
+                for item in stage_attempts
+                if item.get("evidence_hash")
+            ],
+        })
 
     all_completed = all(stage["completed"] for stage in stages)
     verifier_stage = stages[-1]
