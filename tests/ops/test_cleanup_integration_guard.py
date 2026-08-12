@@ -10,7 +10,7 @@ BASE_SHA = "1" * 40
 HEAD_SHA = "2" * 40
 HEAD_TREE = "3" * 40
 MERGE_SHA = "4" * 40
-MERGE_TREE = "5" * 40
+MERGE_TREE = HEAD_TREE
 
 
 def _manifest() -> dict[str, object]:
@@ -49,6 +49,7 @@ def _live_snapshot() -> dict[str, object]:
         "pr_state": "open",
         "draft": False,
         "mergeable": True,
+        "target_clean": True,
         "checks": [
             {
                 "context": "Exact-base impact gate",
@@ -88,6 +89,7 @@ def _post_snapshot(preflight_receipt: dict[str, object]) -> dict[str, object]:
             "nexus/core/nexus_transaction.py": False,
             "nexus/policy/compatibility.py": False,
         },
+        "checks": copy.deepcopy(preflight_receipt["required_checks"]),
     }
 
 
@@ -174,6 +176,14 @@ def test_duplicate_required_check_fails_closed() -> None:
         preflight(_manifest(), snapshot, dry_run=True)
 
 
+def test_dirty_target_fails_closed() -> None:
+    snapshot = _live_snapshot()
+    snapshot["target_clean"] = False
+
+    with pytest.raises(GuardError, match="target must be clean"):
+        preflight(_manifest(), snapshot, dry_run=True)
+
+
 def test_changed_manifest_cannot_reuse_preflight_receipt() -> None:
     manifest = _manifest()
     receipt = preflight(manifest, _live_snapshot(), dry_run=False)
@@ -220,6 +230,15 @@ def test_concurrent_target_movement_fails_closed() -> None:
         post_apply(_manifest(), receipt, snapshot)
 
 
+def test_post_apply_wrong_resulting_tree_fails_closed() -> None:
+    receipt = preflight(_manifest(), _live_snapshot(), dry_run=False)
+    snapshot = _post_snapshot(receipt)
+    snapshot["merge_tree"] = "6" * 40
+
+    with pytest.raises(GuardError, match="resulting tree differs from approved head tree"):
+        post_apply(_manifest(), receipt, snapshot)
+
+
 def test_non_exact_merge_parentage_fails_closed() -> None:
     receipt = preflight(_manifest(), _live_snapshot(), dry_run=False)
     snapshot = _post_snapshot(receipt)
@@ -256,6 +275,19 @@ def test_post_apply_rejects_cas_token_replay() -> None:
     snapshot["cas_token"] = "0" * 64
 
     with pytest.raises(GuardError, match="replay or binding drift"):
+        post_apply(_manifest(), receipt, snapshot)
+
+
+def test_post_apply_rechecks_required_check_source() -> None:
+    receipt = preflight(_manifest(), _live_snapshot(), dry_run=False)
+    snapshot = _post_snapshot(receipt)
+    checks = copy.deepcopy(snapshot["checks"])
+    assert isinstance(checks, list)
+    assert isinstance(checks[1], dict)
+    checks[1]["integration_id"] = 99999
+    snapshot["checks"] = checks
+
+    with pytest.raises(GuardError, match="missing required checks"):
         post_apply(_manifest(), receipt, snapshot)
 
 
