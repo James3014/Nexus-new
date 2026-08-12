@@ -20,6 +20,11 @@ lifecycle state. The agent freezes the request-derived file scope, preserves
 unrelated dirty state, runs relevant checks plus `git diff --check`, and reports
 the exact changed files and evidence.
 
+The Owner chooses the execution lane; defaults, launchers, skills, and agents
+must not relabel that explicit choice. The lane governs authorization, not
+correctness: source behavior, tests, and required verifiers decide whether the
+program works.
+
 Escalate to this governed contract before mutation when implementation is
 delegated, requires an isolated Target, crosses subsystems, changes
 route/lifecycle/workforce authority, weakens security, changes a migration or
@@ -42,6 +47,10 @@ allowed files, forbidden scope, verification commands, required evidence, exit
 criteria, residual-debt handling, and block classification. Its allowed and
 forbidden paths, file-count ceiling, and commit policy are the operative scope.
 
+The Task Card binds execution scope and evidence. It does not replace the
+program or turn incomplete source behavior into completion merely because the
+document is structurally complete.
+
 When the Owner has granted standing coordinator authority and its durable grant
 receipt is current, the primary Codex coordinator may create and commit a
 missing Task Card/INDEX for an already Ready Issue after freezing the effective
@@ -51,6 +60,29 @@ authority; they begin only after the card is physically committed and its hash
 is read back. The grant does not authorize local runtime/lifecycle actions,
 direct protected-main push, force-push, ref deletion, successor work outside
 the active Goal, release, or production/public claims.
+
+Only the primary coordinator under the current grant may create and commit a
+missing card once, then read back its hash. A delegated worker, reviewer, or
+launcher must not create, widen, or recursively bootstrap the card that would
+authorize its own work.
+
+## GitHub collaboration and local lifecycle domains
+
+- A GitHub PR Candidate is an Issue-branch commit governed by the Ready Issue,
+  committed card when delegation requires it, focused checks, CI, independent
+  acceptance, and expected-head/CAS merge authority.
+- A local lifecycle Candidate is formal Target output governed by self-hosted
+  submit, receipt, approval, and integration gates.
+
+Ordinary GitHub Issue work does not enter local lifecycle merely because it is
+delegated or produces a PR Candidate. Local lifecycle tools are mandatory only
+after that domain is selected or the requested outcome is a local governed
+Target/runtime/lifecycle result. GitHub merge never implies lifecycle approval
+or integration, and lifecycle approval never implies GitHub merge authority.
+`nexus_startup_contract_check.py` validates direct or local governed startup;
+it is not the admission or merge gate for ordinary GitHub PR work. Likewise,
+delivery preference `auto` may choose an isolated execution route but cannot
+stand in for an explicit Owner lane selection.
 
 ## Mutation safety
 
@@ -91,6 +123,13 @@ architecture, evidence-integrity, irreversible-risk, or specification conflict.
 Neither block permits promotion, cleanup, or downstream activation. Supersede a
 card only with an explicit `superseded_by` link and a new independently hashed
 card.
+
+`REVISE` means bounded correction of the same work within existing authority.
+A reviewer block, card clarification, or missing card is not automatically a
+terminal `REJECTED` Candidate. Only the authorized decision-maker may apply
+`REJECTED` after stating why repair in place is unsuitable. These are review
+and authority semantics; they do not expand a CLI's enumerated terminal
+disposition surface.
 
 ## Post-completion Issue reconciliation
 
