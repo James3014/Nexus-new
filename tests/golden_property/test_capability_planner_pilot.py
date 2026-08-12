@@ -41,14 +41,12 @@ GENERATOR_VERSION = "stdlib-random-v1"
 def _frozen_runtime():
     old = {name: os.environ.get(name) for name in ENV_NAMES}
     values = {name: "0" for name in ENV_NAMES}
-    values.update(
-        {
-            "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "frozen-test-model",
-            "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "frozen-test-provider",
-            "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "single_local_model",
-            "NEXUS_PROTOCOL_MODE": "test",
-        }
-    )
+    values.update({
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "frozen-test-model",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "frozen-test-provider",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "single_local_model",
+        "NEXUS_PROTOCOL_MODE": "test",
+    })
     os.environ.update(values)
     try:
         yield
