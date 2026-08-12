@@ -347,6 +347,13 @@ def _parse_time(value: Optional[str]) -> Optional[float]:
         return None
 
 
+def _task_deadline(contract: ArchitectTaskContract, submitted_at: Optional[str]) -> Optional[float]:
+    """Return one absolute wall-clock deadline shared by all attempts."""
+    started = _parse_time(submitted_at)
+    budget = float(getattr(contract, "maximum_wall_time_seconds", 0) or 0)
+    return started + budget if started is not None and budget > 0 else None
+
+
 def _validated_action_request(
     request: Mapping[str, Any],
 ) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
@@ -1990,6 +1997,10 @@ class SelfHostedTaskService:
             provider_order=provider_order,
             maximum_provider_calls=len(provider_order) if requested_worker == "auto" else (2 if fallback_worker else 1),
             maximum_replans=0,
+            maximum_attempts_per_task=int(request.get("maximum_attempts_per_task", 5) or 5),
+            maximum_wall_time_seconds=float(request.get("maximum_wall_time_seconds", 0) or 0),
+            maximum_changed_files=int(request.get("maximum_changed_files", 0) or 0),
+            maximum_deleted_files=int(request.get("maximum_deleted_files", 0) or 0),
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,
             collaboration_realm=collaboration_realm,
@@ -2284,6 +2295,9 @@ class SelfHostedTaskService:
         attempt_id: str,
     ) -> dict[str, Any]:
         state = self._read_state(task_id) or {}
+        deadline = _task_deadline(contract, state.get("submitted_at"))
+        if deadline is not None and time.time() >= deadline:
+            raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
         status = str(state.get("status"))
         dispatch_binding = validate_workforce_dispatch_binding(
             request,
@@ -2304,6 +2318,9 @@ class SelfHostedTaskService:
             for raw in state.get("executions") or []
             if (receipt := self._receipt_from_state(raw)) is not None
         ]
+        maximum_attempts = int(getattr(contract, "maximum_attempts_per_task", 1) or 1)
+        if len(state.get("attempts") or ()) > maximum_attempts:
+            raise RuntimeError("ATTEMPT_BUDGET_EXHAUSTED")
         is_fast_lane = check_fast_lane_eligible(contract, request)
         fast_lane_values = {
             "execution_lane": "FAST_LANE" if is_fast_lane else "STANDARD",
@@ -2435,10 +2452,26 @@ class SelfHostedTaskService:
                     dispatch_binding,
                 )
                 consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
+                consumed_attempts = sum(
+                    max(0, int(item.provider_attempt_count or 0))
+                    for item in attempts
+                )
                 configured_budget = int(fast_lane_values["maximum_provider_calls"])
                 remaining_calls = configured_budget - consumed_calls
+                # Provider attempts are a distinct aggregate ceiling from
+                # provider calls.  The task-level attempt budget is the
+                # durable cap and is intentionally measured across retained
+                # execution receipts from every retry/fallback.
+                attempt_ceiling = int(
+                    getattr(contract, "maximum_attempts_per_task", 1) or 1
+                )
+                remaining_attempts = attempt_ceiling - consumed_attempts
                 if remaining_calls <= 0:
                     raise RuntimeError("maximum_provider_calls aggregate budget exhausted")
+                if remaining_attempts <= 0:
+                    raise RuntimeError("maximum_provider_attempts aggregate budget exhausted")
+                if deadline is not None and time.time() >= deadline:
+                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
                 invoke_contract = contract
                 if remaining_calls != configured_budget and hasattr(contract, "model_copy"):
                     invoke_contract = contract.model_copy(update={"maximum_provider_calls": remaining_calls})
@@ -2449,6 +2482,12 @@ class SelfHostedTaskService:
                     dispatch_binding,
                     active_provider=provider,
                 )
+                configured_timeout = float(request.get("timeout_seconds", 900.0))
+                remaining_timeout = (
+                    max(0.0, deadline - time.time()) if deadline is not None else configured_timeout
+                )
+                if remaining_timeout <= 0:
+                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
                 execution_receipt = self.worker_registry.invoke(
                     provider,
                     invoke_contract,
@@ -2463,15 +2502,18 @@ class SelfHostedTaskService:
                         if dispatch_binding is not None
                         else str(request.get("model") or "").strip() or None
                     ),
-                    timeout_seconds=float(request.get("timeout_seconds", 900.0)),
+                    timeout_seconds=min(configured_timeout, remaining_timeout),
                     on_process_group=on_process_group,
                 )
+                if deadline is not None and time.time() >= deadline:
+                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
                 reported_calls = int(execution_receipt.provider_calls)
                 reported_attempts = execution_receipt.provider_attempt_count
                 if reported_calls < 0 or reported_calls > remaining_calls:
                     raise RuntimeError("provider execution receipt exceeded aggregate call budget")
                 if reported_attempts is not None and (
-                    int(reported_attempts) < 0 or int(reported_attempts) > remaining_calls
+                    int(reported_attempts) < 0
+                    or int(reported_attempts) > remaining_attempts
                 ):
                     raise RuntimeError("provider execution receipt exceeded aggregate attempt budget")
                 attempts.append(execution_receipt)
@@ -4794,6 +4836,12 @@ class SelfHostedTaskService:
                         "idempotency_key": idempotency_key or None,
                         "action_request_hash": action_request_hash or None,
                     })
+                    # Enforce the task-scoped attempt ceiling before mutating
+                    # durable lineage.  A rejected retry must not append a
+                    # phantom attempt or reset any aggregate budgets.
+                    max_attempts = int(getattr(contract, "maximum_attempts_per_task", 1) or 1)
+                    if len(current.get("attempts") or ()) >= max_attempts:
+                        raise RuntimeError("ATTEMPT_BUDGET_EXHAUSTED")
                     current["attempt_id"] = attempt_id
                     current.setdefault("attempts", []).append({
                         "attempt_id": attempt_id,
@@ -4815,7 +4863,9 @@ class SelfHostedTaskService:
                     current["error"] = None
                     current["active_provider"] = None
                     current["execution"] = None
-                    current["executions"] = []
+                    # Keep immutable execution history across retries so
+                    # aggregate provider calls/attempts cannot be reset.
+                    # ``execution`` below is the current attempt only.
                     current["execution_outcome"] = None
                     current["attempt_resolution"] = None
                     current["verification_verdict"] = None
@@ -4886,6 +4936,14 @@ class SelfHostedTaskService:
             "decision": None,
             "blocker": None,
         }
+        try:
+            retry_contract = self.build_contract(state.get("request") or {})
+            max_attempts = int(getattr(retry_contract, "maximum_attempts_per_task", 1) or 1)
+            if len(state.get("attempts") or ()) >= max_attempts:
+                retry_meta.update(decision="BLOCK", blocker="ATTEMPT_BUDGET_EXHAUSTED")
+                return {**state, "retry": retry_meta}
+        except Exception:
+            pass
         retained_retry = (
             status == "RETAINED_FOR_REVIEW"
             and state.get("promotion_status") == "NOT_CREATED"
@@ -4918,8 +4976,63 @@ class SelfHostedTaskService:
                 blocker="durable request is missing; cannot safely reconstruct the task",
             )
             return {**state, "retry": retry_meta}
+        # A REPAIRABLE acceptance must rebind through the canonical Planner /
+        # Workforce admission envelope; caller-supplied worker identity is
+        # never accepted as a selector.
+        repair_dispatch: Optional[dict[str, Any]] = None
+        if str(state.get("acceptance_decision") or "") == "REPAIRABLE":
+            planner = request.get("planner_output")
+            if not isinstance(planner, Mapping):
+                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_ADMISSION_BINDING_MISSING"}}
+            try:
+                dispatch = validate_workforce_dispatch_binding({**request, "planner_output": planner}, require_binding=True)
+            except RuntimeError as exc:
+                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)}}
+            worker_id = str((dispatch or {}).get("worker_id") or "")
+            if not worker_id:
+                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_REPAIR_WORKER_MISSING"}}
+            request = dict(request)
+            request["repair_worker_id"] = worker_id
+            repair_dispatch = dict(dispatch or {})
 
-        retry_request = _retry_request(state)
+        # Generate fresh attempt transport identity first, then rebuild the
+        # canonical dispatch envelope against that identity.  The old receipt
+        # and binding remain immutable in history; a mismatch blocks before
+        # any worker invocation.
+        retry_source = dict(state)
+        retry_source["request"] = request
+        retry_request = _retry_request(retry_source)
+        if repair_dispatch is not None:
+            retry_request = dict(retry_request)
+            retry_request["planner_output"] = request.get("planner_output")
+            try:
+                retry_request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
+                    request["planner_output"],
+                    {
+                        **repair_dispatch,
+                        "demand_id": repair_dispatch.get("demand_id"),
+                    },
+                    task_id=str(retry_request.get("task_id") or ""),
+                    attempt_id=str(retry_request.get("attempt_id") or ""),
+                    task_card_path=str(retry_request.get("task_card_path") or ""),
+                    task_card_hash=str(retry_request.get("task_card_hash") or ""),
+                ).to_dict()
+            except (TypeError, ValueError) as exc:
+                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": f"WORKFORCE_REBIND_FAILED:{exc}"}}
+            fresh_dispatch = validate_workforce_dispatch_binding(
+                retry_request, require_binding=True
+            )
+            if not isinstance(fresh_dispatch, Mapping):
+                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_REBIND_FAILED"}}
+            retry_request.update({
+                "worker": fresh_dispatch["provider"],
+                "provider": fresh_dispatch["provider"],
+                "model": fresh_dispatch["model"],
+                "worker_id": fresh_dispatch["worker_id"],
+                "worker_order": [fresh_dispatch["provider"]],
+                "workforce_dispatch": fresh_dispatch,
+                "canonical_dispatch_envelope": fresh_dispatch.get("canonical_dispatch_envelope"),
+            })
         result = dict(self.submit_task(retry_request))
         retry_meta.update(
             decision="REUSED_TASK_ID",

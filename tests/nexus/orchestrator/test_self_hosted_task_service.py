@@ -6277,3 +6277,134 @@ def test_action_transport_uses_bound_payload_and_preserves_card_contract_identit
     assert durable["attempt_id"] == transport["action"]["attempt_id"]
     assert durable["action_id"] == transport["action"]["action_id"]
     assert durable["idempotency_key"] == transport["action"]["idempotency_key"]
+
+
+def test_m3c_build_contract_maps_all_four_execution_ceilings(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract = service.build_contract(_request(
+        tmp_path,
+        maximum_attempts_per_task=2,
+        maximum_wall_time_seconds=17.5,
+        maximum_changed_files=4,
+        maximum_deleted_files=3,
+    ))
+    assert contract.maximum_attempts_per_task == 2
+    assert contract.maximum_wall_time_seconds == 17.5
+    assert contract.maximum_changed_files == 4
+    assert contract.maximum_deleted_files == 3
+
+
+def test_m3c_retry_attempt_cap_blocks_before_durable_append_or_launch(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="m3c-attempt-cap")
+    request["maximum_attempts_per_task"] = 1
+    contract = service.build_contract(request)
+    original = {
+        "task_id": request["task_id"], "status": "FINAL_BLOCK", "terminal_status": "FINAL_BLOCK",
+        "cleanup_decision": "REMOVED", "promotion_status": "NOT_CREATED", "acceptance_decision": "NOT_REPAIRABLE",
+        "request": request, "contract": contract.model_dump(mode="json"), "attempt_id": "old-attempt",
+        "attempts": [{"attempt_id": "old-attempt"}],
+    }
+    service._write_state(request["task_id"], original)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("launch must not run"))
+    result = service.retry_task(request["task_id"])
+    assert result["retry"]["blocker"] == "ATTEMPT_BUDGET_EXHAUSTED"
+    assert service._read_state(request["task_id"])["attempts"] == original["attempts"]
+
+
+def _m3c_receipt(task_id, target, *, calls=1, attempts=1):
+    return WorkerExecutionReceipt(
+        provider="codex", task_id=task_id, target_worktree=str(target), worker_status="completed",
+        outcome=WorkerOutcome.EXECUTION_COMPLETED.value, exit_code=0, executable_identity="fake",
+        argv=("fake",), stdout_sha256="a" * 64, stderr_sha256="b" * 64, wall_time_ms=1,
+        process_group_id=None, process_group_killed=False, timed_out=False, provider_calls=calls,
+        provider_attempt_count=attempts, evidence_complete=True, commit_created=False,
+        merge_performed=False, push_performed=False,
+    )
+
+
+def test_m3c_aggregate_provider_budget_blocks_before_extra_invoke(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "m3c-provider-cap")
+    state = service._read_state(contract.task_id)
+    prior = _m3c_receipt(contract.task_id, lease.target_worktree)
+    state.update({"status": "WORKER_RUNNING", "active_provider": "codex", "attempts": [{"attempt_id": attempt_id}],
+                  "executions": [prior.__dict__], "maximum_provider_calls": 1})
+    service._write_state(contract.task_id, state)
+    calls = {"invoke": 0}
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+                        SimpleNamespace(validate_static_contract=lambda *_: None))
+    monkeypatch.setattr(service.worker_registry, "invoke", lambda *a, **k: calls.__setitem__("invoke", calls["invoke"] + 1))
+    with pytest.raises(RuntimeError, match="maximum_provider_calls aggregate budget exhausted"):
+        service._run_default_resumable(contract, state["request"], lambda *_: None,
+                                       task_id=contract.task_id, attempt_id=attempt_id)
+    assert calls["invoke"] == 0
+
+
+def test_m3c_absolute_deadline_passes_remaining_timeout_and_blocks_overrun(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "m3c-deadline")
+    request = {**service._read_state(contract.task_id)["request"], "maximum_wall_time_seconds": 1.0,
+               "timeout_seconds": 9.0}
+    contract = service.build_contract(request)
+    state = service._read_state(contract.task_id)
+    state.update({"status": "WORKER_RUNNING", "active_provider": "codex", "submitted_at": "1970-01-01T00:01:40+00:00",
+                  "contract": contract.model_dump(mode="json"), "request": request,
+                  "attempts": [{"attempt_id": attempt_id}], "executions": []})
+    service._write_state(contract.task_id, state)
+    observed = {}
+    clock = {"now": 100.0}
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.time.time", lambda: clock["now"])
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+                        SimpleNamespace(validate_static_contract=lambda *_: None))
+    def invoke(provider, contract_arg, lease_arg, **kw):
+        observed.update(kw)
+        clock["now"] = 101.2
+        return _m3c_receipt(contract_arg.task_id, lease_arg.target_worktree)
+    monkeypatch.setattr(service.worker_registry, "invoke", invoke)
+    with pytest.raises(RuntimeError, match="WALL_TIME_BUDGET_EXHAUSTED"):
+        service._run_default_resumable(contract, request, lambda *_: None,
+                                       task_id=contract.task_id, attempt_id=attempt_id)
+    assert observed["timeout_seconds"] == pytest.approx(1.0, abs=0.01)
+
+
+def test_m3c_retry_preserves_execution_history_and_aggregate_budget_blocks_invoke(tmp_path, monkeypatch):
+    """A terminal retry keeps prior receipts; their calls still consume the cap."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="m3c-history-retry")
+    request.update({"execution_lane": "ISOLATED_TARGET", "maximum_attempts_per_task": 2})
+    contract = service.build_contract(request)
+    prior = _m3c_receipt(contract.task_id, str(tmp_path / "old-target"), calls=1, attempts=1)
+    original = {
+        "task_id": contract.task_id, "status": "FINAL_BLOCK", "terminal_status": "FINAL_BLOCK",
+        "cleanup_decision": "REMOVED", "promotion_status": "NOT_CREATED", "request": request,
+        "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
+        "attempt_id": "old-attempt", "attempts": [{"attempt_id": "old-attempt"}],
+        "executions": [prior.__dict__],
+    }
+    service._write_state(contract.task_id, original)
+    monkeypatch.setattr(service, "_launch_worker", lambda task_id, attempt_id: service._read_state(task_id))
+    retried = service.submit_task(request)
+    durable = service._read_state(contract.task_id)
+    assert retried["attempt_id"] != "old-attempt"
+    assert len(durable["executions"]) == 1
+    assert durable["executions"][0]["provider_calls"] == 1
+    assert durable["executions"][0]["provider_attempt_count"] == 1
+    assert durable["executions"][0]["stdout_sha256"] == prior.stdout_sha256
+    assert len(durable["attempts"]) == 2
+
+    # The retained receipt consumes the whole one-call budget before any invoke.
+    retry_contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "m3c-history-budget")
+    state = service._read_state(retry_contract.task_id)
+    state.update({"status": "WORKER_RUNNING", "active_provider": "codex",
+                  "attempts": [{"attempt_id": attempt_id}], "executions": [prior.__dict__]})
+    service._write_state(retry_contract.task_id, state)
+    invoked = {"n": 0}
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+                        SimpleNamespace(validate_static_contract=lambda *_: None))
+    monkeypatch.setattr(service.worker_registry, "invoke",
+                        lambda *args, **kwargs: invoked.__setitem__("n", invoked["n"] + 1))
+    with pytest.raises(RuntimeError, match="maximum_provider_calls aggregate budget exhausted"):
+        service._run_default_resumable(retry_contract, state["request"], lambda *_: None,
+                                       task_id=retry_contract.task_id, attempt_id=attempt_id)
+    assert invoked["n"] == 0
