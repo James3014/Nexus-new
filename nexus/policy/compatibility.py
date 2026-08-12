@@ -1,1 +1,0 @@
-def check_compat(new_policy, old_ticket): return True
