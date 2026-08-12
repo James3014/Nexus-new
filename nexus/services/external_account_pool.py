@@ -8,11 +8,11 @@ execution binding data.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
-import uuid
 
 
 class AccountFailureKind(str, Enum):
