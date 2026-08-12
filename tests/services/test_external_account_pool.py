@@ -146,10 +146,13 @@ def test_noneligible_failure_keeps_original_lease_active() -> None:
     pool = _pool()
     lease = pool.acquire("consumer-a")
 
-    assert pool.report_failure(
-        lease,
-        AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR,
-    ) is None
+    assert (
+        pool.report_failure(
+            lease,
+            AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR,
+        )
+        is None
+    )
     pool.release(lease)
 
 
