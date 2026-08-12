@@ -135,6 +135,8 @@ def _validate_live_snapshot(
         raise GuardError("snapshot.draft: PR must not be draft")
     if raw.get("mergeable") is not True:
         raise GuardError("snapshot.mergeable: PR must be mergeable")
+    if raw.get("target_clean") is not True:
+        raise GuardError("snapshot.target_clean: target must be clean")
 
     required = {
         (row["context"], row["integration_id"])
@@ -187,6 +189,7 @@ def _validate_live_snapshot(
         "pr_state": "open",
         "draft": False,
         "mergeable": True,
+        "target_clean": True,
         "checks": normalized_checks,
     }
 
@@ -252,6 +255,7 @@ def post_apply(
         "pr_state": "open",
         "draft": False,
         "mergeable": True,
+        "target_clean": True,
         "checks": preflight_receipt.get("required_checks"),
     }
     normalized_live = _validate_live_snapshot(reconstructed_live, manifest)
@@ -287,6 +291,8 @@ def post_apply(
 
     merge_sha = _exact_sha(snapshot.get("merge_sha"), "post_snapshot.merge_sha")
     merge_tree = _exact_sha(snapshot.get("merge_tree"), "post_snapshot.merge_tree")
+    if merge_tree != manifest["head_tree"]:
+        raise GuardError("post_snapshot.merge_tree: resulting tree differs from approved head tree")
     current_main_sha = _exact_sha(
         snapshot.get("current_base_sha"), "post_snapshot.current_base_sha"
     )
@@ -309,6 +315,24 @@ def post_apply(
     if still_present:
         raise GuardError(f"post_snapshot.path_states: deleted paths still present {still_present!r}")
 
+    post_check_snapshot = {
+        "schema": LIVE_SCHEMA,
+        "repository": manifest["repository"],
+        "pr_number": manifest["pr_number"],
+        "base_ref": manifest["base_ref"],
+        "base_sha": manifest["base_sha"],
+        "head_sha": manifest["head_sha"],
+        "head_tree": manifest["head_tree"],
+        "pr_state": "open",
+        "draft": False,
+        "mergeable": True,
+        "target_clean": True,
+        "checks": snapshot.get("checks"),
+    }
+    post_checks = _validate_live_snapshot(post_check_snapshot, manifest)["checks"]
+    if post_checks != normalized_live["checks"]:
+        raise GuardError("post_snapshot.checks: required check receipt drift")
+
     return {
         "schema": GUARD_SCHEMA,
         "phase": "post_apply",
@@ -325,6 +349,7 @@ def post_apply(
         "cas_token": preflight_receipt["cas_token"],
         "changed_paths": manifest["changed_paths"],
         "deleted_paths": manifest["deleted_paths"],
+        "required_checks": post_checks,
         "post_snapshot_sha256": _sha256(dict(snapshot)),
     }
 
