@@ -37,6 +37,7 @@ _ALLOWED_TASK_FACT_KEYS = frozenset(
         "authority_changing_scope",
         "security_sensitive_scope",
         "candidate_required",
+        "candidate_generation_only",
     }
 )
 _ALLOWED_AUTHORITY_INPUT_KEYS = frozenset(
@@ -216,6 +217,13 @@ class CanonicalTaskContext:
                 raise ValueError(f"canonical_context_task_fact_forbidden:{key}")
             if not isinstance(value, bool):
                 raise ValueError(f"canonical_context_task_fact_must_be_bool:{key}")
+        if self.task_facts.get("candidate_generation_only", False):
+            if "mutation_requested" not in self.task_facts:
+                raise ValueError(
+                    "candidate_generation_only_requires_explicit_mutation_requested_false"
+                )
+            if self.task_facts["mutation_requested"]:
+                raise ValueError("candidate_generation_only_conflicts_with_mutation_requested")
         for key, value in self.authority_inputs.items():
             if key not in _ALLOWED_AUTHORITY_INPUT_KEYS:
                 raise ValueError(f"canonical_context_authority_input_forbidden:{key}")
