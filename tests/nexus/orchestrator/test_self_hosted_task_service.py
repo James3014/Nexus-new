@@ -6411,3 +6411,207 @@ def test_m3c_retry_preserves_execution_history_and_aggregate_budget_blocks_invok
         service._run_default_resumable(retry_contract, state["request"], lambda *_: None,
                                        task_id=retry_contract.task_id, attempt_id=attempt_id)
     assert invoked["n"] == 0
+
+
+def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
+    card_path = f"tasks/issue-7/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="repair one bounded candidate",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    old_attempt_id = "attempt-old-repair"
+    request = _real_request(tmp_path, task_id=task_id)
+    request.update({
+        "execution_lane": "ISOLATED_TARGET",
+        "maximum_attempts_per_task": 2,
+        "worker": "auto",
+        "model": internal["binding"]["model"],
+        "workforce_demands": internal["workforce_demands"],
+        "workforce_admission": internal["workforce_admission"],
+        "planner_output": internal["planner_output"],
+        "task_card_path": card_path,
+        "task_card_hash": card_hash,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+        "worker_candidate_ingress": True,
+        "attempt_id": old_attempt_id,
+    })
+    old_envelope = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=old_attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    request["canonical_dispatch_envelope"] = old_envelope
+    binding = validate_workforce_dispatch_binding(request)
+    assert binding is not None
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    contract = service.build_contract(request)
+    old_receipt = _m3c_receipt(task_id, tmp_path / "old-target").__dict__
+    old_verified_receipt = {
+        "schema": "nexus.candidate_verification_receipt.v1",
+        "verified": True,
+        "candidate_commit_sha": "c" * 40,
+        "receipt_hash": "e" * 64,
+    }
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "terminal_status": "FINAL_BLOCK",
+        "final_disposition": "FINAL_BLOCK",
+        "cleanup_decision": "REMOVED",
+        "promotion_status": "NOT_CREATED",
+        "acceptance_decision": "REPAIRABLE",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+        "task_card_path": card_path,
+        "task_card_hash": card_hash,
+        "attempt_id": old_attempt_id,
+        "attempts": [{
+            "attempt_id": old_attempt_id,
+            "canonical_dispatch_envelope": copy.deepcopy(old_envelope),
+            "workforce_dispatch": copy.deepcopy(binding),
+            "verified_receipt": copy.deepcopy(old_verified_receipt),
+        }],
+        "executions": [copy.deepcopy(old_receipt)],
+        "workforce_dispatch": copy.deepcopy(binding),
+        "canonical_dispatch_envelope": copy.deepcopy(old_envelope),
+        "workforce_policy_hash": binding["policy_hash"],
+        "workforce_binding_hash": binding["binding_hash"],
+        "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
+        "selected_worker_id": binding["worker_id"],
+        "selected_provider": binding["provider"],
+        "selected_model": binding["model"],
+        "candidate_commit_sha": "c" * 40,
+        "candidate_ref": f"refs/nexus/candidates/{task_id}/old",
+        "candidate_state_hash": "d" * 64,
+        "verified_receipt_hash": "e" * 64,
+        "verified_receipt": copy.deepcopy(old_verified_receipt),
+        "promotion_packet": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_state_hash": "d" * 64,
+            "verified_receipt_hash": "e" * 64,
+        },
+    })
+    return service, request, old_envelope, old_receipt, old_verified_receipt
+
+
+@pytest.mark.parametrize("binding_fault", ["missing", "tampered"])
+def test_m3c_repair_retry_invalid_persisted_workforce_binding_blocks_zero_launch(
+    tmp_path,
+    monkeypatch,
+    binding_fault,
+):
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=f"m3c-repair-binding-{binding_fault}",
+    )
+    state = service._read_state(f"m3c-repair-binding-{binding_fault}")
+    if binding_fault == "missing":
+        state["request"].pop("workforce_admission")
+    else:
+        state["request"]["workforce_admission"]["aggregate_binding_hash"] = "0" * 64
+    service._write_state(state["task_id"], state)
+
+    calls = {"launch": 0, "invoke": 0}
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda *_: calls.__setitem__("launch", calls["launch"] + 1),
+    )
+    monkeypatch.setattr(
+        service.worker_registry,
+        "invoke",
+        lambda *_args, **_kwargs: calls.__setitem__("invoke", calls["invoke"] + 1),
+    )
+
+    result = service.retry_task(state["task_id"])
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"].startswith("WORKFORCE_ADMISSION_BINDING_")
+    assert calls == {"launch": 0, "invoke": 0}
+    assert service._read_state(state["task_id"])["attempts"] == state["attempts"]
+
+
+def test_m3c_repair_retry_rebinds_fresh_attempt_and_preserves_old_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "m3c-repair-fresh-envelope"
+    service, _, old_envelope, old_receipt, old_verified_receipt = (
+        _m3c_repairable_workforce_state(tmp_path, monkeypatch, task_id=task_id)
+    )
+    old_attempt_bytes = json.dumps(
+        service._read_state(task_id)["attempts"][0], sort_keys=True
+    )
+    old_execution_bytes = json.dumps(old_receipt, sort_keys=True)
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+    fresh_attempt_id = durable["attempt_id"]
+    fresh_envelope = durable["canonical_dispatch_envelope"]
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert fresh_attempt_id != "attempt-old-repair"
+    assert fresh_envelope != old_envelope
+    assert fresh_envelope["task_id"] == task_id
+    assert fresh_envelope["attempt_id"] == fresh_attempt_id
+    assert fresh_envelope["task_card_path"] == durable["task_card_path"]
+    assert fresh_envelope["task_card_hash"] == durable["task_card_hash"]
+    assert fresh_envelope["worker_id"] == durable["selected_worker_id"]
+    assert fresh_envelope["provider"] == durable["selected_provider"]
+    assert fresh_envelope["model"] == durable["selected_model"]
+    assert json.dumps(durable["attempts"][0], sort_keys=True) == old_attempt_bytes
+    assert json.dumps(durable["executions"][0], sort_keys=True) == old_execution_bytes
+    assert durable["attempts"][0]["verified_receipt"] == old_verified_receipt
+
+    assert durable["candidate_history"] == [{
+        "candidate_commit": "c" * 40,
+        "candidate_ref": f"refs/nexus/candidates/{task_id}/old",
+        "candidate_state_hash": "d" * 64,
+        "verified_receipt_hash": "e" * 64,
+        "approval_binding": None,
+        "integration_branch": None,
+        "integration_commit": None,
+        "final_disposition": "FINAL_BLOCK",
+    }]
+    for field in (
+        "candidate",
+        "candidate_commit_sha",
+        "candidate_tree_sha",
+        "candidate_ref",
+        "candidate_state_hash",
+        "verified_receipt_hash",
+        "verified_receipt",
+        "promotion_packet",
+    ):
+        assert durable[field] is None

@@ -4829,13 +4829,30 @@ class SelfHostedTaskService:
                             "collaboration_provenance": retry_collaboration_provenance,
                         })
                     current.update({
-                        "request": _jsonable(dict(request)),
+                        "request": _jsonable(state_request),
                         "action": _jsonable(dict(action)) if action else None,
                         "action_id": action_id or None,
                         "attempt_id_hint": attempt_id_hint or None,
                         "idempotency_key": idempotency_key or None,
                         "action_request_hash": action_request_hash or None,
                     })
+                    if dispatch_binding is not None:
+                        current.update({
+                            "worker_provider": dispatch_binding["provider"],
+                            "selected_worker_id": dispatch_binding["worker_id"],
+                            "selected_provider": dispatch_binding["provider"],
+                            "selected_model": dispatch_binding["model"],
+                            "provider_order": [dispatch_binding["provider"]],
+                            "workforce_dispatch": _jsonable(dispatch_binding),
+                            "canonical_dispatch_envelope": _jsonable(
+                                dispatch_binding.get("canonical_dispatch_envelope")
+                            ),
+                            "workforce_policy_hash": dispatch_binding["policy_hash"],
+                            "workforce_binding_hash": dispatch_binding["binding_hash"],
+                            "workforce_aggregate_binding_hash": dispatch_binding[
+                                "aggregate_binding_hash"
+                            ],
+                        })
                     # Enforce the task-scoped attempt ceiling before mutating
                     # durable lineage.  A rejected retry must not append a
                     # phantom attempt or reset any aggregate budgets.
@@ -4848,6 +4865,12 @@ class SelfHostedTaskService:
                         "action_id": action_id or None,
                         "idempotency_key": idempotency_key or None,
                         "action_request_hash": action_request_hash or None,
+                        "canonical_dispatch_envelope": _jsonable(
+                            dispatch_binding.get("canonical_dispatch_envelope")
+                        )
+                        if dispatch_binding is not None
+                        else None,
+                        "workforce_dispatch": _jsonable(dispatch_binding),
                         "started_at": now,
                     })
                     current["status"] = "SUBMITTED"
