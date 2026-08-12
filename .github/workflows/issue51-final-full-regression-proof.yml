@@ -1,0 +1,184 @@
+name: Issue 51 Final Exact Base Head Full Regression Proof
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  full-regression:
+    name: Full regression ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base
+            sha: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
+          - label: head
+            sha: e828aa1cc49f003072337b35b64bf662a7bfd81f
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+          ref: ${{ matrix.sha }}
+
+      - name: Prove exact checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ matrix.sha }}"
+          echo "${{ matrix.sha }}" > "$RUNNER_TEMP/${{ matrix.label }}.sha"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install exact revision dependencies
+        run: uv sync --frozen --all-groups --all-extras
+
+      - name: Run complete repository regression
+        run: |
+          set +e
+          NEXUS_TEST_MODE=CI PYTHONPATH=. .venv/bin/python -m pytest tests/ -q --timeout=300 --junitxml="$RUNNER_TEMP/${{ matrix.label }}.xml" > "$RUNNER_TEMP/${{ matrix.label }}.log" 2>&1
+          status=$?
+          echo "$status" > "$RUNNER_TEMP/${{ matrix.label }}.exit"
+          exit 0
+
+      - name: Archive exact revision evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue51-final-full-${{ matrix.label }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/${{ matrix.label }}.sha
+            ${{ runner.temp }}/${{ matrix.label }}.xml
+            ${{ runner.temp }}/${{ matrix.label }}.log
+            ${{ runner.temp }}/${{ matrix.label }}.exit
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+
+  compare:
+    name: Compare exact base/head full regression
+    needs: full-regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download exact regression evidence
+        uses: actions/download-artifact@v5
+        with:
+          pattern: issue51-final-full-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence
+          merge-multiple: true
+
+      - name: Compare testcase identities and outcomes
+        env:
+          BASE_SHA: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
+          HEAD_SHA: e828aa1cc49f003072337b35b64bf662a7bfd81f
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"], "evidence")
+          if (root / "base.sha").read_text().strip() != os.environ["BASE_SHA"]:
+              raise SystemExit("base SHA artifact mismatch")
+          if (root / "head.sha").read_text().strip() != os.environ["HEAD_SHA"]:
+              raise SystemExit("head SHA artifact mismatch")
+
+          def load(label):
+              tree = ET.parse(root / f"{label}.xml")
+              rows = {}
+              for case in tree.iter("testcase"):
+                  key = (case.get("classname", ""), case.get("name", ""))
+                  if case.find("failure") is not None:
+                      status = "failed"
+                  elif case.find("error") is not None:
+                      status = "error"
+                  elif case.find("skipped") is not None:
+                      status = "skipped"
+                  else:
+                      status = "passed"
+                  if key in rows:
+                      raise SystemExit(f"duplicate testcase identity: {key!r}")
+                  rows[key] = status
+              return rows
+
+          base = load("base")
+          head = load("head")
+          if len(base) < 1000 or len(head) < 1000:
+              raise SystemExit(f"insufficient full-suite collection: base={len(base)} head={len(head)}")
+
+          base_bad = {k: v for k, v in base.items() if v in {"failed", "error"}}
+          head_bad = {k: v for k, v in head.items() if v in {"failed", "error"}}
+          new_bad = sorted((k, v) for k, v in head_bad.items() if k not in base_bad)
+          missing = sorted(set(base) - set(head))
+          added = sorted(set(head) - set(base))
+          changed_bad = sorted(
+              (k, base_bad.get(k), head_bad.get(k))
+              for k in set(base_bad) & set(head_bad)
+              if base_bad[k] != head_bad[k]
+          )
+
+          def counts(rows):
+              values = list(rows.values())
+              return {s: values.count(s) for s in ("passed", "failed", "error", "skipped")}
+
+          report = {
+              "schema": "nexus.issue51.final_full_regression_proof.v1",
+              "base_sha": os.environ["BASE_SHA"],
+              "head_sha": os.environ["HEAD_SHA"],
+              "base_exit": int((root / "base.exit").read_text().strip()),
+              "head_exit": int((root / "head.exit").read_text().strip()),
+              "base_counts": counts(base),
+              "head_counts": counts(head),
+              "base_case_count": len(base),
+              "head_case_count": len(head),
+              "new_bad": new_bad,
+              "missing_testcases": missing,
+              "added_testcases": added,
+              "changed_bad_status": changed_bad,
+              "status": "PASS" if not new_bad and not missing and not added and not changed_bad else "FAIL",
+          }
+          Path(os.environ["RUNNER_TEMP"], "issue51-final-full-regression.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True)
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          if report["status"] != "PASS":
+              raise SystemExit(1)
+          PY
+
+      - name: Archive comparison receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue51-final-full-comparison-${{ github.run_id }}
+          path: ${{ runner.temp }}/issue51-final-full-regression.json
+          if-no-files-found: error
+          retention-days: 14
