@@ -150,9 +150,7 @@ def test_stale_required_check_head_fails_closed() -> None:
     ("status", "conclusion"),
     [("in_progress", None), ("completed", "failure"), ("completed", "cancelled")],
 )
-def test_non_success_required_check_fails_closed(
-    status: str, conclusion: str | None
-) -> None:
+def test_non_success_required_check_fails_closed(status: str, conclusion: str | None) -> None:
     snapshot = _live_snapshot()
     checks = copy.deepcopy(snapshot["checks"])
     assert isinstance(checks, list)
