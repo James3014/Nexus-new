@@ -6,20 +6,19 @@ Verifies that the provider wrapper correctly handles both:
 """
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
 import os
-import pytest
+from unittest.mock import MagicMock, patch
 
-from nexus.services.local_heal.local_model_capability_executors import (
-    LocalHealPipelineCapabilityExecutor,
-)
 from nexus.services.local_heal.local_model_capability_context import (
     LocalModelCapabilityContext,
 )
+from nexus.services.local_heal.local_model_capability_executors import (
+    LocalHealPipelineCapabilityExecutor,
+)
 from nexus.services.local_heal.local_model_provider import (
+    InjectedLocalModelProvider,
     LocalModelProviderRequest,
     LocalModelProviderResponse,
-    InjectedLocalModelProvider,
 )
 
 
@@ -73,10 +72,13 @@ class TestProviderContractSmokeB71:
                     execution_topology="localheal_pipeline",
                     evidence_refs=("e1",),
                     source_anchor={"present": False},
-                    route_context={"signal_snapshot": {"executor_model": "qwen2.5-coder:7b"}},
+                    route_context={
+                        "run_group": "provider-signature",
+                        "signal_snapshot": {"executor_model": "qwen2.5-coder:7b"},
+                    },
                     provider=provider,
                 )
-                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+                LocalHealPipelineCapabilityExecutor().execute(ctx)
 
                 # Pipeline was called
                 pipeline_run_mock.assert_called_once()
@@ -106,7 +108,10 @@ class TestProviderContractSmokeB71:
                     execution_topology="localheal_pipeline",
                     evidence_refs=("e1",),
                     source_anchor={"present": False},
-                    route_context={"signal_snapshot": {"executor_model": "qwen2.5-coder:7b"}},
+                    route_context={
+                        "run_group": "provider-model",
+                        "signal_snapshot": {"executor_model": "qwen2.5-coder:7b"},
+                    },
                     provider=provider,
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
@@ -166,7 +171,7 @@ class TestProviderContractSmokeB71:
                     execution_topology="localheal_pipeline",
                     evidence_refs=("e1",),
                     source_anchor={"present": False},
-                    route_context={},
+                    route_context={"run_group": "provider-error"},
                     provider=provider,
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
