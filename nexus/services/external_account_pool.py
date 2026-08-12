@@ -35,17 +35,15 @@ class AccountFailureKind(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
-_ROTATION_ELIGIBLE_FAILURES = frozenset(
-    {
-        AccountFailureKind.AUTH_OR_SESSION_INVALID,
-        AccountFailureKind.TOKEN_EXPIRED,
-        AccountFailureKind.TOKEN_REFRESH_FAILED,
-        AccountFailureKind.QUOTA_EXHAUSTED,
-        AccountFailureKind.RATE_LIMITED,
-        AccountFailureKind.ACCOUNT_UNAVAILABLE,
-        AccountFailureKind.ACCOUNT_DISABLED,
-    }
-)
+_ROTATION_ELIGIBLE_FAILURES = frozenset({
+    AccountFailureKind.AUTH_OR_SESSION_INVALID,
+    AccountFailureKind.TOKEN_EXPIRED,
+    AccountFailureKind.TOKEN_REFRESH_FAILED,
+    AccountFailureKind.QUOTA_EXHAUSTED,
+    AccountFailureKind.RATE_LIMITED,
+    AccountFailureKind.ACCOUNT_UNAVAILABLE,
+    AccountFailureKind.ACCOUNT_DISABLED,
+})
 
 
 def is_rotation_eligible(failure_kind: AccountFailureKind) -> bool:
