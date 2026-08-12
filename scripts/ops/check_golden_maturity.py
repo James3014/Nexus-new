@@ -100,16 +100,16 @@ def _validate_report(report: object, index: int) -> dict[str, Any]:
             all_nodes.add(nodeid)
             if status == "covered":
                 covered_nodes.add(nodeid)
-            normalized_witnesses.append(
-                {"nodeid": nodeid, "collection": collection, "execution": execution}
-            )
-        normalized_cases.append(
-            {
-                "case_id": case_id,
-                "status": status,
-                "witnesses": sorted(normalized_witnesses, key=lambda item: item["nodeid"]),
-            }
-        )
+            normalized_witnesses.append({
+                "nodeid": nodeid,
+                "collection": collection,
+                "execution": execution,
+            })
+        normalized_cases.append({
+            "case_id": case_id,
+            "status": status,
+            "witnesses": sorted(normalized_witnesses, key=lambda item: item["nodeid"]),
+        })
     _require(
         row.get("collection_node_count") == len(all_nodes), f"{prefix}:collection_count_mismatch"
     )
@@ -214,16 +214,14 @@ def project_maturity(reports: Sequence[object]) -> dict[str, Any]:
                 clean_count += 1
             maturity = "STABLE" if clean_count >= REQUIRED_CLEAN_RUNS else "CANDIDATE"
 
-        cases.append(
-            {
-                "case_id": case_id,
-                "golden_status": case["status"],
-                "maturity": maturity,
-                "consecutive_clean_runs": clean_count,
-                "required_clean_runs": REQUIRED_CLEAN_RUNS,
-                "witnesses": [witness["nodeid"] for witness in case["witnesses"]],
-            }
-        )
+        cases.append({
+            "case_id": case_id,
+            "golden_status": case["status"],
+            "maturity": maturity,
+            "consecutive_clean_runs": clean_count,
+            "required_clean_runs": REQUIRED_CLEAN_RUNS,
+            "witnesses": [witness["nodeid"] for witness in case["witnesses"]],
+        })
     return {
         "schema": PROJECTION_SCHEMA,
         "status": "PASS",
