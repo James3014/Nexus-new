@@ -36,6 +36,39 @@ def test_bootstrap_files_use_current_worktree_authority():
     assert "../GEMINI.md" in contents[".gemini/GEMINI.md"]
 
 
+def test_execution_domains_and_candidate_namespaces_are_unambiguous():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(
+        encoding="utf-8"
+    )
+    launch = (ROOT / ".agents/skills/nexus-task-launch/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "The Owner chooses the execution lane" in agents
+    assert "does not select\n  local lifecycle" in agents
+    assert "A GitHub PR Candidate" in agents
+    assert "a local lifecycle Candidate" in agents
+    assert "never substitutes for program correctness" in agents
+    assert "Reviewer block/card omission is not\n  terminal `REJECTED`" in agents
+
+    assert "GitHub collaboration and local lifecycle domains" in contract
+    assert "does not enter local lifecycle merely because it is\ndelegated" in contract
+    assert "not the admission or merge gate for ordinary GitHub PR work" in contract
+    assert "must not create, widen, or recursively bootstrap" in contract
+    assert "not automatically a\nterminal `REJECTED` Candidate" in contract
+
+    assert "This skill governs only the\nlocal Nexus self-hosted lifecycle" in launch
+    assert "Ordinary GitHub\nReady-Issue branch work does not enter this skill" in launch
+    assert "That handoff applies only to a local lifecycle Candidate" in launch
+
+    assert "applies exclusively to a local Nexus lifecycle Candidate" in merge
+    assert "It is not the merge procedure for a GitHub PR Candidate" in merge
+
+
 def test_bootstrap_file_set_is_complete_and_tracked():
     for path in BOOTSTRAP_FILES:
         assert (ROOT / path).is_file(), path

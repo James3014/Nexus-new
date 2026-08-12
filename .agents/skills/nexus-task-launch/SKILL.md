@@ -12,10 +12,19 @@ explicit current Owner request is eligible for `DIRECT_CANONICAL`, stop this
 skill and return execution to the primary agent in the canonical checkout.
 `DIRECT_CANONICAL` does not require a Task Card or lifecycle state.
 
-Read-only inspection may use the current checkout. After governed
-classification, mutation must use the self-hosted lifecycle tools; do not
-create an unmanaged worktree, manually create a branch, or use a direct
-connector edit/write operation.
+Read-only inspection may use the current checkout. This skill governs only the
+local Nexus self-hosted lifecycle. Use it when the Owner selects that domain or
+the intended result is a local governed Target, lifecycle Candidate, runtime
+integration, or another explicitly local lifecycle outcome. Ordinary GitHub
+Ready-Issue branch work does not enter this skill merely because it is
+delegated or will produce a PR Candidate.
+
+After local-lifecycle classification, mutation must use the self-hosted
+lifecycle tools; do not create an unmanaged worktree, manually create a branch,
+or use a direct connector edit/write operation. Missing-card bootstrap is not a
+lifecycle implementation task: only the primary coordinator under the current
+standing grant creates the minimum card once and binds its hash. Never launch a
+recursive card-only Candidate or let a worker create its own authority card.
 
 ## Required sequence
 
@@ -34,6 +43,10 @@ candidate commit, tree, state hash, receipt hash, changed-file scope, deletion
 audit, and controller immutability. Preserve candidate and salvage refs. Hand
 the verified candidate to `nexus-merge-gate`; approval and integration remain
 separate human-gated actions.
+
+That handoff applies only to a local lifecycle Candidate. A GitHub PR Candidate
+uses fresh PR/base/head/diff, required CI, independent acceptance, and
+expected-head/CAS merge gates instead.
 
 ## Forbidden actions
 
