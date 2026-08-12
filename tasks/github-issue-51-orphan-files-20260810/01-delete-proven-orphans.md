@@ -22,9 +22,9 @@ for the duplicate root transaction module. Preserve `legacy/logmemory.py`.
 
 ## Baseline
 
-- GitHub main: `bdcc427f6249406079c85f9725b3af6cd62ab1f1`
-- prerequisites: #75, #104, #105, and #106 physically completed
-- existing PR: #71, to be rebound to this exact baseline before verification
+- GitHub main: `8620b72e5688dc41551afb8ed5454b49d21dc5e3`
+- prerequisites: #75, #104, #105, #106, and #204 physically completed
+- existing PR: #71, rebound to this exact baseline before verification
 
 ## Authorized deletions
 
