@@ -59,7 +59,7 @@ class CliCommandsService:
         return daemon.monitor()
 
     def reach(self, url: str, tier: int = 1):
-        from nexus.core.ucc_reach import UCCReach
+        from nexus.services.reach.ucc_router import UCCRouter
 
-        reach_engine = UCCReach(self.repo_root)
-        return reach_engine.explore(url, tier=tier)
+        reach_engine = UCCRouter(self.repo_root)
+        return reach_engine.reach(url, tier=tier)
