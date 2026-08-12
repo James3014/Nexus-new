@@ -158,15 +158,11 @@ class ExternalAccountPool:
     def _require_active_lease(self, lease: AccountLease) -> str:
         active = self._active_leases.get(lease.lease_id)
         if active != lease:
-            raise InvalidAccountLeaseError(
-                f"INVALID_ACCOUNT_LEASE:{lease.lease_id}"
-            )
+            raise InvalidAccountLeaseError(f"INVALID_ACCOUNT_LEASE:{lease.lease_id}")
         try:
             return self._lease_to_account_id[lease.lease_id]
         except KeyError as exc:
-            raise InvalidAccountLeaseError(
-                f"INVALID_ACCOUNT_LEASE:{lease.lease_id}"
-            ) from exc
+            raise InvalidAccountLeaseError(f"INVALID_ACCOUNT_LEASE:{lease.lease_id}") from exc
 
     def release(self, lease: AccountLease) -> None:
         """Release only the supplied lease; unrelated bindings remain intact."""
