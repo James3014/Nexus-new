@@ -7,8 +7,9 @@ class AuditService:
         self.repo_root = repo_root
 
     def run_acceptance(self, window: int):
-        from nexus.core.ops.acceptance_check import run_final_gate
-        return run_final_gate(self.repo_root, window=window)
+        from scripts.ops.nexus_acceptance_check import run_acceptance
+
+        return run_acceptance(project_root=self.repo_root, window=window)
 
     def run_release(self, tag: str, aos: int):
         # 這裡遷移原本 release 的複雜邏輯

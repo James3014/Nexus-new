@@ -454,6 +454,119 @@ def _write_markdown(report: Dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run_acceptance(
+    *,
+    project_root: Path,
+    window: int = 50,
+    output_dir: str = ".nexus/reports",
+    repair_success_min: float = 80.0,
+    phantom_fp_max: float = 3.0,
+    regression_pass_min: float = 95.0,
+    retry_spike_factor: float = 2.0,
+    retry_abs_max: float = 1.0,
+    pr_min: float = 30.0,
+    nrh_min: float = 20.0,
+    learning_gate_mode: str = "soft_signal",
+    include_sources: str = "pipeline.crystallize,pipeline.repair,pipeline.repair_audit",
+    exclude_sources: str = "calibration.sim",
+    exclude_tasks: str = "",
+    cold_start_min_samples: int = 10,
+    required_claim_paths: str | None = None,
+    report_file: str = ".nexus/reports/agent_report.json",
+    require_test_evidence: bool = True,
+    report_newer_than: str | None = None,
+) -> int:
+    """Run the canonical acceptance algorithm without CLI-global state."""
+    project_root = Path(project_root).resolve()
+    output_dir_path = project_root / output_dir
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+    if required_claim_paths is None:
+        required_claim_paths = os.environ.get("NEXUS_REQUIRED_CLAIM_PATHS", "")
+    
+    metrics_dir = project_root / ".nexus" / "metrics"
+    all_opt = _load_jsonl(metrics_dir / "skills_optimization_runs.jsonl")
+    all_out = _load_jsonl(metrics_dir / "skill_outcome_events.jsonl")
+    
+    included = [s.strip() for s in include_sources.split(",")]
+    excluded = [s.strip() for s in exclude_sources.split(",")]
+    ext_tasks = [t.strip() for t in exclude_tasks.split(",")] if exclude_tasks else []
+    
+    outcome_rows = [r for r in all_out if r.get("source") in included and r.get("source") not in excluded and r.get("task_id") not in ext_tasks]
+    opt_rows = [r for r in all_opt if r.get("source", "pipeline.crystallize") in included and r.get("task_id") not in ext_tasks]
+    
+    checks = []
+    checks.append(_evaluate_repair_success(opt_rows, outcome_rows, window=window, success_min=repair_success_min))
+    checks.append(_evaluate_phantom_false_positive(outcome_rows, window=window, fp_max=phantom_fp_max))
+    
+    reg_result, reg_audit = _evaluate_regression_and_side_effects(
+        outcome_rows, window=window,
+        regression_min=regression_pass_min, retry_abs_max=retry_abs_max, retry_spike_factor=retry_spike_factor
+    )
+    checks.append(reg_result)
+    
+    # 💎 核心傳遞修正: 將獲取的 mode 傳遞給 Learning Promotion
+    learning_check = _evaluate_learning_promotion(
+        outcome_rows, window=window, pr_min=pr_min, nrh_min=nrh_min, mode=learning_gate_mode
+    )
+    
+    ucc_check = _evaluate_ucc_truth_efficiency(all_out, window=window)
+    
+    wiki_summary = _summarize_wiki_harness(project_root)
+    wiki_contract_check = _evaluate_wiki_harness_contract(wiki_summary)
+    
+    lesson_check = _evaluate_lesson_writeback(project_root)
+    all_checks = checks + [learning_check, ucc_check, wiki_contract_check, lesson_check]
+    gate_passed = all(c.passed for c in all_checks)
+    cold_start = len(outcome_rows) < max(1, int(cold_start_min_samples))
+    primary_failure = _build_primary_failure(all_checks)
+    status = "PASS" if gate_passed else "FAIL"
+    if (not gate_passed) and cold_start:
+        status = "UNVERIFIED_COLD_START"
+
+    report = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "gate_passed": gate_passed,
+        "cold_start": cold_start,
+        "cold_start_sample_count": len(outcome_rows),
+        "cold_start_min_samples": int(cold_start_min_samples),
+        "primary_failure": primary_failure,
+        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks],
+        "wiki_harness": wiki_summary,
+    }
+
+    # Write once so verifier can inspect current acceptance status from disk.
+    (output_dir_path / "acceptance_check.json").write_text(json.dumps(report, indent=2))
+    _write_markdown(report, output_dir_path / "acceptance_check.md")
+
+    required_paths = [p.strip() for p in str(required_claim_paths).split(",") if p.strip()]
+    claim_check = _evaluate_report_claim_integrity(
+        project_root,
+        required_paths=required_paths,
+        require_acceptance_pass=True, # T13: 固定為True，打破循環依賴
+        report_file_rel=report_file,
+        require_test_evidence=bool(require_test_evidence),
+        report_newer_than=report_newer_than,
+    )
+    all_checks.append(claim_check)
+    gate_passed = gate_passed and claim_check.passed
+    primary_failure = _build_primary_failure(all_checks)
+    status = "PASS" if gate_passed else "FAIL"
+    if (not gate_passed) and cold_start:
+        status = "UNVERIFIED_COLD_START"
+    report["status"] = status
+    report["gate_passed"] = gate_passed
+    report["primary_failure"] = primary_failure
+    report["criteria"] = [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks]
+
+    (output_dir_path / "acceptance_check.json").write_text(json.dumps(report, indent=2))
+    _write_markdown(report, output_dir_path / "acceptance_check.md")
+    
+    print(f"[acceptance-check] status={report['status']}")
+    print(f"[acceptance-check] gate_passed={str(gate_passed).lower()}")
+    return 0 if gate_passed else 1
+
+
 @nexus_metabolize(task_name="Nexus System Acceptance Check")
 def main():
     parser = argparse.ArgumentParser(description="Nexus Acceptance Gate Checker")
@@ -504,95 +617,29 @@ def main():
         default=None,
         help="Reference file that the agent report must be newer than.",
     )
-    
     parser.add_argument("--json", action="store_true", help="Output as JSON.")
     args = parser.parse_args()
-    project_root = Path(args.project_root).resolve()
-    output_dir = project_root / args.output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    metrics_dir = project_root / ".nexus" / "metrics"
-    all_opt = _load_jsonl(metrics_dir / "skills_optimization_runs.jsonl")
-    all_out = _load_jsonl(metrics_dir / "skill_outcome_events.jsonl")
-    
-    included = [s.strip() for s in args.include_sources.split(",")]
-    excluded = [s.strip() for s in args.exclude_sources.split(",")]
-    ext_tasks = [t.strip() for t in args.exclude_tasks.split(",")] if args.exclude_tasks else []
-    
-    outcome_rows = [r for r in all_out if r.get("source") in included and r.get("source") not in excluded and r.get("task_id") not in ext_tasks]
-    opt_rows = [r for r in all_opt if r.get("source", "pipeline.crystallize") in included and r.get("task_id") not in ext_tasks]
-    
-    checks = []
-    checks.append(_evaluate_repair_success(opt_rows, outcome_rows, window=args.window, success_min=args.repair_success_min))
-    checks.append(_evaluate_phantom_false_positive(outcome_rows, window=args.window, fp_max=args.phantom_fp_max))
-    
-    reg_result, reg_audit = _evaluate_regression_and_side_effects(
-        outcome_rows, window=args.window, 
-        regression_min=args.regression_pass_min, retry_abs_max=args.retry_abs_max, retry_spike_factor=args.retry_spike_factor
-    )
-    checks.append(reg_result)
-    
-    # 💎 核心傳遞修正: 將獲取的 mode 傳遞給 Learning Promotion
-    learning_check = _evaluate_learning_promotion(
-        outcome_rows, window=args.window, pr_min=args.pr_min, nrh_min=args.nrh_min, mode=args.learning_gate_mode
-    )
-    
-    ucc_check = _evaluate_ucc_truth_efficiency(all_out, window=args.window)
-    
-    wiki_summary = _summarize_wiki_harness(project_root)
-    wiki_contract_check = _evaluate_wiki_harness_contract(wiki_summary)
-    
-    lesson_check = _evaluate_lesson_writeback(project_root)
-    all_checks = checks + [learning_check, ucc_check, wiki_contract_check, lesson_check]
-    gate_passed = all(c.passed for c in all_checks)
-    cold_start = len(outcome_rows) < max(1, int(args.cold_start_min_samples))
-    primary_failure = _build_primary_failure(all_checks)
-    status = "PASS" if gate_passed else "FAIL"
-    if (not gate_passed) and cold_start:
-        status = "UNVERIFIED_COLD_START"
-
-    report = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": status,
-        "gate_passed": gate_passed,
-        "cold_start": cold_start,
-        "cold_start_sample_count": len(outcome_rows),
-        "cold_start_min_samples": int(args.cold_start_min_samples),
-        "primary_failure": primary_failure,
-        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks],
-        "wiki_harness": wiki_summary,
-    }
-
-    # Write once so verifier can inspect current acceptance status from disk.
-    (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))
-    _write_markdown(report, output_dir / "acceptance_check.md")
-
-    required_paths = [p.strip() for p in str(args.required_claim_paths).split(",") if p.strip()]
-    claim_check = _evaluate_report_claim_integrity(
-        project_root,
-        required_paths=required_paths,
-        require_acceptance_pass=True, # T13: 固定為True，打破循環依賴
-        report_file_rel=args.report_file,
-        require_test_evidence=bool(args.require_test_evidence),
+    return run_acceptance(
+        project_root=Path(args.project_root),
+        output_dir=args.output_dir,
+        window=args.window,
+        repair_success_min=args.repair_success_min,
+        phantom_fp_max=args.phantom_fp_max,
+        regression_pass_min=args.regression_pass_min,
+        retry_spike_factor=args.retry_spike_factor,
+        retry_abs_max=args.retry_abs_max,
+        pr_min=args.pr_min,
+        nrh_min=args.nrh_min,
+        learning_gate_mode=args.learning_gate_mode,
+        include_sources=args.include_sources,
+        exclude_sources=args.exclude_sources,
+        exclude_tasks=args.exclude_tasks,
+        cold_start_min_samples=args.cold_start_min_samples,
+        required_claim_paths=args.required_claim_paths,
+        report_file=args.report_file,
+        require_test_evidence=args.require_test_evidence,
         report_newer_than=args.report_newer_than,
     )
-    all_checks.append(claim_check)
-    gate_passed = gate_passed and claim_check.passed
-    primary_failure = _build_primary_failure(all_checks)
-    status = "PASS" if gate_passed else "FAIL"
-    if (not gate_passed) and cold_start:
-        status = "UNVERIFIED_COLD_START"
-    report["status"] = status
-    report["gate_passed"] = gate_passed
-    report["primary_failure"] = primary_failure
-    report["criteria"] = [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks]
-
-    (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))
-    _write_markdown(report, output_dir / "acceptance_check.md")
-    
-    print(f"[acceptance-check] status={report['status']}")
-    print(f"[acceptance-check] gate_passed={str(gate_passed).lower()}")
-    return 0 if gate_passed else 1
 
 if __name__ == "__main__":
     sys.exit(main())
