@@ -6,7 +6,7 @@ campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 baseline_main: 599227f0efbe1e9a4ca8cd6bff56824f0a6d9965
 reconciled_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
-current_main: bc16cbf2bf00377a4521e3eab233175112d0c963
+current_main: 9125913ca809c954806386e3f11e6eb799ff882f
 rebind_owner_directive: https://github.com/James3014/Nexus-new/issues/7#issuecomment-5250252765
 rebind_date: 2026-08-11
 ordered_cards:
@@ -14,11 +14,12 @@ ordered_cards:
   - 02-independent-candidate-acceptance.md
   - 03-bounded-repair-attempts.md
   - 04-ordered-attempt-events-and-e2e.md
-current_frontier: 03-bounded-repair-attempts.md
-frontier_status: ACTIVE
+current_frontier: 04-ordered-attempt-events-and-e2e.md
+frontier_status: BLOCKED_OWNER_GATE
 completed_cards:
   - 01-canonical-planner-dispatch-binding.md
   - 02-independent-candidate-acceptance.md
+  - 03-bounded-repair-attempts.md
 blocked_cards: []
 AUTO_CHAIN: false
 ---
@@ -54,12 +55,18 @@ merged as `9121cd2cf83e959db763bbb578a60f861b0855fb`; independent review was
 `MERGE_SAFE`, with 255 combined tests and 14 reducer tests. Protected required
 checks were terminal PASS; Tier 3 remained skipped.
 
-Current frontier is M3-C (`03-bounded-repair-attempts.md`) with `ACTIVE`
-status. On 2026-08-12 the Owner explicitly granted the
+M3-C (`03-bounded-repair-attempts.md`) was completed via PR #188. Its exact
+Candidate head was `0bfb31ebc4dc5862581fe6cf289dea43c8942302`, physically
+merged as `892369a93a5c540042f0b4b35d1ee8d81a9de2b2`; the seven-file scope
+received independent `ACCEPT`, required checks were terminal PASS, and focused
+evidence included 297 combined tests, eight M3-C tests, and 311 primary tests.
+
+The current frontier is M3-D (`04-ordered-attempt-events-and-e2e.md`) with
+`BLOCKED_OWNER_GATE` status. On 2026-08-12 the Owner explicitly granted the
 `M3_C_CAMPAIGN_REBIND_AND_OWNER_GATE` for bounded implementation, commit,
 issue-branch push, and pull-request creation against current main
 `bc16cbf2bf00377a4521e3eab233175112d0c963`.
 
-`AUTO_CHAIN=false`; M3-C may form a Candidate PR only. Approval, integration,
-merge, successor-card activation, release, and production/public claims remain
-separate authorities.
+`AUTO_CHAIN=false`; this reconciliation does not activate M3-D. M3-D requires
+a separate Owner authorization. Approval, integration, merge, release, and
+production/public claims remain separate authorities.
