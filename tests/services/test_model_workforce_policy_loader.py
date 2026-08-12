@@ -28,7 +28,7 @@ def test_loader_loads_default_policy_successfully() -> None:
     assert snapshot.status == "current"
     assert snapshot.route_authority == "CapabilityPlanner"
     assert len(snapshot.declared_states) > 0
-    assert len(snapshot.workers) == 23
+    assert len(snapshot.workers) == 24
     for retired_worker_id in ("local_ornith9b", "local_qwythos_v2_9b", "local_gemma12b"):
         assert retired_worker_id not in snapshot.workers
     assert snapshot.policy_hash is not None
@@ -191,6 +191,68 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
     dec2 = loader.admit(req2, snapshot)
     assert dec2.decision == AdmissionDecision.ALLOW
     assert dec2.resolved_worker_id == "agy_flash"
+
+
+def _agy_medium_request(**overrides: object) -> WorkforceAdmissionRequest:
+    values: dict[str, object] = {
+        "requested_worker_id": "agy_flash_medium",
+        "provider": "agy",
+        "model": "gemini-3.6-flash-medium",
+        "role": "fast_bounded_implementation",
+        "autonomy": "L1",
+        "context": "nexus_bounded",
+        "route_authorized": True,
+        "provided_controls": [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "parser",
+            "verifier",
+            "independent_verification",
+        ],
+    }
+    values.update(overrides)
+    return WorkforceAdmissionRequest(**values)  # type: ignore[arg-type]
+
+
+def test_agy_medium_admission_is_exact_bounded_and_fail_closed() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+
+    by_worker = loader.admit(_agy_medium_request())
+    assert by_worker.decision == AdmissionDecision.ALLOW
+    assert by_worker.resolved_worker_id == "agy_flash_medium"
+    assert by_worker.resolved_model == "gemini-3.6-flash-medium"
+    assert by_worker.autonomy_ceiling == "L1"
+
+    by_identity = loader.admit(_agy_medium_request(requested_worker_id=None))
+    assert by_identity.decision == AdmissionDecision.ALLOW
+    assert by_identity.resolved_worker_id == "agy_flash_medium"
+
+    high_through_medium = loader.admit(_agy_medium_request(model="gemini-3.6-flash-high"))
+    assert high_through_medium.decision == AdmissionDecision.BLOCK
+    assert any("Mismatched model" in reason for reason in high_through_medium.decision_reasons)
+
+    medium_through_high = loader.admit(_agy_medium_request(requested_worker_id="agy_flash"))
+    assert medium_through_high.decision == AdmissionDecision.BLOCK
+    assert any("Mismatched model" in reason for reason in medium_through_high.decision_reasons)
+
+    elevated = loader.admit(_agy_medium_request(autonomy="L2"))
+    assert elevated.decision == AdmissionDecision.ESCALATE
+    assert any("exceeds worker autonomy ceiling" in reason for reason in elevated.decision_reasons)
+
+    missing_parser = loader.admit(
+        _agy_medium_request(
+            provided_controls=[
+                "task_card",
+                "allowed_files",
+                "mandatory_commands",
+                "verifier",
+                "independent_verification",
+            ]
+        )
+    )
+    assert missing_parser.decision == AdmissionDecision.BLOCK
+    assert missing_parser.missing_controls == ("parser",)
 
 
 def test_admission_blocks_missing_route_authorization() -> None:
