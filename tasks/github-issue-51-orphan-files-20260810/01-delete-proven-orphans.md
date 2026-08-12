@@ -16,14 +16,12 @@ worker_may_push: false
 
 ## Objective
 
-Delete exactly the thirteen currently proven Issue #51 orphan paths without
-replacement or reachable behavior change. Remove the stale Wiki inventory row
-for the duplicate root transaction module. Preserve `legacy/logmemory.py`.
+Delete exactly the thirteen currently proven Issue #51 orphan paths without replacement or reachable behavior change. Remove the stale Wiki inventory row for the duplicate root transaction module. Preserve `legacy/logmemory.py`.
 
 ## Baseline
 
-- GitHub main: `8620b72e5688dc41551afb8ed5454b49d21dc5e3`
-- prerequisites: #75, #104, #105, #106, and #204 physically completed
+- GitHub main: `61ea89a85ad0e8cb453ec642293a2da9df072a4c`
+- prerequisites: #75, #104, #105, #106, #204, and #207 physically completed
 - existing PR: #71, rebound to this exact baseline before verification
 
 ## Authorized deletions
@@ -44,44 +42,32 @@ for the duplicate root transaction module. Preserve `legacy/logmemory.py`.
 
 ## Required retained path
 
-- `legacy/logmemory.py` must remain byte-identical to baseline. It contains an
-  executable CLI entrypoint and is not admitted for deletion.
+- `legacy/logmemory.py` must remain byte-identical to baseline. It contains an executable CLI entrypoint and is not admitted for deletion.
 
 ## Allowed documentation correction
 
-- `nexus_wiki_vault/90_Sources/Source - Coverage Heatmap.md`: delete only the
-  stale row for `nexus/core/nexus_transaction.py`.
+- `nexus_wiki_vault/90_Sources/Source - Coverage Heatmap.md`: delete only the stale row for `nexus/core/nexus_transaction.py`.
 
 ## Required controls
 
-- exact caller/import/registration/packaging search must not reveal a live user
-  of any deleted path;
+- exact caller/import/registration/packaging search must not reveal a live user of any deleted path;
 - zero-byte placeholders must remain zero-byte at the bound baseline;
-- `nexus/core/nexus_transaction.py` must remain byte-identical to the retained
-  `nexus/core/engine/nexus_transaction.py` before deletion;
-- no replacement, refactor, dependency, route, lifecycle, Workforce, authority,
-  generated artifact, or historical report change;
-- required protected checks must bind the exact candidate head and trusted
-  GitHub Actions integration;
-- integration must use the #106 exact-head CAS/post-apply contract and stop on
-  base/head/tree/check/path drift.
+- `nexus/core/nexus_transaction.py` must remain byte-identical to the retained `nexus/core/engine/nexus_transaction.py` before deletion;
+- no replacement, refactor, dependency, route, lifecycle, Workforce, authority, generated artifact, or historical report change;
+- required protected checks must bind the exact candidate head and trusted GitHub Actions integration;
+- integration must use the #106 exact-head CAS/post-apply contract and stop on base/head/tree/check/path drift.
 
 ## Verification
 
 - per-path caller and executable-content audit;
 - retained canonical transaction/coordinator focused tests;
-- exact-base impact gate, Ruff, Pyright, Bandit, Wiki governance, and trusted
-  verifier on the exact candidate;
-- full exact-base/post-change regression comparison when the repository's
-  dispatchable Tier-3 workflow is available, preserving all pre-existing debt;
+- exact-base impact gate, Ruff, Pyright, Bandit, Wiki governance, and trusted verifier on the exact candidate;
+- full exact-base/post-change regression comparison preserving all pre-existing debt;
 - exact deletion manifest, `git diff --check`, and changed-path scope audit;
-- post-merge verify resulting main tree, exact merge parents, all thirteen paths
-  absent, retained legacy path present, and stale Wiki row absent.
+- post-merge verify resulting main tree, exact merge parents, all thirteen paths absent, retained legacy path present, and stale Wiki row absent.
 
 ## Exit
 
-Every physical deletion is individually supported, no executable test behavior
-is deleted, no current caller remains, no new regression is introduced, and an
-independent exact-head acceptance accepts the bounded diff.
+Every physical deletion is individually supported, no executable test behavior is deleted, no current caller remains, no new regression is introduced, and an independent exact-head acceptance accepts the bounded diff.
 
 Maximum candidate claim: `ISSUE_51_ORPHAN_CLEANUP_CANDIDATE`.
