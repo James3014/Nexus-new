@@ -8,7 +8,7 @@ purpose: Govern Issue #114 Golden evaluator evidence hardening on fresh GitHub m
 # Issue 114 Golden Evaluator Hardening
 
 - Issue: `#114`
-- Baseline: `bc16cbf2bf00377a4521e3eab233175112d0c963`
+- Baseline: `752d1dec0517b29e1e1179827919e45dac33d131`
 - AUTO_CHAIN: `false`
 - Active card: `00-golden-evaluator-hardening.md`
 - Worker guidance: Agy `agy_flash_medium / gemini-3.6-flash-medium` may provide bounded candidate analysis only; coordinator materializes the exact governed diff through typed workspace edits and independently verifies it.

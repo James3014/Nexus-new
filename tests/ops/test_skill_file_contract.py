@@ -107,10 +107,14 @@ def _write_skill(root: Path, frontmatter: str, *, openai: str | None = None) -> 
 
 def test_current_repository_skill_descriptors_pass_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    skills_root = repo_root / ".agents" / "skills"
+    skill_paths = sorted(skills_root.glob("**/SKILL.md"))
+    openai_paths = sorted(skills_root.glob("**/agents/openai.yaml"))
+
     rows = scan_skill_descriptors(repo_root)
 
-    assert len(rows) == 141
-    assert sum(bool(row["openai_descriptor"]) for row in rows) == 1
+    assert len(rows) == len(skill_paths)
+    assert sum(bool(row["openai_descriptor"]) for row in rows) == len(openai_paths)
     yang = next(row for row in rows if row["name"] == "yang-ding-yi-nexus-eternal")
     assert yang["id"] == "nexus-yang-ding-yi-eternal-v5"
 
