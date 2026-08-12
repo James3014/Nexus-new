@@ -155,9 +155,11 @@ def _fingerprint(root: Path, revision: str, case: CaseSnapshot) -> str:
         content = _git_bytes(root, revision, local)
         if content is None:
             raise ValueError(f"missing_authority_path:{source}")
-        rows.append(
-            {"source": source, "kind": "local", "sha256": hashlib.sha256(content).hexdigest()}
-        )
+        rows.append({
+            "source": source,
+            "kind": "local",
+            "sha256": hashlib.sha256(content).hexdigest(),
+        })
     payload = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode()).hexdigest()
 

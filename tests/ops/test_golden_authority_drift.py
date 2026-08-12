@@ -19,14 +19,12 @@ def test_unmapped_change_needs_no_disposition(tmp_path):
     head = _git("rev-parse", "HEAD")
     dispositions = tmp_path / "dispositions.json"
     dispositions.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {},
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {},
+        }),
         encoding="utf-8",
     )
 
@@ -46,14 +44,12 @@ def test_changed_mapped_authority_requires_exact_fingerprint(tmp_path, monkeypat
     head = _git("rev-parse", "HEAD")
     missing = tmp_path / "missing.json"
     missing.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {},
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {},
+        }),
         encoding="utf-8",
     )
 
@@ -76,14 +72,12 @@ def test_changed_mapped_authority_requires_exact_fingerprint(tmp_path, monkeypat
     }
     supplied = tmp_path / "supplied.json"
     supplied.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": rows,
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": rows,
+        }),
         encoding="utf-8",
     )
     passed = drift.check_golden_authority_drift(
@@ -100,20 +94,18 @@ def test_stale_fingerprint_and_malformed_rationale_fail_closed(tmp_path, monkeyp
     head = _git("rev-parse", "HEAD")
     path = tmp_path / "dispositions.json"
     path.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {
-                    "GB-001": {
-                        "disposition": "NO_GOLDEN_IMPACT",
-                        "source_fingerprint": "0" * 64,
-                        "rationale": "short",
-                    }
-                },
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {
+                "GB-001": {
+                    "disposition": "NO_GOLDEN_IMPACT",
+                    "source_fingerprint": "0" * 64,
+                    "rationale": "short",
+                }
+            },
+        }),
         encoding="utf-8",
     )
 
@@ -147,14 +139,12 @@ def test_unsafe_authority_path_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(drift, "_load_corpus", lambda *_args, **_kwargs: cases)
     path = tmp_path / "dispositions.json"
     path.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {},
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {},
+        }),
         encoding="utf-8",
     )
 
@@ -211,19 +201,17 @@ def test_finding_cannot_be_promoted_by_mapping_metadata(tmp_path, monkeypatch):
     fingerprint = drift._fingerprint(ROOT, head, finding.cases["GB-F"])
     path = tmp_path / "dispositions.json"
     path.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {
-                    "GB-F": {
-                        "disposition": "MAPPING_UPDATED",
-                        "source_fingerprint": fingerprint,
-                    }
-                },
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {
+                "GB-F": {
+                    "disposition": "MAPPING_UPDATED",
+                    "source_fingerprint": fingerprint,
+                }
+            },
+        }),
         encoding="utf-8",
     )
 
@@ -241,14 +229,12 @@ def test_report_is_deterministic(tmp_path):
     head = _git("rev-parse", "HEAD")
     path = tmp_path / "dispositions.json"
     path.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {},
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {},
+        }),
         encoding="utf-8",
     )
 
@@ -273,14 +259,12 @@ def test_malformed_corpus_returns_fail_closed_report(tmp_path, monkeypatch):
     monkeypatch.setattr(drift, "_git_bytes", lambda *_args: b"not python: [")
     path = tmp_path / "dispositions.json"
     path.write_text(
-        json.dumps(
-            {
-                "schema": drift.DISPOSITIONS_SCHEMA,
-                "base_revision": head,
-                "head_revision": head,
-                "cases": {},
-            }
-        ),
+        json.dumps({
+            "schema": drift.DISPOSITIONS_SCHEMA,
+            "base_revision": head,
+            "head_revision": head,
+            "cases": {},
+        }),
         encoding="utf-8",
     )
 
