@@ -1,14 +1,14 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: github-issue-7-m3-c-bounded-repair
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 owner_gate: M3_C_CAMPAIGN_REBIND_AND_OWNER_GATE
 owner_gate_status: GRANTED_2026_08_12
 baseline_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
-current_main: bc16cbf2bf00377a4521e3eab233175112d0c963
+current_main: 9125913ca809c954806386e3f11e6eb799ff882f
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_approve: false
@@ -60,6 +60,14 @@ Maximum changed files: 7.
 Focused retry, exhaustion, clock, provider failure, file-count, lineage, and
 tamper tests; Ruff, Pyright, `git diff --check`; exact commit and independent
 review.
+
+## Completion evidence
+
+PR #188 Candidate head `0bfb31ebc4dc5862581fe6cf289dea43c8942302`
+was physically merged as `892369a93a5c540042f0b4b35d1ee8d81a9de2b2`.
+The exact seven-file scope received independent `ACCEPT`; required checks were
+terminal PASS. Focused evidence included 297 combined tests, eight M3-C tests,
+and 311 primary tests. This completion does not activate M3-D.
 
 ## Block classification
 

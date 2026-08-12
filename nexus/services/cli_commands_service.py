@@ -33,9 +33,6 @@ class CliCommandsService:
     def acceptance_check(self, window: int):
         return self._audit.run_acceptance(window)
 
-    def release(self, tag: str, aos: int):
-        return self._audit.run_release(tag, aos)
-
     def swarm_wave1(self):
         return self._wave.trigger_wave(1)
 
