@@ -1,30 +1,32 @@
 # Universal Agent Guidelines
 
-Scope: Antigravity, Gemini, OpenClaw, Codex, Claude.
+Scope: all coding agents.
 
-- Repository authority: this root `AGENTS.md`.
-- Direct execution authority: an explicit current Owner request may authorize a
+- Repository authority: root `AGENTS.md`.
+- Direct authority: an explicit current Owner request may authorize a
   bounded `DIRECT_CANONICAL` change without a Task Card or lifecycle state.
-- Governed execution authority: the active Git-tracked Task Card under
+- Governed authority: the active Git-tracked Task Card under
   `tasks/<campaign-id>/`.
-- Response/domain overlay: `MUSE_PROTO.md`; it never grants mutation authority.
+- `MUSE_PROTO.md` is response/domain overlay, never mutation authority.
+
+The Owner chooses the execution lane; defaults/skills cannot relabel it, and
+`auto` is not direct authority. Lane governs authorization, not correctness:
+source behavior, tests, and required verifiers remain authoritative.
 
 ## Repository collaboration authority (GitHub)
 
 - The collaboration repository is `James3014/Nexus-new`; its default and
   collaboration branch is `main`.
-- A GitHub Issue becomes an approved implementation unit only after the Owner
-  marks it Ready with bounded scope, acceptance criteria, and explicit
-  non-goals. Draft, triage, and unready Issues grant no mutation authority.
+- A Ready GitHub Issue authorizes bounded collaboration only; it does not select
+  local lifecycle. Draft, triage, and unready Issues grant no mutation.
 - Codex implements a Ready Issue on an issue-specific branch such as
   `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
   request to `main`.
 - No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
   never approve or merge their Candidate. Only the primary coordinator may use
   protected PR merge under exact Owner approval or the standing grant below.
-- Runtime and sanitized collaboration histories differ. Never merge/rebase/
-  cherry-pick runtime history into GitHub `main` to align SHAs; synchronize
-  reviewed deltas without secrets, runtime state, or generated artifacts.
+- Never merge runtime history into GitHub `main` to align SHAs; synchronize only
+  reviewed deltas without secrets or generated/runtime state.
 - The Owner may give the primary coordinator a non-transferable standing grant
   for bounded Ready Issues in one thread, eliminating repeated Task Card,
   branch, push, PR, and merge approvals. Its active Task Card receipt binds
@@ -47,21 +49,17 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, Claude.
 - After merge, read back `main`, record merge/head/check evidence, reconcile the
   Issue/card, then start downstream work. This never implies local lifecycle,
   runtime, release, or production truth.
-- A Ready Issue defines GitHub collaboration scope only. It does not bypass
-  Task Card or lifecycle requirements for delegated, isolated,
-  lifecycle/security/schema, Candidate, approval, integration, release, or
-  production work.
+- Delegated GitHub work consumes its card; it uses local lifecycle only when
+  Owner-selected or producing a local Target/runtime/lifecycle outcome.
 
 ## Local Nexus runtime authority
 
-- On the Owner's current machine, the local Nexus runtime entry point remains
-  `/Users/jameschen/Workspace/nexus`. This is a machine-local runtime location,
-  not a universal checkout requirement.
+- The Owner's local runtime root is `/Users/jameschen/Workspace/nexus`; it is not
+  a universal checkout requirement.
 - Its local runtime/integration branch remains `nexus/integration/main`; query
   HEAD at task start. This bootstrap does not rename that branch or imply that
   its commit identity is synchronized with GitHub `main`.
-- `/Users/jameschen/Workspace/nexus-worktrees` is retired local evidence, not an
-  entry point. Do not create checkouts there.
+- Do not use retired `/Users/jameschen/Workspace/nexus-worktrees`.
 - Before every task, run:
   `git rev-parse --show-toplevel`, `git branch --show-current`,
   `git status --short --branch`, and `git worktree list --porcelain`.
@@ -79,8 +77,10 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, Claude.
 
 ## Governance boundary
 
-- Implementation and commit, Candidate creation, verification, approval,
-  integration, push, and release are distinct authorities and evidence stages.
+- Implementation, commit, Candidate, verification, approval, integration, push,
+  and release are distinct stages.
+- A GitHub PR Candidate is an Issue-branch commit; a local lifecycle Candidate
+  is receipt-bound Target output. Neither supplies authority to the other.
 - An agent may implement, test, commit, push an authorized issue branch, and
   open a PR. For manual/legacy work it cannot convert its own implementation
   or Candidate into approval, integration, merge, release, or production truth.
@@ -115,9 +115,9 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, Claude.
 - Governed workers may commit only their scoped card changes. Approval,
   integration, push, cleanup, and production/public claims remain separate
   authorities.
-- Blocks are explicit: `RECOVERABLE_BLOCK` preserves the card for retry;
-  `HARD_BLOCK` stops mutation until owner/spec authority resolves it. A block
-  never promotes a Candidate or activates downstream work.
+- `REVISE` permits bounded correction; `RECOVERABLE_BLOCK` preserves retry;
+  `HARD_BLOCK` pauses affected mutation. Reviewer block/card omission is not
+  terminal `REJECTED`; only an authorized decision-maker may reject.
 
 ## Direct canonical execution
 
@@ -151,6 +151,7 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, Claude.
   verification/evidence, exit, and block class. That card plus machine baseline
   bind allowed/forbidden files and file-count ceiling; policy/workers cannot
   widen them.
+- A Task Card binds scope/evidence; it never substitutes for program correctness.
 - Implementation needs a scoped commit unless read-only. Stage only authorized
   files; run exact checks, `git diff --check`, deletion and staged/unstaged
   audits; bind Candidate commit/tree to card hash. Workers never self-approve.

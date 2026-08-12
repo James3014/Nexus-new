@@ -9,10 +9,19 @@ This gate is connector-driven and fail-closed. A green test subset is not a
 promotion decision, and a candidate is not integrated until its exact receipt
 binding is approved.
 
+This skill applies exclusively to a local Nexus lifecycle Candidate and local
+integration. It is not the merge procedure for a GitHub PR Candidate. GitHub
+Ready Issues instead use fresh PR/base/head/diff, required CI, independent
+acceptance, and expected-head/CAS merge authority. Local lifecycle approval
+cannot bootstrap a Task Card or manufacture GitHub merge authority.
+
 ## Gate sequence
 
 1. Call `nexus_self_hosted_list_actionable_tasks` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted list-actionable` / `python -m scripts.ops.nexus_chatgpt_delivery actionable`). Treat `PENDING_HUMAN_APPROVAL` and `APPROVED` as `ACTION_REQUIRED`; never infer that a worker completion is approval.
 2. Verify candidate commit, candidate tree, candidate state hash, verified receipt hash, controller revision, allowed-file scope, and all verifier results. Confirm the controller checkout is unchanged.
+   `REVISE`, card clarification, or reviewer `HARD_BLOCK` stops approval but is
+   not automatically terminal `REJECTED`. Repair within existing Owner scope
+   when possible; only an authorized decision-maker may reject the Candidate.
 3. With the recorded hashes, call `nexus_self_hosted_approve_promotion` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted approve`). Approval must bind the exact candidate; do not substitute a newer commit or recompute a receipt after approval.
 4. Call `nexus_self_hosted_integrate_approved` (or `nexus.bash` running `python3 -m scripts.engine.nexus_cli self-hosted integrate`) targeting exactly `nexus/integration/self-hosted-lifecycle-closure`. The operation must create a normal merge preserving candidate and integration ancestry. Verify the implementation, live-canary, and docs commits are ancestors afterward.
 5. Run the focused and full repository gates, `git diff --check`, and both
