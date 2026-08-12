@@ -91,3 +91,48 @@ architecture, evidence-integrity, irreversible-risk, or specification conflict.
 Neither block permits promotion, cleanup, or downstream activation. Supersede a
 card only with an explicit `superseded_by` link and a new independently hashed
 card.
+
+## Post-completion Issue reconciliation
+
+A governed GitHub Issue is terminal only after a fresh, revision-bound
+completion snapshot is evaluated against the physical repository. A worker
+report, green pre-merge run, merged PR, close keyword, terminal marker, or
+historical receipt is an evidence input and is never sufficient by itself.
+
+The snapshot binds the exact repository, Issue contract revision and latest
+durable comment, Candidate and PR identity, Candidate head, merge commit,
+current default-branch HEAD and tree, required post-merge verifier evidence,
+hard prerequisites, downstream effects, and residual scope. A separately
+captured fresh binding input supplies the expected repository, Issue, latest
+comment, PR, Candidate head, merge commit, canonical main ref and head/tree,
+exact required-evidence set, and exact predecessor receipts; snapshot fields
+cannot self-attest those identities. The consumer resolves the binding's
+canonical `nexus-new` collaboration remote URL and default-branch ref rather
+than the invoking worktree's `HEAD` or an arbitrary remote.
+Candidate, PR, and Issue identities must agree; the Candidate head must be
+contained by the merge commit, and the merge commit must be contained by the
+resolved default branch. Missing, stale, malformed, wrongly attributed, or
+revision-mismatched evidence fails closed and cannot unlock downstream work.
+
+The reconciliation selects exactly one disposition:
+
+- `DONE_NO_FOLLOW_UP`: the original bounded contract is physically complete
+  and no independently bounded survivor remains.
+- `KEEP_OPEN`: the original contract or a hard prerequisite remains incomplete;
+  same-scope work stays on the original Issue.
+- `CONTRACT_DELTA`: fresh evidence requires a bounded correction or
+  re-verification of the original contract without rewriting its history.
+- `FOLLOW_UP_REQUIRED`: the original Issue is independently complete and a
+  distinct bounded survivor remains after checking for an existing durable
+  owner.
+- `BLOCKED_EVIDENCE`: required identity or evidence is missing, stale,
+  malformed, contradictory, or unavailable.
+
+Only `DONE_NO_FOLLOW_UP` and `FOLLOW_UP_REQUIRED` are terminal. Downstream
+readiness additionally requires every hard predecessor to have a terminal
+disposition bound to the same current-main revision. The machine consumer is
+`scripts/ops/agent_protocol_check.py --completion-snapshot
+<snapshot.json> --completion-bindings <fresh-bindings.json> --main-ref
+refs/remotes/nexus-new/main`; it validates this contract but does not fetch or
+store Issue state, create follow-ups, approve Candidates, or create a second
+completion authority.
