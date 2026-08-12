@@ -12,23 +12,23 @@ worker_may_integrate: false
 worker_may_push: false
 ---
 
-# Delete Fourteen Proven Orphan Files
+# Delete Thirteen Proven Orphan Files
 
 ## Objective
 
-Delete exactly the fourteen Issue #51 orphan paths without replacement or any
-reachable behavior change. Remove the stale Wiki inventory row for the root
-transaction duplicate only if it remains exact and isolated.
+Delete exactly the thirteen currently proven Issue #51 orphan paths without
+replacement or reachable behavior change. Remove the stale Wiki inventory row
+for the duplicate root transaction module. Preserve `legacy/logmemory.py`.
 
 ## Baseline
 
-- GitHub main: `14dd1f29183b09646215462b97b0dd0feb8c0743`
-- fresh re-anchor comment: https://github.com/James3014/Nexus-new/issues/51#issuecomment-5234633899
+- GitHub main: `bdcc427f6249406079c85f9725b3af6cd62ab1f1`
+- prerequisites: #75, #104, #105, and #106 physically completed
+- existing PR: #71, to be rebound to this exact baseline before verification
 
 ## Authorized deletions
 
 - `nexus/policy/compatibility.py`
-- `legacy/logmemory.py`
 - `nexus/committee/diversity_sampler.py`
 - `nexus/env/diff_report.py`
 - `nexus/env/snapshot.py`
@@ -42,40 +42,46 @@ transaction duplicate only if it remains exact and isolated.
 - `tests/unit/env/test_denoiser_split.py`
 - `nexus/core/nexus_transaction.py`
 
-## Optional allowed edit
+## Required retained path
+
+- `legacy/logmemory.py` must remain byte-identical to baseline. It contains an
+  executable CLI entrypoint and is not admitted for deletion.
+
+## Allowed documentation correction
 
 - `nexus_wiki_vault/90_Sources/Source - Coverage Heatmap.md`: delete only the
   stale row for `nexus/core/nexus_transaction.py`.
 
-Maximum source paths changed: 15. Task Card files are authorization artifacts.
-
 ## Required controls
 
-- repeat exact import/symbol/path search before deletion;
-- if any live caller, dynamic registration, package export, CI/CLI/config
-  consumer, or executable content is found, do not delete that path;
-- preserve the retained `nexus.core.engine.nexus_transaction` implementation;
-- no replacement, refactor, formatting sweep, generated artifact, dependency,
-  authority, lifecycle, route, workforce, or historical report change.
+- exact caller/import/registration/packaging search must not reveal a live user
+  of any deleted path;
+- zero-byte placeholders must remain zero-byte at the bound baseline;
+- `nexus/core/nexus_transaction.py` must remain byte-identical to the retained
+  `nexus/core/engine/nexus_transaction.py` before deletion;
+- no replacement, refactor, dependency, route, lifecycle, Workforce, authority,
+  generated artifact, or historical report change;
+- required protected checks must bind the exact candidate head and trusted
+  GitHub Actions integration;
+- integration must use the #106 exact-head CAS/post-apply contract and stop on
+  base/head/tree/check/path drift.
 
 ## Verification
 
-- per-path caller and executable-content audit before and after deletion;
+- per-path caller and executable-content audit;
 - retained canonical transaction/coordinator focused tests;
-- Ruff on remaining touched Python surface where applicable;
-- exact deletion audit and zero unexpected additions;
-- full exact-base/post-change regression comparison, including collected test
-  count and failure/error node IDs;
-- `git diff --check` and complete staged/unstaged stats.
+- exact-base impact gate, Ruff, Pyright, Bandit, Wiki governance, and trusted
+  verifier on the exact candidate;
+- full exact-base/post-change regression comparison when the repository's
+  dispatchable Tier-3 workflow is available, preserving all pre-existing debt;
+- exact deletion manifest, `git diff --check`, and changed-path scope audit;
+- post-merge verify resulting main tree, exact merge parents, all thirteen paths
+  absent, retained legacy path present, and stale Wiki row absent.
 
 ## Exit
 
-Every physical deletion is individually proven, no executable test is removed,
-no current caller remains, no regression is introduced, and an independent
-exact-commit review accepts the bounded diff.
+Every physical deletion is individually supported, no executable test behavior
+is deleted, no current caller remains, no new regression is introduced, and an
+independent exact-head acceptance accepts the bounded diff.
 
-## Block class
-
-`RECOVERABLE_BLOCK` for a path whose orphan proof fails; omit that path and
-continue the independently proven subset. `HARD_BLOCK` for any request to adapt
-a caller or alter reachable behavior under this cleanup card.
+Maximum candidate claim: `ISSUE_51_ORPHAN_CLEANUP_CANDIDATE`.

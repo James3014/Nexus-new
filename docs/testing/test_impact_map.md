@@ -1,17 +1,22 @@
 # 測試影響映射 (Impact Map)
 | 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |
 | :--- | :--- | :--- | :--- | :--- |
+| .agents/skills | tests/ops/test_skill_file_contract.py, tests/learning/test_skill_catalog.py, tests/learning/test_skill_schema.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_artifact_contract_and_catalog_governance |
+| nexus/events | tests/events, tests/core/test_event_bus.py, tests/architecture/test_boundaries_v4.py | active | high | event_store_and_transport_contract |
+| nexus/feedback | tests/events, tests/unit/evaluation/test_policy_delta.py, tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | developer_feedback_contract |
 | nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |
 | nexus/core/context_hub.py | tests/core/test_context_hub_strict_deps.py, tests/core/test_context_budget_sources.py, tests/core/test_context_text_store.py | active | high | context_hub_split_contract |
 | nexus/core/context_budget_sources.py | tests/core/test_context_budget_sources.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_budget_source_builder | active | high | context_hub_split_contract |
 | nexus/core/context_text_store.py | tests/core/test_context_text_store.py, tests/core/test_context_hub_strict_deps.py::test_context_hub_uses_split_context_text_store | active | high | context_hub_split_contract |
 | nexus/core/memory_manager.py | tests/core/test_memory_manager_sqlite_retry.py, tests/core/test_memory_manager_write_guard.py, tests/infrastructure/test_sqlite_retry.py | active | high | project_memory_sqlite_retry_contract |
+| nexus/learning | tests/learning | active | high | learning_contract |
 | nexus/learning/skill_registry.py | tests/test_skill_sharing.py::test_skill_registry_upsert_retries_sqlite_busy_then_success, tests/test_skill_sharing.py::test_skill_registry_upsert_keeps_non_busy_errors_fail_fast, tests/test_skill_sharing.py, tests/infrastructure/test_sqlite_retry.py | active | high | skill_registry_sqlite_retry_contract |
 | nexus/learning/skill_fit_status.py | tests/learning/test_skill_fit_data_shape_pregate.py, tests/learning/test_skill_fit_ablation.py::test_skill_fit_status_rollup_finds_skill_but_blocks_benchmark_until_threshold_clean, tests/learning/test_skill_fit_ablation.py::test_skill_fit_status_rollup_uses_threshold_alternate_candidate_even_if_policy_needs_more_data | active | high | skill_fit_data_shape_pregate_contract |
 | nexus/learning/skill_fit_ablation_core.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract, tests/learning/test_skill_fit_ablation.py::test_execution_matrix_characterizes_public_row_shape_for_all_arm_types, tests/learning/test_skill_fit_ablation.py::test_execution_matrix_expands_tasks_by_arms_without_claiming_value, tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_index_groups_rows_by_capability_and_skill_id, tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_requires_receipt_backed_effective_rows, tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_groups_verdicts_by_capability_and_skill_id, tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_returns_when_matrix_incomplete | active | high | skill_fit_candidate_catalog_and_execution_matrix_contract |
 | nexus/learning/skill_fit_candidate_index.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_candidate_index_preserves_plan_selection_contract, tests/learning/test_skill_fit_ablation.py::test_skill_fit_plan_characterizes_public_candidate_selection_contract, tests/learning/test_skill_fit_ablation.py::test_plan_dedupes_gstack_prefixed_skill_aliases | active | high | skill_fit_candidate_index_contract |
 | nexus/learning/sf2_bounded_probe.py | tests/learning/test_skill_route_taxonomy.py::test_sf2_probe_verdict_catalog_characterizes_multicapability_fail_closed_shape, tests/learning/test_skill_route_taxonomy.py::test_sf2_bounded_probe_static_receipts_keep_runtime_and_benchmark_blocked, tests/learning/test_skill_route_taxonomy.py::test_sf2_completion_gate_closes_only_after_receipts_and_dispositions | active | high | sf2_bounded_probe_fail_closed_contract |
 | nexus/services | tests/services, tests/test_services_*.py | active | medium | service_contract |
+| nexus/config/model_workforce.yaml | tests/contracts/test_model_workforce_policy.py, tests/services/test_model_workforce_policy_loader.py | active | medium | workforce_policy_contract |
 | nexus/engine/capability_planner.py | tests/engine/test_capability_planner.py::test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill | active | high | skill_mount_planner_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
@@ -102,6 +107,10 @@
 | docs/reports/NEXUS_REFACTOR_REMAINING_START_EVIDENCE_2026-05-23.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | refactor_start_evidence_contract |
 | nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | lesson_writeback_contract |
 | nexus_wiki_vault/06_Ops/Ops - Governance Changelog.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | medium | governance_changelog_contract |
+| scripts/brain_de_entropy.py | tests/core/test_context_hub_strict_deps.py, tests/core/test_context_budget_sources.py, tests/core/test_context_text_store.py | active | high | context_hub_behavioral_contract |
+| scripts/core/migration_validator.py | tests/core/test_migration_validator_contract.py | active | high | migration_validator_contract |
+| scripts/core/drclaw_diagnosis.py | tests/benchmark/test_drclaw_diagnosis_contract.py | active | high | drclaw_diagnosis_contract |
+| muse_nexus.egg-info/SOURCES.txt | tests/ops/test_source_inventory_integrity.py | active | high | source_inventory_integrity_contract |
 ## Candidate Legacy Tests
 | 檔案 | 理由 |
 | :--- | :--- |

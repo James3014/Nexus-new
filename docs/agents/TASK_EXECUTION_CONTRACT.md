@@ -25,7 +25,9 @@ delegated, requires an isolated Target, crosses subsystems, changes
 route/lifecycle/workforce authority, weakens security, changes a migration or
 schema, performs cleanup or protected-branch/ref operations, creates a
 Candidate, or supports a production/public claim. Direct work does not commit,
-push, merge, delete, or auto-chain without exact Owner authority.
+push, merge, delete, or auto-chain without exact Owner authority. The standing
+coordinator grant does not expand `DIRECT_CANONICAL`; it applies only to the
+governed GitHub Ready-Issue actions defined below.
 
 ## Governed discovery and authority
 
@@ -40,14 +42,25 @@ allowed files, forbidden scope, verification commands, required evidence, exit
 criteria, residual-debt handling, and block classification. Its allowed and
 forbidden paths, file-count ceiling, and commit policy are the operative scope.
 
+When the Owner has granted standing coordinator authority and its durable grant
+receipt is current, the primary Codex coordinator may create and commit a
+missing Task Card/INDEX for an already Ready Issue after freezing the effective
+Issue contract, current baseline, overlap, Workforce receipt, verification,
+and claim ceiling. Delegated workers cannot create or widen their own
+authority; they begin only after the card is physically committed and its hash
+is read back. The grant does not authorize local runtime/lifecycle actions,
+direct protected-main push, force-push, ref deletion, successor work outside
+the active Goal, release, or production/public claims.
+
 ## Mutation safety
 
 - Preserve unrelated dirty state. Use a clean governed Target for isolation;
   never reset, stash, clean, overwrite, or absorb ambiguous changes.
 - Do not hand-edit lifecycle JSON or protected control-plane state. Use formal
   API, CLI, or service surfaces and preserve receipts.
-- A worker may not approve, integrate, push, delete refs, or clean up its own
-  Candidate unless the card grants that exact authority.
+- A worker may never approve, integrate, merge, or delete refs for its own
+  Candidate. A card may grant only a scoped issue-branch push and bounded
+  non-destructive cleanup; it cannot grant self-approval or self-integration.
 
 ## Commit and Candidate gates
 
@@ -64,6 +77,12 @@ receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
 
+The primary coordinator may perform the GitHub protected merge under the root
+standing-authority gate only after an independent exact-head review, terminal
+success for every ruleset-required check, an up-to-date base, a complete scope
+and deletion audit, and an expected-head/CAS merge. This GitHub action does not
+approve or integrate local Nexus lifecycle state.
+
 ## Blocks and residual debt
 
 `RECOVERABLE_BLOCK` preserves the same card for retry after an external or
@@ -72,3 +91,48 @@ architecture, evidence-integrity, irreversible-risk, or specification conflict.
 Neither block permits promotion, cleanup, or downstream activation. Supersede a
 card only with an explicit `superseded_by` link and a new independently hashed
 card.
+
+## Post-completion Issue reconciliation
+
+A governed GitHub Issue is terminal only after a fresh, revision-bound
+completion snapshot is evaluated against the physical repository. A worker
+report, green pre-merge run, merged PR, close keyword, terminal marker, or
+historical receipt is an evidence input and is never sufficient by itself.
+
+The snapshot binds the exact repository, Issue contract revision and latest
+durable comment, Candidate and PR identity, Candidate head, merge commit,
+current default-branch HEAD and tree, required post-merge verifier evidence,
+hard prerequisites, downstream effects, and residual scope. A separately
+captured fresh binding input supplies the expected repository, Issue, latest
+comment, PR, Candidate head, merge commit, canonical main ref and head/tree,
+exact required-evidence set, and exact predecessor receipts; snapshot fields
+cannot self-attest those identities. The consumer resolves the binding's
+canonical `nexus-new` collaboration remote URL and default-branch ref rather
+than the invoking worktree's `HEAD` or an arbitrary remote.
+Candidate, PR, and Issue identities must agree; the Candidate head must be
+contained by the merge commit, and the merge commit must be contained by the
+resolved default branch. Missing, stale, malformed, wrongly attributed, or
+revision-mismatched evidence fails closed and cannot unlock downstream work.
+
+The reconciliation selects exactly one disposition:
+
+- `DONE_NO_FOLLOW_UP`: the original bounded contract is physically complete
+  and no independently bounded survivor remains.
+- `KEEP_OPEN`: the original contract or a hard prerequisite remains incomplete;
+  same-scope work stays on the original Issue.
+- `CONTRACT_DELTA`: fresh evidence requires a bounded correction or
+  re-verification of the original contract without rewriting its history.
+- `FOLLOW_UP_REQUIRED`: the original Issue is independently complete and a
+  distinct bounded survivor remains after checking for an existing durable
+  owner.
+- `BLOCKED_EVIDENCE`: required identity or evidence is missing, stale,
+  malformed, contradictory, or unavailable.
+
+Only `DONE_NO_FOLLOW_UP` and `FOLLOW_UP_REQUIRED` are terminal. Downstream
+readiness additionally requires every hard predecessor to have a terminal
+disposition bound to the same current-main revision. The machine consumer is
+`scripts/ops/agent_protocol_check.py --completion-snapshot
+<snapshot.json> --completion-bindings <fresh-bindings.json> --main-ref
+refs/remotes/nexus-new/main`; it validates this contract but does not fetch or
+store Issue state, create follow-ups, approve Candidates, or create a second
+completion authority.

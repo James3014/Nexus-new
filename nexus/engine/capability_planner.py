@@ -1153,6 +1153,20 @@ class CapabilityPlanner:
                 raise ValueError(f"topology_fact_must_be_bool:{key}")
             facts[key] = value
 
+        candidate_generation_only = facts.get("candidate_generation_only", False)
+        if candidate_generation_only:
+            if "mutation_requested" not in facts:
+                raise ValueError(
+                    "candidate_generation_only_requires_explicit_mutation_requested_false"
+                )
+            if facts["mutation_requested"]:
+                raise ValueError("candidate_generation_only_conflicts_with_mutation_requested")
+            route_mutation = route.get("mutation_requested")
+            if route_mutation is not None and not isinstance(route_mutation, bool):
+                raise ValueError("candidate_generation_only_route_mutation_must_be_bool")
+            if route_mutation:
+                raise ValueError("candidate_generation_only_conflicts_with_route_mutation")
+
         isolation_required = any(
             facts.get(key, False)
             for key in (
@@ -1163,6 +1177,7 @@ class CapabilityPlanner:
                 "authority_changing_scope",
                 "security_sensitive_scope",
                 "candidate_required",
+                "candidate_generation_only",
             )
         )
         if isolation_required:
@@ -1661,8 +1676,15 @@ class CapabilityPlanner:
     ) -> WorkforceDemands:
         local_enabled = bool(route.get("local_enabled"))
         online_enabled = bool(route.get("online_enabled"))
+        topology_facts = route.get("topology_facts", {})
+        candidate_generation_only = bool(
+            isinstance(topology_facts, dict)
+            and topology_facts.get("candidate_generation_only", False)
+        )
 
-        if "mutation_requested" in route and route["mutation_requested"] is not None:
+        if candidate_generation_only:
+            mutation_intent = False
+        elif "mutation_requested" in route and route["mutation_requested"] is not None:
             mutation_intent = bool(route["mutation_requested"])
         else:
             task_type_clean = str(task_type or "").lower()
@@ -1676,7 +1698,12 @@ class CapabilityPlanner:
 
         # Hybrid produces local then online demand in stable order
         if local_enabled:
-            if mutation_intent:
+            if candidate_generation_only:
+                role = "bounded_candidate_generation"
+                autonomy = "L1"
+                ctx = "nexus_bounded"
+                reason = "candidate_generation_only_bounded_candidate_generation"
+            elif mutation_intent:
                 role = "bounded_code_candidate"
                 autonomy = "L1"
                 ctx = "nexus_bounded"
@@ -1735,7 +1762,12 @@ class CapabilityPlanner:
                 or any(kw in task_desc_str for kw in ("review", "audit"))
             )
 
-            if is_explicit_type_review_audit:
+            if candidate_generation_only:
+                role = "bounded_candidate_generation"
+                autonomy = "L1"
+                ctx = "nexus_bounded"
+                reason = "candidate_generation_only_bounded_candidate_generation"
+            elif is_explicit_type_review_audit:
                 role = "independent_review"
                 autonomy = "L2+"
                 ctx = "nexus_bounded"

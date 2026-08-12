@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from scripts.ops.select_tests import (
     ImpactRule,
@@ -13,14 +14,12 @@ from scripts.ops.select_tests import (
 def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
     impact_map = tmp_path / "test_impact_map.md"
     impact_map.write_text(
-        "\n".join(
-            [
-                "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |",
-                "| :--- | :--- | :--- | :--- | :--- |",
-                "| nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |",
-                "| nexus/legacy | tests/legacy | retired | low | legacy |",
-            ]
-        ),
+        "\n".join([
+            "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |",
+            "| :--- | :--- | :--- | :--- | :--- |",
+            "| nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |",
+            "| nexus/legacy | tests/legacy | retired | low | legacy |",
+        ]),
         encoding="utf-8",
     )
 
@@ -35,6 +34,80 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
             risk_reason="core_contract",
         )
     ]
+
+
+def test_issue153_event_feedback_rows_map_without_fallback():
+    rules = load_impact_rules()
+    details = select_target_details(
+        ["nexus/events/log_store.py", "nexus/events/transport.py", "nexus/feedback/contracts.py"],
+        rules,
+        index_path=Path("/tmp/missing-issue153-impact-index.json"),
+        history_path=Path("/tmp/missing-issue153-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/events",
+        "tests/core/test_event_bus.py",
+        "tests/architecture/test_boundaries_v4.py",
+        "tests/unit/evaluation/test_policy_delta.py",
+        "tests/unit/committee/test_data_flow_v267.py",
+        "tests/architecture/test_boundaries_v3.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.risk_reasons == [
+        "event_store_and_transport_contract",
+        "developer_feedback_contract",
+    ]
+
+
+def test_issue153_feedback_row_maps_exact_targets_without_fallback():
+    rules = load_impact_rules()
+    details = select_target_details(
+        ["nexus/feedback/contracts.py"],
+        rules,
+        index_path=Path("/tmp/missing-issue153-impact-index.json"),
+        history_path=Path("/tmp/missing-issue153-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/events",
+        "tests/unit/evaluation/test_policy_delta.py",
+        "tests/unit/committee/test_data_flow_v267.py",
+        "tests/architecture/test_boundaries_v3.py",
+        "tests/architecture/test_boundaries_v4.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.risk_reasons == ["developer_feedback_contract"]
+
+
+def test_issue153_unrelated_event_path_remains_fallback():
+    rules = load_impact_rules()
+    targets, reasons = select_targets(
+        ["nexus/events_unknown/transport.py"],
+        rules,
+        fallback_targets=("tests/ops/test_select_tests.py",),
+    )
+
+    assert targets == ["tests/ops/test_select_tests.py"]
+    assert reasons == ["nexus/events_unknown/transport.py: fallback"]
+
+
+def test_issue153_unknown_feedback_path_remains_fallback():
+    rules = load_impact_rules()
+    targets, reasons = select_targets(
+        ["nexus/feedback_unknown/foo.py"],
+        rules,
+        fallback_targets=("tests/ops/test_select_tests.py",),
+    )
+
+    assert targets == ["tests/ops/test_select_tests.py"]
+    assert reasons == ["nexus/feedback_unknown/foo.py: fallback"]
 
 
 def test_select_targets_prefers_most_specific_prefix_and_deduplicates_targets():
@@ -53,6 +126,47 @@ def test_select_targets_prefers_most_specific_prefix_and_deduplicates_targets():
     ]
 
 
+def test_skill_descriptors_select_artifact_catalog_and_trust_contracts(tmp_path):
+    rules = load_impact_rules()
+    expected = [
+        "tests/ops/test_skill_file_contract.py",
+        "tests/learning/test_skill_catalog.py",
+        "tests/learning/test_skill_schema.py",
+        "tests/ops/test_ci_gate_report_trust_audit.py",
+        "tests/services/test_policy_gate.py",
+    ]
+
+    for path in (
+        ".agents/skills/example/SKILL.md",
+        ".agents/skills/example/agents/openai.yaml",
+    ):
+        details = select_target_details(
+            [path],
+            rules,
+            index_path=tmp_path / "missing-index.json",
+            stats_path=tmp_path / "missing-stats.json",
+            history_path=tmp_path / "missing-history.jsonl",
+        )
+        assert details.targets == expected
+        assert details.risk == "high"
+        assert details.fallback_used is False
+        assert details.unmatched_paths == []
+        assert details.risk_reasons == ["skill_artifact_contract_and_catalog_governance"]
+
+
+def test_unrelated_agents_path_remains_fail_closed_fallback(tmp_path):
+    details = select_target_details(
+        [".agents/other/config.yaml"],
+        load_impact_rules(),
+        index_path=tmp_path / "missing-index.json",
+        stats_path=tmp_path / "missing-stats.json",
+        history_path=tmp_path / "missing-history.jsonl",
+    )
+
+    assert details.fallback_used is True
+    assert details.unmatched_paths == [".agents/other/config.yaml"]
+
+
 def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
     rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high", "core_contract")]
 
@@ -67,6 +181,99 @@ def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
         "nexus/core/state.py: matched nexus/core",
         "docs/testing/test_runbook.md: fallback",
     ]
+
+
+def test_issue_86_pr_cleanup_surfaces_resolve_to_intended_targets(tmp_path):
+    rules = load_impact_rules()
+    issue_86_paths = [
+        "scripts/brain_de_entropy.py",
+        "scripts/core/migration_validator.py",
+        "scripts/core/drclaw_diagnosis.py",
+        "muse_nexus.egg-info/SOURCES.txt",
+    ]
+
+    details = select_target_details(
+        issue_86_paths,
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+
+    targets = details.targets
+    assert "tests/core/test_context_hub_strict_deps.py" in targets
+    assert "tests/core/test_context_budget_sources.py" in targets
+    assert "tests/core/test_context_text_store.py" in targets
+    assert "tests/core/test_migration_validator_contract.py" in targets
+    assert "tests/benchmark/test_drclaw_diagnosis_contract.py" in targets
+    assert "tests/ops/test_source_inventory_integrity.py" in targets
+
+
+def test_default_impact_map_covers_new_learning_modules_without_shadowing_specific_rules(tmp_path):
+    rules = load_impact_rules()
+
+    new_details = select_target_details(
+        ["nexus/learning/new_contract.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+    specific_details = select_target_details(
+        ["nexus/learning/skill_registry.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+    unknown_details = select_target_details(
+        ["nexus/unknown_subsystem/new.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert "tests/learning" in new_details.targets
+    assert new_details.high_risk_escalated is True
+    assert "learning_contract" in new_details.risk_reasons
+    assert new_details.unmatched_paths == []
+
+    assert "tests/learning" not in specific_details.targets
+    assert (
+        "nexus/learning/skill_registry.py: matched nexus/learning/skill_registry.py"
+        in specific_details.reasons
+    )
+
+    assert unknown_details.fallback_used is True
+    assert "tests/learning" not in unknown_details.targets
+
+
+def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp_path):
+    rules = load_impact_rules()
+    workforce_rule = next(
+        rule for rule in rules if rule.code_path == "nexus/config/model_workforce.yaml"
+    )
+    details = select_target_details(
+        ["nexus/config/model_workforce.yaml"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/contracts/test_model_workforce_policy.py",
+        "tests/services/test_model_workforce_policy_loader.py",
+    ]
+    assert workforce_rule.risk_reason == "workforce_policy_contract"
+    assert details.risk == "medium"
+    assert details.high_risk_escalated is False
+    assert details.fallback_used is False
+    assert details.unmatched_paths == []
 
 
 def test_select_targets_uses_fallback_when_no_paths_match():
@@ -109,21 +316,28 @@ def test_main_emits_json_payload(tmp_path, capsys):
 def test_select_target_details_merges_import_index_and_impact_map(tmp_path):
     index_path = tmp_path / "test_impact_index.json"
     index_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "mappings": {
-                    "nexus/core/state.py": ["tests/core/test_state.py"],
-                },
-            }
-        ),
+        json.dumps({
+            "version": 1,
+            "mappings": {
+                "nexus/core/state.py": ["tests/core/test_state.py"],
+            },
+        }),
         encoding="utf-8",
     )
     rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high", "core_contract")]
 
-    details = select_target_details(["nexus/core/state.py"], rules, index_path=index_path, history_path=tmp_path / "missing.jsonl")
+    details = select_target_details(
+        ["nexus/core/state.py"],
+        rules,
+        index_path=index_path,
+        history_path=tmp_path / "missing.jsonl",
+    )
 
-    assert details.targets == ["tests/core/test_state.py", "tests/core", "tests/services/test_policy_gate.py"]
+    assert details.targets == [
+        "tests/core/test_state.py",
+        "tests/core",
+        "tests/services/test_policy_gate.py",
+    ]
     assert details.confidence == 0.85
     assert details.risk == "high"
     assert details.risk_reasons == ["core_contract"]
@@ -134,7 +348,10 @@ def test_select_target_details_merges_import_index_and_impact_map(tmp_path):
 def test_select_target_details_does_not_fallback_when_import_index_matches(tmp_path):
     index_path = tmp_path / "test_impact_index.json"
     index_path.write_text(
-        json.dumps({"version": 1, "mappings": {"nexus/new_module.py": ["tests/test_new_module.py"]}}),
+        json.dumps({
+            "version": 1,
+            "mappings": {"nexus/new_module.py": ["tests/test_new_module.py"]},
+        }),
         encoding="utf-8",
     )
 
@@ -160,13 +377,15 @@ def test_select_target_details_handles_empty_changed_paths():
 def test_load_test_history_aggregates_duration_failures_and_flaky(tmp_path):
     history = tmp_path / "test_history.jsonl"
     history.write_text(
-        "\n".join(
-            [
-                json.dumps({"targets": ["tests/a.py"], "success": True, "duration_sec": 2.0}),
-                json.dumps({"targets": ["tests/a.py"], "success": False, "duration_sec": 4.0}),
-                json.dumps({"targets": ["tests/b.py"], "success": True, "target_durations": {"tests/b.py": 1.0}}),
-            ]
-        ),
+        "\n".join([
+            json.dumps({"targets": ["tests/a.py"], "success": True, "duration_sec": 2.0}),
+            json.dumps({"targets": ["tests/a.py"], "success": False, "duration_sec": 4.0}),
+            json.dumps({
+                "targets": ["tests/b.py"],
+                "success": True,
+                "target_durations": {"tests/b.py": 1.0},
+            }),
+        ]),
         encoding="utf-8",
     )
 
@@ -182,16 +401,22 @@ def test_load_test_history_aggregates_duration_failures_and_flaky(tmp_path):
 def test_select_target_details_uses_history_and_high_risk_escalation(tmp_path):
     history = tmp_path / "test_history.jsonl"
     history.write_text(
-        "\n".join(
-            [
-                json.dumps({"targets": ["tests/core/slow.py"], "success": True, "duration_sec": 10.0}),
-                json.dumps({"targets": ["tests/core/flaky.py"], "success": False, "duration_sec": 1.0}),
-                json.dumps({"targets": ["tests/core/flaky.py"], "success": True, "duration_sec": 1.0}),
-            ]
-        ),
+        "\n".join([
+            json.dumps({"targets": ["tests/core/slow.py"], "success": True, "duration_sec": 10.0}),
+            json.dumps({"targets": ["tests/core/flaky.py"], "success": False, "duration_sec": 1.0}),
+            json.dumps({"targets": ["tests/core/flaky.py"], "success": True, "duration_sec": 1.0}),
+        ]),
         encoding="utf-8",
     )
-    rules = [ImpactRule("nexus/core", ("tests/core/slow.py", "tests/core/flaky.py"), "active", "high", "core_contract")]
+    rules = [
+        ImpactRule(
+            "nexus/core",
+            ("tests/core/slow.py", "tests/core/flaky.py"),
+            "active",
+            "high",
+            "core_contract",
+        )
+    ]
 
     details = select_target_details(["nexus/core/state.py"], rules, history_path=history)
 
@@ -229,12 +454,15 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
     )
     index_path = tmp_path / "test_impact_index.json"
     index_path.write_text(
-        json.dumps({"version": 1, "mappings": {"nexus/core/state.py": ["tests/core/test_state.py"]}}),
+        json.dumps({
+            "version": 1,
+            "mappings": {"nexus/core/state.py": ["tests/core/test_state.py"]},
+        }),
         encoding="utf-8",
     )
 
-    assert main(
-        [
+    assert (
+        main([
             "--impact-map",
             str(impact_map),
             "--impact-index",
@@ -243,11 +471,16 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
             str(tmp_path / "missing.jsonl"),
             "--json",
             "nexus/core/state.py",
-        ]
-    ) == 0
+        ])
+        == 0
+    )
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload["targets"] == ["tests/core/test_state.py", "tests/core", "tests/services/test_policy_gate.py"]
+    assert payload["targets"] == [
+        "tests/core/test_state.py",
+        "tests/core",
+        "tests/services/test_policy_gate.py",
+    ]
     assert payload["confidence"] == 0.85
     assert payload["risk"] == "high"
     assert payload["risk_reasons"] == ["core_contract"]

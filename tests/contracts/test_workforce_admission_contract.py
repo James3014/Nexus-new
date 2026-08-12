@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from enum import Enum
+
 import pytest
 
 from nexus.contracts.workforce_admission import (
@@ -16,6 +18,38 @@ def test_admission_decision_enum_values() -> None:
     assert AdmissionDecision.ALLOW.value == "ALLOW"
     assert AdmissionDecision.BLOCK.value == "BLOCK"
     assert AdmissionDecision.ESCALATE.value == "ESCALATE"
+
+
+class _WrongEnumFamily(Enum):
+    YES = "YES"
+
+
+def test_admission_decision_rejects_forged_values_fail_closed() -> None:
+    forged = [
+        "FORGED",
+        "ALLOW",
+        "allow",
+        "",
+        None,
+        0,
+        1,
+        1.5,
+        [],
+        {},
+        object(),
+        _WrongEnumFamily.YES,
+    ]
+    for value in forged:
+        with pytest.raises(ValueError, match="must be an AdmissionDecision member"):
+            WorkforceAdmissionDecision(decision=value)  # type: ignore[arg-type]
+
+
+def test_admission_decision_valid_values_remain_deterministic() -> None:
+    for member in (AdmissionDecision.ALLOW, AdmissionDecision.BLOCK, AdmissionDecision.ESCALATE):
+        decision = WorkforceAdmissionDecision(decision=member)
+        assert decision.decision is member
+        assert decision.to_dict()["decision"] == member.value
+    assert WorkforceAdmissionDecision().decision is AdmissionDecision.BLOCK
 
 
 def test_autonomy_level_deterministic_parsing_and_ordering() -> None:

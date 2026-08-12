@@ -3383,6 +3383,82 @@ def test_workforce_demand_online_ordinary():
     assert d["route_authority"] == "CapabilityPlanner"
 
 
+def test_candidate_generation_only_projects_bounded_non_mutating_demand():
+    plan = (
+        CapabilityPlanner()
+        .plan(
+            task_desc="Produce one bounded implementation candidate for independent review",
+            task_type="candidate_generation",
+            route={
+                "workforce_admission_enabled": True,
+                "online_enabled": True,
+                "topology_facts": {
+                    "candidate_generation_only": True,
+                    "mutation_requested": False,
+                },
+            },
+        )
+        .to_dict()
+    )
+
+    snapshot = plan["signal_snapshot"]
+    assert snapshot["execution_topology"] == "ISOLATED_TARGET"
+    demand = snapshot["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "bounded_candidate_generation"
+    assert demand["minimum_autonomy"] == "L1"
+    assert demand["context_class"] == "nexus_bounded"
+    assert demand["mutation_intent"] is False
+    assert demand["external_verification_required"] is True
+    assert demand["route_authority"] == "CapabilityPlanner"
+    assert not ({"worker_id", "provider", "model"} & set(demand))
+
+
+@pytest.mark.parametrize(
+    ("topology_facts", "route_mutation"),
+    [
+        ({"candidate_generation_only": True}, None),
+        ({"candidate_generation_only": True, "mutation_requested": True}, None),
+        ({"candidate_generation_only": "true", "mutation_requested": False}, None),
+        ({"candidate_generation_only": True, "mutation_requested": False}, True),
+        ({"candidate_generation_only": True, "mutation_requested": False}, "false"),
+    ],
+)
+def test_candidate_generation_only_fails_closed_before_workforce_projection(
+    topology_facts,
+    route_mutation,
+):
+    route = {
+        "workforce_admission_enabled": True,
+        "online_enabled": True,
+        "topology_facts": topology_facts,
+    }
+    if route_mutation is not None:
+        route["mutation_requested"] = route_mutation
+    with pytest.raises(ValueError, match="candidate_generation_only|topology_fact_must_be_bool"):
+        CapabilityPlanner().plan(
+            task_desc="Reject invalid candidate-only facts",
+            task_type="candidate_generation",
+            route=route,
+        )
+
+
+def test_candidate_required_retains_existing_isolation_and_workforce_semantics():
+    plan = CapabilityPlanner().plan(
+        task_desc="Implement one bounded candidate under the existing contract",
+        task_type="bug",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+            "topology_facts": {"candidate_required": True},
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["execution_topology"] == "ISOLATED_TARGET"
+    demand = plan["signal_snapshot"]["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "fast_bounded_implementation"
+    assert demand["mutation_intent"] is True
+
+
 def test_workforce_demand_online_complex_closure():
     plan = CapabilityPlanner().plan(
         task_desc="Perform self-hosted lifecycle runtime-closure for cross-module integration",

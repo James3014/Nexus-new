@@ -1,5 +1,6 @@
 ---
-name: "nexus-yang-ding-yi-eternal-v5"
+id: nexus-yang-ding-yi-eternal-v5
+name: yang-ding-yi-nexus-eternal
 description: |
   Nexus L5.7 Eternal 終極演化聖衣。
   融合楊定一博士「全部生命系列」的實相觀察與 Nexus 商用引擎的冷酷治理。

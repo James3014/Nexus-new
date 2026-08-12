@@ -283,6 +283,32 @@ class LocalHealPipelineCapabilityExecutor:
             )
 
         # Pipeline topology requested - actual Path A execution
+        from nexus.services.local_heal.receipt import canonical_run_group
+
+        route_ctx_for_execution = (
+            dict(ctx.route_context) if isinstance(ctx.route_context, dict) else {}
+        )
+        try:
+            canonical_run_group_value = canonical_run_group(
+                route_ctx_for_execution.get("run_group", "")
+            )
+        except ValueError as exc:
+            return CapabilityExecutionResult(
+                name="repair_loop",
+                selected=True,
+                invoked=True,
+                gate_passed=False,
+                outcome_contributed=False,
+                evidence_present=True,
+                failure_reason=f"run_group_validation_error:{exc}",
+                telemetries={
+                    "canonical_run_group": "",
+                    "pipeline_final_patch": "",
+                    "canonical_world_c_patch_projection": {},
+                    "localheal_pipeline_available": modules.get("heal_pipeline", False),
+                },
+            )
+
         invoked_modules = []
         path_a_actual_execution = False
         path_a_failure_reason = ""
@@ -541,6 +567,7 @@ class LocalHealPipelineCapabilityExecutor:
                     route_ctx = {}
                 route_ctx.setdefault("target_file", ctx.target_file)
                 route_ctx.setdefault("target_symbol", ctx.target_symbol)
+                route_ctx["run_group"] = canonical_run_group_value
                 repro_script = route_ctx.get("repro_script", "") if isinstance(route_ctx, dict) else ""
                 skip_repro = not bool(repro_script)
 
@@ -571,6 +598,7 @@ class LocalHealPipelineCapabilityExecutor:
                     problem_statement=ctx.problem_statement,
                     repair_specification=str(route_ctx.get("repair_specification", "") or ""),
                     route_context=route_ctx,
+                    run_group=canonical_run_group_value,
                     python_executable=python_executable,
                     max_tries=_max_tries,
                     skip_reproduction=skip_repro,
@@ -614,18 +642,49 @@ class LocalHealPipelineCapabilityExecutor:
         if pipeline_run_success and not world_c_receipt_valid and not path_a_failure_reason:
             path_a_failure_reason = "world_c_receipt_invalid:" + ",".join(world_c_receipt_errors)
 
-        # Extract pipeline result if available
+        # Extract pipeline result if available. Raw pipeline patch text is diagnostic
+        # only; canonical output is rebuilt from verified source/workspace state.
         pipeline_final_patch = ""
+        raw_pipeline_final_patch = ""
+        canonical_world_c_patch_projection: dict[str, Any] = {}
         pipeline_solve_eligible = False
         pipeline_failure_reason = ""
         if pipeline_result_ctx is not None:
-            pipeline_final_patch = getattr(pipeline_result_ctx, "final_patch", "") or ""
-            if not pipeline_final_patch:
+            raw_pipeline_final_patch = getattr(pipeline_result_ctx, "final_patch", "") or ""
+            if not raw_pipeline_final_patch:
                 preserved_patch = getattr(pipeline_result_ctx, "pre_verification_final_patch", "")
                 if isinstance(preserved_patch, str):
-                    pipeline_final_patch = preserved_patch
+                    raw_pipeline_final_patch = preserved_patch
             pipeline_solve_eligible = getattr(pipeline_result_ctx, "solve_eligible", False)
             pipeline_failure_reason = getattr(pipeline_result_ctx, "failure_reason", "") or ""
+
+        if pipeline_run_success and world_c_receipt_valid:
+            try:
+                from nexus.services.local_heal.world_c_receipt import (
+                    build_world_c_canonical_patch_projection,
+                )
+
+                canonical_world_c_patch_projection = build_world_c_canonical_patch_projection(
+                    ctx.source_root,
+                    world_c_workspace_path,
+                    ctx.target_file,
+                    expected_source_hash=route_ctx_for_execution.get(
+                        "world_c_expected_source_hash"
+                    ),
+                    expected_workspace_hash=route_ctx_for_execution.get(
+                        "world_c_expected_workspace_hash"
+                    ),
+                    expected_patch_hash=route_ctx_for_execution.get(
+                        "world_c_expected_patch_hash"
+                    ),
+                )
+                pipeline_final_patch = canonical_world_c_patch_projection["patch"]
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                actual_execution = False
+                path_a_failure_reason = (
+                    f"canonical_patch_projection_error:{type(exc).__name__}:{str(exc)[:200]}"
+                )
+                pipeline_final_patch = ""
 
         # C1/C5D: Phase progression + attempt telemetry from pipeline result context
         phase_reached = ""
@@ -861,6 +920,8 @@ class LocalHealPipelineCapabilityExecutor:
                 "orchestrator_run_reachable": orchestrator_run_reachable,
                 "world_c_receipt": world_c_receipt,
                 "world_c_receipt_valid": world_c_receipt_valid,
+                "canonical_run_group": canonical_run_group_value,
+                "canonical_world_c_patch_projection": canonical_world_c_patch_projection,
                 "world_c_receipt_errors": world_c_receipt_errors,
                 "world_c_workspace_path": world_c_workspace_path,
                 "committee_orchestrator_available": modules.get("committee_orchestrator", False),
@@ -897,6 +958,7 @@ class LocalHealPipelineCapabilityExecutor:
                 "path_a_actual_execution": actual_execution,
                 "path_a_failure_reason": path_a_failure_reason,
                 "pipeline_final_patch": pipeline_final_patch,
+                "raw_pipeline_final_patch": raw_pipeline_final_patch,
                 "pipeline_solve_eligible": pipeline_solve_eligible,
                 "pipeline_failure_reason": pipeline_failure_reason,
                 "first_attempt_patch_hash": getattr(pipeline_result_ctx, "_first_attempt_patch_hash", "") if pipeline_result_ctx else "",
