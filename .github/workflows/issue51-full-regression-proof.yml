@@ -65,7 +65,8 @@ jobs:
           BASE_DIR: ${{ steps.roots.outputs.base }}
         run: |
           set +e
-          "$BASE_DIR/.venv/bin/python" -m pytest "$BASE_DIR/tests" -q --timeout=300 --junitxml="$RUNNER_TEMP/base.xml" > "$RUNNER_TEMP/base.log" 2>&1
+          cd "$BASE_DIR"
+          NEXUS_TEST_MODE=CI PYTHONPATH=. .venv/bin/python -m pytest tests/ -q --timeout=300 --junitxml="$RUNNER_TEMP/base.xml" > "$RUNNER_TEMP/base.log" 2>&1
           status=$?
           echo "$status" > "$RUNNER_TEMP/base.exit"
           exit 0
@@ -75,7 +76,8 @@ jobs:
           HEAD_DIR: ${{ steps.roots.outputs.head }}
         run: |
           set +e
-          "$HEAD_DIR/.venv/bin/python" -m pytest "$HEAD_DIR/tests" -q --timeout=300 --junitxml="$RUNNER_TEMP/head.xml" > "$RUNNER_TEMP/head.log" 2>&1
+          cd "$HEAD_DIR"
+          NEXUS_TEST_MODE=CI PYTHONPATH=. .venv/bin/python -m pytest tests/ -q --timeout=300 --junitxml="$RUNNER_TEMP/head.xml" > "$RUNNER_TEMP/head.log" 2>&1
           status=$?
           echo "$status" > "$RUNNER_TEMP/head.exit"
           exit 0
@@ -126,6 +128,7 @@ jobs:
               values = list(rows.values())
               return {s: values.count(s) for s in ("passed", "failed", "error", "skipped")}
 
+          substantial_collection = len(base) >= 1000 and len(head) >= 1000
           report = {
               "schema": "nexus.issue51.full_regression_proof.v1",
               "base_sha": os.environ["BASE_SHA"],
@@ -136,11 +139,12 @@ jobs:
               "head_counts": counts(head),
               "base_case_count": len(base),
               "head_case_count": len(head),
+              "substantial_collection": substantial_collection,
               "new_bad": new_bad,
               "missing_testcases": missing,
               "added_testcases": added,
               "changed_bad_status": changed_bad,
-              "status": "PASS" if not new_bad and not missing and not added and not changed_bad else "FAIL",
+              "status": "PASS" if substantial_collection and not new_bad and not missing and not added and not changed_bad else "FAIL",
           }
           (root / "issue51-full-regression.json").write_text(
               json.dumps(report, indent=2, sort_keys=True)
