@@ -60,7 +60,14 @@ def _frozen_runtime():
                 os.environ[name] = value
 
 
-def _case(*, risk: int, confidence: float = 0.8, cross_module: bool = False, candidate_count: int = 2, **features):
+def _case(
+    *,
+    risk: int,
+    confidence: float = 0.8,
+    cross_module: bool = False,
+    candidate_count: int = 2,
+    **features,
+):
     route_features = {
         "risk_score": risk,
         "adjusted_root_cause_confidence": confidence,
@@ -81,7 +88,11 @@ def _case(*, risk: int, confidence: float = 0.8, cross_module: bool = False, can
 
 
 def _plan(case):
-    return CapabilityPlanner().plan(**{key: value for key, value in case.items() if not key.startswith("_")}).to_dict()
+    return (
+        CapabilityPlanner()
+        .plan(**{key: value for key, value in case.items() if not key.startswith("_")})
+        .to_dict()
+    )
 
 
 def _stable(plan):
@@ -93,7 +104,8 @@ def _coverage(plan):
     return {
         "routing_tier": trace.get("routing_tier"),
         "execution_depth": plan["execution_depth"],
-        "safety_escalated": trace.get("routing_tier") == "L0_micro_patch" and plan["execution_depth"] == "STANDARD",
+        "safety_escalated": trace.get("routing_tier") == "L0_micro_patch"
+        and plan["execution_depth"] == "STANDARD",
         "compression": "prompt_compression" in plan["conditional_capabilities"],
         "shadow": bool(trace.get("p3_shadow_route")),
         "replan_floor": plan["execution_depth"] == "FULL",
@@ -131,11 +143,23 @@ def test_deterministic_generator_is_replayable_and_non_vacuous():
         first_cases = list(_generated_cases())
         second_cases = list(_generated_cases())
         for case in first_cases + second_cases:
-            case["_pilot_malformed"] = not isinstance(case["route"]["route_features"].get("impact_complexity"), (int, float))
-        first = [_coverage(_plan(case)) | {"malformed_features": case["_pilot_malformed"]} for case in first_cases]
-        second = [_coverage(_plan(case)) | {"malformed_features": case["_pilot_malformed"]} for case in second_cases]
+            case["_pilot_malformed"] = not isinstance(
+                case["route"]["route_features"].get("impact_complexity"), (int, float)
+            )
+        first = [
+            _coverage(_plan(case)) | {"malformed_features": case["_pilot_malformed"]}
+            for case in first_cases
+        ]
+        second = [
+            _coverage(_plan(case)) | {"malformed_features": case["_pilot_malformed"]}
+            for case in second_cases
+        ]
     assert first == second
-    assert {item["routing_tier"] for item in first} >= {"L1_green_lane", "L2_hardened", "L3_swarm_deep"}
+    assert {item["routing_tier"] for item in first} >= {
+        "L1_green_lane",
+        "L2_hardened",
+        "L3_swarm_deep",
+    }
     assert any(item["malformed_features"] or item["safety_escalated"] for item in first)
     assert GENERATOR_VERSION == "stdlib-random-v1"
 
@@ -150,7 +174,9 @@ def test_falsification_operators_change_authoritative_outcome_or_counter():
         compressed = deepcopy(baseline)
         compressed["route"]["prompt_compression"] = True
         operators.append(compressed)
-        escalated = _case(risk=10, confidence=0.9, cross_module=True, impact_complexity=9, has_hard_signal=True)
+        escalated = _case(
+            risk=10, confidence=0.9, cross_module=True, impact_complexity=9, has_hard_signal=True
+        )
         operators.append(escalated)
         malformed = _case(risk=20, confidence=0.8)
         malformed["route"]["route_features"] = ["malformed-route-features"]
@@ -175,7 +201,10 @@ def test_falsification_operators_change_authoritative_outcome_or_counter():
                 outcomes.append((f"FAIL_CLOSED:{type(exc).__name__}", {"malformed_features": True}))
             else:
                 outcomes.append((_stable(planned), _coverage(planned)))
-    assert all(serialized != _stable(baseline_plan) or coverage != baseline_cov for serialized, coverage in outcomes)
+    assert all(
+        serialized != _stable(baseline_plan) or coverage != baseline_cov
+        for serialized, coverage in outcomes
+    )
 
 
 def test_coverage_counters_cover_required_authority_branches():
