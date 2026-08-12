@@ -38,15 +38,9 @@ def test_bootstrap_files_use_current_worktree_authority():
 
 def test_execution_domains_and_candidate_namespaces_are_unambiguous():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(
-        encoding="utf-8"
-    )
-    launch = (ROOT / ".agents/skills/nexus-task-launch/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(
-        encoding="utf-8"
-    )
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
+    launch = (ROOT / ".agents/skills/nexus-task-launch/SKILL.md").read_text(encoding="utf-8")
+    merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
 
     assert "The Owner chooses the execution lane" in agents
     assert "does not select\n  local lifecycle" in agents
