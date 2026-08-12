@@ -17,9 +17,9 @@ jobs:
       matrix:
         include:
           - label: base
-            sha: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
+            sha: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
           - label: head
-            sha: e828aa1cc49f003072337b35b64bf662a7bfd81f
+            sha: d121f7cd3b7282829b7c652f436f2dba0e5f23bf
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@v6
@@ -97,8 +97,8 @@ jobs:
 
       - name: Compare testcase identities and outcomes
         env:
-          BASE_SHA: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
-          HEAD_SHA: e828aa1cc49f003072337b35b64bf662a7bfd81f
+          BASE_SHA: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
+          HEAD_SHA: d121f7cd3b7282829b7c652f436f2dba0e5f23bf
         run: |
           set -euo pipefail
           python - <<'PY'
