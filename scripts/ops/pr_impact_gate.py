@@ -12,6 +12,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -71,6 +72,14 @@ CI_MACHINERY_TARGETS = (
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
 _UNKNOWN = "IMPACT_UNKNOWN"
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+_AWARE_ISO_DATETIME = re.compile(
+    r"(?<![0-9A-Za-z])"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})"
+    r"(?![0-9A-Za-z])"
+)
+
+LogicalNodeKey = tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -674,9 +683,78 @@ def parse_junit_metadata(path: Path) -> dict[str, Any]:
     }
 
 
+def _logical_node_key(raw_node: str) -> LogicalNodeKey:
+    """Abstract valid aware ISO datetimes only inside a pytest parameter id."""
+    component_start = raw_node.rfind("::") + 2
+    parameter_start = raw_node.find("[", component_start)
+    if parameter_start < component_start or not raw_node.endswith("]"):
+        return (("literal", raw_node),)
+
+    parameter_id = raw_node[parameter_start + 1 : -1]
+    segments: list[tuple[str, str]] = [("literal", raw_node[: parameter_start + 1])]
+    cursor = 0
+    normalized = False
+    for match in _AWARE_ISO_DATETIME.finditer(parameter_id):
+        token = match.group(0)
+        try:
+            parsed = datetime.fromisoformat(token[:-1] + "+00:00" if token.endswith("Z") else token)
+        except ValueError:
+            continue
+        if parsed.utcoffset() is None:
+            continue
+        segments.append(("literal", parameter_id[cursor : match.start()]))
+        segments.append(("aware_iso_datetime", ""))
+        cursor = match.end()
+        normalized = True
+    if not normalized:
+        return (("literal", raw_node),)
+    segments.append(("literal", parameter_id[cursor:] + "]"))
+    return tuple(segments)
+
+
+def _logical_node_index(raw_nodes: Iterable[str]) -> dict[LogicalNodeKey, str] | None:
+    index: dict[LogicalNodeKey, str] = {}
+    for raw_node in raw_nodes:
+        key = _logical_node_key(raw_node)
+        if key in index and index[key] != raw_node:
+            return None
+        index[key] = raw_node
+    return index
+
+
+def _logical_node_set(raw_nodes: Iterable[str]) -> set[LogicalNodeKey] | None:
+    index = _logical_node_index(raw_nodes)
+    return None if index is None else set(index)
+
+
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
-    base_nodes = set(base.node_ids)
-    head_nodes = set(head.node_ids)
+    base_index = _logical_node_index(base.node_ids)
+    head_index = _logical_node_index(head.node_ids)
+    base_passed = _logical_node_set(base.passed_node_ids)
+    head_passed = _logical_node_set(head.passed_node_ids)
+    base_skipped = _logical_node_set(base.skipped_node_ids)
+    head_skipped = _logical_node_set(head.skipped_node_ids)
+    head_failed = _logical_node_set(head.failed_node_ids)
+    head_errors = _logical_node_set(head.error_node_ids)
+    indexes = (
+        base_index,
+        head_index,
+        base_passed,
+        head_passed,
+        base_skipped,
+        head_skipped,
+        head_failed,
+        head_errors,
+    )
+    if any(index is None for index in indexes):
+        return True
+
+    assert base_index is not None and head_index is not None
+    assert base_passed is not None and head_passed is not None
+    assert base_skipped is not None and head_skipped is not None
+    assert head_failed is not None and head_errors is not None
+    base_nodes = set(base_index)
+    head_nodes = set(head_index)
     if not base_nodes and not head_nodes:
         return False
     if not base_nodes or not head_nodes or not base_nodes <= head_nodes:
@@ -685,13 +763,13 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     head_only = head_nodes - base_nodes
     if head_only and base.test_inventory_tree == head.test_inventory_tree:
         return True
-    if not head_only <= set(head.passed_node_ids):
+    if not head_only <= head_passed:
         return True
-    if not set(head.skipped_node_ids) <= set(base.skipped_node_ids):
+    if not head_skipped <= base_skipped:
         return True
 
-    downgraded = set(base.passed_node_ids) - set(head.passed_node_ids)
-    classified_failures = set(head.failed_node_ids) | set(head.error_node_ids)
+    downgraded = base_passed - head_passed
+    classified_failures = head_failed | head_errors
     return bool(downgraded - classified_failures)
 
 
@@ -780,11 +858,24 @@ def _valid_test_provenance(result: PytestRunResult) -> bool:
 def classify_regression(base: PytestRunResult, head: PytestRunResult) -> RegressionClassification:
     base_failures = sorted(set(base.failures))
     head_failures = sorted(set(head.failures))
-    new_failures = sorted(set(head_failures) - set(base_failures))
-    resolved = sorted(set(base_failures) - set(head_failures))
+    base_failure_index = _logical_node_index(base_failures)
+    head_failure_index = _logical_node_index(head_failures)
+    if base_failure_index is None or head_failure_index is None:
+        new_failures = sorted(set(head_failures) - set(base_failures))
+        resolved = sorted(set(base_failures) - set(head_failures))
+        logical_failure_collision = True
+    else:
+        new_failures = sorted(
+            raw for key, raw in head_failure_index.items() if key not in base_failure_index
+        )
+        resolved = sorted(
+            raw for key, raw in base_failure_index.items() if key not in head_failure_index
+        )
+        logical_failure_collision = False
 
     evidence_mismatch = (
-        not base.plan_digest
+        logical_failure_collision
+        or not base.plan_digest
         or base.plan_digest != head.plan_digest
         or base.selected_targets != head.selected_targets
         or not base.revision
