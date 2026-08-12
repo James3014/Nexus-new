@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: CLOSED
 task_id: TC-P1A-G4
 campaign_id: CAMPAIGN-PHASE1A-V1.1
 source_issue: https://github.com/James3014/Nexus-new/issues/172
@@ -114,10 +114,25 @@ Bind exact base/head/tree, physical diff, changed-file inventory, exact verifier
 - no route/model/provider/workforce/approval/release authority change;
 - no runtime integration or production/public causal claim.
 
+## Closure evidence
+
+G4 is closed against the exact current GitHub collaboration lineage:
+
+- accepted Candidate / PR #181 head: `361938f907276e065892eb64ab059d0e0bf1e9cb`;
+- accepted Candidate tree: `40bf6d1ae028335d04f08ab52f1bc51bcea1ada8`;
+- protected merge commit: `ea8c15293455575b4312b92eeeebc69daa4abbcf`;
+- physical diff remained exactly the two allowed files;
+- exact-head Pytest impact gate included `tests/test_phase1a_report.py`, added no failures relative to the exact base, and classified the pre-existing research-suite failures as non-blocking exact-baseline debt;
+- exact-head Ruff, Pyright, Bandit, and Governance workflows completed successfully;
+- independent acceptance verified authoritative rebuild, B-A/C-B replay, invalid-run exclusion, frozen identity binding, existing VAP physical-consumption authority reuse, tamper/substitution negatives, and claim-boundary fail-close;
+- post-merge readback confirmed `phase1a_report.py` on `main@ea8c15293455575b4312b92eeeebc69daa4abbcf`.
+
+Closure classification for this bounded G4 contract: `DONE_NO_FOLLOW_UP`.
+
 ## Exit / next gate
 
-Implementation output is Candidate-only: `phase1a_report_replay_tamper_substrate_candidate_only`.
+Maximum G4 claim: `phase1a_report_replay_tamper_substrate_implemented_and_verified`.
 
-Independent acceptance of the exact Candidate is mandatory. Only after accepted merge + post-merge readback may G4 rise to `phase1a_report_replay_tamper_substrate_implemented_and_verified`.
+The serial repository-substrate lane is complete through G4. The campaign next gate is `PRE-FORMAL / BLOCKED_ON_#29` because Issue #29's exact same-task Local/World-C -> physical Online consumption -> truthful contribution evidence remains `BLOCKED_EVIDENCE` on the fresh reconciliation fence.
 
-Even after G4 acceptance, formal Phase 1A remains blocked until Issue #29's exact same-task Local/World-C -> physical Online consumption -> truthful contribution evidence is independently satisfied and the final pre-formal freeze gate passes. G5 remains absent / unauthorized.
+G5 remains absent / unauthorized. No qualification/formal experiment, runtime integration, route/approval/release authority, production/public claim, or causal benefit is implied by this closure.
