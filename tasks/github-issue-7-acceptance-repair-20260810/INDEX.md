@@ -6,6 +6,7 @@ campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 baseline_main: 599227f0efbe1e9a4ca8cd6bff56824f0a6d9965
 reconciled_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
+current_main: bc16cbf2bf00377a4521e3eab233175112d0c963
 rebind_owner_directive: https://github.com/James3014/Nexus-new/issues/7#issuecomment-5250252765
 rebind_date: 2026-08-11
 ordered_cards:
@@ -14,7 +15,7 @@ ordered_cards:
   - 03-bounded-repair-attempts.md
   - 04-ordered-attempt-events-and-e2e.md
 current_frontier: 03-bounded-repair-attempts.md
-frontier_status: BLOCKED_OWNER_GATE
+frontier_status: ACTIVE
 completed_cards:
   - 01-canonical-planner-dispatch-binding.md
   - 02-independent-candidate-acceptance.md
@@ -53,10 +54,12 @@ merged as `9121cd2cf83e959db763bbb578a60f861b0855fb`; independent review was
 `MERGE_SAFE`, with 255 combined tests and 14 reducer tests. Protected required
 checks were terminal PASS; Tier 3 remained skipped.
 
-Current frontier is M3-C (`03-bounded-repair-attempts.md`) with
-`BLOCKED_OWNER_GATE`; no M3-C implementation is authorized until its separate
-Owner gate is granted.
+Current frontier is M3-C (`03-bounded-repair-attempts.md`) with `ACTIVE`
+status. On 2026-08-12 the Owner explicitly granted the
+`M3_C_CAMPAIGN_REBIND_AND_OWNER_GATE` for bounded implementation, commit,
+issue-branch push, and pull-request creation against current main
+`bc16cbf2bf00377a4521e3eab233175112d0c963`.
 
-`AUTO_CHAIN=false`; the active M3-C frontier is blocked, and worker mutation,
-commit, approval, integration, merge, and issue-branch push remain unauthorized
-until its separate Owner gate is granted.
+`AUTO_CHAIN=false`; M3-C may form a Candidate PR only. Approval, integration,
+merge, successor-card activation, release, and production/public claims remain
+separate authorities.

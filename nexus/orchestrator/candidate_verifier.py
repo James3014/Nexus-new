@@ -79,6 +79,10 @@ class VerifiedCandidateReceipt:
     authority_findings_sha256: str = ""
     collaboration_gate_passed: bool = True
     collaboration_provenance: Optional[dict[str, object]] = None
+    changed_file_count: int = 0
+    changed_file_budget_passed: bool = True
+    deleted_file_count: int = 0
+    deleted_file_budget_passed: bool = True
 
 
 class CandidateVerifier:
@@ -355,7 +359,28 @@ class CandidateVerifier:
             candidate=candidate,
             current=post_verifier,
         )
+        # Count paths, rather than Git status records: a path can be both a
+        # tracked modification and a deletion (or appear in more than one
+        # status bucket).  The aggregate ceiling must therefore use the union
+        # of all three buckets and be computed from the post-verifier state.
+        changed_file_count = len(
+            set(post_verifier.changed_files)
+            | set(post_verifier.untracked_files)
+            | set(post_verifier.deleted_files)
+        )
+        maximum_changed_files = int(getattr(contract, "maximum_changed_files", 0) or 0)
+        maximum_deleted_files = int(getattr(contract, "maximum_deleted_files", 0) or 0)
+        changed_file_budget_passed = not maximum_changed_files or changed_file_count <= maximum_changed_files
+        deleted_file_count = len(set(post_verifier.deleted_files))
+        # A zero cap retains the contract's backwards-compatible meaning of
+        # "no aggregate cap"; deletion authorization remains an independent
+        # fail-closed gate below.  Positive caps bound physical deletions.
+        deleted_file_budget_passed = not maximum_deleted_files or deleted_file_count <= maximum_deleted_files
         failures: list[str] = []
+        if not changed_file_budget_passed:
+            failures.append("changed_file_budget_exhausted")
+        if not deleted_file_budget_passed:
+            failures.append("deleted_file_budget_exhausted")
         if not scope_passed:
             failures.append("scope_gate_failed")
         if not deletion_passed:
@@ -404,4 +429,8 @@ class CandidateVerifier:
             verification_wall_time_ms=max(0, int((time.monotonic() - verification_started) * 1000)),
             collaboration_gate_passed=collaboration_passed,
             collaboration_provenance=post_verifier.collaboration_provenance,
+            changed_file_count=changed_file_count,
+            changed_file_budget_passed=changed_file_budget_passed,
+            deleted_file_count=deleted_file_count,
+            deleted_file_budget_passed=deleted_file_budget_passed,
         )

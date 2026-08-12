@@ -1633,7 +1633,10 @@ def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_pa
         ("candidate_commit_sha", "f" * 40, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
         ("candidate_tree_sha", "f" * 40, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
         ("authority_findings_sha256", "b" * 64, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
-        ("expires_at", (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(), "ARCHITECTURE_APPROVAL_EXPIRY_INVALID"),
+        # Keep the parametrized node id stable across exact-base/head runs.
+        # A runtime-generated timestamp makes identical source collect as two
+        # different tests and invalidates revision-bound comparison evidence.
+        ("expires_at", "2000-01-01T00:00:00+00:00", "ARCHITECTURE_APPROVAL_EXPIRY_INVALID"),
         ("unknown", "reject", "ARCHITECTURE_APPROVAL_UNKNOWN_FIELDS"),
     ],
 )
@@ -6277,3 +6280,338 @@ def test_action_transport_uses_bound_payload_and_preserves_card_contract_identit
     assert durable["attempt_id"] == transport["action"]["attempt_id"]
     assert durable["action_id"] == transport["action"]["action_id"]
     assert durable["idempotency_key"] == transport["action"]["idempotency_key"]
+
+
+def test_m3c_build_contract_maps_all_four_execution_ceilings(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract = service.build_contract(_request(
+        tmp_path,
+        maximum_attempts_per_task=2,
+        maximum_wall_time_seconds=17.5,
+        maximum_changed_files=4,
+        maximum_deleted_files=3,
+    ))
+    assert contract.maximum_attempts_per_task == 2
+    assert contract.maximum_wall_time_seconds == 17.5
+    assert contract.maximum_changed_files == 4
+    assert contract.maximum_deleted_files == 3
+
+
+def test_m3c_retry_attempt_cap_blocks_before_durable_append_or_launch(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="m3c-attempt-cap")
+    request["maximum_attempts_per_task"] = 1
+    contract = service.build_contract(request)
+    original = {
+        "task_id": request["task_id"], "status": "FINAL_BLOCK", "terminal_status": "FINAL_BLOCK",
+        "cleanup_decision": "REMOVED", "promotion_status": "NOT_CREATED", "acceptance_decision": "NOT_REPAIRABLE",
+        "request": request, "contract": contract.model_dump(mode="json"), "attempt_id": "old-attempt",
+        "attempts": [{"attempt_id": "old-attempt"}],
+    }
+    service._write_state(request["task_id"], original)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("launch must not run"))
+    result = service.retry_task(request["task_id"])
+    assert result["retry"]["blocker"] == "ATTEMPT_BUDGET_EXHAUSTED"
+    assert service._read_state(request["task_id"])["attempts"] == original["attempts"]
+
+
+def _m3c_receipt(task_id, target, *, calls=1, attempts=1):
+    return WorkerExecutionReceipt(
+        provider="codex", task_id=task_id, target_worktree=str(target), worker_status="completed",
+        outcome=WorkerOutcome.EXECUTION_COMPLETED.value, exit_code=0, executable_identity="fake",
+        argv=("fake",), stdout_sha256="a" * 64, stderr_sha256="b" * 64, wall_time_ms=1,
+        process_group_id=None, process_group_killed=False, timed_out=False, provider_calls=calls,
+        provider_attempt_count=attempts, evidence_complete=True, commit_created=False,
+        merge_performed=False, push_performed=False,
+    )
+
+
+def test_m3c_aggregate_provider_budget_blocks_before_extra_invoke(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "m3c-provider-cap")
+    state = service._read_state(contract.task_id)
+    prior = _m3c_receipt(contract.task_id, lease.target_worktree)
+    state.update({"status": "WORKER_RUNNING", "active_provider": "codex", "attempts": [{"attempt_id": attempt_id}],
+                  "executions": [prior.__dict__], "maximum_provider_calls": 1})
+    service._write_state(contract.task_id, state)
+    calls = {"invoke": 0}
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+                        SimpleNamespace(validate_static_contract=lambda *_: None))
+    monkeypatch.setattr(service.worker_registry, "invoke", lambda *a, **k: calls.__setitem__("invoke", calls["invoke"] + 1))
+    with pytest.raises(RuntimeError, match="maximum_provider_calls aggregate budget exhausted"):
+        service._run_default_resumable(contract, state["request"], lambda *_: None,
+                                       task_id=contract.task_id, attempt_id=attempt_id)
+    assert calls["invoke"] == 0
+
+
+def test_m3c_absolute_deadline_passes_remaining_timeout_and_blocks_overrun(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "m3c-deadline")
+    request = {**service._read_state(contract.task_id)["request"], "maximum_wall_time_seconds": 1.0,
+               "timeout_seconds": 9.0}
+    contract = service.build_contract(request)
+    state = service._read_state(contract.task_id)
+    state.update({"status": "WORKER_RUNNING", "active_provider": "codex", "submitted_at": "1970-01-01T00:01:40+00:00",
+                  "contract": contract.model_dump(mode="json"), "request": request,
+                  "attempts": [{"attempt_id": attempt_id}], "executions": []})
+    service._write_state(contract.task_id, state)
+    observed = {}
+    clock = {"now": 100.0}
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.time.time", lambda: clock["now"])
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+                        SimpleNamespace(validate_static_contract=lambda *_: None))
+    def invoke(provider, contract_arg, lease_arg, **kw):
+        observed.update(kw)
+        clock["now"] = 101.2
+        return _m3c_receipt(contract_arg.task_id, lease_arg.target_worktree)
+    monkeypatch.setattr(service.worker_registry, "invoke", invoke)
+    with pytest.raises(RuntimeError, match="WALL_TIME_BUDGET_EXHAUSTED"):
+        service._run_default_resumable(contract, request, lambda *_: None,
+                                       task_id=contract.task_id, attempt_id=attempt_id)
+    assert observed["timeout_seconds"] == pytest.approx(1.0, abs=0.01)
+
+
+def test_m3c_retry_preserves_execution_history_and_aggregate_budget_blocks_invoke(tmp_path, monkeypatch):
+    """A terminal retry keeps prior receipts; their calls still consume the cap."""
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="m3c-history-retry")
+    request.update({"execution_lane": "ISOLATED_TARGET", "maximum_attempts_per_task": 2})
+    contract = service.build_contract(request)
+    prior = _m3c_receipt(contract.task_id, str(tmp_path / "old-target"), calls=1, attempts=1)
+    original = {
+        "task_id": contract.task_id, "status": "FINAL_BLOCK", "terminal_status": "FINAL_BLOCK",
+        "cleanup_decision": "REMOVED", "promotion_status": "NOT_CREATED", "request": request,
+        "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
+        "attempt_id": "old-attempt", "attempts": [{"attempt_id": "old-attempt"}],
+        "executions": [prior.__dict__],
+    }
+    service._write_state(contract.task_id, original)
+    monkeypatch.setattr(service, "_launch_worker", lambda task_id, attempt_id: service._read_state(task_id))
+    retried = service.submit_task(request)
+    durable = service._read_state(contract.task_id)
+    assert retried["attempt_id"] != "old-attempt"
+    assert len(durable["executions"]) == 1
+    assert durable["executions"][0]["provider_calls"] == 1
+    assert durable["executions"][0]["provider_attempt_count"] == 1
+    assert durable["executions"][0]["stdout_sha256"] == prior.stdout_sha256
+    assert len(durable["attempts"]) == 2
+
+    # The retained receipt consumes the whole one-call budget before any invoke.
+    retry_contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "m3c-history-budget")
+    state = service._read_state(retry_contract.task_id)
+    state.update({"status": "WORKER_RUNNING", "active_provider": "codex",
+                  "attempts": [{"attempt_id": attempt_id}], "executions": [prior.__dict__]})
+    service._write_state(retry_contract.task_id, state)
+    invoked = {"n": 0}
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier",
+                        SimpleNamespace(validate_static_contract=lambda *_: None))
+    monkeypatch.setattr(service.worker_registry, "invoke",
+                        lambda *args, **kwargs: invoked.__setitem__("n", invoked["n"] + 1))
+    with pytest.raises(RuntimeError, match="maximum_provider_calls aggregate budget exhausted"):
+        service._run_default_resumable(retry_contract, state["request"], lambda *_: None,
+                                       task_id=retry_contract.task_id, attempt_id=attempt_id)
+    assert invoked["n"] == 0
+
+
+def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
+    card_path = f"tasks/issue-7/{task_id}.md"
+    card = tmp_path / card_path
+    card.parent.mkdir(parents=True)
+    card.write_text(f"task_id: `{task_id}`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT",
+        tmp_path,
+    )
+    internal = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="repair one bounded candidate",
+        allowed_files=("nexus_canary.txt",),
+        verifier_command=("python3 -c 'print(\"pass\")'",),
+        task_card_identity=VerifiedTaskCardIdentity(
+            task_id=task_id,
+            task_card_path=card_path,
+            canonical_task_card_path=str(card.resolve()),
+            task_card_hash=card_hash,
+        ),
+    )
+    old_attempt_id = "attempt-old-repair"
+    request = _real_request(tmp_path, task_id=task_id)
+    request.update({
+        "execution_lane": "ISOLATED_TARGET",
+        "maximum_attempts_per_task": 2,
+        "worker": "auto",
+        "model": internal["binding"]["model"],
+        "workforce_demands": internal["workforce_demands"],
+        "workforce_admission": internal["workforce_admission"],
+        "planner_output": internal["planner_output"],
+        "task_card_path": card_path,
+        "task_card_hash": card_hash,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+        "worker_candidate_ingress": True,
+        "attempt_id": old_attempt_id,
+    })
+    old_envelope = build_canonical_dispatch_envelope(
+        internal["planner_output"],
+        internal["binding"],
+        task_id=task_id,
+        attempt_id=old_attempt_id,
+        task_card_path=card_path,
+        task_card_hash=card_hash,
+    ).to_dict()
+    request["canonical_dispatch_envelope"] = old_envelope
+    binding = validate_workforce_dispatch_binding(request)
+    assert binding is not None
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    contract = service.build_contract(request)
+    old_receipt = _m3c_receipt(task_id, tmp_path / "old-target").__dict__
+    old_verified_receipt = {
+        "schema": "nexus.candidate_verification_receipt.v1",
+        "verified": True,
+        "candidate_commit_sha": "c" * 40,
+        "receipt_hash": "e" * 64,
+    }
+    service._write_state(task_id, {
+        "task_id": task_id,
+        "status": "FINAL_BLOCK",
+        "terminal_status": "FINAL_BLOCK",
+        "final_disposition": "FINAL_BLOCK",
+        "cleanup_decision": "REMOVED",
+        "promotion_status": "NOT_CREATED",
+        "acceptance_decision": "REPAIRABLE",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+        "task_card_path": card_path,
+        "task_card_hash": card_hash,
+        "attempt_id": old_attempt_id,
+        "attempts": [{
+            "attempt_id": old_attempt_id,
+            "canonical_dispatch_envelope": copy.deepcopy(old_envelope),
+            "workforce_dispatch": copy.deepcopy(binding),
+            "verified_receipt": copy.deepcopy(old_verified_receipt),
+        }],
+        "executions": [copy.deepcopy(old_receipt)],
+        "workforce_dispatch": copy.deepcopy(binding),
+        "canonical_dispatch_envelope": copy.deepcopy(old_envelope),
+        "workforce_policy_hash": binding["policy_hash"],
+        "workforce_binding_hash": binding["binding_hash"],
+        "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
+        "selected_worker_id": binding["worker_id"],
+        "selected_provider": binding["provider"],
+        "selected_model": binding["model"],
+        "candidate_commit_sha": "c" * 40,
+        "candidate_ref": f"refs/nexus/candidates/{task_id}/old",
+        "candidate_state_hash": "d" * 64,
+        "verified_receipt_hash": "e" * 64,
+        "verified_receipt": copy.deepcopy(old_verified_receipt),
+        "promotion_packet": {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_state_hash": "d" * 64,
+            "verified_receipt_hash": "e" * 64,
+        },
+    })
+    return service, request, old_envelope, old_receipt, old_verified_receipt
+
+
+@pytest.mark.parametrize("binding_fault", ["missing", "tampered"])
+def test_m3c_repair_retry_invalid_persisted_workforce_binding_blocks_zero_launch(
+    tmp_path,
+    monkeypatch,
+    binding_fault,
+):
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=f"m3c-repair-binding-{binding_fault}",
+    )
+    state = service._read_state(f"m3c-repair-binding-{binding_fault}")
+    if binding_fault == "missing":
+        state["request"].pop("workforce_admission")
+    else:
+        state["request"]["workforce_admission"]["aggregate_binding_hash"] = "0" * 64
+    service._write_state(state["task_id"], state)
+
+    calls = {"launch": 0, "invoke": 0}
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda *_: calls.__setitem__("launch", calls["launch"] + 1),
+    )
+    monkeypatch.setattr(
+        service.worker_registry,
+        "invoke",
+        lambda *_args, **_kwargs: calls.__setitem__("invoke", calls["invoke"] + 1),
+    )
+
+    result = service.retry_task(state["task_id"])
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"].startswith("WORKFORCE_ADMISSION_BINDING_")
+    assert calls == {"launch": 0, "invoke": 0}
+    assert service._read_state(state["task_id"])["attempts"] == state["attempts"]
+
+
+def test_m3c_repair_retry_rebinds_fresh_attempt_and_preserves_old_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "m3c-repair-fresh-envelope"
+    service, _, old_envelope, old_receipt, old_verified_receipt = (
+        _m3c_repairable_workforce_state(tmp_path, monkeypatch, task_id=task_id)
+    )
+    old_attempt_bytes = json.dumps(
+        service._read_state(task_id)["attempts"][0], sort_keys=True
+    )
+    old_execution_bytes = json.dumps(old_receipt, sort_keys=True)
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+    fresh_attempt_id = durable["attempt_id"]
+    fresh_envelope = durable["canonical_dispatch_envelope"]
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert fresh_attempt_id != "attempt-old-repair"
+    assert fresh_envelope != old_envelope
+    assert fresh_envelope["task_id"] == task_id
+    assert fresh_envelope["attempt_id"] == fresh_attempt_id
+    assert fresh_envelope["task_card_path"] == durable["task_card_path"]
+    assert fresh_envelope["task_card_hash"] == durable["task_card_hash"]
+    assert fresh_envelope["worker_id"] == durable["selected_worker_id"]
+    assert fresh_envelope["provider"] == durable["selected_provider"]
+    assert fresh_envelope["model"] == durable["selected_model"]
+    assert json.dumps(durable["attempts"][0], sort_keys=True) == old_attempt_bytes
+    assert json.dumps(durable["executions"][0], sort_keys=True) == old_execution_bytes
+    assert durable["attempts"][0]["verified_receipt"] == old_verified_receipt
+
+    assert durable["candidate_history"] == [{
+        "candidate_commit": "c" * 40,
+        "candidate_ref": f"refs/nexus/candidates/{task_id}/old",
+        "candidate_state_hash": "d" * 64,
+        "verified_receipt_hash": "e" * 64,
+        "approval_binding": None,
+        "integration_branch": None,
+        "integration_commit": None,
+        "final_disposition": "FINAL_BLOCK",
+    }]
+    for field in (
+        "candidate",
+        "candidate_commit_sha",
+        "candidate_tree_sha",
+        "candidate_ref",
+        "candidate_state_hash",
+        "verified_receipt_hash",
+        "verified_receipt",
+        "promotion_packet",
+    ):
+        assert durable[field] is None
