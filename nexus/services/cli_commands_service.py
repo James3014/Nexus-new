@@ -13,7 +13,7 @@ class CliCommandsService:
     所有的實體邏輯已拆分至專用的 Domain Services 中。
     符合 ISP (介面隔離) 與 SRP (單一職責) 原則。
     """
-    
+
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
         self._aos = AosService(repo_root)
@@ -36,9 +36,14 @@ class CliCommandsService:
     def release(self, tag: str, aos: int):
         return self._audit.run_release(tag, aos)
 
-    def swarm_wave1(self): return self._wave.trigger_wave(1)
-    def swarm_wave2(self): return self._wave.trigger_wave(2)
-    def swarm_wave3(self): return self._wave.trigger_wave(3)
+    def swarm_wave1(self):
+        return self._wave.trigger_wave(1)
+
+    def swarm_wave2(self):
+        return self._wave.trigger_wave(2)
+
+    def swarm_wave3(self):
+        return self._wave.trigger_wave(3)
 
     def probe(self, test_spec: str):
         # 簡單邏輯保持在此，複雜則下沉
@@ -55,5 +60,6 @@ class CliCommandsService:
 
     def reach(self, url: str, tier: int = 1):
         from nexus.core.ucc_reach import UCCReach
+
         reach_engine = UCCReach(self.repo_root)
         return reach_engine.explore(url, tier=tier)

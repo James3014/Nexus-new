@@ -6,9 +6,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
 class PaperclipDaemon:
     """🛸 [Wave 1] Agent Heartbeat & RBAC Eviction (Standard Library Edition)"""
-    
+
     def __init__(self, watch_dir: Path):
         self.watch_dir = watch_dir
         self.watch_dir.mkdir(parents=True, exist_ok=True)
@@ -60,12 +61,13 @@ class PaperclipDaemon:
         except ProcessLookupError:
             return False
         except PermissionError:
-            return True # 存在但無權限操作，視為存活
+            return True  # 存在但無權限操作，視為存活
         else:
             return True
 
     def _is_rbac_violated(self, pid) -> bool:
         return False
+
 
 if __name__ == "__main__":
     daemon = PaperclipDaemon(Path(".nexus/heartbeats"))
