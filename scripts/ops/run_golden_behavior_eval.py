@@ -289,9 +289,9 @@ def main() -> int:
     executable_cases = [
         case for case in selected if case.status == "covered" or args.include_findings
     ]
-    executable_nodeids = sorted(
-        {nodeid for case in executable_cases for nodeid in case.automated_tests}
-    )
+    executable_nodeids = sorted({
+        nodeid for case in executable_cases for nodeid in case.automated_tests
+    })
 
     collection_evidence, collection_exit_code = collect_witnesses(selected_nodeids)
     for nodeid, evidence in collection_evidence.items():
@@ -319,14 +319,12 @@ def main() -> int:
             else:
                 witness["execution_status"] = "not_executed"
             witnesses.append(witness)
-        case_evidence.append(
-            {
-                "case_id": case.case_id,
-                "status": case.status,
-                "witnesses": witnesses,
-                "finding_probe": case.finding_probe,
-            }
-        )
+        case_evidence.append({
+            "case_id": case.case_id,
+            "status": case.status,
+            "witnesses": witnesses,
+            "finding_probe": case.finding_probe,
+        })
 
     result: dict[str, Any] = {
         "schema": "nexus.golden_behavior_eval.v1",
