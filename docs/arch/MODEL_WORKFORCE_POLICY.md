@@ -74,6 +74,7 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 |---|---|---:|---|---|
 | Codex Luna — `gpt-5.6-luna` | Main engineering, milestone closure, integration | Historical L3 | Governed mainchain | Available; Codex CLI 0.146.0 with `gpt-5.6-luna` returned exactly `OK` in a read-only smoke on 2026-07-29 |
 | Agy Flash — `gemini-3.6-flash-high` | Fast bounded implementation and focused verification | L2 | **Nexus-bounded** | Available; benchmark 10/11 → 11/11 → 10/11 |
+| Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Registered conditional; exact Task Card, parser/verifier, and independent verification required; provider/model revision unresolved |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |

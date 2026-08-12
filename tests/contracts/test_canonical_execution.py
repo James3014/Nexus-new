@@ -100,6 +100,47 @@ def test_canonical_context_allows_code_target_facts_but_not_target_authority() -
         )
 
 
+def test_candidate_generation_only_requires_explicit_non_mutation() -> None:
+    context = CanonicalTaskContext(
+        task_id="task-candidate-only",
+        task_type="candidate_generation",
+        task_desc="Produce one bounded candidate without mutation authority.",
+        task_facts={
+            "candidate_generation_only": True,
+            "mutation_requested": False,
+        },
+    )
+
+    assert context.to_dict()["task_facts"] == {
+        "candidate_generation_only": True,
+        "mutation_requested": False,
+    }
+    assert context.planner_inputs()["route"]["topology_facts"] == {
+        "candidate_generation_only": True,
+        "mutation_requested": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "task_facts",
+    [
+        {"candidate_generation_only": True},
+        {"candidate_generation_only": True, "mutation_requested": True},
+        {"candidate_generation_only": "true", "mutation_requested": False},
+    ],
+)
+def test_candidate_generation_only_rejects_missing_contradictory_or_malformed_facts(
+    task_facts,
+) -> None:
+    with pytest.raises(ValueError, match="candidate_generation_only|task_fact_must_be_bool"):
+        CanonicalTaskContext(
+            task_id="task-candidate-only-invalid",
+            task_type="candidate_generation",
+            task_desc="Reject an invalid candidate-only contract.",
+            task_facts=task_facts,
+        )
+
+
 def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
     context = CanonicalTaskContext(
         task_id="task-route-receipt-evidence",
