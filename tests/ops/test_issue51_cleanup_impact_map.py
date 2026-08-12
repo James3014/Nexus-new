@@ -30,7 +30,7 @@ def test_issue51_orphan_cleanup_paths_have_exact_high_risk_rules() -> None:
 
     expected = {
         "nexus/committee/diversity_sampler.py": (
-            "tests/unit/committee",
+            "tests/unit/committee/test_data_flow_v267.py",
             "tests/architecture/test_boundaries_v4.py",
         ),
         "nexus/env/diff_report.py": (
@@ -62,7 +62,7 @@ def test_issue51_orphan_cleanup_paths_have_exact_high_risk_rules() -> None:
 def test_issue51_orphan_cleanup_paths_resolve_without_fallback() -> None:
     expected_targets = {
         "nexus/committee/diversity_sampler.py": {
-            "tests/unit/committee",
+            "tests/unit/committee/test_data_flow_v267.py",
             "tests/architecture/test_boundaries_v4.py",
             "tests/services/test_policy_gate.py",
         },
@@ -102,15 +102,15 @@ def test_issue51_combined_cleanup_paths_are_explicit_and_high_risk() -> None:
     assert details.high_risk_escalated is True
     assert details.risk_reasons == ["issue51_proven_orphan_cleanup_contract"]
     assert {
-        "tests/unit/committee",
+        "tests/unit/committee/test_data_flow_v267.py",
         "tests/architecture/test_boundaries_v3.py",
         "tests/architecture/test_boundaries_v4.py",
         "tests/services/test_policy_gate.py",
     }.issubset(details.targets)
 
 
-def test_unrelated_unknown_env_path_remains_fail_closed_fallback() -> None:
-    details = _details(["nexus/env/new_runtime.py"])
-
-    assert details.fallback_used is True
-    assert details.unmatched_paths == ["nexus/env/new_runtime.py"]
+def test_unrelated_unknown_committee_and_env_paths_remain_fail_closed_fallback() -> None:
+    for path in ("nexus/committee/new_runtime.py", "nexus/env/new_runtime.py"):
+        details = _details([path])
+        assert details.fallback_used is True
+        assert details.unmatched_paths == [path]
