@@ -1633,7 +1633,10 @@ def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_pa
         ("candidate_commit_sha", "f" * 40, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
         ("candidate_tree_sha", "f" * 40, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
         ("authority_findings_sha256", "b" * 64, "ARCHITECTURE_APPROVAL_BINDING_MISMATCH"),
-        ("expires_at", (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(), "ARCHITECTURE_APPROVAL_EXPIRY_INVALID"),
+        # Keep the parametrized node id stable across exact-base/head runs.
+        # A runtime-generated timestamp makes identical source collect as two
+        # different tests and invalidates revision-bound comparison evidence.
+        ("expires_at", "2000-01-01T00:00:00+00:00", "ARCHITECTURE_APPROVAL_EXPIRY_INVALID"),
         ("unknown", "reject", "ARCHITECTURE_APPROVAL_UNKNOWN_FIELDS"),
     ],
 )
