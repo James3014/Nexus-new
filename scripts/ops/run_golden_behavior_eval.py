@@ -25,12 +25,22 @@ _corpus = importlib.import_module("tests.golden_behavior.corpus")
 CASES = _corpus.CASES
 FINDINGS = _corpus.FINDINGS
 
+
 CLASSIFICATIONS = {"invariant", "regression", "compatibility", "security"}
 SCENARIOS = {
-    "normal", "boundary", "failure", "authority_conflict", "partial_state",
-    "recovery", "idempotency", "malformed_input", "stale_state",
+    "normal",
+    "boundary",
+    "failure",
+    "authority_conflict",
+    "partial_state",
+    "recovery",
+    "idempotency",
+    "malformed_input",
+    "stale_state",
 }
 STATUSES = {"covered", "finding"}
+
+
 PROBES: dict[str, Callable[[], tuple[bool, str]]] = {}
 
 
@@ -39,7 +49,13 @@ def _sha256(path: Path) -> str:
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False)
+    return subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _pytest_env() -> dict[str, str]:
@@ -66,19 +82,27 @@ def collect_witnesses(nodeids: Iterable[str]) -> tuple[dict[str, dict[str, Any]]
     if not ordered:
         return {}, 0
     completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *ordered],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *ordered,
+        ],
         cwd=ROOT,
         env=_pytest_env(),
         capture_output=True,
         text=True,
         check=False,
     )
+    collected_lines = {line.strip() for line in completed.stdout.splitlines() if "::" in line}
     detail = _output_tail(completed)
     evidence: dict[str, dict[str, Any]] = {}
     for nodeid in ordered:
-        # Pytest returns success only if every requested exact node resolved. This also
-        # supports absolute temporary paths used by the focused collection-only test.
-        collected = completed.returncode == 0
+        collected = nodeid in collected_lines or completed.returncode == 0
         row: dict[str, Any] = {
             "collection_status": "collected" if collected else "collection_failed",
             "collection_exit_code": 0 if collected else completed.returncode,
@@ -105,14 +129,23 @@ def _junit_rows(path: Path) -> list[ET.Element]:
 
 
 def execute_witnesses(nodeids: Iterable[str]) -> tuple[dict[str, dict[str, Any]], int]:
-    """Run exact witnesses once and attribute each JUnit outcome to its exact node."""
+    """Run exact witnesses in one pytest batch and attribute each JUnit outcome exactly."""
     ordered = sorted(set(nodeids))
     if not ordered:
         return {}, 0
     with tempfile.TemporaryDirectory(prefix="nexus-golden-") as tmpdir:
         junit_path = Path(tmpdir) / "witnesses.xml"
         completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={junit_path}", *ordered],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                f"--junitxml={junit_path}",
+                *ordered,
+            ],
             cwd=ROOT,
             env=_pytest_env(),
             capture_output=True,
@@ -129,7 +162,8 @@ def execute_witnesses(nodeids: Iterable[str]) -> tuple[dict[str, dict[str, Any]]
     evidence: dict[str, dict[str, Any]] = {}
     batch_detail = _output_tail(completed)
     for nodeid in ordered:
-        matches = by_identity.get(_expected_junit_identity(nodeid), [])
+        identity = _expected_junit_identity(nodeid)
+        matches = by_identity.get(identity, [])
         if len(matches) != 1:
             evidence[nodeid] = {
                 "execution_status": "execution_unattributed",
@@ -182,8 +216,9 @@ def validate_corpus() -> list[str]:
                 errors.append(f"{case.case_id}:missing_authority_path:{source}")
         if case.status == "covered" and not case.automated_tests:
             errors.append(f"{case.case_id}:covered_without_test")
-        if case.status == "finding" and (not case.finding_id or case.finding_id not in FINDINGS):
-            errors.append(f"{case.case_id}:missing_finding")
+        if case.status == "finding":
+            if not case.finding_id or case.finding_id not in FINDINGS:
+                errors.append(f"{case.case_id}:missing_finding")
         if case.finding_probe and case.finding_probe not in PROBES:
             errors.append(f"{case.case_id}:unknown_finding_probe")
         for nodeid in case.automated_tests:
@@ -239,7 +274,8 @@ def main() -> int:
 
     errors = validate_corpus()
     selected = [
-        case for case in CASES
+        case
+        for case in CASES
         if (not args.classification or case.classification == args.classification)
         and (not args.scenario or case.scenario == args.scenario)
         and (not args.case_ids or case.case_id in args.case_ids)
@@ -250,8 +286,12 @@ def main() -> int:
 
     provenance = _provenance(errors)
     selected_nodeids = sorted({nodeid for case in selected for nodeid in case.automated_tests})
-    executable_cases = [case for case in selected if case.status == "covered" or args.include_findings]
-    executable_nodeids = sorted({nodeid for case in executable_cases for nodeid in case.automated_tests})
+    executable_cases = [
+        case for case in selected if case.status == "covered" or args.include_findings
+    ]
+    executable_nodeids = sorted(
+        {nodeid for case in executable_cases for nodeid in case.automated_tests}
+    )
 
     collection_evidence, collection_exit_code = collect_witnesses(selected_nodeids)
     for nodeid, evidence in collection_evidence.items():
@@ -279,12 +319,14 @@ def main() -> int:
             else:
                 witness["execution_status"] = "not_executed"
             witnesses.append(witness)
-        case_evidence.append({
-            "case_id": case.case_id,
-            "status": case.status,
-            "witnesses": witnesses,
-            "finding_probe": case.finding_probe,
-        })
+        case_evidence.append(
+            {
+                "case_id": case.case_id,
+                "status": case.status,
+                "witnesses": witnesses,
+                "finding_probe": case.finding_probe,
+            }
+        )
 
     result: dict[str, Any] = {
         "schema": "nexus.golden_behavior_eval.v1",
@@ -293,7 +335,9 @@ def main() -> int:
         "selected_case_count": len(selected),
         "test_bound_case_count": sum(bool(case.automated_tests) for case in selected),
         "probe_bound_case_count": sum(bool(case.finding_probe) for case in selected),
-        "default_automated_case_count": sum(case.status == "covered" and bool(case.automated_tests) for case in selected),
+        "default_automated_case_count": sum(
+            case.status == "covered" and bool(case.automated_tests) for case in selected
+        ),
         "finding_case_count": sum(case.status == "finding" for case in selected),
         "findings_included_in_eval": args.include_findings,
         "test_node_count": len(executable_nodeids),
@@ -301,7 +345,9 @@ def main() -> int:
         "collection_exit_code": collection_exit_code,
         "validation_errors": errors,
         "case_evidence": case_evidence,
-        "findings": {case.finding_id: FINDINGS[case.finding_id] for case in selected if case.finding_id},
+        "findings": {
+            case.finding_id: FINDINGS[case.finding_id] for case in selected if case.finding_id
+        },
     }
 
     exit_code = 0 if not errors else 2
@@ -311,7 +357,10 @@ def main() -> int:
             if case.status != "finding":
                 continue
             if not case.finding_probe:
-                probe_results[case.case_id] = {"passed": False, "detail": "finding_has_no_automated_probe"}
+                probe_results[case.case_id] = {
+                    "passed": False,
+                    "detail": "finding_has_no_automated_probe",
+                }
                 exit_code = 1
                 continue
             passed, detail = PROBES[case.finding_probe]()
@@ -322,8 +371,12 @@ def main() -> int:
 
     if pytest_exit_code is not None:
         result["pytest_exit_code"] = pytest_exit_code
-        bad = [e for e in execution_evidence.values() if e["execution_status"] not in {"passed", "skipped"}]
-        if pytest_exit_code != 0 or bad:
+        unattributed_or_failed = [
+            evidence
+            for evidence in execution_evidence.values()
+            if evidence["execution_status"] not in {"passed", "skipped"}
+        ]
+        if pytest_exit_code != 0 or unattributed_or_failed:
             exit_code = pytest_exit_code or 1
 
     payload = json.dumps(result, indent=2, sort_keys=True)
