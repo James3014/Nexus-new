@@ -1,12 +1,11 @@
-import click
-import json
-import time
-import subprocess
-import sys
 from pathlib import Path
+
+import click
+
+from nexus.engine.canonical_task_seam import build_legacy_cli_service
 from nexus.services.aos_service import AosService
 from nexus.services.audit_service import AuditService, SwarmWaveService
-from nexus.engine.canonical_task_seam import build_legacy_cli_service
+
 
 class CliCommandsService:
     """
@@ -14,7 +13,7 @@ class CliCommandsService:
     所有的實體邏輯已拆分至專用的 Domain Services 中。
     符合 ISP (介面隔離) 與 SRP (單一職責) 原則。
     """
-    
+
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
         self._aos = AosService(repo_root)
@@ -37,9 +36,14 @@ class CliCommandsService:
     def release(self, tag: str, aos: int):
         return self._audit.run_release(tag, aos)
 
-    def swarm_wave1(self): return self._wave.trigger_wave(1)
-    def swarm_wave2(self): return self._wave.trigger_wave(2)
-    def swarm_wave3(self): return self._wave.trigger_wave(3)
+    def swarm_wave1(self):
+        return self._wave.trigger_wave(1)
+
+    def swarm_wave2(self):
+        return self._wave.trigger_wave(2)
+
+    def swarm_wave3(self):
+        return self._wave.trigger_wave(3)
 
     def probe(self, test_spec: str):
         # 簡單邏輯保持在此，複雜則下沉
@@ -47,10 +51,15 @@ class CliCommandsService:
         return "PASS"
 
     def heartbeat(self, test: bool):
-        from nexus.core.ops.nexus_heartbeat import run_heartbeat
-        return run_heartbeat(self.repo_root, test=test)
+        from scripts.ops.paperclip import PaperclipDaemon
+
+        daemon = PaperclipDaemon(self.repo_root / ".nexus" / "heartbeats")
+        if test:
+            return daemon.scan_once()
+        return daemon.monitor()
 
     def reach(self, url: str, tier: int = 1):
-        from nexus.core.ucc_reach import UCCReach
-        reach_engine = UCCReach(self.repo_root)
-        return reach_engine.explore(url, tier=tier)
+        from nexus.services.reach.ucc_router import UCCRouter
+
+        reach_engine = UCCRouter(self.repo_root)
+        return reach_engine.reach(url, tier=tier)

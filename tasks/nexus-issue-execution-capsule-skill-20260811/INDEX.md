@@ -3,7 +3,7 @@ campaign_id: nexus-issue-execution-capsule-skill-20260811
 authority: governed delegated work
 owner: James Chen
 status: active
-baseline: 374348c89e7814e11d55e00ea397dc5a6effe471
+baseline: bc16cbf2bf00377a4521e3eab233175112d0c963
 branch: codex/nexus-issue-execution-capsule-skill
 auto_chain: false
 frontier: 01-create-skill.md

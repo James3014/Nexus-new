@@ -1,12 +1,13 @@
-import threading
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
 import logging
+import threading
 import time
 import uuid
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-from nexus.events.log_store import JsonlEventLogStore
+from nexus.events.log_store import DeveloperFeedbackDecisionStore, JsonlEventLogStore
 from nexus.events.signal_queue_service import SignalQueueService
+from nexus.feedback.contracts import DeveloperFeedbackDecision
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class NexusEventBus:
     _observer_lock = threading.RLock()
     _global_seq = 0
     _log_store = JsonlEventLogStore()
+    _developer_feedback_store = DeveloperFeedbackDecisionStore()
     _signal_queue_svc = SignalQueueService()
     _observer_error_count = 0
     _last_observer_error: Optional[Dict[str, Any]] = None
@@ -58,6 +60,7 @@ class NexusEventBus:
         """初始化持久化路徑"""
         log_dir, event_log_path = cls._log_store.configure(project_root)
         cls._event_log_path = event_log_path
+        cls._developer_feedback_store.configure(project_root)
         signal_file = log_dir / "signal_inbox.jsonl"
         cls._signal_queue = cls._signal_queue_svc.load_from_inbox(signal_file)
 
@@ -75,6 +78,8 @@ class NexusEventBus:
     @classmethod
     def publish(cls, event_type: str, payload: Dict[str, Any]) -> None:
         """發布事件（v23 終極原子修復版）"""
+        if event_type == "developer_feedback_decision":
+            raise ValueError("developer feedback decisions require the typed emitter")
         with cls._sequence_lock:
             cls._global_seq += 1
             local_payload = payload.copy()
@@ -112,6 +117,31 @@ class NexusEventBus:
                 cls._record_observer_error(event_type, "remote_broadcaster", e)
 
     @classmethod
+    def emit_developer_feedback_decision(
+        cls, decision: DeveloperFeedbackDecision, *, expected_tail: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Persist a typed recommendation, then notify observers after commit."""
+        record = cls._developer_feedback_store.append(decision, expected_tail=expected_tail)
+        if getattr(record, "replayed", False):
+            return record
+        payload = dict(record)
+        with cls._subs_lock:
+            handlers = cls._subscribers.get("developer_feedback_decision", [])[:]
+        for handler in handlers:
+            try:
+                handler(payload)
+            except Exception as exc:
+                cls._record_observer_error("developer_feedback_decision", "subscriber", exc)
+        if cls._remote_broadcaster:
+            try:
+                cls._remote_broadcaster("developer_feedback_decision", payload)
+            except Exception as exc:
+                cls._record_observer_error("developer_feedback_decision", "remote_broadcaster", exc)
+        return record
+
+    emit_feedback_decision = emit_developer_feedback_decision
+
+    @classmethod
     def _record_observer_error(cls, event_type: str, observer: str, error: Exception) -> None:
         """Record observer failures without changing route or enforcement state."""
         with cls._observer_lock:
@@ -144,14 +174,18 @@ class NexusEventBus:
         )
 
     @classmethod
-    def emit_learning_decision(cls, *, task_id: str, action: str, reasons: List[str] | None = None) -> None:
+    def emit_learning_decision(
+        cls, *, task_id: str, action: str, reasons: List[str] | None = None
+    ) -> None:
         cls.publish(
             "learning_decision",
             {"task_id": task_id, "action": action, "reasons": list(reasons or [])},
         )
 
     @classmethod
-    def emit_evidence_accepted(cls, *, task_id: str, evidence_id: str, evidence_type: str = "") -> None:
+    def emit_evidence_accepted(
+        cls, *, task_id: str, evidence_id: str, evidence_type: str = ""
+    ) -> None:
         cls.publish(
             "evidence_accepted",
             {"task_id": task_id, "evidence_id": evidence_id, "evidence_type": evidence_type},
@@ -202,7 +236,9 @@ class NexusEventBus:
             return []
 
     @classmethod
-    def audit_event_contracts(cls, limit: int = 100, *, fail_on_raw: bool = False, raw_policy: str | None = None) -> Dict[str, Any]:
+    def audit_event_contracts(
+        cls, limit: int = 100, *, fail_on_raw: bool = False, raw_policy: str | None = None
+    ) -> Dict[str, Any]:
         """Report raw-vs-semantic event usage during the migration window."""
         if raw_policy is None:
             raw_policy = "block" if fail_on_raw else "warn"

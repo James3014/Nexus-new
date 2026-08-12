@@ -6,6 +6,7 @@ It deliberately does not infer stage completion from fields left on HealContext.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 from copy import deepcopy
@@ -39,6 +40,8 @@ WORLD_C_STAGES = (
     "verification",
 )
 
+WORLD_C_CANONICAL_PATCH_SCHEMA = "nexus.world_c.canonical_patch_projection.v1"
+
 
 def _sha256_json(value: Mapping[str, Any]) -> str:
     encoded = json.dumps(
@@ -49,6 +52,89 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
         default=str,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def build_world_c_canonical_patch_projection(
+    source_root: str | Path,
+    workspace_root: str | Path,
+    relative_path: str,
+    *,
+    expected_source_hash: str | None = None,
+    expected_workspace_hash: str | None = None,
+    expected_patch_hash: str | None = None,
+) -> dict[str, Any]:
+    """Rebuild one canonical patch from two verified filesystem states.
+
+    The caller supplies only roots and a relative path; patch text is always
+    reconstructed from bytes on disk.  Every identity/hash mismatch fails
+    closed before a projection is returned.
+    """
+    source_input = Path(source_root).expanduser()
+    workspace_input = Path(workspace_root).expanduser()
+    if source_input.is_symlink() or workspace_input.is_symlink():
+        raise ValueError("verified roots must not be symlinks")
+    source = source_input.resolve()
+    workspace = workspace_input.resolve()
+    if source == workspace:
+        raise ValueError("source and workspace roots must be distinct")
+    if not isinstance(relative_path, str) or not relative_path.strip():
+        raise ValueError("path must be a non-empty relative path")
+    candidate = Path(relative_path)
+    if candidate.is_absolute() or "\\" in relative_path:
+        raise ValueError("path must remain relative to both roots")
+    source_file = (source / candidate).resolve()
+    workspace_file = (workspace / candidate).resolve()
+    try:
+        source_file.relative_to(source)
+        workspace_file.relative_to(workspace)
+    except ValueError as exc:
+        raise ValueError("path escapes verified root") from exc
+    if not source_file.is_file() or not workspace_file.is_file():
+        raise ValueError("verified source/workspace file is missing")
+    source_bytes = source_file.read_bytes()
+    workspace_bytes = workspace_file.read_bytes()
+    source_hash = _sha256_bytes(source_bytes)
+    workspace_hash = _sha256_bytes(workspace_bytes)
+    if expected_source_hash is not None and expected_source_hash != source_hash:
+        raise ValueError("source hash mismatch")
+    if expected_workspace_hash is not None and expected_workspace_hash != workspace_hash:
+        raise ValueError("workspace hash mismatch")
+    try:
+        source_text = source_bytes.decode("utf-8")
+        workspace_text = workspace_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("canonical projection requires UTF-8 text") from exc
+    patch = "".join(
+        difflib.unified_diff(
+            source_text.splitlines(keepends=True),
+            workspace_text.splitlines(keepends=True),
+            fromfile=f"a/{candidate.as_posix()}",
+            tofile=f"b/{candidate.as_posix()}",
+            lineterm="\n",
+        )
+    )
+    if not patch:
+        raise ValueError("verified states contain no patch")
+    patch_hash = _sha256_bytes(patch.encode("utf-8"))
+    if expected_patch_hash is not None and expected_patch_hash != patch_hash:
+        raise ValueError("patch hash mismatch")
+    return {
+        "schema": WORLD_C_CANONICAL_PATCH_SCHEMA,
+        "valid": True,
+        "path": candidate.as_posix(),
+        "source_hash": source_hash,
+        "workspace_hash": workspace_hash,
+        "patch": patch,
+        "patch_hash": patch_hash,
+        "public_claim_allowed": False,
+    }
+
+
+canonical_project_world_c_patch = build_world_c_canonical_patch_projection
 
 
 def canonical_stage_name(phase_name: str) -> str:

@@ -1,3 +1,9 @@
+---
+name: sf2-ddtree-route-fit-spec
+description: Candidate-only route-fit specification for ddtree.
+runtime_eligible: false
+---
+
 # SF2 ddtree Route Fit Spec
 
 Purpose: candidate-only route-fit skill for `ddtree`.

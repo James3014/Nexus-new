@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = REPO_ROOT / "docs/arch/MODEL_WORKFORCE_POLICY.md"
 MANIFEST_PATH = REPO_ROOT / "nexus/config/model_workforce.yaml"
@@ -54,8 +53,12 @@ def test_initial_uniform_matrix_covers_all_enrolled_models() -> None:
     assert matrix["latest_snapshot"]["all_enrolled_models_attempted"] is True
     assert matrix["result_authority"] == "nexus/config/model_workforce.yaml"
     assert matrix["composite_task"]["verifier_assertions"] == 11
-    assert matrix["latest_snapshot"]["summary_report"] == str(SUMMARY_REPORT_PATH.relative_to(REPO_ROOT))
-    assert matrix["latest_snapshot"]["machine_summary"] == str(SUMMARY_JSON_PATH.relative_to(REPO_ROOT))
+    assert matrix["latest_snapshot"]["summary_report"] == str(
+        SUMMARY_REPORT_PATH.relative_to(REPO_ROOT)
+    )
+    assert matrix["latest_snapshot"]["machine_summary"] == str(
+        SUMMARY_JSON_PATH.relative_to(REPO_ROOT)
+    )
     assert SUMMARY_REPORT_PATH.is_file()
     assert SUMMARY_JSON_PATH.is_file()
 
@@ -88,6 +91,44 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
     assert agy["availability"] == "AVAILABLE"
     assert agy["preferred_context"] == "nexus_bounded"
 
+    medium = workers["agy_flash_medium"]
+    assert medium == {
+        "provider": "agy",
+        "model": "gemini-3.6-flash-medium",
+        "state": "REGISTERED_CONDITIONAL",
+        "availability": "AVAILABLE",
+        "autonomy": "L1",
+        "roles": [
+            "bounded_candidate_generation",
+            "fast_bounded_implementation",
+            "focused_verification",
+        ],
+        "preferred_context": "nexus_bounded",
+        "default_route": False,
+        "requires": [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "parser",
+            "verifier",
+            "independent_verification",
+        ],
+        "forbidden_actions": [
+            "route_authority",
+            "approval",
+            "integration",
+            "push",
+            "release",
+            "production_claim",
+            "public_claim",
+        ],
+        "calibration_evidence": {
+            "status": "CONDITIONAL",
+            "provider_model_revision": "UNRESOLVED",
+            "inherits_high_evidence": False,
+        },
+    }
+
     grok = workers["grok_review"]
     assert grok["state"] == "PROVEN_MAINCHAIN"
     assert grok["availability"] == "AVAILABLE"
@@ -106,6 +147,53 @@ def test_required_remote_workers_have_current_fail_closed_states() -> None:
 
     assert workers["direct_gemini"]["state"] == "REGISTERED_BLOCKED"
     assert workers["mimo_cli"]["state"] == "REGISTERED_BLOCKED"
+
+
+def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound() -> None:
+    worker = _manifest()["workers"]["opencode_deepseek_v4_flash"]
+    assert worker["provider"] == "opencode"
+    assert worker["model"] == "opencode/deepseek-v4-flash-free"
+    assert worker["state"] == "REGISTERED_CONDITIONAL"
+    assert worker["availability"] == "AVAILABLE"
+    assert worker["autonomy"] == "L1"
+    assert worker["default_route"] is False
+    assert worker["roles"] == ["bounded_candidate_generation", "compact_code_candidate"]
+    assert {"parser", "focused_tests", "verifier"} <= set(worker["requires"])
+    assert "second_repetition" not in worker["requires"]
+    assert "physical_patch_suite" not in worker["requires"]
+    assert {
+        "route_authority",
+        "direct_workspace_mutation",
+        "production_ready_judgment",
+        "approval",
+        "integration",
+        "push",
+    } <= set(worker["forbidden_actions"])
+    evidence = worker["requalification_evidence"]
+    assert evidence["date"] == "2026-08-11"
+    assert evidence["repetitions"] == 2
+    assert evidence["provider"] == "opencode"
+    assert evidence["model"] == "opencode/deepseek-v4-flash-free"
+    assert evidence["opencode_version"] == "1.17.20"
+    assert evidence["provider_model_revision"] == "UNRESOLVED"
+    assert evidence["arm_results"] == {
+        "R2": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"},
+        "R3": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"},
+    }
+    assert evidence["result_json_sha256"] == {
+        "R2": "2493c49e2e9caa1b5a39f3839807d655cd78f8f12c8854058032b3e0d602471a",
+        "R3": "b52e4ee5cc6e15a4cf452d8373bbe16fa6ce8837386dca8a9c70bf94c05065e8",
+    }
+    assert evidence["physical_patch_evidence"] == {
+        "PR_84_merge_sha": "c304e7d98f62f615f7ca44c2ab4451dff9e780e3",
+        "PR_85_merge_sha": "8f7c75ca08a6c88fad9b791f254d38d79ad8bf29",
+    }
+    assert evidence["role_recommendation"] == "bounded_code_candidate"
+    assert evidence["autonomy_ceiling"] == "L1"
+    assert evidence["public_claim"] is False
+    policy = POLICY_PATH.read_text(encoding="utf-8")
+    assert "Dated Owner-approved amendment — 2026-08-11" in policy
+    assert "L1.5 candidate/reviewer proposal is **NOT APPROVED**" in policy
 
 
 def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() -> None:

@@ -74,9 +74,11 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 |---|---|---:|---|---|
 | Codex Luna — `gpt-5.6-luna` | Main engineering, milestone closure, integration | Historical L3 | Governed mainchain | Available; Codex CLI 0.146.0 with `gpt-5.6-luna` returned exactly `OK` in a read-only smoke on 2026-07-29 |
 | Agy Flash — `gemini-3.6-flash-high` | Fast bounded implementation and focused verification | L2 | **Nexus-bounded** | Available; benchmark 10/11 → 11/11 → 10/11 |
+| Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Registered conditional; exact Task Card, parser/verifier, and independent verification required; provider/model revision unresolved |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |
+| OpenCode DeepSeek V4 Flash — `opencode/deepseek-v4-flash-free` | Bounded OpenCode code candidate | L1 | Bounded isolated prompt | Owner-approved 2026-08-11; two comparable 11/11 repetitions and physical evidence; high fixed input-token overhead |
 | Cline — `glm-5.2` | Bounded code candidate | L1 | Bounded isolated prompt | Registered conditional; Cline CLI adapter and external-runtime authorization required |
 | Local Advisor — `qwen2.5-s2t-advisor:3b` | Classification, extraction, compression, compact diagnosis | L0.5 | **Nexus-bounded only** | Available; 9/11 → 11/11 → 10/11 |
 | Local Coder — `qwen2.5-coder:7b-instruct` | Small bounded code candidate | L1 | Bounded exact contract | Available; 10/11 on every arm; no measured Nexus uplift |
@@ -99,7 +101,7 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 |---|---|---|
 | `deepseek-coder:6.7b-instruct` | Committee secondary proposer only | 8/11 → 9/11 → 0/11; Full envelope failure |
 | `qwythos:9b` | Bounded second opinion or committee candidate | 10/11 across arms, no uplift, Full latency about 95 s |
-| `opencode/deepseek-v4-flash-free` | Shadow bounded engineering candidate | 11/11 all arms, but only one uniform run and no physical patch suite |
+| `opencode/deepseek-v4-flash-free` | L1 bounded OpenCode code candidate | Owner-approved after two comparable repetitions and PR #84/#85 physical evidence; remains candidate-only and externally verified |
 | `deepseek-coder-v2:lite` | Bounded secondary code candidate | 9/11 → 10/11 → 10/11; missed implementation edge case |
 | `qwen2.5:1.5b` | Simple extraction or read-only fixed-schema candidate | 9/11 across arms; no uplift and weak implementation behavior |
 
@@ -231,6 +233,29 @@ Higher autonomy requires all of the following:
 
 Until those gates pass, the lower autonomy level and stricter context policy remain authoritative.
 
-## 10. Pending v2 collaboration proposal
+## 10. Dated Owner-approved amendment — 2026-08-11
+
+The Owner-approved DeepSeek V4 Flash amendment is active for the registered
+worker `opencode_deepseek_v4_flash`:
+
+- Approved role: L1 bounded OpenCode code candidate.
+- Exact active roles: `bounded_candidate_generation` and
+  `compact_code_candidate`.
+- Autonomy remains `L1`; `default_route` remains `false`.
+- Independent parser, focused tests, verifier, bounded context, isolated
+  directory, and JSON event receipt controls remain required.
+- Output is a candidate only. The worker has no route, reviewer, approval,
+  integration, merge, push, production, or public-claim authority and cannot
+  self-approve or self-integrate.
+- OpenCode remains subscription-free but carries high fixed input-token
+  overhead.
+- The `requalification_evidence` record preserves the accepted R2/R3
+  11/11/11 results, exact OpenCode identity, and PR #84/#85 merge evidence;
+  those gates are evidence, not per-dispatch controls.
+
+The prior DeepSeek L1.5 candidate/reviewer proposal is **NOT APPROVED** and
+does not change this L1 ceiling or grant reviewer authority.
+
+## 11. Pending v2 collaboration proposal
 
 `NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0 and DeepSeek V4 Flash at L1.5 candidate/reviewer—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.

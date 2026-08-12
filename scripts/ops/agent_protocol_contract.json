@@ -19,5 +19,32 @@
       "packages/"
     ],
     "max_files_touched": 10
+  },
+  "completion_snapshot": {
+    "schema": "nexus.issue_completion_snapshot.v1",
+    "dispositions": [
+      "DONE_NO_FOLLOW_UP",
+      "KEEP_OPEN",
+      "CONTRACT_DELTA",
+      "FOLLOW_UP_REQUIRED",
+      "BLOCKED_EVIDENCE"
+    ],
+    "terminal_dispositions": [
+      "DONE_NO_FOLLOW_UP",
+      "FOLLOW_UP_REQUIRED"
+    ],
+    "required_identity_bindings": [
+      "fresh_expected_repository_issue_pr_and_comment",
+      "issue_contract_revision",
+      "candidate_issue_pr_and_exact_head",
+      "exact_merge_commit",
+      "candidate_head_to_merge_commit",
+      "merge_commit_to_current_main",
+      "collaboration_remote_url",
+      "explicit_default_main_ref_head_and_tree",
+      "post_merge_current_main_evidence",
+      "required_evidence_set",
+      "required_predecessor_set"
+    ]
   }
 }

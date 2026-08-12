@@ -5,14 +5,19 @@ status: active
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 baseline_main: 599227f0efbe1e9a4ca8cd6bff56824f0a6d9965
+reconciled_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
+rebind_owner_directive: https://github.com/James3014/Nexus-new/issues/7#issuecomment-5250252765
+rebind_date: 2026-08-11
 ordered_cards:
   - 01-canonical-planner-dispatch-binding.md
   - 02-independent-candidate-acceptance.md
   - 03-bounded-repair-attempts.md
   - 04-ordered-attempt-events-and-e2e.md
-current_frontier: 01-canonical-planner-dispatch-binding.md
-frontier_status: ACTIVE
-completed_cards: []
+current_frontier: 03-bounded-repair-attempts.md
+frontier_status: BLOCKED_OWNER_GATE
+completed_cards:
+  - 01-canonical-planner-dispatch-binding.md
+  - 02-independent-candidate-acceptance.md
 blocked_cards: []
 AUTO_CHAIN: false
 ---
@@ -33,5 +38,25 @@ M3 emits only auditable structured task/attempt events. Canonical compaction,
 resume loading, cross-agent rehydration, hidden chain-of-thought, and #31
 continuity metrics are outside this campaign.
 
-Current M3-A card SHA-256:
-`71e0835991583469e60d212b618398bbf73dceb6f3b8cc695c3e595855bfa8d4`.
+## Reconciliation (2026-08-11)
+
+Owner directive comment 5250252765 authorizes this governance-only campaign
+rebind on branch `codex/issue-7-m3-campaign-rebind`.
+
+M3-A completed on main via PR #81: head
+`c68379ea98e090c22847669fbefc50ada6335157`, merged as
+`41e5ee06eeecb4abd7df7c15c36af13142a1da56` on 2026-08-11.
+
+M3-B (`02-independent-candidate-acceptance.md`) completed via PR #161. Its
+exact Candidate head was `d2a3bfa8b6ed3fd28015565680a84cdf7c826768`, physically
+merged as `9121cd2cf83e959db763bbb578a60f861b0855fb`; independent review was
+`MERGE_SAFE`, with 255 combined tests and 14 reducer tests. Protected required
+checks were terminal PASS; Tier 3 remained skipped.
+
+Current frontier is M3-C (`03-bounded-repair-attempts.md`) with
+`BLOCKED_OWNER_GATE`; no M3-C implementation is authorized until its separate
+Owner gate is granted.
+
+`AUTO_CHAIN=false`; the active M3-C frontier is blocked, and worker mutation,
+commit, approval, integration, merge, and issue-branch push remain unauthorized
+until its separate Owner gate is granted.

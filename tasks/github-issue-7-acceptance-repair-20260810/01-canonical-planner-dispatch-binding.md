@@ -1,10 +1,14 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: github-issue-7-m3-a-canonical-dispatch
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
+completed_via_pr: 81
+pr_head: c68379ea98e090c22847669fbefc50ada6335157
+merge_commit: 41e5ee06eeecb4abd7df7c15c36af13142a1da56
+merge_date: 2026-08-11
 AUTO_CHAIN: false
 worker_may_commit: false
 worker_may_approve: false

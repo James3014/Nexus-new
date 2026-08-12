@@ -277,6 +277,60 @@ def test_recording_provider_records_success() -> None:
     assert record.phase == "patch"
 
 
+def test_recording_provider_persists_ollama_metrics_in_ledger() -> None:
+    from nexus.services.local_heal.local_model_provider import (
+        LocalModelProviderResponse,
+    )
+
+    class MetricsProvider:
+        def generate(self, req):
+            return LocalModelProviderResponse(
+                provider_invoked=True,
+                model_called=True,
+                model_name="qwen3:8b",
+                output_text="ok",
+                ollama_total_duration=101,
+                ollama_load_duration=11,
+                ollama_prompt_eval_count=7,
+                ollama_prompt_eval_duration=13,
+                ollama_eval_count=5,
+                ollama_eval_duration=17,
+                ollama_done_reason="stop",
+                ollama_metrics_available=True,
+            )
+
+    record = RecordingLocalModelProvider(MetricsProvider())
+    record.generate(LocalModelProviderRequest(task_id="metrics", prompt="x", evidence_refs=()))
+
+    payload = record.ledger[0].to_dict()
+    assert payload["ollama_total_duration"] == 101
+    assert payload["ollama_load_duration"] == 11
+    assert payload["ollama_prompt_eval_count"] == 7
+    assert payload["ollama_prompt_eval_duration"] == 13
+    assert payload["ollama_eval_count"] == 5
+    assert payload["ollama_eval_duration"] == 17
+    assert payload["ollama_done_reason"] == "stop"
+    assert payload["ollama_metrics_available"] is True
+
+
+def test_recording_provider_preserves_absent_ollama_metrics_as_none() -> None:
+    record = RecordingLocalModelProvider(InjectedLocalModelProvider(lambda _: "ok"))
+    record.generate(LocalModelProviderRequest(task_id="no-metrics", prompt="x", evidence_refs=()))
+
+    payload = record.ledger[0].to_dict()
+    assert payload["ollama_metrics_available"] is False
+    for field in (
+        "ollama_total_duration",
+        "ollama_load_duration",
+        "ollama_prompt_eval_count",
+        "ollama_prompt_eval_duration",
+        "ollama_eval_count",
+        "ollama_eval_duration",
+        "ollama_done_reason",
+    ):
+        assert payload[field] is None
+
+
 def test_recording_provider_records_raised_exception() -> None:
     from nexus.services.local_heal.local_model_provider import RecordingLocalModelProvider, LocalModelProviderRequest
     import pytest

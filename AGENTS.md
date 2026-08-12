@@ -1,6 +1,6 @@
 # Universal Agent Guidelines
 
-Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
+Scope: Antigravity, Gemini, OpenClaw, Codex, Claude.
 
 - Repository authority: this root `AGENTS.md`.
 - Direct execution authority: an explicit current Owner request may authorize a
@@ -19,30 +19,34 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
 - Codex implements a Ready Issue on an issue-specific branch such as
   `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
   request to `main`.
-- Codex and other coding agents never direct-push, force-push, or delete
-  `main`. Manual, legacy, and non-autonomy-enabled work remains Owner-reviewed
-  and Owner-authorized for final merge. The bounded autonomy exception below
-  applies only to this program's autonomy-enabled Goals.
-- The local runtime repository and this sanitized collaboration repository have
-  intentionally separate histories. Never treat SHA mismatch as missing work,
-  or normal-merge, rebase, or cherry-pick local runtime history into GitHub
-  `main` merely to align SHAs; synchronize by reviewed content or semantic
-  delta and preserve GitHub-only governance without resurrecting secrets,
-  runtime state, or generated artifacts.
-- For manual, legacy, and non-autonomy-enabled work, final GitHub merge still
-  requires explicit current Owner authorization. For an autonomy-enabled Goal,
-  one bounded Owner Goal Grant may instead derive an exact action-bound machine
-  authorization only after machine policy evaluation and independent
-  acceptance; this is not unlimited autonomous merge authority and has no
-  retroactive effect on older work.
-- Every autonomous merge still requires fresh SHA-bound verification of the PR
-  number, exact head, current base/main, complete diff, Goal Grant identity,
-  independent acceptance, CI/check evidence, unresolved threads or blockers,
-  and current authorization validity. A moved PR head fails closed.
-- Under that exception, only the designated integration action may perform the
-  exact-head merge after all listed gates pass; it may not direct-push `main`,
-  broaden the Goal Grant, or merge manual/legacy work. This bounded exception
-  is the specific, non-general authorization for an autonomy-enabled Goal.
+- No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
+  never approve or merge their Candidate. Only the primary coordinator may use
+  protected PR merge under exact Owner approval or the standing grant below.
+- Runtime and sanitized collaboration histories differ. Never merge/rebase/
+  cherry-pick runtime history into GitHub `main` to align SHAs; synchronize
+  reviewed deltas without secrets, runtime state, or generated artifacts.
+- The Owner may give the primary coordinator a non-transferable standing grant
+  for bounded Ready Issues in one thread, eliminating repeated Task Card,
+  branch, push, PR, and merge approvals. Its active Task Card receipt binds
+  grant/Goal ids, parties, repository/thread, scope/actions, eligibility,
+  issuance, expiry, and revocation. It ends when revoked, narrowed, or the Goal
+  is verified terminal and grants no delegated-worker authority.
+- Under that standing grant, the primary coordinator may create and commit a
+  missing Task Card/INDEX only when the effective Issue contract is already
+  Ready, exact allowed/forbidden paths and the claim ceiling are frozen,
+  overlap and Workforce gates are satisfied, and `AUTO_CHAIN=false`. Workers
+  may consume the committed card but cannot create, widen, or self-authorize
+  it.
+- Every coordinator merge still requires a fresh SHA-bound PR/head/base/diff,
+  Issue/card, independent acceptance, resolved blockers, valid authorization,
+  current `main`, terminal-success required checks, and expected-head/CAS.
+  Drift, conflict, unexpected deletion, or unknown/failed checks fail closed.
+- The coordinator handles ordinary implementation, rebind, retry, and evidence
+  autonomously. It asks again only for contract widening/change, weaker
+  security, a new irreversible external effect, or release/production claims.
+- After merge, read back `main`, record merge/head/check evidence, reconcile the
+  Issue/card, then start downstream work. This never implies local lifecycle,
+  runtime, release, or production truth.
 - A Ready Issue defines GitHub collaboration scope only. It does not bypass
   Task Card or lifecycle requirements for delegated, isolated,
   lifecycle/security/schema, Candidate, approval, integration, release, or
@@ -82,7 +86,9 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   or Candidate into approval, integration, merge, release, or production truth.
   For this program's autonomy-enabled Goals, a separate designated integration
   action may perform only the exact machine-authorized merge after independent
-  acceptance and fresh merge-gate verification.
+  acceptance and fresh merge-gate verification. The primary coordinator acting
+  under a valid standing grant is that separate integration action; a delegated
+  implementer or reviewer is not.
 - GitHub review/merge does not silently perform Nexus lifecycle approval or
   runtime integration. Local Nexus runtime actions keep their existing formal
   authority and evidence requirements until a separate migration changes them.
@@ -93,8 +99,9 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   absorb ambiguous changes; use a clean governed Target when isolation is
   required.
 - Do not hand-edit lifecycle JSON. Use the formal lifecycle API, CLI, or
-  service surface. Do not push, merge protected main, or delete refs without
-  explicit authority.
+  service surface. Do not direct-push protected main or delete refs. Protected
+  PR merge requires exact Owner authority or the standing coordinator grant
+  above and never permits bypassing required checks.
 - Completion requires behavioral evidence, structural conformance, and the
   applicable request- or card-defined verifier. A report or green subset is not
   solve truth.
@@ -128,31 +135,29 @@ Scope: Antigravity, Gemini, OpenClaw, Codex, and Claude.
   or protected-branch/ref operations, creates a Candidate, or makes a
   production/public claim.
 - Direct work does not commit, push, merge, delete, or continue into a successor
-  task unless the Owner grants that exact authority. If eligibility is unclear,
-  stop and report the specific escalation condition.
+  task unless the Owner grants that exact direct authority. The standing
+  coordinator grant does not expand `DIRECT_CANONICAL`; it applies only to
+  governed GitHub Ready-Issue card creation, issue-branch work, and protected
+  PR merge. If eligibility is unclear, stop and report the specific escalation
+  condition.
 - A Ready GitHub Issue separately authorizes scoped commits and pushes on its
   issue-specific branch and opening a PR; it never authorizes direct `main`
   mutation or self-merge.
 
 ## Governed task-card and artifact governance
 
-- Every active campaign has `tasks/<campaign-id>/INDEX.md` with authority,
-  status, ordered cards, dependencies, frontier, and completed/blocked state.
-- Each active card defines objective, inputs, dependencies, allowed files,
-  forbidden scope, verification, evidence, exit criteria, and block class.
-- The active card and machine baseline define allowed/forbidden files and any
-  file-count ceiling; this root policy does not widen those limits.
-- Implementation cards require a scoped commit unless explicitly read-only;
-  stage only authorized files and inspect the complete staged diff.
-- Before commit: run the card's exact checks, `git diff --check`, deletion
-  audits, and staged/unstaged stats. Bind Candidate evidence to commit SHA and
-  card hash; worker cannot approve or integrate its own Candidate.
-- Persistent documents default to deny. Add one only when the user/card,
-  runtime consumer, durable contract, dedicated audit, or cross-session handoff
-  requires it. Mark admitted documents with purpose, authority, owner, status,
-  and evidence/commit.
-- Report evidence in the final response, commit, PR, or existing receipt;
-  do not create recursive evidence reports.
+- Each campaign `INDEX.md` records authority, status, cards, dependencies,
+  frontier, and terminal state. Its active card records objective, inputs,
+  verification/evidence, exit, and block class. That card plus machine baseline
+  bind allowed/forbidden files and file-count ceiling; policy/workers cannot
+  widen them.
+- Implementation needs a scoped commit unless read-only. Stage only authorized
+  files; run exact checks, `git diff --check`, deletion and staged/unstaged
+  audits; bind Candidate commit/tree to card hash. Workers never self-approve.
+- Persistent documents default-deny unless required by user/card, runtime
+  consumer, durable contract/audit, or cross-session handoff. Mark purpose,
+  authority, owner, status, and evidence. Report evidence in the final response,
+  commit, PR, or existing receipt; never create recursive evidence reports.
 
 ## Conditional load map
 
@@ -174,7 +179,8 @@ Load the smallest authoritative surface that matches the task:
 - LocalHeal or another nested subsystem: read its nearest nested `AGENTS.md`.
 - Ordinary repository reads use targeted retrieval from the relevant lesson,
   ADR, report, or test; never full-corpus scanning by default.
-- Broad repository orientation: when `openwiki/quickstart.md` exists, it may be used as a `derived_non_authoritative` navigation index to locate candidate subsystems, paths, symbols, entrypoints, workflows, and tests. Verify every operational, wiring, runtime, authority, or current-state claim against current source, tests, or bound runtime evidence before relying on it. OpenWiki absence, staleness, nondeterministic page layout, or disagreement never overrides current source and never blocks direct source inspection.
+- OpenWiki is `derived_non_authoritative` navigation only. Source, tests, or
+  bound runtime evidence verify claims; OpenWiki never blocks source inspection.
 
 ## Authority invariants
 
@@ -194,7 +200,7 @@ Load the smallest authoritative surface that matches the task:
 
 ## Response and tool discipline
 
-- Follow `MUSE_PROTO.md` for compressed response/domain tagging.
-- Prefer direct tool invocation and concise evidence. Do not narrate tool calls.
-- If output appears degenerate or repetitively looping, stop mutation, preserve
-  the last verified state, and report `retry_required=true`.
+- Follow `MUSE_PROTO.md` for response/domain tags.
+- Prefer direct tools and concise evidence; do not narrate calls.
+- On degenerate/repetitive output, stop mutation, preserve the last verified
+  state, and report `retry_required=true`.

@@ -4,7 +4,7 @@ campaign_id: nexus-issue-execution-capsule-skill-20260811
 status: in_progress
 authority: governed delegated worker
 owner: James Chen
-baseline: 374348c89e7814e11d55e00ea397dc5a6effe471
+baseline: bc16cbf2bf00377a4521e3eab233175112d0c963
 setup_commit_required: true
 ---
 
