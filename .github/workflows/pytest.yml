@@ -65,9 +65,6 @@ jobs:
             echo "checkout credentials remain configured" >&2
             exit 1
           fi
-      - name: Link persistent evidence directory
-        run: ln -s "$RUNNER_TEMP/nexus-ci-impact" .ci-impact
-
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -103,8 +100,8 @@ jobs:
           echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Run Golden Behavior gate on exact pull request head
-        if: github.event_name == 'pull_request'
+      - name: Run Golden Behavior gate on exact PR or main-push head
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         env:
           HEAD_SHA: ${{ steps.base.outputs.head_sha }}
           GIT_AUTHOR_NAME: Nexus CI
@@ -114,20 +111,42 @@ jobs:
         run: |
           set -euo pipefail
           .venv/bin/python scripts/ops/run_golden_behavior_eval.py \
-            --json-report .ci-impact/golden-behavior.json
+            --json-report "$RUNNER_TEMP/nexus-ci-impact/golden-behavior.json"
           .venv/bin/python - <<'PY'
           import json
           import os
           from pathlib import Path
 
           report = json.loads(
-              Path(".ci-impact/golden-behavior.json").read_text(encoding="utf-8")
+              Path(os.environ["RUNNER_TEMP"], "nexus-ci-impact", "golden-behavior.json").read_text(
+                  encoding="utf-8"
+              )
           )
           if report.get("schema") != "nexus.golden_behavior_eval.v1":
               raise SystemExit("Golden Behavior report schema mismatch")
           if report.get("source_revision") != os.environ["HEAD_SHA"]:
               raise SystemExit("Golden Behavior report source revision mismatch")
+          expected_tree = __import__("subprocess").check_output(
+              ["git", "rev-parse", "HEAD^{tree}"], text=True
+          ).strip()
+          if report.get("source_tree") != expected_tree:
+              raise SystemExit("Golden Behavior report source tree mismatch")
+          if report.get("workspace_dirty") is not False:
+              raise SystemExit("Golden Behavior evaluator did not observe a clean exact-head checkout")
+          for field in (
+              "corpus_identity",
+              "evaluator_identity",
+              "dependency_lock_identity",
+              "python_version",
+              "pytest_version",
+              "case_evidence",
+          ):
+              if not report.get(field):
+                  raise SystemExit(f"Golden Behavior report missing {field}")
           PY
+
+      - name: Link persistent evidence directory
+        run: ln -s "$RUNNER_TEMP/nexus-ci-impact" .ci-impact
 
       - name: Build tiered exact-base impact plan
         env:

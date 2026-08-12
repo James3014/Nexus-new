@@ -46,9 +46,7 @@ def _run(
     plan_digest = "1" * 64
     verifier_digest = "2" * 64
     selected_targets = selected_targets or ["tests/test_contract.py"]
-    executed_targets = (
-        selected_targets if executed_targets is None else executed_targets
-    )
+    executed_targets = selected_targets if executed_targets is None else executed_targets
     missing_targets = missing_targets or []
     unexpected_missing_targets = unexpected_missing_targets or []
     node_ids = sorted(
@@ -431,6 +429,97 @@ def test_missing_base_node_and_replacement_substitution_fail_closed():
         assert result.blocking is True
 
 
+def test_aware_iso_timestamp_parameter_drift_preserves_logical_node_identity():
+    base_node = (
+        "tests.test_contract::test_expiry[expires_at-2026-08-12T07:32:05.930190+00:00-invalid]"
+    )
+    head_node = (
+        "tests.test_contract::test_expiry[expires_at-2026-08-12T07:40:05.480103+00:00-invalid]"
+    )
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=[head_node])
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+def test_dynamic_failure_identity_preserves_raw_evidence_without_false_regression():
+    base_node = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
+    head_node = "tests.test_contract::test_expiry[2026-08-12T07:40:05+00:00]"
+    base = _with_node_outcomes(_run(1, [base_node], revision="base"), passed=[], failed=[base_node])
+    head = _with_node_outcomes(_run(1, [head_node], revision="head"), passed=[], failed=[head_node])
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "EXACT_BASELINE_DEBT"
+    assert result.base_failures == [base_node]
+    assert result.head_failures == [head_node]
+    assert result.new_failures == []
+    assert result.resolved_failures == []
+
+
+def test_dynamic_logical_node_downgrade_remains_a_new_regression():
+    base_node = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
+    head_node = "tests.test_contract::test_expiry[2026-08-12T07:40:05Z]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(_run(1, [head_node], revision="head"), passed=[], failed=[head_node])
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "NEW_REGRESSION"
+    assert result.blocking is True
+    assert result.new_failures == [head_node]
+
+
+@pytest.mark.parametrize("collision_side", ["base", "head"])
+def test_logical_node_identity_collisions_fail_closed(collision_side):
+    first = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
+    second = "tests.test_contract::test_expiry[2026-08-12T07:40:05+00:00]"
+    stable = "tests.test_contract::test_stable"
+    base_nodes = [first, second] if collision_side == "base" else [first, stable]
+    head_nodes = [first, second] if collision_side == "head" else [first, stable]
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=base_nodes)
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=head_nodes)
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "IMPACT_UNKNOWN"
+    assert result.blocking is True
+
+
+@pytest.mark.parametrize(
+    ("base_token", "head_token"),
+    [
+        ("2026-02-30T07:32:05Z", "2026-03-01T07:32:05Z"),
+        ("2026-08-12T07:32:60Z", "2026-08-12T07:33:00Z"),
+        ("2026-08-12T07:32:05+24:00", "2026-08-12T07:32:05+00:00"),
+        ("2026-08-12T07:32:05", "2026-08-12T07:33:05"),
+        ("2026-08-12", "2026-08-13"),
+        ("123", "124"),
+        ("a" * 40, "b" * 40),
+        ("<ISO_DATETIME>", "2026-08-12T07:32:05Z"),
+    ],
+)
+def test_non_aware_or_arbitrary_parameter_drift_is_not_normalized(base_token, head_token):
+    base_node = f"tests.test_contract::test_value[{base_token}]"
+    head_node = f"tests.test_contract::test_value[{head_token}]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=[head_node])
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_timestamp_outside_parameter_id_is_not_normalized():
+    base_node = "tests.test_2026-08-12T07:32:05Z::test_value"
+    head_node = "tests.test_2026-08-12T07:40:05Z::test_value"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=[head_node])
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
 def test_empty_or_downgraded_inventory_metadata_fails_closed():
     existing = "tests.test_contract::test_existing"
     empty_base = _with_node_outcomes(_run(0, [], revision="base"), passed=[])
@@ -439,9 +528,7 @@ def test_empty_or_downgraded_inventory_metadata_fails_closed():
         passed=[existing],
         test_inventory_tree="f" * 40,
     )
-    assert classify_regression(empty_base, populated_head).classification == (
-        "IMPACT_UNKNOWN"
-    )
+    assert classify_regression(empty_base, populated_head).classification == ("IMPACT_UNKNOWN")
 
     populated_base = _with_node_outcomes(
         _run(0, [], revision="base"),
@@ -452,18 +539,14 @@ def test_empty_or_downgraded_inventory_metadata_fails_closed():
         passed=[],
         test_inventory_tree="f" * 40,
     )
-    assert classify_regression(populated_base, empty_head).classification == (
-        "IMPACT_UNKNOWN"
-    )
+    assert classify_regression(populated_base, empty_head).classification == ("IMPACT_UNKNOWN")
 
     skipped_head = _with_node_outcomes(
         _run(0, [], revision="head"),
         passed=[],
         skipped=[existing],
     )
-    assert classify_regression(populated_base, skipped_head).classification == (
-        "IMPACT_UNKNOWN"
-    )
+    assert classify_regression(populated_base, skipped_head).classification == ("IMPACT_UNKNOWN")
 
 
 @pytest.mark.parametrize("base_outcome", ["failed", "errors"])
@@ -601,9 +684,7 @@ def test_unexpected_missing_base_target_fails_closed():
         ),
     ],
 )
-def test_decision_field_tampering_omission_overlap_count_membership_fails_closed(
-    label, tamper
-):
+def test_decision_field_tampering_omission_overlap_count_membership_fails_closed(label, tamper):
     base = _run(
         0,
         [],
