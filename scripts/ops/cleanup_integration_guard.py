@@ -114,9 +114,7 @@ def validate_manifest(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _validate_live_snapshot(
-    raw: Mapping[str, Any], manifest: Mapping[str, Any]
-) -> dict[str, Any]:
+def _validate_live_snapshot(raw: Mapping[str, Any], manifest: Mapping[str, Any]) -> dict[str, Any]:
     if raw.get("schema") != LIVE_SCHEMA:
         raise GuardError("snapshot.schema: unsupported schema")
     for field in ("repository", "base_ref"):
@@ -138,10 +136,7 @@ def _validate_live_snapshot(
     if raw.get("target_clean") is not True:
         raise GuardError("snapshot.target_clean: target must be clean")
 
-    required = {
-        (row["context"], row["integration_id"])
-        for row in manifest["required_checks"]
-    }
+    required = {(row["context"], row["integration_id"]) for row in manifest["required_checks"]}
     checks_raw = raw.get("checks")
     if not isinstance(checks_raw, list):
         raise GuardError("snapshot.checks: expected list")
@@ -158,22 +153,21 @@ def _validate_live_snapshot(
             continue
         if key in seen:
             raise GuardError(f"snapshot.checks: duplicate required check {context}")
-        if _exact_sha(row.get("head_sha"), f"snapshot.checks[{index}].head_sha") != manifest[
-            "head_sha"
-        ]:
+        if (
+            _exact_sha(row.get("head_sha"), f"snapshot.checks[{index}].head_sha")
+            != manifest["head_sha"]
+        ):
             raise GuardError(f"snapshot.checks[{index}]: stale check head")
         if row.get("status") != "completed" or row.get("conclusion") != "success":
             raise GuardError(f"snapshot.checks[{index}]: required check not successful")
         seen.add(key)
-        normalized_checks.append(
-            {
-                "context": context,
-                "integration_id": integration_id,
-                "head_sha": manifest["head_sha"],
-                "status": "completed",
-                "conclusion": "success",
-            }
-        )
+        normalized_checks.append({
+            "context": context,
+            "integration_id": integration_id,
+            "head_sha": manifest["head_sha"],
+            "status": "completed",
+            "conclusion": "success",
+        })
     missing = sorted(required - seen)
     if missing:
         raise GuardError(f"snapshot.checks: missing required checks {missing!r}")
@@ -313,7 +307,9 @@ def post_apply(
         raise GuardError("post_snapshot.path_states: incomplete deleted-path audit")
     still_present = sorted(path for path in expected_deleted if path_states.get(path) is not False)
     if still_present:
-        raise GuardError(f"post_snapshot.path_states: deleted paths still present {still_present!r}")
+        raise GuardError(
+            f"post_snapshot.path_states: deleted paths still present {still_present!r}"
+        )
 
     post_check_snapshot = {
         "schema": LIVE_SCHEMA,
