@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: CLOSED
 task_id: TC-P1A-G3
 campaign_id: CAMPAIGN-PHASE1A-V1.1
 source_issue: https://github.com/James3014/Nexus-new/issues/169
@@ -104,8 +104,19 @@ Bind exact base/head/tree, physical diff, changed-file inventory, exact verifier
 - no model/workforce promotion;
 - no production/public causal claim.
 
+## Acceptance / merge receipt
+
+- accepted Candidate: `71cc9148c9dddc94f9153efc1d06e5dd73e906e2`
+- accepted scope: exactly `nexus/research/epistemic_benchmark/phase1a_qualification.py` and `tests/test_phase1a_qualification.py`
+- isolated verification: focused `61/61 PASS`; compatibility `67/67 PASS`; Ruff check PASS; Ruff format check PASS; compileall PASS; `git diff --check` PASS
+- exact-head GitHub workflows: Pytest, Ruff, Pyright, Bandit, and Governance all terminal `success`
+- independent read-only reviewer: local `qwen3:8b` JSON-Schema verdict `PASS`, `blockers=[]`, `false_green_risks=[]`
+- merge PR: `#171`
+- merge/current unlock fence: `91c3e6aa6b0fa85f6fb91bef5853e83900834aea`
+- post-merge `Nexus-new/main` readback matched the merge fence.
+
 ## Exit / next gate
 
-Implementation output is Candidate-only: `phase1a_qualification_freeze_substrate_candidate_only`.
+G3 is closed at maximum claim `phase1a_qualification_freeze_substrate_implemented_and_verified`.
 
-Independent acceptance of the exact Candidate is mandatory. Only after accepted merge + post-merge readback may G3 rise to `phase1a_qualification_freeze_substrate_implemented_and_verified` and G4 become the next frontier.
+G4 / `TC-P1A-G4` / Issue #172 is the next bounded implementation frontier. Issue #29 remains a separate parallel pre-formal evidence prerequisite; G5 remains absent / unauthorized.
