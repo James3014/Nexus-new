@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import pytest
+import shutil
+from pathlib import Path
 
+from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext
 from nexus.services.local_heal.local_model_capability_executors import (
     LocalHealPipelineCapabilityExecutor,
 )
-from nexus.services.local_heal.local_model_capability_context import LocalModelCapabilityContext
 
 
 def _make_ctx(topology="local_committee_only"):
@@ -14,6 +14,7 @@ def _make_ctx(topology="local_committee_only"):
         task_id="t1", source_root="/ws", problem_statement="fix bug",
         target_file="a.py", target_symbol="f", selected_capabilities=("repair_loop",),
         execution_topology=topology, evidence_refs=("ref1",),
+        route_context={"run_group": "bridge-test"},
     )
 
 
@@ -31,9 +32,21 @@ def test_localheal_pipeline_availability_reported():
     assert r.telemetries.get("semantic_retry_available") is True
 
 
-def test_localheal_pipeline_topology_invokes_modules(tmp_path):
+def test_localheal_pipeline_topology_invokes_modules(tmp_path, monkeypatch):
     """Pipeline topology enters World C but cannot claim completion without evidence."""
     (tmp_path / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+
+    def prepare_workspace(source_root, _task_id, *, target_file, repro_script):
+        source = Path(source_root)
+        workspace = source / "world-c-workspace"
+        workspace.mkdir()
+        shutil.copy2(source / target_file, workspace / target_file)
+        return workspace
+
+    monkeypatch.setattr(
+        "nexus.services.local_heal.pipeline_isolation.prepare_world_c_workspace",
+        prepare_workspace,
+    )
     ctx = _make_ctx(topology="localheal_pipeline")
     ctx.source_root = str(tmp_path)
     ctx.failure_feedback = "VERIFIER_FAIL: previous attempt"

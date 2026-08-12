@@ -91,6 +91,44 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
     assert agy["availability"] == "AVAILABLE"
     assert agy["preferred_context"] == "nexus_bounded"
 
+    medium = workers["agy_flash_medium"]
+    assert medium == {
+        "provider": "agy",
+        "model": "gemini-3.6-flash-medium",
+        "state": "REGISTERED_CONDITIONAL",
+        "availability": "AVAILABLE",
+        "autonomy": "L1",
+        "roles": [
+            "bounded_candidate_generation",
+            "fast_bounded_implementation",
+            "focused_verification",
+        ],
+        "preferred_context": "nexus_bounded",
+        "default_route": False,
+        "requires": [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "parser",
+            "verifier",
+            "independent_verification",
+        ],
+        "forbidden_actions": [
+            "route_authority",
+            "approval",
+            "integration",
+            "push",
+            "release",
+            "production_claim",
+            "public_claim",
+        ],
+        "calibration_evidence": {
+            "status": "CONDITIONAL",
+            "provider_model_revision": "UNRESOLVED",
+            "inherits_high_evidence": False,
+        },
+    }
+
     grok = workers["grok_review"]
     assert grok["state"] == "PROVEN_MAINCHAIN"
     assert grok["availability"] == "AVAILABLE"
