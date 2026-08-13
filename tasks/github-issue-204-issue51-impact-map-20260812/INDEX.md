@@ -26,7 +26,7 @@ physical_receipt:
 - Baseline: `bdcc427f6249406079c85f9725b3af6cd62ab1f1`
 - AUTO_CHAIN: `false`
 - Reconciled card: `00-map-orphan-cleanup-surfaces.md`
-- Claim ceiling: `ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN`
+- Claim ceiling: `ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN_ONLY`
 
 PR #205 physically merged the four exact proven-orphan impact mappings. This
 terminal reconciliation proves only those four mappings and their existing
