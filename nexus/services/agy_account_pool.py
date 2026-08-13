@@ -6,7 +6,7 @@ import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from nexus.services.external_account_pool import (
     AccountFailureKind,
@@ -173,7 +173,7 @@ class AgyAccountPoolManager:
         fallback_root = Path.home() / ".nexus/agy-account-pool/runtime"
         return str(fallback_root.resolve()) if fallback_root.exists() else str(fallback_root)
 
-    def _call_manager_cli(self, args: list[str]) -> dict:
+    def _call_manager_cli(self, args: list[str], expect_json: bool = True) -> Any:
         mgr = self._manager_path or self.resolve_manager_path()
         if not mgr or not Path(mgr).is_file():
             raise AgyAccountPoolManagerError("AGY account pool manager binary not found")
@@ -189,6 +189,8 @@ class AgyAccountPoolManager:
             raise AgyAccountPoolManagerError(
                 f"agy-cli-manager failed with exit code {res.returncode}"
             )
+        if not expect_json:
+            return res.stdout
         try:
             import json
             return json.loads(res.stdout)
@@ -393,6 +395,69 @@ class AgyAccountPoolManager:
         self._pool = ExternalAccountPool(provider="agy", accounts=records)
         return self._pool
 
+    def _refresh_pool_health(self) -> None:
+        if self._pool is None:
+            self._ensure_pool()
+            return
+
+        if not self._use_real_manager:
+            for acc in self._accounts:
+                record = self._pool._accounts.get(acc.alias)
+                if record is not None:
+                    record.is_available = acc.is_active
+            return
+
+        mgr = self._manager_path or self.resolve_manager_path()
+        root = self._manager_root or self.resolve_manager_root(manager_path=mgr)
+        try:
+            self._call_manager_cli(["ensure-active", "--json"])
+            status = self._call_manager_cli(["status", "--json"])
+        except Exception as exc:
+            raise AgyAccountPoolError(f"Failed to get manager status during refresh: {exc}")
+
+        accounts_data = status.get("accounts") or {}
+        accounts_list = []
+        if isinstance(accounts_data, dict):
+            for name, info in accounts_data.items():
+                accounts_list.append((name, info))
+        elif isinstance(accounts_data, list):
+            for info in accounts_data:
+                name = info.get("name")
+                if name:
+                    accounts_list.append((name, info))
+
+        for name, info in accounts_list:
+            record = self._pool._accounts.get(name)
+            snapshot_dir = Path(root) / "accounts" / name
+            is_avail = False
+            if info.get("enabled") is True and snapshot_dir.is_dir():
+                cooldown_val = info.get("cooldown_until")
+                is_cooldown = False
+                if cooldown_val:
+                    try:
+                        from datetime import datetime, timezone
+                        cooldown_str = str(cooldown_val).replace("Z", "+00:00")
+                        dt = datetime.fromisoformat(cooldown_str)
+                        if dt > datetime.now(timezone.utc):
+                            is_cooldown = True
+                    except Exception:
+                        is_cooldown = True
+                if not is_cooldown:
+                    is_avail = True
+
+            if record is not None:
+                record.is_available = is_avail
+            else:
+                env = build_isolated_env(home_dir=str(snapshot_dir))
+                h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+                new_rec = InternalAccountRecord(
+                    internal_id=name,
+                    alias_hash=h,
+                    execution_env=env,
+                    is_available=is_avail,
+                )
+                self._pool.register_account(new_rec)
+
     def acquire(self, consumer_id: str) -> AccountLease:
         # Trigger ensure_active and build_isolated_env to respect subclass overrides
         try:
@@ -400,12 +465,14 @@ class AgyAccountPoolManager:
             self.build_isolated_env()
         except Exception:
             pass
+        self._refresh_pool_health()
         pool = self._ensure_pool()
         lease = pool.acquire(consumer_id)
         self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
         return lease
 
     def release(self, lease: AccountLease) -> None:
+        self._refresh_pool_health()
         pool = self._ensure_pool()
         pool.release(lease)
         self._lease_to_raw_alias.pop(lease.lease_id, None)
@@ -415,6 +482,7 @@ class AgyAccountPoolManager:
         lease: AccountLease,
         failure_kind: AccountFailureKind,
     ) -> Optional[AccountLease]:
+        self._refresh_pool_health()
         pool = self._ensure_pool()
         failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
         if failed_alias is None:
@@ -425,16 +493,19 @@ class AgyAccountPoolManager:
 
         if is_rotation_eligible(failure_kind):
             if self._use_real_manager:
-                try:
-                    self._call_manager_cli(["mark-bad", failed_alias, "--reason", failure_kind.value])
-                except Exception:
-                    pass
+                # Execute mark-bad without parsing as JSON and propagate errors
+                self._call_manager_cli(["mark-bad", failed_alias, "--reason", failure_kind.value], expect_json=False)
             else:
                 for acc in self._accounts:
                     if acc.alias == failed_alias:
                         acc.is_active = False
 
+            # Refresh local pool health after mutating vendor status to ensure status updates are reflected
+            self._refresh_pool_health()
+
             next_lease = pool.report_failure(lease, failure_kind)
+            # Remove old mapping from mapping database
+            self._lease_to_raw_alias.pop(lease.lease_id, None)
             if next_lease is not None:
                 new_alias = pool._require_active_lease(next_lease)
                 self._lease_to_raw_alias[next_lease.lease_id] = new_alias
