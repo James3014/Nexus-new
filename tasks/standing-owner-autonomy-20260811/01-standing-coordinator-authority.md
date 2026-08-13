@@ -1,6 +1,6 @@
 # Task Card: standing coordinator authority
 
-- status: SUPERSEDED_BY_OWNER_MERGE_QUEUE_AUTHORITY
+- status: ACTIVE_NARROWED_BY_OWNER_MERGE_QUEUE_AUTHORITY
 - base_sha: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
 - authority: direct Owner request, 2026-08-11
 - AUTO_CHAIN: false
@@ -19,7 +19,7 @@
 - allowed_actions: create/commit bounded card; update issue branch; test; push; open PR; prepare MERGE_INTENT; non-authorizing readback/reconciliation only after a separately slot-authorized merge
 - expires_when: Owner revokes or narrows the grant, or the active Goal is verified terminal
 - revocation_rule: any later Owner instruction that revokes or narrows scope takes immediate precedence
-- superseded_merge_authority: Owner decision recorded in Issue #163; protected merge now requires fresh exact PR/head/base-bound MERGE_SLOT_GRANTED
+- narrowed_merge_authority: Owner decision recorded in Issue #163; protected merge now requires fresh exact PR/head/base-bound MERGE_SLOT_GRANTED
 - exclusions: Issue #143 and its mutation files; direct main push; force-push; ref deletion; worker self-approval/merge; local runtime/lifecycle approval; release; production/public claims
 
 ## Objective
