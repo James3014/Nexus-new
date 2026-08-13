@@ -17,22 +17,31 @@ NOW = datetime(2026, 8, 14, tzinfo=timezone.utc)
 
 
 def evidence(**overrides):
+    checks = (CheckResult(name="ci", status="completed", conclusion="success"),)
+    reviews = (ReviewResult(reviewer="reviewer", state="APPROVED"),)
+    impact = ImpactResult(classification="NO_CHANGE", known=True, regression_free=True)
+    candidate = CandidateLineage(
+        task_id="task-8", attempt_id="attempt-1", contract_hash="2" * 64,
+        card_hash="7" * 64, candidate_commit_sha="b" * 40, candidate_tree_sha="c" * 40,
+        candidate_state_hash="3" * 64, verified_receipt_hash="4" * 64,
+        independent_acceptance_hash="5" * 64, reviewer="reviewer", implementer="implementer",
+    )
     value = dict(
         repository="James3014/Nexus-new",
         issue_number=8,
         pull_request_number=81,
-        base_sha="a" * 40,
+        base_sha="d" * 40,
         head_sha="b" * 40,
         tree_sha="c" * 40,
         current_main_sha="d" * 40,
         diff_hash="e" * 64,
-        checks_hash="f" * 64,
-        reviews_hash="1" * 64,
+        checks_hash=canonical_hash({"checks": [c.model_dump(mode="json") for c in checks]}),
+        reviews_hash=canonical_hash({"reviews": [r.model_dump(mode="json") for r in reviews]}),
         task_attempt_contract_hash="2" * 64,
         candidate_hash="3" * 64,
         verifier_hash="4" * 64,
         independent_acceptance_hash="5" * 64,
-        impact_hash="6" * 64,
+        impact_hash=canonical_hash(impact.model_dump(mode="json")),
         observed_at=NOW,
         fresh_until=NOW + timedelta(hours=1),
         allowed_paths=("nexus/a.py", "tests/test_a.py"),
@@ -42,8 +51,10 @@ def evidence(**overrides):
         regression_free=True,
         impact_known=True,
         independent_acceptance=True,
-        required_checks=(CheckResult(name="ci", status="completed", conclusion="success"),),
-        reviews=(ReviewResult(reviewer="reviewer", state="APPROVED"),),
+        required_checks=checks,
+        reviews=reviews,
+        candidate=candidate,
+        impact=impact,
     )
     value.update(overrides)
     return GitHubOrchestrationEvidence.model_validate(value)

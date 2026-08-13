@@ -162,3 +162,30 @@ def test_protocol_surface_is_pure_and_no_provider_is_required():
 
     intent = prepare_merge_intent(context(), request(context()), evidence(), now=NOW)
     assert intent.mutation_authorized is False
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("candidate", None),
+        ("impact", None),
+        ("reviews", ()),
+        ("reviews_resolved", False),
+        ("regression_free", False),
+        ("impact_known", False),
+        ("current_main_sha", None),
+        ("repository", "evil/repo"),
+    ],
+)
+def test_hostile_missing_or_spoofed_summary_is_fail_closed(field, value):
+    raw = evidence().model_dump(mode="json")
+    raw[field] = value
+    with pytest.raises(ValueError, match="MALFORMED_INPUT"):
+        prepare_merge_intent(context(), request(context()), raw, now=NOW)
+
+
+def test_reviewer_implementer_identity_cannot_collude():
+    raw = evidence().model_dump(mode="json")
+    raw["candidate"]["implementer"] = "reviewer"
+    with pytest.raises(ValueError, match="MALFORMED_INPUT"):
+        prepare_merge_intent(context(), request(context()), raw, now=NOW)

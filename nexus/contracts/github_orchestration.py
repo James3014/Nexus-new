@@ -91,6 +91,7 @@ class CandidateLineage(_Frozen):
     verified_receipt_hash: StrictStr
     independent_acceptance_hash: StrictStr
     reviewer: StrictStr
+    implementer: StrictStr
 
     @field_validator(
         "contract_hash",
@@ -133,7 +134,7 @@ class GitHubOrchestrationEvidence(_Frozen):
     base_sha: StrictStr
     head_sha: StrictStr
     tree_sha: StrictStr
-    current_main_sha: StrictStr | None = None
+    current_main_sha: StrictStr
     diff_hash: StrictStr
     checks_hash: StrictStr
     reviews_hash: StrictStr
@@ -146,10 +147,10 @@ class GitHubOrchestrationEvidence(_Frozen):
     fresh_until: AwareDatetime
     allowed_paths: tuple[StrictStr, ...]
     changed_paths: tuple[StrictStr, ...]
-    required_checks: tuple[CheckResult, ...] = ()
-    reviews: tuple[ReviewResult, ...] = ()
-    candidate: CandidateLineage | None = None
-    impact: ImpactResult | None = None
+    required_checks: tuple[CheckResult, ...]
+    reviews: tuple[ReviewResult, ...]
+    candidate: CandidateLineage
+    impact: ImpactResult
     checks_passed: StrictBool = True
     reviews_resolved: StrictBool = True
     regression_free: StrictBool = True
@@ -192,6 +193,47 @@ class GitHubOrchestrationEvidence(_Frozen):
             raise ValueError("FRESHNESS_INVALID")
         if not set(self.changed_paths).issubset(self.allowed_paths):
             raise ValueError("DIFF_OUT_OF_SCOPE")
+        if len(set(c.name for c in self.required_checks)) != len(self.required_checks):
+            raise ValueError("CHECKS_DUPLICATE")
+        if self.repository != "James3014/Nexus-new":
+            raise ValueError("REPOSITORY_IDENTITY_INVALID")
+        if self.current_main_sha != self.base_sha:
+            raise ValueError("CURRENT_MAIN_SHA_MISMATCH")
+        if self.candidate.candidate_commit_sha != self.head_sha or self.candidate.candidate_tree_sha != self.tree_sha:
+            raise ValueError("CANDIDATE_LINEAGE_MISMATCH")
+        if self.candidate.reviewer.strip() == self.candidate.implementer.strip():
+            raise ValueError("REVIEWER_IMPLEMENTER_MUST_DIFFER")
+        if not self.reviews:
+            raise ValueError("REVIEW_INDEPENDENT_MISSING")
+        reviewers = {r.reviewer.strip() for r in self.reviews}
+        if self.candidate.implementer.strip() in reviewers:
+            raise ValueError("REVIEWER_IMPLEMENTER_MUST_DIFFER")
+        if not self.checks_passed:
+            raise ValueError("CHECKS_FAILED_OR_MISSING")
+        if not self.required_checks:
+            raise ValueError("CHECK_FAILED_OR_MISSING")
+        if not all(c.terminal and c.conclusion.lower() in {"success", "passed"} for c in self.required_checks):
+            raise ValueError("CHECKS_SUMMARY_CONTRADICTS_DETAIL")
+        if not self.reviews_resolved or not all(not r.unresolved_threads and r.state.upper() not in {"CHANGES_REQUESTED", "REQUESTED_CHANGES"} for r in self.reviews):
+            raise ValueError("REVIEWS_SUMMARY_CONTRADICTS_DETAIL")
+        if not self.impact_known or not self.regression_free or not self.impact.known or not self.impact.regression_free:
+            raise ValueError("IMPACT_SUMMARY_CONTRADICTS_DETAIL")
+        if self.candidate.contract_hash != self.task_attempt_contract_hash:
+            raise ValueError("TASK_ATTEMPT_LINEAGE_MISMATCH")
+        if self.candidate.candidate_state_hash != self.candidate_hash:
+            raise ValueError("CANDIDATE_HASH_LINEAGE_MISMATCH")
+        if self.candidate.verified_receipt_hash != self.verifier_hash:
+            raise ValueError("VERIFIER_HASH_LINEAGE_MISMATCH")
+        if self.candidate.independent_acceptance_hash != self.independent_acceptance_hash:
+            raise ValueError("ACCEPTANCE_HASH_LINEAGE_MISMATCH")
+        if not self.independent_acceptance:
+            raise ValueError("INDEPENDENT_ACCEPTANCE_MISSING")
+        if self.reviews_hash != canonical_hash({"reviews": [r.model_dump(mode="json") for r in self.reviews]}):
+            raise ValueError("REVIEWS_HASH_MISMATCH")
+        if self.required_checks and self.checks_hash != canonical_hash({"checks": [c.model_dump(mode="json") for c in self.required_checks]}):
+            raise ValueError("CHECKS_HASH_MISMATCH")
+        if self.impact_hash != canonical_hash(self.impact.model_dump(mode="json")):
+            raise ValueError("IMPACT_HASH_MISMATCH")
         if len(set(c.name for c in self.required_checks)) != len(self.required_checks):
             raise ValueError("CHECKS_DUPLICATE")
         return self
