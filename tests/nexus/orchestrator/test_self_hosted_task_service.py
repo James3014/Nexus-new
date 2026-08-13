@@ -36,6 +36,7 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_dispatch_envelope,
     build_canonical_planner_admission,
 )
+from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerExecutionReceipt,
@@ -7145,3 +7146,16 @@ def test_m3d_event_append_failure_persists_reconciliation_debt(tmp_path, monkeyp
     assert durable["event_append_failure"]["status"] == "BLOCKED"
     assert durable["event_append_failure"]["error_type"] == "OSError"
     assert len(durable["event_append_failure"]["error_sha256"]) == 64
+
+
+def test_canonical_continuity_read_preserves_event_store_integrity_error(monkeypatch):
+    class ExplodingStore:
+        event_log_path = None
+
+        def read_recent(self, **_kwargs):
+            raise ValueError("tampered event log")
+
+    monkeypatch.setattr(NexusEventBus, "_log_store", ExplodingStore())
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    with pytest.raises(ValueError, match="tampered event log"):
+        SelfHostedTaskService.read_canonical_attempt_events("task-1", "attempt-1")
