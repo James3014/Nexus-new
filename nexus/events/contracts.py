@@ -30,6 +30,8 @@ class AttemptTransitionEvent:
     reason: str = ""
     candidate_refs: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
+    source_revision: str = ""
+    contract_revision: str = ""
     timestamp: float = field(default_factory=time.time)
     schema: str = "nexus.attempt_transition.v1"
 
@@ -46,6 +48,8 @@ class AttemptTransitionEvent:
             raise ValueError("state is required")
         if not isinstance(self.reason, str):
             raise ValueError("reason must be a string")
+        if not isinstance(self.source_revision, str) or not isinstance(self.contract_revision, str):
+            raise ValueError("source and contract revisions must be strings")
         if not isinstance(self.timestamp, (int, float)) or isinstance(self.timestamp, bool):
             raise ValueError("timestamp must be numeric")
         if not isinstance(self.candidate_refs, tuple) or not isinstance(self.evidence_refs, tuple):
@@ -65,10 +69,12 @@ def build_attempt_transition_event(
     *, task_id: str, attempt_id: str, sequence: int, state: str,
     reason: str = "", candidate_refs: tuple[str, ...] | list[str] = (),
     evidence_refs: tuple[str, ...] | list[str] = (),
+    source_revision: str = "", contract_revision: str = "",
 ) -> AttemptTransitionEvent:
     return AttemptTransitionEvent(
         task_id=task_id, attempt_id=attempt_id, sequence=sequence, state=state,
         reason=reason, candidate_refs=tuple(candidate_refs), evidence_refs=tuple(evidence_refs),
+        source_revision=source_revision, contract_revision=contract_revision,
     )
 
 

@@ -322,6 +322,55 @@ def resume(
     )
 
 
+def events_from_attempt_records(
+    records: Iterable[dict[str, Any]], *, task_id: str, attempt_id: str
+) -> list[ContinuityEvent]:
+    """Decode canonical EventBus attempt records without trusting projections."""
+    decoded: list[ContinuityEvent] = []
+    previous = ""
+    record_previous = "0" * 64
+    for record in records:
+        if not isinstance(record, dict) or record.get("event_type") != "attempt_transition":
+            continue
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("attempt transition payload is missing")
+        required = ("task_id", "attempt_id", "sequence", "state", "source_revision", "contract_revision")
+        if any(key not in payload for key in required):
+            raise ValueError("continuity fields are missing")
+        if payload["task_id"] != task_id or payload["attempt_id"] != attempt_id:
+            raise ValueError("foreign task or attempt event")
+        persisted_parent = record.get("_attempt_parent_digest")
+        persisted_digest = record.get("_attempt_record_digest")
+        if not isinstance(persisted_parent, str) or not isinstance(persisted_digest, str):
+            raise ValueError("continuity record digest fields are missing")
+        unsigned = dict(record)
+        unsigned.pop("_attempt_record_digest", None)
+        expected_record = hashlib.sha256(_canonical(unsigned)).hexdigest()
+        if persisted_digest != expected_record:
+            raise ValueError("continuity record tampered")
+        if persisted_parent != record_previous:
+            raise ValueError("continuity record parent mismatch")
+        current = ContinuityEvent(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=payload["sequence"],
+            event_type=payload.get("continuity_event_type", "OBSERVATION_RECORDED"),
+            summary=str(payload.get("state") or ""),
+            observation=str(payload.get("reason") or ""),
+            evidence_refs=tuple(payload.get("evidence_refs") or ()),
+            source_revision=payload["source_revision"],
+            contract_revision=payload["contract_revision"],
+            previous_hash=previous,
+        )
+        decoded.append(current)
+        previous = current.event_hash
+        record_previous = persisted_digest
+    if not decoded:
+        raise ValueError("continuity event stream is empty")
+    return decoded
+
+
 def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> ContinuitySnapshot:
     facts, active = list(snapshot.verified_facts), list(snapshot.active_hypotheses)
     rejected_hypotheses, strategy_changes = (

@@ -1,6 +1,9 @@
+import hashlib
+import json
+
 import pytest
 
-from nexus.core.task_continuity import ContinuityEvent, project, resume
+from nexus.core.task_continuity import ContinuityEvent, events_from_attempt_records, project, resume
 
 
 def event(sequence, kind, previous="", **kwargs):
@@ -162,3 +165,23 @@ def test_forged_snapshot_is_rejected_without_optional_hash():
             source_revision="src-a",
             contract_revision="contract-a",
         )
+
+
+def test_canonical_attempt_records_are_consumed_after_record_validation():
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1", "attempt_id": "attempt-1", "sequence": 1,
+            "state": "RUNNING", "source_revision": "src-a",
+            "contract_revision": "contract-a", "evidence_refs": ["ev-1"],
+        },
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
+    }
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    events = events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+    assert project(events).evidence_refs == ("ev-1",)
