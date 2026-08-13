@@ -2,7 +2,7 @@
 campaign_id: github-issue-129-atomic-work-claim-20260813
 issue: 129
 repository: James3014/Nexus-new
-baseline_main: a74d838cc6bb14af47ce79207181c12a1aed1d35
+baseline_main: 8015d9cbd4a24eea483f6406acafff5c35a62d9a
 status: ACTIVE
 current_frontier: github-issue-129-atomic-work-claim
 AUTO_CHAIN: false
@@ -19,7 +19,7 @@ Only `00-atomic-work-claim.md` is active. The campaign stops at a verified
 Candidate PR. It does not activate Issue #130 or authorize acceptance, merge,
 runtime activation, release, or production claims.
 
-The card is rebound to exact `main` `a74d838cc6bb14af47ce79207181c12a1aed1d35`.
+The card is rebound to exact `main` `8015d9cbd4a24eea483f6406acafff5c35a62d9a`.
 Implementation remains blocked until the coordinator releases the shared
 `nexus/orchestrator/self_hosted_task_service.py` and
 `tests/nexus/orchestrator/test_self_hosted_task_service.py` gate after PR226;
