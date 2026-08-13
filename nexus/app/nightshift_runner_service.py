@@ -1216,6 +1216,24 @@ class AutoResearchNightShift:
         """🛡️ 原子化寫入待審核清單 (與 fcntl 鎖定技術結合)"""
         import fcntl
         pending_item = {
+            "schema": "nexus.nightshift_candidate_demand.v1",
+            "demand_role": "bounded_candidate_generation",
+            "required_controls": [
+                "isolated_directory",
+                "bounded_context",
+                "json_event_receipt",
+                "parser",
+                "focused_tests",
+                "verifier",
+            ],
+            "mutation_intent": False,
+            "external_verification_required": True,
+            "worker_permissions": {
+                "commit": False,
+                "push": False,
+                "approve": False,
+                "integrate": False,
+            },
             "task": task_name,
             "target_file": target_file,
             "commit_sha": commit_sha,
