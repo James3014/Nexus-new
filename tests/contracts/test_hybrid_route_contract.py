@@ -46,6 +46,23 @@ def test_to_dict_round_trip() -> None:
     assert round_trip == decision
 
 
+def test_gb013_default_payload_is_observational_and_non_claiming() -> None:
+    payload = capability_payload_from_hybrid_route(HybridRouteDecision())
+    receipt = LocalHealReceiptAdapter().build(claim_verified=False, payload=payload)
+    assert payload["gate_passed"] is False
+    assert payload["invoked"] is False
+    assert receipt.public_claim_safe is False
+    assert receipt.outcome_contributed is False
+
+
+def test_gb014_round_trip_tamper_cannot_escalate_authority() -> None:
+    payload = HybridRouteDecision().to_dict()
+    payload["authority"] = "fail_closed"
+    payload["public_claim_allowed"] = True
+    with pytest.raises(ValueError):
+        hybrid_route_decision_from_payload(payload)
+
+
 def test_from_payload_coerces_enum() -> None:
     payload = {
         "route_mode": "cloud_first_local_guard_advisory",

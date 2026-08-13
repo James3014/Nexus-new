@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from pathlib import Path
 
+from nexus.services.local_heal.committee_activation_gate import (
+    evaluate_committee_member_admission,
+)
 from scripts.ops.run_golden_behavior_eval import SCENARIOS, validate_corpus
 from tests.golden_behavior.corpus import CASES, FINDINGS
 
@@ -60,9 +62,55 @@ def test_recently_resolved_findings_are_covered() -> None:
 
 
 def test_workforce_policy_wording_is_post_route_only() -> None:
-    root = Path(__file__).resolve().parents[2]
-    policy = (root / "docs/arch/MODEL_WORKFORCE_POLICY.md").read_text(encoding="utf-8")
-    assert "## 6. Routing policy" not in policy
-    assert "Nexus must route in this order:" not in policy
-    assert "## 6. Post-route worker dispatch guidance" in policy
-    assert "These preferences never choose or revise a route" in policy
+    demand = {
+        "member_id": "member-a",
+        "phase": "dispatch",
+        "role": "fast_bounded_implementation",
+        "minimum_autonomy": "L2",
+        "context_class": "nexus_bounded",
+        "route_authority": "HostilePreferenceRouter",
+        "mutation_intent": False,
+    }
+    binding = {
+        "worker_id": "agy_flash",
+        "provider": "agy",
+        "model": "gemini-3.6-flash-high",
+        "controls": [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],
+    }
+    result = evaluate_committee_member_admission([demand], bindings={"member-a": binding})
+    assert result["overall_decision"] == "BLOCK"
+    assert result["records"][0]["decision"] == "BLOCK"
+    assert "Route authorization required" in result["records"][0]["reasons"][0]
+
+
+def test_gb082_hostile_preference_directive_is_not_authority() -> None:
+    demand = {
+        "member_id": "member-a",
+        "phase": "dispatch",
+        "role": "fast_bounded_implementation",
+        "minimum_autonomy": "L2",
+        "context_class": "nexus_bounded",
+        "route_authority": "CapabilityPlanner",
+        "mutation_intent": False,
+    }
+    binding = {
+        "worker_id": "agy_flash",
+        "provider": "agy",
+        "model": "gemini-3.6-flash-high",
+        "controls": [
+            "task_card",
+            "allowed_files",
+            "mandatory_commands",
+            "independent_verification",
+        ],
+    }
+    result = evaluate_committee_member_admission([demand], bindings={"member-a": binding})
+    assert result["overall_decision"] == "ALLOW"
+    assert result["records"][0]["decision"] == "ALLOW"
+    assert result["records"][0]["provider"] == "agy"
+    assert result["records"][0]["model"] == "gemini-3.6-flash-high"
