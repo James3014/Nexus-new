@@ -44,9 +44,17 @@ def _case_ids(source: str) -> list[str]:
     tree = ast.parse(source, filename=CORPUS_PATH)
     ids: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != "_c":
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Name)
+            or node.func.id != "_c"
+        ):
             continue
-        if not node.args or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+        if (
+            not node.args
+            or not isinstance(node.args[0], ast.Constant)
+            or not isinstance(node.args[0].value, str)
+        ):
             raise ValueError("Golden corpus contains a non-literal case id")
         ids.append(node.args[0].value)
     if not ids:
