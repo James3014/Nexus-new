@@ -123,11 +123,14 @@ receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
 
-The primary coordinator may perform the GitHub protected merge under the root
-standing-authority gate only after an independent exact-head review, terminal
-success for every ruleset-required check, an up-to-date base, a complete scope
-and deletion audit, and an expected-head/CAS merge. This GitHub action does not
-approve or integrate local Nexus lifecycle state.
+The primary coordinator may prepare `MERGE_INTENT` under standing authority
+after an independent exact-head review, terminal success for every
+ruleset-required check, an up-to-date base, and complete scope/deletion audits.
+Protected merge then requires a fresh Owner `MERGE_SLOT_GRANTED` decision bound
+to the exact repository, PR, head, and base. Any drift invalidates the slot and
+requires a new decision before expected-head/CAS merge. Neither `MERGE_INTENT`
+nor standing authority is merge permission. This GitHub action does not approve
+or integrate local Nexus lifecycle state.
 
 ## Blocks and residual debt
 
