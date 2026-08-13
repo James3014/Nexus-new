@@ -171,9 +171,13 @@ def test_canonical_attempt_records_are_consumed_after_record_validation():
     record = {
         "event_type": "attempt_transition",
         "payload": {
-            "task_id": "task-1", "attempt_id": "attempt-1", "sequence": 1,
-            "state": "RUNNING", "source_revision": "src-a",
-            "contract_revision": "contract-a", "evidence_refs": ["ev-1"],
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "RUNNING",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+            "evidence_refs": ["ev-1"],
         },
         "_attempt_parent_digest": "0" * 64,
         "_attempt_record_digest": "",

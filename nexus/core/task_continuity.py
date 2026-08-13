@@ -335,7 +335,14 @@ def events_from_attempt_records(
         payload = record.get("payload")
         if not isinstance(payload, dict):
             raise ValueError("attempt transition payload is missing")
-        required = ("task_id", "attempt_id", "sequence", "state", "source_revision", "contract_revision")
+        required = (
+            "task_id",
+            "attempt_id",
+            "sequence",
+            "state",
+            "source_revision",
+            "contract_revision",
+        )
         if any(key not in payload for key in required):
             raise ValueError("continuity fields are missing")
         if payload["task_id"] != task_id or payload["attempt_id"] != attempt_id:

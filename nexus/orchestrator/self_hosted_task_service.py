@@ -41,9 +41,9 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.core.task_continuity import events_from_attempt_records
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
 from nexus.events.contracts import build_attempt_transition_event
-from nexus.core.task_continuity import events_from_attempt_records
 from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
