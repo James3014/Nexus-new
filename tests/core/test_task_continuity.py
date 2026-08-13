@@ -115,8 +115,14 @@ def test_resume_rejects_tail_revision_drift(field):
     first = event(1, "PLAN_FORMED")
     tail = event(2, "OBSERVATION_RECORDED", first.event_hash, observation="x", **{field: "forged"})
     with pytest.raises(ValueError, match="revision drift"):
-        resume(project([first]), [tail], task_id="task-1", attempt_id="attempt-1",
-               source_revision="src-a", contract_revision="contract-a")
+        resume(
+            project([first]),
+            [tail],
+            task_id="task-1",
+            attempt_id="attempt-1",
+            source_revision="src-a",
+            contract_revision="contract-a",
+        )
 
 
 def test_project_empty_stream_fails_closed():
@@ -207,14 +213,26 @@ def test_canonical_attempt_records_are_consumed_after_record_validation():
 
 @pytest.mark.parametrize(
     "field,value",
-    [("state", 7), ("state", ""), ("source_revision", 7), ("source_revision", ""),
-     ("contract_revision", 7), ("contract_revision", "")],
+    [
+        ("state", 7),
+        ("state", ""),
+        ("source_revision", 7),
+        ("source_revision", ""),
+        ("contract_revision", 7),
+        ("contract_revision", ""),
+    ],
 )
 def test_canonical_attempt_records_reject_malformed_continuity_fields(field, value):
     record = {
         "event_type": "attempt_transition",
-        "payload": {"task_id": "task-1", "attempt_id": "attempt-1", "sequence": 1,
-                    "state": "RUNNING", "source_revision": "src-a", "contract_revision": "contract-a"},
+        "payload": {
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "RUNNING",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
         "_attempt_parent_digest": "0" * 64,
         "_attempt_record_digest": "",
     }

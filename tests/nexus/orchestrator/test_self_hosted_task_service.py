@@ -36,6 +36,7 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_dispatch_envelope,
     build_canonical_planner_admission,
 )
+from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerExecutionReceipt,
@@ -54,7 +55,6 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_task_card_binding,
     validate_workforce_dispatch_binding,
 )
-from nexus.events.transport import NexusEventBus
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
