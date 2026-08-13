@@ -1,11 +1,17 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-153-event-feedback-impact-map
 campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
 baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
+historical_baseline: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN
+claim_ceiling: EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN_ONLY
 implementation_commit: 4ffbd1fa7e4b88c932615daf3dfa3dec9e8ecd7b
 rebind_lineage_commit: 88a6c616fdf145738e582aa625c94abbf90daf66
 AUTO_CHAIN: false
@@ -57,9 +63,19 @@ semantics.
 - `git diff --check`
 - exact three-file implementation scope audit, plus this card/INDEX
 
-## Claim ceiling
+## Physical evidence and terminal boundary
 
-`EVENT_AND_FEEDBACK_IMPACT_MAPPING_CANDIDATE_ONLY`
+- Historical baseline: `9dddd018ad2761face3d2f3ce29dff8d8feae72d`.
+- Implementation commit: `4ffbd1fa7e4b88c932615daf3dfa3dec9e8ecd7b`.
+- Rebind lineage: `88a6c616fdf145738e582aa625c94abbf90daf66`.
+- PR #156 head: `c0d491d331b06e6e5657109a16ea7295024b0428`.
+- PR #156 merge: `02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c`.
+- Exact scope: impact-map, selector tests, this card, and INDEX.
+- Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance completed
+  successfully.
+- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
 
-Final exact PR head identity is supplied by the external PR/protected-check/
-merge receipt, not recursively stored in this card.
+`EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN` proves only exact selector mapping,
+high-risk escalation, and preserved fail-closed fallback. It grants no PR #151 mutation,
+selector algorithm, workflow, runtime, routing, lifecycle, Workforce, claim, approval,
+integration, merge, release, or production authority. `AUTO_CHAIN=false`.
