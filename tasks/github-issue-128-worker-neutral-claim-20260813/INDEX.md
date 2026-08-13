@@ -1,7 +1,7 @@
 # Issue #128 — worker-neutral Ready-Issue claim contract
 
 - authority: Owner-authorized Ready GitHub Issue #128; fresh remote `main`
-- baseline: `f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04`
+- baseline: `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`
 - status: active / implementation candidate
 - frontier: `00-worker-neutral-claim-contract.md`
 - AUTO_CHAIN: false
