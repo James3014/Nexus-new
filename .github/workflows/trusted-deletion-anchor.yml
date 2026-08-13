@@ -270,6 +270,11 @@ jobs:
         run: |
           set -euo pipefail
           candidate_repo="$RUNNER_TEMP/trusted-golden-candidate.git"
+          cleanup_candidate() {
+            rm -rf -- "$candidate_repo"
+            rm -rf -- "$RUNNER_TEMP/trusted-golden-verifier.git" "$RUNNER_TEMP/trusted-golden-verifier-source"
+          }
+          trap cleanup_candidate EXIT
           git init --bare "$candidate_repo"
           git -C "$candidate_repo" remote add origin "https://github.com/$REPOSITORY.git"
           basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
@@ -279,8 +284,6 @@ jobs:
           test "$(git -C "$candidate_repo" cat-file -t "$EXPECTED_HEAD_SHA")" = commit
           python "$RUNNER_TEMP/trusted-golden-verifier-source/trusted_golden_verifier.py" --repo-root "$candidate_repo" --head-sha "$EXPECTED_HEAD_SHA" --manifest "$RUNNER_TEMP/trusted-anchor/manifest.json" --anchor-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" --json-report "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json"
           test "$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["trusted_source"])' "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json")" = "default-branch-verifier"
-          rm -rf -- "$candidate_repo"
-          rm -rf -- "$RUNNER_TEMP/trusted-golden-verifier.git" "$RUNNER_TEMP/trusted-golden-verifier-source"
       - name: Cleanup trusted verifier source
         if: always()
         run: |
