@@ -1,18 +1,29 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-90-run-group-canonicalization
 campaign_id: github-issue-90-run-group-canonicalization-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/90
 baseline_main: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
+historical_baseline: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: true
-block_class: RECOVERABLE_BLOCK
-claim_ceiling: WORLD_C_RUN_GROUP_CANONICALIZATION_CANDIDATE_ONLY
+block_class: NONE
+completion_marker: WORLD_C_RUN_GROUP_CANONICALIZATION_PROVEN
+claim_ceiling: WORLD_C_S1_RUN_GROUP_CANONICALIZATION_PROVEN_ONLY
+physical_receipt:
+  pull_request: 155
+  candidate_head: 000274fe44b0b5ae1250fa7fc0fec0cd673b4e47
+  merge_commit: 8e05e0827fe913e3e408f87dc274e005bdc0bf92
+  changed_files: 4
+  focused_tests: 17
+  required_checks: SUCCESS
 ---
 
 # Task Card: Canonicalize repair-receipt `run_group`
@@ -51,7 +62,10 @@ integration, merge, release, or public/production claim.
 
 ## Evidence and exit
 
-Bind Candidate evidence to the implementation commit and this card hash.
-Worker may commit and push the issue branch but may not approve, integrate, or
-merge. Maximum claim is canonicalized fail-closed receipt `run_group` identity
-only.
+PR #155 head `000274fe44b0b5ae1250fa7fc0fec0cd673b4e47` merged as
+`8e05e0827fe913e3e408f87dc274e005bdc0bf92` with the exact four-file scope,
+17 focused tests, and required checks successful. This terminal metadata
+reconciliation proves only canonicalized fail-closed World C S1 receipt
+`run_group` identity. #91 and #95 remain separate; no broader World C,
+runtime, route, planner, provider, Workforce, approval, integration, merge,
+release, or production claim follows.
