@@ -1,18 +1,22 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-95-world-c-executor-projection
 campaign_id: github-issue-95-world-c-executor-projection-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/95
 baseline_main: ea8c15293455575b4312b92eeeebc69daa4abbcf
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_push: true
 worker_may_approve: false
 worker_may_integrate: false
-block_class: RECOVERABLE_BLOCK
-claim_ceiling: WORLD_C_EXECUTOR_PROJECTION_WIRING_CANDIDATE_ONLY
+block_class: NONE
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: WORLD_C_EXECUTOR_PROJECTION_WIRING_PROVEN
+claim_ceiling: WORLD_C_EXECUTOR_PROJECTION_WIRING_SOURCE_AND_TESTS_ONLY
 ---
 
 # Task Card: Wire canonical World C projection into LocalModel capability executor
@@ -64,8 +68,17 @@ release, runtime activation, production/public claim, approval, integration, or 
 - compileall on changed Python files;
 - `git diff --check` and exact changed-file scope audit.
 
-## Evidence and exit
+## Physical evidence and terminal boundary
 
-Bind one Candidate commit and PR to this exact baseline and changed-file set. Worker may
-commit and push the Issue branch and open a Candidate PR. Worker may not approve,
-integrate, merge, release, or claim runtime/production readiness.
+- Historical baseline: `ea8c15293455575b4312b92eeeebc69daa4abbcf`.
+- Implementation commit: `339551f88fc3cd4c18b29e551d800175bf1746b4`.
+- Focused follow-up test commit: `279567b7fae472d67859181ea7f62f87e0387718`.
+- PR #186 head: `d585f43b0b02c3d0f79851f5bcd7f2b359a9d064`.
+- PR #186 merge: `facd84753b42d2a4bc00581cab74c19b075c733a`.
+- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+
+`WORLD_C_EXECUTOR_PROJECTION_WIRING_PROVEN` is limited to the canonical World C
+executor projection source and focused tests. Historical live check-rollup details were
+not recovered by this reconciliation and are not inferred. This marker grants no
+receipt-owner, Planner/route, Workforce, provider, runtime, approval, integration,
+merge, release, production, or Issue #29 consumption authority. `AUTO_CHAIN=false`.
