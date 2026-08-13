@@ -4,6 +4,8 @@ from nexus.core.task_continuity import ContinuityEvent, project, resume
 
 
 def event(sequence, kind, previous="", **kwargs):
+    source_revision = kwargs.pop("source_revision", "src-a")
+    contract_revision = kwargs.pop("contract_revision", "contract-a")
     return ContinuityEvent(
         task_id="task-1",
         attempt_id="attempt-1",
@@ -11,8 +13,8 @@ def event(sequence, kind, previous="", **kwargs):
         event_type=kind,
         summary=kwargs.pop("summary", kind),
         previous_hash=previous,
-        source_revision="src-a",
-        contract_revision="contract-a",
+        source_revision=source_revision,
+        contract_revision=contract_revision,
         **kwargs,
     )
 
@@ -26,12 +28,16 @@ def test_projection_preserves_rejected_strategy_and_next_action():
         summary="A failed",
         do_not_repeat=("A",),
         evidence_refs=("ev-1",),
+        unresolved_risks=("risk-1",),
+        unknowns=("unknown-1",),
         next_action="try B",
         claim_ceiling="evidence only",
     )
     snapshot = project([first, second])
     assert snapshot.rejected_strategies == ("A",)
     assert snapshot.evidence_refs == ("ev-1",)
+    assert snapshot.unresolved_risks == ("risk-1",)
+    assert snapshot.unknowns == ("unknown-1",)
     assert (
         resume(
             snapshot,
@@ -104,6 +110,26 @@ def test_sequence_gap_and_tamper_fail_closed():
         resume(
             project([first]),
             [event(3, "OBSERVATION_RECORDED", first.event_hash, observation="x")],
+            task_id="task-1",
+            attempt_id="attempt-1",
+            source_revision="src-a",
+            contract_revision="contract-a",
+        )
+
+
+def test_empty_revision_is_rejected():
+    with pytest.raises(ValueError):
+        event(1, "PLAN_FORMED", source_revision="")
+
+
+def test_forged_snapshot_is_rejected_without_optional_hash():
+    first = event(1, "PLAN_FORMED", next_action="try A", claim_ceiling="bounded")
+    snapshot = project([first])
+    object.__setattr__(snapshot, "claim_ceiling", "forged")
+    with pytest.raises(ValueError, match="snapshot tampered"):
+        resume(
+            snapshot,
+            [],
             task_id="task-1",
             attempt_id="attempt-1",
             source_revision="src-a",

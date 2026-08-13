@@ -64,6 +64,8 @@ class ContinuityEvent:
     strategy_delta: str = ""
     do_not_repeat: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
+    unresolved_risks: tuple[str, ...] = ()
+    unknowns: tuple[str, ...] = ()
     next_action: str = ""
     claim_ceiling: str = ""
     source_revision: str = ""
@@ -98,8 +100,10 @@ class ContinuityEvent:
             "contract_revision",
             "previous_hash",
         ):
-            _clean_text(getattr(self, name), name)
-        for name in ("do_not_repeat", "evidence_refs"):
+            _clean_text(
+                getattr(self, name), name, required=name in {"source_revision", "contract_revision"}
+            )
+        for name in ("do_not_repeat", "evidence_refs", "unresolved_risks", "unknowns"):
             values = getattr(self, name)
             if not isinstance(values, tuple) or any(
                 not isinstance(v, str) or not v.strip() for v in values
@@ -114,6 +118,8 @@ class ContinuityEvent:
         return asdict(self) | {
             "do_not_repeat": list(self.do_not_repeat),
             "evidence_refs": list(self.evidence_refs),
+            "unresolved_risks": list(self.unresolved_risks),
+            "unknowns": list(self.unknowns),
         }
 
 
@@ -135,16 +141,32 @@ class ContinuitySnapshot:
     failed_attempts: tuple[str, ...]
     rejected_strategies: tuple[str, ...]
     unresolved_risks: tuple[str, ...]
+    unknowns: tuple[str, ...]
     evidence_refs: tuple[str, ...]
     next_action: str
     claim_ceiling: str
+    _snapshot_digest: str = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_snapshot_digest", _digest(self._content_dict()))
+
+    def _content_dict(self) -> dict[str, Any]:
+        return {
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__
+            if name != "_snapshot_digest"
+        }
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return self._content_dict()
 
     @property
     def snapshot_hash(self) -> str:
-        return _digest(self.to_dict())
+        return self._snapshot_digest
+
+    def validate_integrity(self) -> None:
+        if self._snapshot_digest != _digest(self._content_dict()):
+            raise ValueError("snapshot tampered")
 
 
 @dataclass(frozen=True)
@@ -197,6 +219,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
     failed: list[str] = []
     rejected: list[str] = []
     risks: list[str] = []
+    unknowns: list[str] = []
     evidence: list[str] = []
     next_action = ""
     claim = ""
@@ -218,6 +241,8 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
         if event.action and event.event_type == "COMPLETED":
             applied.append(event.action)
         evidence.extend(event.evidence_refs)
+        risks.extend(event.unresolved_risks)
+        unknowns.extend(event.unknowns)
         next_action = event.next_action or next_action
         claim = event.claim_ceiling or claim
     return ContinuitySnapshot(
@@ -237,6 +262,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
         failed_attempts=tuple(dict.fromkeys(failed)),
         rejected_strategies=tuple(dict.fromkeys(rejected)),
         unresolved_risks=tuple(dict.fromkeys(risks)),
+        unknowns=tuple(dict.fromkeys(unknowns)),
         evidence_refs=tuple(dict.fromkeys(evidence)),
         next_action=next_action,
         claim_ceiling=claim,
@@ -253,6 +279,7 @@ def resume(
     contract_revision: str,
     snapshot_hash: str | None = None,
 ) -> ResumeContext:
+    snapshot.validate_integrity()
     if (
         snapshot.schema != SCHEMA
         or snapshot.task_id != task_id
@@ -303,6 +330,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
     )
     applied, failed = list(snapshot.applied_changes), list(snapshot.failed_attempts)
     rejected, evidence = list(snapshot.rejected_strategies), list(snapshot.evidence_refs)
+    risks, unknowns = list(snapshot.unresolved_risks), list(snapshot.unknowns)
     next_action, claim = snapshot.next_action, snapshot.claim_ceiling
     for event in tail:
         if event.observation:
@@ -320,6 +348,8 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         evidence.extend(event.evidence_refs)
         next_action = event.next_action or next_action
         claim = event.claim_ceiling or claim
+        risks.extend(event.unresolved_risks)
+        unknowns.extend(event.unknowns)
 
     def unique(values: list[str]) -> tuple[str, ...]:
         return tuple(dict.fromkeys(values))
@@ -341,6 +371,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         failed_attempts=unique(failed),
         rejected_strategies=unique(rejected),
         unresolved_risks=snapshot.unresolved_risks,
+        unknowns=tuple(dict.fromkeys(unknowns)),
         evidence_refs=unique(evidence),
         next_action=next_action,
         claim_ceiling=claim,
