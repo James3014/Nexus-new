@@ -373,6 +373,35 @@ def test_valid_fixed_schema_evidence_is_accepted():
     assert _verify(manifest, _evidence(manifest)) == "PASS"
 
 
+@pytest.mark.parametrize(
+    "witnesses",
+    [
+        ["not-a-mapping"],
+        [{"collection_status": "collected", "execution_status": "skipped"}],
+        [{"collection_status": "collected", "execution_status": "not_executed"}],
+    ],
+)
+def test_malformed_or_nonexecuted_covered_witness_fails_closed(witnesses: list[object]):
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    report = evidence["golden_report"]
+    assert isinstance(report, dict)
+    report["case_evidence"][0]["witnesses"] = witnesses
+    evidence["golden_report_sha256"] = trusted_anchor._sha(trusted_anchor._json(report))
+    assert _verify(manifest, evidence) == "IMPACT_UNKNOWN"
+
+
+def test_finding_witness_cannot_claim_skipped_execution():
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    report = evidence["golden_report"]
+    assert isinstance(report, dict)
+    report["case_evidence"][0]["status"] = "finding"
+    report["case_evidence"][0]["witnesses"][0]["execution_status"] = "skipped"
+    evidence["golden_report_sha256"] = trusted_anchor._sha(trusted_anchor._json(report))
+    assert _verify(manifest, evidence) == "IMPACT_UNKNOWN"
+
+
 def test_supplied_trees_cannot_override_immutable_commit_trees():
     manifest = _manifest()
     assert (

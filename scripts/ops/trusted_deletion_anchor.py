@@ -452,20 +452,26 @@ def verify_evidence(
         if len(case_ids) != len(cases) or len(set(case_ids)) != len(case_ids):
             raise ValueError("Golden report case identity is malformed")
         for case in cases:
+            witnesses = case.get("witnesses")
+            if not isinstance(witnesses, list) or any(
+                not isinstance(witness, dict) for witness in witnesses
+            ):
+                raise ValueError("Golden witness evidence is malformed")
             if case.get("status") == "covered":
-                witnesses = case.get("witnesses")
-                if (
-                    not isinstance(witnesses, list)
-                    or not witnesses
-                    or any(
-                        witness.get("collection_status") != "collected"
-                        or witness.get("execution_status") != "passed"
-                        for witness in witnesses
-                        if isinstance(witness, dict)
-                    )
+                if not witnesses or any(
+                    witness.get("collection_status") != "collected"
+                    or witness.get("execution_status") != "passed"
+                    for witness in witnesses
                 ):
                     raise ValueError("Golden covered witness did not pass")
-            elif case.get("status") != "finding":
+            elif case.get("status") == "finding":
+                if any(
+                    witness.get("execution_status")
+                    not in {"not_executed_finding_excluded", "passed"}
+                    for witness in witnesses
+                ):
+                    raise ValueError("Golden finding witness is malformed")
+            else:
                 raise ValueError("Golden case status is invalid")
         if source_archive is not None:
             if _sha(source_archive) != manifest["source_archive_sha256"]:
