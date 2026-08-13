@@ -24,22 +24,123 @@ class JsonlEventLogStore:
 
     def __init__(self):
         self.event_log_path: Optional[Path] = None
+        self.lock_path: Optional[Path] = None
+        self._attempt_tails: Dict[Tuple[str, str], Tuple[int, str]] = {}
+        self._lock = threading.RLock()
 
     def configure(self, project_root: Path) -> Tuple[Path, Path]:
         log_dir = project_root / ".nexus" / "events"
         log_dir.mkdir(parents=True, exist_ok=True)
         self.event_log_path = log_dir / "event_log.jsonl"
+        self.lock_path = log_dir / "event_log.lock"
+        with self._lock:
+            self._attempt_tails = self._scan_attempt_tails()
         return log_dir, self.event_log_path
 
     def append_record(self, record: Dict[str, Any]) -> None:
         if not self.event_log_path:
             return
-        with open(self.event_log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str) + "\n")
+        with self._lock:
+            if not self.lock_path:
+                raise RuntimeError("event store is not configured")
+            with open(self.lock_path, "a+", encoding="utf-8") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    self._attempt_tails = self._scan_attempt_tails()
+                    key = self._attempt_key(record)
+                    previous = self._attempt_tails.get(key) if key else None
+                    self._bind_attempt_record(record)
+                    try:
+                        with open(self.event_log_path, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(record, default=str) + "\n")
+                            f.flush()
+                            os.fsync(f.fileno())
+                    except Exception:
+                        if key is not None:
+                            if previous is None:
+                                self._attempt_tails.pop(key, None)
+                            else:
+                                self._attempt_tails[key] = previous
+                        raise
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _attempt_key(record: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        if record.get("event_type") != "attempt_transition":
+            return None
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("invalid attempt transition payload")
+        task_id, attempt_id = payload.get("task_id"), payload.get("attempt_id")
+        sequence = payload.get("sequence")
+        if not isinstance(task_id, str) or not task_id or not isinstance(attempt_id, str) or not attempt_id:
+            raise ValueError("attempt transition identity is required")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
+            raise ValueError("attempt transition sequence must be a positive integer")
+        return task_id, attempt_id
+
+    @staticmethod
+    def _record_digest(record: Dict[str, Any]) -> str:
+        unsigned = dict(record)
+        unsigned.pop("_attempt_record_digest", None)
+        return hashlib.sha256(
+            json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()
+        ).hexdigest()
+
+    def _bind_attempt_record(self, record: Dict[str, Any]) -> None:
+        key = self._attempt_key(record)
+        if key is None:
+            return
+        payload = record["payload"]
+        sequence, parent = self._attempt_tails.get(key, (0, "0" * 64))
+        expected = sequence + 1
+        if payload["sequence"] != expected:
+            raise ValueError("attempt transition sequence must be contiguous")
+        record["_attempt_parent_digest"] = parent
+        digest = self._record_digest(record)
+        record["_attempt_record_digest"] = digest
+        self._attempt_tails[key] = (expected, digest)
+
+    def _scan_attempt_tails(self) -> Dict[Tuple[str, str], Tuple[int, str]]:
+        tails: Dict[Tuple[str, str], Tuple[int, str]] = {}
+        if not self.event_log_path or not self.event_log_path.exists():
+            return tails
+        raw = self.event_log_path.read_text(encoding="utf-8")
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            key = self._attempt_key(record)
+            if key is None:
+                continue
+            payload = record["payload"]
+            sequence, parent = tails.get(key, (0, "0" * 64))
+            if payload["sequence"] != sequence + 1:
+                raise ValueError("broken attempt transition sequence")
+            persisted_parent = record.get("_attempt_parent_digest")
+            if not isinstance(persisted_parent, str):
+                raise ValueError("legacy attempt transition missing parent digest")
+            if persisted_parent != parent:
+                raise ValueError("tampered attempt transition parent")
+            persisted_digest = record.get("_attempt_record_digest")
+            if not isinstance(persisted_digest, str):
+                raise ValueError("legacy attempt transition missing record digest")
+            if persisted_digest != self._record_digest(record):
+                raise ValueError("tampered attempt transition record")
+            tails[key] = (payload["sequence"], persisted_digest)
+        return tails
+
+    def attempt_tail(self, task_id: str, attempt_id: str) -> int:
+        with self._lock:
+            self._attempt_tails = self._scan_attempt_tails()
+            return self._attempt_tails.get((task_id, attempt_id), (0, ""))[0]
 
     def read_recent(self, event_type: str = "", limit: int = 50) -> List[Dict[str, Any]]:
         if not self.event_log_path or not self.event_log_path.exists():
             return []
+        with self._lock:
+            self._attempt_tails = self._scan_attempt_tails()
         lines = self.event_log_path.read_text(encoding="utf-8").strip().split("\n")
         events = [json.loads(line) for line in lines[-limit:] if line.strip()]
         if event_type:

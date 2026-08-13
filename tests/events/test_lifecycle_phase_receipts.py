@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from nexus.events.contracts import PHASE_OBSERVER_HOOKS, build_attempt_transition_event, build_phase_observer_event
 from nexus.engine.phase_handshake import build_phase_receipt, validate_phase_receipt
+from nexus.events.contracts import (
+    PHASE_OBSERVER_HOOKS,
+    build_attempt_transition_event,
+    build_phase_observer_event,
+)
 
 
 def test_phase_observer_hook_vocabulary_is_symmetric():

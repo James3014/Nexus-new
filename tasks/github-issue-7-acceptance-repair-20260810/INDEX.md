@@ -64,8 +64,10 @@ evidence included 297 combined tests, eight M3-C tests, and 311 primary tests.
 The current frontier is M3-D (`04-ordered-attempt-events-and-e2e.md`) with
 `ACTIVE` status. On 2026-08-13 the Owner explicitly granted M3-D activation,
 bounded implementation, commit, issue-branch push, and pull-request creation
-against current main `069596056fff852bad8c826725902d25361aa9c7`.
+against current main `069596056fff852bad8c826725902d25361aa9c7`. The M3-D
+frontier is amended to include the persisted event-log hardening contract in
+`nexus/events/log_store.py` and hostile acceptance coverage; this does not
+activate #31, #65, #191, or #143.
 
-`AUTO_CHAIN=false`; this reconciliation does not activate M3-D. M3-D requires
-a separate Owner authorization. Approval, integration, merge, release, and
-production/public claims remain separate authorities.
+`AUTO_CHAIN=false`. Approval, integration, merge, release, and production/public
+claims remain separate authorities.

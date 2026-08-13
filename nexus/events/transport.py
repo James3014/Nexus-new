@@ -5,8 +5,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from nexus.events.log_store import DeveloperFeedbackDecisionStore, JsonlEventLogStore
 from nexus.events.contracts import AttemptTransitionEvent
+from nexus.events.log_store import DeveloperFeedbackDecisionStore, JsonlEventLogStore
 from nexus.events.signal_queue_service import SignalQueueService
 from nexus.feedback.contracts import DeveloperFeedbackDecision
 
@@ -64,6 +64,13 @@ class NexusEventBus:
         log_dir, event_log_path = cls._log_store.configure(project_root)
         cls._event_log_path = event_log_path
         cls._developer_feedback_store.configure(project_root)
+        with cls._sequence_lock:
+            cls._attempt_sequences = {
+                key: tail
+                for key in cls._attempt_sequences
+                for tail in [cls._log_store.attempt_tail(*key)]
+                if tail
+            }
         signal_file = log_dir / "signal_inbox.jsonl"
         cls._signal_queue = cls._signal_queue_svc.load_from_inbox(signal_file)
 
@@ -127,10 +134,21 @@ class NexusEventBus:
             previous = cls._attempt_sequences.get(key, 0)
             if previous and event.sequence != previous + 1:
                 raise ValueError("attempt transition sequence must be contiguous")
+            payload = event.to_dict()
+            # Publish persists first; advance the in-memory tail only after
+            # append succeeds so a deterministic persistence block is retryable.
+            cls.publish("attempt_transition", payload)
             cls._attempt_sequences[key] = event.sequence
-        payload = event.to_dict()
-        cls.publish("attempt_transition", payload)
         return payload
+
+    @classmethod
+    def next_attempt_sequence(cls, task_id: str, attempt_id: str) -> int:
+        """Return the only valid next sequence after persisted-tail recovery."""
+        key = (task_id, attempt_id)
+        with cls._sequence_lock:
+            persisted = cls._log_store.attempt_tail(task_id, attempt_id)
+            previous = max(cls._attempt_sequences.get(key, 0), persisted)
+            return previous + 1
 
     @classmethod
     def emit_developer_feedback_decision(

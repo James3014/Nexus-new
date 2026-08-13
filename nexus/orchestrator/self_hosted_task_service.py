@@ -1675,8 +1675,9 @@ class SelfHostedTaskService:
     def _emit_attempt_transition(result: Optional[Mapping[str, Any]], task_id: str) -> None:
         if not result or not result.get("attempt_id"):
             return
-        history = result.get("status_history") or []
-        sequence = sum(1 for item in history if isinstance(item, Mapping) and item.get("status"))
+        sequence = NexusEventBus.next_attempt_sequence(
+            str(result.get("task_id") or task_id), str(result.get("attempt_id"))
+        )
         candidate_refs = tuple(str(value) for value in (
             result.get("candidate_commit_sha"),
             (result.get("promotion_packet") or {}).get("candidate_tree_sha"),
@@ -1685,16 +1686,15 @@ class SelfHostedTaskService:
             result.get("verified_receipt_hash"),
             (result.get("verified_receipt") or {}).get("receipt_ref"),
         ) if value)
-        try:
-            NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
-                task_id=str(result.get("task_id") or task_id),
-                attempt_id=str(result.get("attempt_id")), sequence=max(1, sequence),
-                state=str(result.get("status")), reason=str(result.get("error") or ""),
-                candidate_refs=candidate_refs, evidence_refs=evidence_refs,
-            ))
-        except ValueError:
-            # Replays/reconciliation must not alter lifecycle authority.
-            pass
+        # Persistence/sequence failures are deterministic event blocks.  They
+        # must remain visible to the caller; silently dropping them creates a
+        # false lifecycle receipt while leaving the lifecycle authority intact.
+        NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
+            task_id=str(result.get("task_id") or task_id),
+            attempt_id=str(result.get("attempt_id")), sequence=sequence,
+            state=str(result.get("status")), reason=str(result.get("error") or ""),
+            candidate_refs=candidate_refs, evidence_refs=evidence_refs,
+        ))
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
