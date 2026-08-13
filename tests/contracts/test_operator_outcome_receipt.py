@@ -93,18 +93,12 @@ def test_receipt_settled_schema_enums_and_provenance_are_strict():
     with pytest.raises(ValueError, match="REASON"):
         _receipt(reason_code="arbitrary free text")
     with pytest.raises(ValueError):
-        _receipt(
-            field_provenance={
-                "observed_outcome": {"provenance": "operator", "secret": "no"}
-            }
-        )
+        _receipt(field_provenance={"observed_outcome": {"provenance": "operator", "secret": "no"}})
     with pytest.raises(ValueError, match="RECORDED_BEFORE_OBSERVED"):
         _receipt(
             observed_at=datetime.now(timezone.utc),
             recorded_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
-    future_recorded = _receipt(
-        recorded_at=datetime.now(timezone.utc) + timedelta(minutes=10)
-    )
+    future_recorded = _receipt(recorded_at=datetime.now(timezone.utc) + timedelta(minutes=10))
     with pytest.raises(ValueError, match="STALE"):
         validate_operator_outcome_receipt(future_recorded)

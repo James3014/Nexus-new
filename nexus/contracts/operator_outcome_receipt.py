@@ -178,8 +178,14 @@ def build_operator_outcome_receipt(
         "observed_outcome": observed_outcome,
         "observation_basis": observation_basis,
         "reason_code": reason_code,
-        "observed_at": (observed_at or now).astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "recorded_at": (recorded_at or now).astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "observed_at": (observed_at or now)
+        .astimezone(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "recorded_at": (recorded_at or now)
+        .astimezone(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
         "source_revision": source_revision,
         "runtime_receipt_hash": runtime_receipt_hash,
         "supersedes_receipt_id": supersedes_receipt_id,
@@ -209,7 +215,11 @@ def validate_operator_outcome_receipt(
     max_age_seconds: float = 300.0,
     check_freshness: bool = True,
 ) -> OperatorOutcomeReceipt:
-    result = receipt if isinstance(receipt, OperatorOutcomeReceipt) else OperatorOutcomeReceipt.model_validate(receipt)
+    result = (
+        receipt
+        if isinstance(receipt, OperatorOutcomeReceipt)
+        else OperatorOutcomeReceipt.model_validate(receipt)
+    )
     expected = {
         "task_id": task_id,
         "attempt_id": attempt_id,
