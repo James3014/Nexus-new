@@ -41,6 +41,7 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.core.task_continuity import events_from_attempt_records
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
@@ -1881,12 +1882,44 @@ class SelfHostedTaskService:
         # Persistence/sequence failures are deterministic event blocks.  They
         # must remain visible to the caller; silently dropping them creates a
         # false lifecycle receipt while leaving the lifecycle authority intact.
+        request = result.get("request") if isinstance(result.get("request"), Mapping) else {}
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
             task_id=str(result.get("task_id") or task_id),
             attempt_id=str(result.get("attempt_id")), sequence=sequence,
             state=str(result.get("status")), reason=str(result.get("error") or ""),
             candidate_refs=candidate_refs, evidence_refs=evidence_refs,
+            source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
+            contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
         ))
+
+    @staticmethod
+    def read_canonical_attempt_events(task_id: str, attempt_id: str) -> list[dict[str, Any]]:
+        """Read attempt events from the canonical EventBus log, without mutation."""
+        # Read the validated canonical store directly.  The EventBus observer
+        # facade intentionally serves best-effort dashboards and swallows
+        # integrity failures; continuity recovery must preserve those errors.
+        if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
+            NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
+        records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
+        selected = []
+        for record in records:
+            payload = record.get("payload") if isinstance(record, Mapping) else None
+            if not isinstance(payload, Mapping):
+                raise ValueError("attempt transition payload is missing")
+            if payload.get("task_id") == task_id and payload.get("attempt_id") == attempt_id:
+                selected.append(dict(record))
+        if not selected:
+            raise ValueError("attempt continuity stream is empty")
+        return selected
+
+    @staticmethod
+    def read_canonical_attempt_continuity(task_id: str, attempt_id: str) -> list[Any]:
+        """Consume the canonical JSONL attempt log as validated continuity events."""
+        return events_from_attempt_records(
+            SelfHostedTaskService.read_canonical_attempt_events(task_id, attempt_id),
+            task_id=task_id,
+            attempt_id=attempt_id,
+        )
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
