@@ -70,9 +70,9 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     prior_card = (
         ROOT / "tasks/standing-owner-autonomy-20260811/01-standing-coordinator-authority.md"
     ).read_text(encoding="utf-8")
-    prior_index = (
-        ROOT / "tasks/standing-owner-autonomy-20260811/INDEX.md"
-    ).read_text(encoding="utf-8")
+    prior_index = (ROOT / "tasks/standing-owner-autonomy-20260811/INDEX.md").read_text(
+        encoding="utf-8"
+    )
     allowed_actions = next(
         line for line in prior_card.splitlines() if line.startswith("- allowed_actions:")
     ).casefold()
