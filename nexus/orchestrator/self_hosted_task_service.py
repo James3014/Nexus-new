@@ -24,11 +24,11 @@ from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from nexus.contracts.autonomy_goal import AutonomyGoalGrant
+from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.contracts.operator_outcome_receipt import (
     OperatorOutcomeReceipt,
     validate_operator_outcome_receipt,
 )
-from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionEnvelope,

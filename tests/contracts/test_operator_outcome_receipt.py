@@ -33,14 +33,17 @@ def test_receipt_is_hashed_and_strict():
 
 def test_receipt_binds_identity_and_freshness():
     receipt = _receipt()
-    assert validate_operator_outcome_receipt(
-        receipt,
-        task_id="task-1",
-        attempt_id="attempt-1",
-        lifecycle_revision="life-1",
-        source_revision="a" * 40,
-        runtime_identity="b" * 64,
-    ) == receipt
+    assert (
+        validate_operator_outcome_receipt(
+            receipt,
+            task_id="task-1",
+            attempt_id="attempt-1",
+            lifecycle_revision="life-1",
+            source_revision="a" * 40,
+            runtime_identity="b" * 64,
+        )
+        == receipt
+    )
     with pytest.raises(ValueError, match="ATTEMPT_ID"):
         validate_operator_outcome_receipt(receipt, attempt_id="other")
     stale = _receipt(observed_at=datetime.now(timezone.utc) - timedelta(minutes=10))

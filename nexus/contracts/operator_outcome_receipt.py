@@ -113,7 +113,12 @@ def build_operator_outcome_receipt(
     idempotency_key: str,
     supersedes_receipt_hash: str | None = None,
 ) -> OperatorOutcomeReceipt:
-    timestamp = (observed_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = (
+        (observed_at or datetime.now(timezone.utc))
+        .astimezone(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     payload: dict[str, Any] = {
         "schema": SCHEMA,
         "task_id": task_id,
@@ -141,7 +146,11 @@ def validate_operator_outcome_receipt(
     now: datetime | None = None,
     max_age_seconds: float = 300.0,
 ) -> OperatorOutcomeReceipt:
-    result = receipt if isinstance(receipt, OperatorOutcomeReceipt) else OperatorOutcomeReceipt.model_validate(receipt)
+    result = (
+        receipt
+        if isinstance(receipt, OperatorOutcomeReceipt)
+        else OperatorOutcomeReceipt.model_validate(receipt)
+    )
     expected = {
         "task_id": task_id,
         "attempt_id": attempt_id,

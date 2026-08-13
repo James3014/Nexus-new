@@ -26,6 +26,7 @@ from nexus.contracts.lifecycle_action import (
     build_owner_inline_contract,
     canonical_request_hash,
 )
+from nexus.contracts.operator_outcome_receipt import build_operator_outcome_receipt
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
@@ -53,7 +54,6 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_task_card_binding,
     validate_workforce_dispatch_binding,
 )
-from nexus.contracts.operator_outcome_receipt import build_operator_outcome_receipt
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
