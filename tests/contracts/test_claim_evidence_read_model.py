@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from nexus.contracts.claim_evidence_read_model import (
     CLAIM_EVIDENCE_READ_MODEL_SCHEMA,
     build_claim_evidence_read_model,
     validate_claim_evidence_read_model,
 )
 from nexus.contracts.optimization_report import ClaimClass, ProviderTokenCleanliness
+from nexus.contracts.root_receipt import validate_root_receipt
 
 
 def _record(**overrides: object) -> dict[str, object]:
@@ -72,15 +76,17 @@ def test_public_read_model_requires_clean_provider_tokens() -> None:
 
 
 def test_validate_rejects_attempted_unlocks_from_read_model_payload() -> None:
-    blockers = validate_claim_evidence_read_model({
-        "claim_class": ClaimClass.PUBLIC_READY.value,
-        "provider_token_cleanliness": ProviderTokenCleanliness.MEASURED.value,
-        "evidence_bundle_refs": ["docs/reports/evidence.json"],
-        "receipt_refs": ["docs/reports/receipt.json"],
-        "runtime_update_allowed": True,
-        "public_benchmark_allowed": True,
-        "gates": [{"name": "delivery", "status": "PASS"}],
-    })
+    blockers = validate_claim_evidence_read_model(
+        {
+            "claim_class": ClaimClass.PUBLIC_READY.value,
+            "provider_token_cleanliness": ProviderTokenCleanliness.MEASURED.value,
+            "evidence_bundle_refs": ["docs/reports/evidence.json"],
+            "receipt_refs": ["docs/reports/receipt.json"],
+            "runtime_update_allowed": True,
+            "public_benchmark_allowed": True,
+            "gates": [{"name": "delivery", "status": "PASS"}],
+        }
+    )
 
     assert blockers == [
         "read_model_must_not_unlock_public_benchmark",
@@ -101,6 +107,28 @@ def test_gb061_pass_read_model_remains_observational_when_binding_is_tampered() 
         "read_model_must_not_unlock_public_benchmark",
         "read_model_must_not_update_runtime",
     ]
+
+    # A PASS read model is not a receipt authority.  The existing root-receipt
+    # consumer must reject a tampered binding before any claim can proceed.
+    root = {
+        "schema": "nexus.root_receipt.v1",
+        "task_id": "task-claim-1",
+        "receipt_complete": True,
+        "missing_evidence": [],
+        "world_c_receipt_hash": "sha256:world-c",
+        "world_c_receipt_valid": True,
+        "source_hash": "sha256:source",
+        "verifier_source": "HealOrchestrator.VerificationPhase",
+        "verifier_bound_to_world_c": True,
+        "public_claim_allowed": False,
+    }
+    encoded = json.dumps(root, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    root["root_receipt_hash"] = "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
+    assert validate_root_receipt(root) == (True, [])
+
+    tampered = dict(root)
+    tampered["world_c_receipt_hash"] = "sha256:forged"
+    assert validate_root_receipt(tampered) == (False, ["root_receipt_hash_mismatch"])
 
 
 def test_read_model_requires_sealed_and_hash_valid_evidence_when_requested() -> None:
