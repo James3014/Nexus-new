@@ -91,6 +91,7 @@ def test_search_fallback_is_not_used_for_general_rg_failure(monkeypatch):
         raise OSError("permission denied")
 
     monkeypatch.setattr(gateway_module, "_run_rg_literal_search", fail)
+    monkeypatch.setattr(gateway_module.shutil, "which", lambda name: "/usr/bin/rg")
     with pytest.raises(OSError, match="permission denied"):
         _gateway()._search({
             "pattern": "needle",
