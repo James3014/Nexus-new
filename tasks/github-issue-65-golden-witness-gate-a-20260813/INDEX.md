@@ -3,7 +3,7 @@ artifact_authority: current
 owner: James Chen
 status: active
 source_issue: "#65"
-baseline_main: 96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857
+baseline_main: 82b904a730095494213ad1dc6c54bcb09b798a47
 current_frontier: 00-gate-a-false-witnesses.md
 AUTO_CHAIN: false
 ---

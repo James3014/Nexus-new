@@ -5,7 +5,7 @@ campaign_id: github-issue-65-golden-witness-gate-a-20260813
 source_issue: "#65"
 owner: James Chen
 status: ACTIVE
-baseline_revision: 96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857
+baseline_revision: 82b904a730095494213ad1dc6c54bcb09b798a47
 commit_required: true
 candidate_required: true
 worker_may_commit: false
