@@ -25,16 +25,16 @@ from uuid import uuid4
 
 from nexus.contracts.autonomy_goal import AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
-from nexus.contracts.operator_outcome_receipt import (
-    OperatorOutcomeReceipt,
-    validate_operator_outcome_receipt,
-)
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     LifecycleActionEnvelope,
     LifecycleActionType,
     canonical_request_hash,
     validate_owner_inline_contract,
+)
+from nexus.contracts.operator_outcome_receipt import (
+    OperatorOutcomeReceipt,
+    validate_operator_outcome_receipt,
 )
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
