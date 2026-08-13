@@ -3,8 +3,8 @@ task_id: github-issue-65-gate-c-semantic-consumer-tamper-witnesses
 campaign_id: github-issue-65-golden-witness-gate-c-20260814
 source_issue: "#65"
 owner: James Chen
-status: PLANNED
-baseline_revision: a74d838cc6bb14af47ce79207181c12a1aed1d35
+status: IMPLEMENTATION_ACTIVE
+baseline_revision: 8e0986b40db56016c79b03eb81ff3d03c85c6f32
 commit_required: true
 candidate_required: true
 worker_may_commit: false

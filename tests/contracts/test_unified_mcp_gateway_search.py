@@ -86,6 +86,18 @@ def test_search_uses_python_fallback_when_rg_is_missing(monkeypatch):
     assert all(not line.startswith("/") for line in payload["matches"])
 
 
+def test_search_fallback_is_not_used_for_general_rg_failure(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(gateway_module, "_run_rg_literal_search", fail)
+    with pytest.raises(OSError, match="permission denied"):
+        _gateway()._search({
+            "pattern": "needle",
+            "path": "nexus/orchestrator/unified_mcp_gateway.py",
+        })
+
+
 def test_search_falls_back_when_rg_launch_raises_file_not_found(monkeypatch):
     monkeypatch.setattr(gateway_module.shutil, "which", lambda name: "/nonexistent/rg-binary")
     payload = _gateway()._search({"pattern": "def _search", "path": "nexus/orchestrator/unified_mcp_gateway.py"})

@@ -120,6 +120,20 @@ def test_head_drift_only_is_informational():
     assert result["reload_reasons"] == []
 
 
+def test_tampered_head_only_signal_cannot_invent_action_review():
+    result = _evaluate_freshness(
+        repo_head_at_start=SHA40_A,
+        repo_head_current=SHA40_B,
+        runtime_sha_at_start=DIGEST_1,
+        runtime_sha_current=DIGEST_1,
+        action_sha_at_start=DIGEST_2,
+        action_sha_current=DIGEST_2,
+    )
+    assert result["repository_drift"] is True
+    assert result["reload_required"] is False
+    assert result["action_review_required"] is False
+
+
 def test_runtime_drift_triggers_reload_only():
     result = _evaluate_freshness(
         repo_head_at_start=SHA40_A,

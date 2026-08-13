@@ -4,8 +4,8 @@
 - issue: #65
 - authority: Ready Issue #65 test-only hardening under the Owner's standing coordinator grant; card preparation only
 - owner: James Chen
-- status: planned
-- baseline_main: a74d838cc6bb14af47ce79207181c12a1aed1d35
+- status: implementation_active
+- baseline_main: 8e0986b40db56016c79b03eb81ff3d03c85c6f32
 - prerequisite: Gate B physically merged as PR #231 at the exact baseline above; Gate C mutation touching the shared self-hosted service test is serialized after PR #226
 - current_frontier: 00-gate-c-semantic-consumer-tamper-witnesses.md
 - AUTO_CHAIN: false
