@@ -58,11 +58,13 @@ class TestHardLane:
 
     def test_gb081_tampered_hard_lane_requirements_fail_closed(self, monkeypatch):
         original = load_manifest()
-        tampered = {**original, "policies": [
-            {**policy, "test_entrypoints": []}
-            if policy["policy_id"] == "P-GATE-03" else policy
-            for policy in original["policies"]
-        ]}
+        tampered = {
+            **original,
+            "policies": [
+                {**policy, "test_entrypoints": []} if policy["policy_id"] == "P-GATE-03" else policy
+                for policy in original["policies"]
+            ],
+        }
         monkeypatch.setattr("scripts.ops.check_policy_lane_gate.load_manifest", lambda: tampered)
         result = check_lane_gate("P-GATE-03", "modify")
         assert result["allowed"] is False

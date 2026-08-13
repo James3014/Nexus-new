@@ -11,4 +11,3 @@
 - maximum_files: 7
 - claim_ceiling: GOLDEN_WITNESS_GATE_B_SEMANTIC_TESTS_CANDIDATE_ONLY
 - prerequisite: Gate A physically merged as PR #227 on exact baseline
-

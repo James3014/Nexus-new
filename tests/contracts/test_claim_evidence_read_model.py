@@ -72,17 +72,15 @@ def test_public_read_model_requires_clean_provider_tokens() -> None:
 
 
 def test_validate_rejects_attempted_unlocks_from_read_model_payload() -> None:
-    blockers = validate_claim_evidence_read_model(
-        {
-            "claim_class": ClaimClass.PUBLIC_READY.value,
-            "provider_token_cleanliness": ProviderTokenCleanliness.MEASURED.value,
-            "evidence_bundle_refs": ["docs/reports/evidence.json"],
-            "receipt_refs": ["docs/reports/receipt.json"],
-            "runtime_update_allowed": True,
-            "public_benchmark_allowed": True,
-            "gates": [{"name": "delivery", "status": "PASS"}],
-        }
-    )
+    blockers = validate_claim_evidence_read_model({
+        "claim_class": ClaimClass.PUBLIC_READY.value,
+        "provider_token_cleanliness": ProviderTokenCleanliness.MEASURED.value,
+        "evidence_bundle_refs": ["docs/reports/evidence.json"],
+        "receipt_refs": ["docs/reports/receipt.json"],
+        "runtime_update_allowed": True,
+        "public_benchmark_allowed": True,
+        "gates": [{"name": "delivery", "status": "PASS"}],
+    })
 
     assert blockers == [
         "read_model_must_not_unlock_public_benchmark",

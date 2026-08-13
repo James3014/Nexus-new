@@ -161,7 +161,11 @@ def test_workforce_admission_decision_schema_and_serialization() -> None:
         policy_last_verified="2026-07-29",
         policy_hash="abc123hash",
         route_authority="CapabilityPlanner",
-        freshness_evidence={"last_verified": "2026-07-29", "verified_age_days": 0, "is_future": False},
+        freshness_evidence={
+            "last_verified": "2026-07-29",
+            "verified_age_days": 0,
+            "is_future": False,
+        },
     )
 
     assert dec.schema == "nexus.workforce_admission_decision.v1"
