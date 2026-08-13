@@ -6,7 +6,7 @@ campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 baseline_main: 599227f0efbe1e9a4ca8cd6bff56824f0a6d9965
 reconciled_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
-current_main: 9125913ca809c954806386e3f11e6eb799ff882f
+current_main: 069596056fff852bad8c826725902d25361aa9c7
 rebind_owner_directive: https://github.com/James3014/Nexus-new/issues/7#issuecomment-5250252765
 rebind_date: 2026-08-11
 ordered_cards:
@@ -15,7 +15,7 @@ ordered_cards:
   - 03-bounded-repair-attempts.md
   - 04-ordered-attempt-events-and-e2e.md
 current_frontier: 04-ordered-attempt-events-and-e2e.md
-frontier_status: BLOCKED_OWNER_GATE
+frontier_status: ACTIVE
 completed_cards:
   - 01-canonical-planner-dispatch-binding.md
   - 02-independent-candidate-acceptance.md
@@ -62,10 +62,9 @@ received independent `ACCEPT`, required checks were terminal PASS, and focused
 evidence included 297 combined tests, eight M3-C tests, and 311 primary tests.
 
 The current frontier is M3-D (`04-ordered-attempt-events-and-e2e.md`) with
-`BLOCKED_OWNER_GATE` status. On 2026-08-12 the Owner explicitly granted the
-`M3_C_CAMPAIGN_REBIND_AND_OWNER_GATE` for bounded implementation, commit,
-issue-branch push, and pull-request creation against current main
-`bc16cbf2bf00377a4521e3eab233175112d0c963`.
+`ACTIVE` status. On 2026-08-13 the Owner explicitly granted M3-D activation,
+bounded implementation, commit, issue-branch push, and pull-request creation
+against current main `069596056fff852bad8c826725902d25361aa9c7`.
 
 `AUTO_CHAIN=false`; this reconciliation does not activate M3-D. M3-D requires
 a separate Owner authorization. Approval, integration, merge, release, and

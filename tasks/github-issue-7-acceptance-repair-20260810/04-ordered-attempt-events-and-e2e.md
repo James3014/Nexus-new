@@ -1,15 +1,15 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: PENDING
+status: ACTIVE
 task_id: github-issue-7-m3-d-events-e2e
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 AUTO_CHAIN: false
-worker_may_commit: false
+worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
-worker_may_push: false
+worker_may_push: true
 ---
 
 # M3-D Ordered Attempt Events and End-to-End Acceptance

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from nexus.events.log_store import DeveloperFeedbackDecisionStore, JsonlEventLogStore
+from nexus.events.contracts import AttemptTransitionEvent
 from nexus.events.signal_queue_service import SignalQueueService
 from nexus.feedback.contracts import DeveloperFeedbackDecision
 
@@ -20,6 +21,7 @@ SEMANTIC_EVENT_TYPES = frozenset(
         "lifecycle_hook",
         "phase_transition",
         "spec_bind",
+        "attempt_transition",
     }
 )
 RAW_EVENT_TYPES = frozenset(
@@ -50,6 +52,7 @@ class NexusEventBus:
     _signal_queue_svc = SignalQueueService()
     _observer_error_count = 0
     _last_observer_error: Optional[Dict[str, Any]] = None
+    _attempt_sequences: Dict[tuple[str, str], int] = {}
 
     @classmethod
     def set_remote_broadcaster(cls, broadcaster: Callable[[str, Dict[str, Any]], None]) -> None:
@@ -115,6 +118,19 @@ class NexusEventBus:
                 cls._remote_broadcaster(event_type, local_payload)
             except Exception as e:
                 cls._record_observer_error(event_type, "remote_broadcaster", e)
+
+    @classmethod
+    def emit_attempt_transition(cls, event: AttemptTransitionEvent) -> Dict[str, Any]:
+        """Append one ordered semantic attempt event without hidden payloads."""
+        key = (event.task_id, event.attempt_id)
+        with cls._sequence_lock:
+            previous = cls._attempt_sequences.get(key, 0)
+            if previous and event.sequence != previous + 1:
+                raise ValueError("attempt transition sequence must be contiguous")
+            cls._attempt_sequences[key] = event.sequence
+        payload = event.to_dict()
+        cls.publish("attempt_transition", payload)
+        return payload
 
     @classmethod
     def emit_developer_feedback_decision(

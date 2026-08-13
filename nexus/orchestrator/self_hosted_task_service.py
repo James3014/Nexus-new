@@ -38,6 +38,8 @@ from nexus.contracts.target_integration_lifecycle import (
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
+from nexus.events.contracts import build_attempt_transition_event
+from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     AttemptResolutionVerdict,
@@ -1670,6 +1672,31 @@ class SelfHostedTaskService:
             return self._write_state_locked(task_id, state)
 
     @staticmethod
+    def _emit_attempt_transition(result: Optional[Mapping[str, Any]], task_id: str) -> None:
+        if not result or not result.get("attempt_id"):
+            return
+        history = result.get("status_history") or []
+        sequence = sum(1 for item in history if isinstance(item, Mapping) and item.get("status"))
+        candidate_refs = tuple(str(value) for value in (
+            result.get("candidate_commit_sha"),
+            (result.get("promotion_packet") or {}).get("candidate_tree_sha"),
+        ) if value)
+        evidence_refs = tuple(str(value) for value in (
+            result.get("verified_receipt_hash"),
+            (result.get("verified_receipt") or {}).get("receipt_ref"),
+        ) if value)
+        try:
+            NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
+                task_id=str(result.get("task_id") or task_id),
+                attempt_id=str(result.get("attempt_id")), sequence=max(1, sequence),
+                state=str(result.get("status")), reason=str(result.get("error") or ""),
+                candidate_refs=candidate_refs, evidence_refs=evidence_refs,
+            ))
+        except ValueError:
+            # Replays/reconciliation must not alter lifecycle authority.
+            pass
+
+    @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
         return hashlib.sha256(
             json.dumps(dict(request), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -1698,7 +1725,9 @@ class SelfHostedTaskService:
             state["updated_at"] = now
             state.setdefault("status_history", []).append({"status": state["status"], "at": now})
 
-        return self._mutate_state(task_id, mutate)
+        result = self._mutate_state(task_id, mutate)
+        self._emit_attempt_transition(result, task_id)
+        return result
 
     def record_canonical_action_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
         """Public observer-safe hook for an Assisted provider/apply failure."""
@@ -1823,7 +1852,9 @@ class SelfHostedTaskService:
                 development_receipt_ref=str(state.get("verified_receipt_hash") or ""),
             )
 
-        return self._mutate_state(task_id, mutate)
+        result = self._mutate_state(task_id, mutate)
+        self._emit_attempt_transition(result, task_id)
+        return result
 
     def _heartbeat(self, task_id: str, attempt_id: str, stop: threading.Event) -> None:
         while not stop.wait(1.0):

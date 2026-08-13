@@ -5,6 +5,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.event_bus import NexusEventBus
+from nexus.events.contracts import build_attempt_transition_event
 from nexus.core.healing_artifacts import HealingArtifactKeyPolicy, sign_healing_artifact
 
 @pytest.fixture(autouse=True)
@@ -238,3 +239,13 @@ def test_event_bus_persists_same_timestamp_and_monotonic_sequence_seen_by_handle
     for row in rows:
         assert row["timestamp"] == row["payload"]["internal_ts"]
     assert [item["_seq"] for item in seen] == [row["seq"] for row in rows]
+
+
+def test_attempt_transition_events_are_contiguous_and_replayable(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    first = build_attempt_transition_event(task_id="t1", attempt_id="a1", sequence=1, state="VERIFY")
+    second = build_attempt_transition_event(task_id="t1", attempt_id="a1", sequence=2, state="ACCEPT")
+    NexusEventBus.emit_attempt_transition(first)
+    NexusEventBus.emit_attempt_transition(second)
+    rows = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=5)
+    assert [row["payload"]["sequence"] for row in rows] == [1, 2]

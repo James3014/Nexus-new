@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from nexus.events.contracts import PHASE_OBSERVER_HOOKS, build_phase_observer_event
+from nexus.events.contracts import PHASE_OBSERVER_HOOKS, build_attempt_transition_event, build_phase_observer_event
 from nexus.engine.phase_handshake import build_phase_receipt, validate_phase_receipt
 
 
@@ -55,3 +55,14 @@ def test_phase_receipt_is_machine_readable_and_complete():
 def test_incomplete_phase_receipt_fails_closed():
     with pytest.raises(RuntimeError, match="PHASE_RECEIPT_INCOMPLETE"):
         validate_phase_receipt({"task_id": "t1"})
+
+
+def test_attempt_transition_contract_has_ordered_refs_and_no_hidden_payload():
+    event = build_attempt_transition_event(
+        task_id="t1", attempt_id="a1", sequence=1, state="ACCEPT",
+        candidate_refs=["commit:abc"], evidence_refs=["receipt:def"],
+    )
+    value = event.to_dict()
+    assert value["sequence"] == 1
+    assert value["candidate_refs"] == ["commit:abc"]
+    assert "prompt" not in value and "hidden_chain_of_thought" not in value
