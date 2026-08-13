@@ -277,7 +277,7 @@ jobs:
             git -C "$candidate_repo" fetch --no-tags --depth=1 origin "refs/pull/$EXPECTED_PR_NUMBER/head"
           test "$(git -C "$candidate_repo" rev-parse "$EXPECTED_HEAD_SHA^{commit}")" = "$EXPECTED_HEAD_SHA"
           test "$(git -C "$candidate_repo" cat-file -t "$EXPECTED_HEAD_SHA")" = commit
-          python "$RUNNER_TEMP/trusted-golden-verifier-source/trusted_golden_verifier.py" --repo-root "$candidate_repo" --head-sha "$EXPECTED_HEAD_SHA" --json-report "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json"
+          python "$RUNNER_TEMP/trusted-golden-verifier-source/trusted_golden_verifier.py" --repo-root "$candidate_repo" --head-sha "$EXPECTED_HEAD_SHA" --manifest "$RUNNER_TEMP/trusted-anchor/manifest.json" --anchor-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" --json-report "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json"
           test "$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["trusted_source"])' "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json")" = "default-branch-verifier"
           rm -rf -- "$candidate_repo"
           rm -rf -- "$RUNNER_TEMP/trusted-golden-verifier.git" "$RUNNER_TEMP/trusted-golden-verifier-source"
